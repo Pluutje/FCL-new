@@ -1,16 +1,19 @@
 package app.aaps.plugins.main.general.overview
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.drawable.AnimationDrawable
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.TypedValue
@@ -21,6 +24,8 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.text.toSpanned
 import androidx.recyclerview.widget.LinearLayoutManager
 import app.aaps.core.data.configuration.Constants
@@ -78,6 +83,7 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.interfaces.source.DexcomBoyda
 import app.aaps.core.interfaces.source.XDripSource
+import app.aaps.core.interfaces.stats.TirCalculator
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
@@ -111,11 +117,13 @@ import dagger.android.HasAndroidInjector
 import dagger.android.support.DaggerFragment
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickListener {
 
@@ -157,6 +165,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
     @Inject lateinit var uiInteraction: UiInteraction
     @Inject lateinit var decimalFormatter: DecimalFormatter
     @Inject lateinit var commandQueue: CommandQueue
+    @Inject lateinit var tirCalculator: TirCalculator
 
     private val disposable = CompositeDisposable()
 
@@ -962,6 +971,10 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             rh.gs(app.aaps.core.ui.R.string.basal) + ": " + rh.gs(app.aaps.core.ui.R.string.format_insulin_units, basalIob().basaliob)
 
     private fun updateIobCob() {
+        val TIR_24h_4_10 = tirCalculator.averageTIR(tirCalculator.calculateXHour(24,70.0, 180.0))?.inRangePct()!!.roundToInt()
+        val TIR_5d_4_10 = (tirCalculator.averageTIR(tirCalculator.calculate(5,70.0, 180.0))?.inRangePct()!!).roundToInt()
+
+
         val iobText = iobText()
         val iobDialogText = iobDialogText()
         val displayText = iobCobCalculator.getCobInfo("Overview COB").displayText(rh, decimalFormatter)
@@ -988,6 +1001,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                     carbAnimation?.selectDrawable(0)
                 }
             }
+
+            cobText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
             binding.infoLayout.cob.text = cobText
         }
     }
@@ -1148,6 +1163,34 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         binding.progressBar.progress = overviewData.calcProgressPct
     }
 
+
+    val REQUEST_CODE_STORAGE_PERMISSION = 1001
+    fun getRatioFactor(context: Context): Double {
+        // Controleer of leesrechten zijn verleend
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            // Vraag de gebruiker om toestemming
+            ActivityCompat.requestPermissions(
+                context as android.app.Activity,
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                REQUEST_CODE_STORAGE_PERMISSION
+            )
+            return 1.0  // Voorkomt crash en geeft een veilige standaardwaarde terug
+        }
+
+        val externalDir = File(Environment.getExternalStorageDirectory(), "Documents/AAPS/")
+        val resistentieFile = File(externalDir, "ANALYSE/resistentie.txt")
+
+        return if (resistentieFile.exists()) {
+            resistentieFile.readText().trim().toDouble().div(100) // Converteer percentage naar factor
+        } else {
+            1.0 // Voorkomt crash als het bestand niet bestaat
+        }
+    }
+
+
+
     private fun updateSensitivity() {
         _binding ?: return
         val lastAutosensData = iobCobCalculator.ads.getLastAutosensData("Overview", aapsLogger, dateUtil)
@@ -1187,7 +1230,9 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             if (config.APS) request?.variableSens ?: 0.0
             else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.variableSens ?: 0.0
             else 0.0
-        val ratioUsed = request?.autosensResult?.ratio ?: 1.0
+     //   val ratioUsed = request?.autosensResult?.ratio ?: 1.0
+
+        val ratioUsed = getRatioFactor(requireContext()) //ratioFactor
 
         if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
             val okDialogText: ArrayList<String> = ArrayList()
@@ -1224,11 +1269,24 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         } else {
             binding.infoLayout.sensitivity.text =
                 lastAutosensData?.let {
-                    rh.gs(app.aaps.core.ui.R.string.autosens_short, it.autosensResult.ratio * 100)
+                //    rh.gs(app.aaps.core.ui.R.string.autosens_short, it.autosensResult.ratio * 100)
+                    rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed * 100)
                 } ?: ""
             binding.infoLayout.variableSensitivity.visibility = View.GONE
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
         }
+
+        val overViewText: ArrayList<String> = ArrayList()
+        overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed*100))
+        overViewText.add(
+            String.format(
+                Locale.getDefault(), "%1$.1f→%2$.1f",
+                profileUtil.fromMgdlToUnits(isfMgdl!!, profileFunction.getUnits()),
+                profileUtil.fromMgdlToUnits(variableSens, profileFunction.getUnits())
+            )
+        )
+        binding.infoLayout.sensitivity.text = overViewText.joinToString("\n")
+        binding.infoLayout.sensitivity.visibility = View.VISIBLE
     }
 
     private fun updatePumpStatus() {

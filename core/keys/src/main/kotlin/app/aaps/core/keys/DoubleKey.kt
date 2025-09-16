@@ -48,4 +48,15 @@ enum class DoubleKey(
     ApsAutoIsfSmbDeliveryRatioMax("openapsama_smb_delivery_ratio_max", 0.5, 0.5, 1.0, defaultedBySM = true),
     ApsAutoIsfSmbMaxRangeExtension("openapsama_smb_max_range_extension", 1.0, 1.0, 5.0, defaultedBySM = true),
 
+    //  Eigen
+
+    Dag_resistentie_target("Dag_resistentie_target", 5.2,4.0,8.0),
+    Nacht_resistentie_target("Dacht_resistentie_target", 5.2,4.0,8.0),
+    Uren_resistentie("Uren_resistentie", 2.5,1.0,5.0),
+
+    persistent_Dagdrempel("persistent_Dagdrempel", 8.5,7.0,12.0),
+    persistent_Nachtdrempel("persistent_Nachtdrempel",7.0,6.0,10.0),
+    persistent_grens("persistent_grens",0.5,0.1, 1.0),
+
+    stap_TT("stap_TT", 2.0,0.5,4.0),
 }
