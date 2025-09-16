@@ -84,4 +84,5 @@ enum class IntKey(
     stap_retentie("stap_retentie", 6,2,12),
 
     fcl_percentage("fcl_percentage", 100,10,200),
+    carb_percentage("carb_percentage", 100,10,200),
 }

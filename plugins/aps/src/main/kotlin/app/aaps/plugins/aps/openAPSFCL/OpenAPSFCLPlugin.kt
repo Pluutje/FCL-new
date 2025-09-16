@@ -612,7 +612,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
                 addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.FCLAanUit, summary = R.string.FCLAanUit_summary, title = R.string.FCLAanUit_title))
                 addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.fcl_percentage, dialogMessage = R.string.fcl_percentage_summary, title = R.string.fcl_percentage_title))
-
+                addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.carb_percentage, dialogMessage = R.string.carb_percentage_summary, title = R.string.carb_percentage_title))
             })
 
 

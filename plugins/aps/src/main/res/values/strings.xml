@@ -299,4 +299,6 @@
     <string name="FCLAanUit_title">Full Closed Loop</string>
     <string name="fcl_percentage_summary">Percentage van de berekende bolus wat daadwerkelijk afgegeven wordt</string>
     <string name="fcl_percentage_title">FCL percentage</string>
+    <string name="carb_percentage_summary">Percentage waarmee de in de FCL code berekende carb word vermenigvuldigd</string>
+    <string name="carb_percentage_title">Berekend Carb percentage</string>
    </resources>
