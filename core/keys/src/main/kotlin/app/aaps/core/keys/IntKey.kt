@@ -83,6 +83,14 @@ enum class IntKey(
     stap_5minuten("stap_5minuten", 200,100,300),
     stap_retentie("stap_retentie", 6,2,12),
 
-    fcl_percentage("fcl_percentage", 100,10,200),
+    bolus_perc_day("bolus_perc_day", 100,10,200),
+    bolus_perc_night("bolus_perc_night", 20,5,50),
+    bolus_perc_early("bolus_perc_early", 100,10,200),
+    bolus_perc_late("bolus_perc_late", 100,10,200),
+
     carb_percentage("carb_percentage", 100,10,200),
+    peak_damping_percentage("peak_damping_percentage", 50,10,100),
+    tau_absorption_minutes("tau_absorption_minutes", 40,20,60),
+    hypo_risk_percentage("hypo_risk_percentage", 35,20,50),
+
 }

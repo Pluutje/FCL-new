@@ -59,7 +59,7 @@
     <string name="always_use_short_avg_summary">Nuttig wanneer gegevens van niet gefilterde bronnen zoals xDrip+ veel ruis heeft.</string>
     <string name="openapsama_max_daily_safety_multiplier">Maximale dagelijkse veiligheids vermeningvuldigings factor</string>
     <string name="openapsama_current_basal_safety_multiplier">Huidige basaalstand veiligheids vermenigvuldigings factor</string>
-    <string name="openapssmb_max_iob_title">Max totaal IOB dat OpenAPS niet kan overschrijden [E]</string>
+    <string name="openapssmb_max_iob_title">Max IOB [eh]</string>
     <string name="openapssmb_max_iob_summary">Deze waarde heet MAX IOB in OpenAPS context\nOpenAPS zal geen extra insuline toedienen als de actuele IOB onderstaande waarde overschreden heeft</string>
     <string name="enable_uam">Activeer UAM</string>
     <string name="enable_smb">Activeer SMB</string>

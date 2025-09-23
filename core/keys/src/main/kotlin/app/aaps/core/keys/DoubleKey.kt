@@ -59,4 +59,6 @@ enum class DoubleKey(
     persistent_grens("persistent_grens",0.5,0.1, 1.0),
 
     stap_TT("stap_TT", 2.0,0.5,4.0),
+    max_bolus("max_bolus", 1.25,0.5,2.5),
+    meal_detection_sensitivity("meal_detection_sensitivity", 0.35,0.2,0.5),
 }

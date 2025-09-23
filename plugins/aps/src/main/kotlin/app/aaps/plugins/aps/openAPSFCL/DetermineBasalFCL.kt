@@ -41,6 +41,7 @@ import app.aaps.plugins.aps.openAPSFCL.FCL.EnhancedInsulinAdvice
 import java.io.IOException
 import java.util.Scanner
 import android.content.Context
+import kotlin.text.get
 
 @Singleton
 data class Resistentie_class(val resistentie: Double, val log: String)
@@ -524,15 +525,37 @@ class DetermineBasalFCL @Inject constructor(
 
 
 
-    fun getFCLAdvice(profile: OapsProfileFCL, iob_data_array: Array<IobTotal>, sens: Double): FCL.EnhancedInsulinAdvice {
+    fun getFCLAdvice(profile: OapsProfileFCL, iob_data_array: Array<IobTotal>, sens: Double, target: Double, BgNow: Double): FCL.EnhancedInsulinAdvice {
         try {
             // Eerst parameters ophalen
-            val fclPercentage = preferences.get(IntKey.fcl_percentage)
+            val bolusPercDay = preferences.get(IntKey.bolus_perc_day)
+            val bolusPercNight = preferences.get(IntKey.bolus_perc_night)
+            val bolusPercEarly = preferences.get(IntKey.bolus_perc_early)
+            val bolusPercLate = preferences.get(IntKey.bolus_perc_late)
             val carbPercentage = preferences.get(IntKey.carb_percentage)
+            val maxbolus = preferences.get(DoubleKey.max_bolus).toFloat()
+            val max_bolus = maxbolus.toDouble()
+            val peakDampingPercentage = preferences.get(IntKey.peak_damping_percentage) ?: 50   // standaard 50% reductie
+            val tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes) ?: 40  // standaard 40 min
+            val hypoRiskPercentage = preferences.get(IntKey.hypo_risk_percentage) ?: 35  // standaard 35% reductie
+            val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity).toFloat() ?: 0.2F  // mmol/L/5min drempel
+            val nightTime = Nacht()
+
 
             // Parameters instellen op FCL instance
-            fcl.setExternalReductionPercentage(fclPercentage)
-            fcl.setCarbReductionPercentage(carbPercentage)
+            fcl.setbolusPercDay(bolusPercDay)
+            fcl.setbolusPercNight(bolusPercNight)
+            fcl.setbolusPercEarly(bolusPercEarly)
+            fcl.setbolusPercLate(bolusPercLate)
+            fcl.setCarbSensitivity(carbPercentage)
+            fcl.setMaxBolus(maxbolus)
+            fcl.setPeakDampingPercentage(peakDampingPercentage)
+            fcl.setTauAbsorptionMinutes(tauAbsorptionMinutes)
+            fcl.setHypoRiskPercentage(hypoRiskPercentage)
+
+            fcl.setMealDetectionSensitivity(mealDetectionSensitivity)
+            fcl.setNightTime(nightTime)
+            fcl.setCurrentBg(BgNow)
 
             val iobArray = iob_data_array
             val iob_data = iobArray[0]
@@ -550,17 +573,17 @@ class DetermineBasalFCL @Inject constructor(
                 bg = historicalData.last().bg,
                 iob = currentIOB
             )
-
-            val targetBG = ((profile.min_bg + profile.max_bg) / 2.0) / 18.0
-
+            val target = round(target/18,1)
             // Gebruik de enhanced versie van FCL
             return fcl.getEnhancedInsulinAdvice(
                 currentData = currentData,
                 historicalData = historicalData,
                 currentISF = currentISF,
-                targetBG = targetBG,
+                targetBG = target,
                 carbRatio = profile.carb_ratio,
-                currentIOB = currentIOB
+                currentIOB = currentIOB,
+                maxBolus = max_bolus,
+                maxIOB = profile.max_iob,
             )
 
         } catch (e: Exception) {
@@ -842,7 +865,8 @@ class DetermineBasalFCL @Inject constructor(
         } else if (bg > 60 && flatBGsDetected) {
             rT.reason.append("Error: CGM data is unchanged for the past ~45m")
         }
-        if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
+      //  if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
+            if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 ) {
             if (currenttemp.rate > basal) { // high temp is running
                 rT.reason.append(". Replacing high temp basal of ${currenttemp.rate} with neutral temp of $basal")
                 rT.deliverAt = deliverAt
@@ -1047,43 +1071,31 @@ class DetermineBasalFCL @Inject constructor(
         consoleError.add("profile.sens: ${round((profile.sens)/18,1)}, sens: ${round((sens)/18,1)}")
         consoleError.add("\n")
 
-        val fclAdvice = getFCLAdvice(profile, iob_data_array, sens)
+        val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
         consoleError.add("FCL resultaat")
         consoleError.add("Dose: ${fclAdvice.dose}")
+        consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
         consoleError.add("Reason: ${fclAdvice.reason}")
         consoleError.add("Confidence: ${fclAdvice.confidence}")
         var bg_pred = fclAdvice.predictedValue?.let { round(it, 1) }
-        consoleError.add("Voorspelling: ${bg_pred}")
-        consoleError.add("Meal Detected: ${fclAdvice.mealDetected}")
+        consoleError.add("Voorspelling: ${bg_pred ?: "nvt"}")
         consoleError.add("Phase: ${fclAdvice.phase}")
-        consoleError.add("Detected Carbs: ${fclAdvice.detectedCarbs}g")
-        consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
+        consoleError.add("Meal Detected: ${fclAdvice.mealDetected}")
+        var det_carbs = fclAdvice.detectedCarbs?.let { round(it, 1) }
+        consoleError.add("Detected Carbs: ${det_carbs}g")
+        var det_cob = fclAdvice.carbsOnBoard?.let { round(it, 0) }
+        consoleError.add("COB: ${det_cob}g")
+
+       
         consoleError.add("\n")
 
-        consoleError.add("\n--- FCL Learning Status -1-")
+        consoleError.add("\n--- FCL Learning Info ---")
         val learningStatus = fcl.getLearningStatus()
         learningStatus.split("\n").forEach { line ->
             consoleError.add(line)
         }
         consoleError.add("\n")
-/*
-        fclAdvice.learningMetrics?.let { metrics ->
-            consoleError.add("\n--- FCL Learning Metrics -2-")
-            consoleError.add("Learning Confidence: ${round(metrics.confidence * 100, 1)}%")
-            consoleError.add("Total Samples: ${metrics.samples}")
-            consoleError.add("Carb Ratio Adjustment: ${round(metrics.carbRatioAdjustment, 2)}")
-            consoleError.add("ISF Adjustment: ${round(metrics.isfAdjustment, 2)}")
 
-            consoleError.add("Meal Time Factors:")
-            metrics.mealTimeFactors.forEach { (mealType, factor) ->
-                consoleError.add("  - $mealType: ${round(factor, 2)}")
-            }
-
-            consoleError.add("Hourly Sensitivities:")
-            metrics.hourlySensitivities.entries.sortedBy { it.key }.forEach { (hour, sensitivity) ->
-                consoleError.add("  - ${hour}:00: ${round(sensitivity, 2)}")
-            }
-        }   */
         consoleError.add("\n")
 
         logFCL(
@@ -1385,8 +1397,15 @@ class DetermineBasalFCL @Inject constructor(
         }
 
         if (FCL_SMB > 0.0 && fclAdvice.shouldDeliverBolus) {
-            
-            rT.reason.append("=> FCL perc: ${preferences.get(IntKey.fcl_percentage)} SMB:  $FCL_SMB eh ")
+
+            rT.reason.append("=> Bolus perc: ${preferences.get(IntKey.bolus_perc_day)} SMB:  $FCL_SMB eh ")
+
+            if (iob_data.iob + FCL_SMB > max_iob) {
+              FCL_SMB = max_iob - iob_data.iob
+              FCL_SMB = round(FCL_SMB * 20, 0) / 20
+              rT.reason.append("Bolus beperkt tot $FCL_SMB eh ivm max_IOB $max_iob")
+            }
+            FCL_SMB = Math.min(preferences.get(DoubleKey.max_bolus),FCL_SMB)
 
             rT.deliverAt = deliverAt
             rT.duration = 30

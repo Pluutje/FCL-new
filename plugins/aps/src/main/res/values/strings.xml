@@ -293,12 +293,33 @@
     <string name="stap_retentie_summary">Maximum aantal keren dat de stappen acitvatie na-ijlt.</string>
     <string name="stap_retentie_title">Max aantal retenties</string>
 
-    <string name="Info_fcl">● Activiteits instellingen gebasserd op stappen!:\n 1. Stappenteller aan/uit schakelen.\n 2. Insuline percentage bij gedetecteerde activiteit.\n \n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl">● Full Closed Loop settings!:\n 1. \n 2. \n \n !! Klik to open !!\n</string>
+    <string name="Info_fcl_bolus">● Bolus strenght settings!:\n 1. Day- and Night-time percentage.\n 2. Early- and Late-rise percentage.\n \n !! Klik om te openen !!\n</string>
+
     <string name="b_fcl_doc" translatable="false">https://docs.google.com/document/d/12gcpIZ9B-TC0vAnB9XH_55IpHAuePFSV/edit</string>
     <string name="FCLAanUit_summary">Bij activering wordt bij stijging van de BG en maaltijd detectie automatisch de insuline afgifte verhoogd</string>
     <string name="FCLAanUit_title">Full Closed Loop</string>
-    <string name="fcl_percentage_summary">Percentage van de berekende bolus wat daadwerkelijk afgegeven wordt</string>
-    <string name="fcl_percentage_title">FCL percentage</string>
-    <string name="carb_percentage_summary">Percentage waarmee de in de FCL code berekende carb word vermenigvuldigd</string>
-    <string name="carb_percentage_title">Berekend Carb percentage</string>
+
+    <string name="bolus_perc_day_summary">Bolus-percentage deliverd during DAY-Time.</string>
+    <string name="bolus_perc_day_title">Bolus percentage day [%]</string>
+    <string name="bolus_perc_night_summary">Bolus-percentage deliverd during NIGHT-Time</string>
+    <string name="bolus_perc_night_title">Bolus percentage night [%]</string>
+    <string name="bolus_perc_early_summary">Bolus-percentage deliverd during EARLY meal detection</string>
+    <string name="bolus_perc_early_title">Bolus percentage early-rise [%]</string>
+    <string name="bolus_perc_late_summary">Bolus-percentage deliverd during LATE meal detection</string>
+    <string name="bolus_perc_late_title">Bolus percentage late-rise [%]</string>
+
+    <string name="max_bolus_summary">Percentage van de berekende bolus wat daadwerkelijk afgegeven wordt</string>
+    <string name="max_bolus_title">Max Bolus [eh]</string>
+    <string name="carb_percentage_summary">Percentage waarmee de FCL code de berekende carbs vermenigvuldigd</string>
+    <string name="carb_percentage_title">Carb berekenings percentage [%]</string>
+
+    <string name="peak_damping_percentage_summary">extra Bolus Percentage correction near peak</string>
+    <string name="peak_damping_percentage_title">Peak damping percentage [%]</string>
+    <string name="hypo_risk_percentage_summary">extra Bolus Percentage correction when hypo risc is detected</string>
+    <string name="hypo_risk_percentage_title">Hypo risc percentage [%]</string>
+    <string name="meal_detection_sensitivity_summary">Drempelwaarde waarboven een stijging als gevolg van carbs wordt gerekend</string>
+    <string name="meal_detection_sensitivity_title">Meal detection sensitivity [mmol/l per 5 min]</string>
+    <string name="tau_absorption_minutes_summary">Gemiddelde tijd hoelang carbs “in het lichaam aanwezig blijven</string>
+    <string name="tau_absorption_minutes_title">COB absorption time [min]</string>
    </resources>
