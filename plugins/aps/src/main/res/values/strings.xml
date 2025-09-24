@@ -299,6 +299,9 @@
     <string name="b_fcl_doc" translatable="false">https://docs.google.com/document/d/12gcpIZ9B-TC0vAnB9XH_55IpHAuePFSV/edit</string>
     <string name="FCLAanUit_summary">Bij activering wordt bij stijging van de BG en maaltijd detectie automatisch de insuline afgifte verhoogd</string>
     <string name="FCLAanUit_title">Full Closed Loop</string>
+    <string name="Info_fcl_learning">● Learning settings!:\n 1. Reset data.\n 2. .......\n \n !! Klik om te openen !!\n</string>
+    <string name="ResetLearning_summary">Wanneer ingeschakeld worden bij de eerst volgende run de FCL-learnings gewist. LET OP! na de reset weer uitzetten anders blijft de data gewist</string>
+    <string name="ResetLearning_title">Reset Learning</string>
 
     <string name="bolus_perc_day_summary">Bolus-percentage deliverd during DAY-Time.</string>
     <string name="bolus_perc_day_title">Bolus percentage day [%]</string>

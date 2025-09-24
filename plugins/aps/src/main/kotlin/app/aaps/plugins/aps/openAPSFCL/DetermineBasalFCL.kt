@@ -540,6 +540,7 @@ class DetermineBasalFCL @Inject constructor(
             val hypoRiskPercentage = preferences.get(IntKey.hypo_risk_percentage) ?: 35  // standaard 35% reductie
             val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity).toFloat() ?: 0.2F  // mmol/L/5min drempel
             val nightTime = Nacht()
+            val resetlearning = preferences.get(BooleanKey.ResetLearning)
 
 
             // Parameters instellen op FCL instance
@@ -556,6 +557,7 @@ class DetermineBasalFCL @Inject constructor(
             fcl.setMealDetectionSensitivity(mealDetectionSensitivity)
             fcl.setNightTime(nightTime)
             fcl.setCurrentBg(BgNow)
+            fcl.setResetLearning(resetlearning)
 
             val iobArray = iob_data_array
             val iob_data = iobArray[0]

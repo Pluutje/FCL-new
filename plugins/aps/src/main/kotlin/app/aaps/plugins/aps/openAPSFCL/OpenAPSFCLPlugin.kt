@@ -639,6 +639,25 @@ open class OpenAPSFCLPlugin @Inject constructor(
                 }
                 addPreference(bolusScreen)
 
+                // Bolus Settings scherm
+                val learningScreen = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "Learning Settings"
+                    title = "Learning Settings"
+                    initialExpandedChildrenCount = Int.MAX_VALUE
+
+                    addPreference(
+                        AdaptiveIntentPreference(
+                            ctx = context,
+                            intentKey = IntentKey.ApsLinkToDocs,
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
+                            summary = R.string.Info_fcl_learning
+                        )
+                    )
+
+                    addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.ResetLearning, summary = R.string.ResetLearning_summary, title = R.string.ResetLearning_title))
+                }
+                addPreference(learningScreen)
+
                 addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.carb_percentage, dialogMessage = R.string.carb_percentage_summary, title = R.string.carb_percentage_title))
 
                 addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.meal_detection_sensitivity, dialogMessage = R.string.meal_detection_sensitivity_summary, title = R.string.meal_detection_sensitivity_title))

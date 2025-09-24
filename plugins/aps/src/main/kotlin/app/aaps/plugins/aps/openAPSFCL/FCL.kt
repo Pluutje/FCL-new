@@ -32,7 +32,7 @@ class FCL(context: Context) {
         fun loadMealPerformanceResults(): List<MealPerformanceResult>
         fun saveCorrectionPerformanceResult(result: CorrectionPerformanceResult)
         fun loadCorrectionPerformanceResults(): List<CorrectionPerformanceResult>
-
+        fun resetAllLearningData()
     }
 
     // Android implementatie met geïsoleerde storage
@@ -54,7 +54,6 @@ class FCL(context: Context) {
             val lastUpdatedMillis: Long,
             val learningConfidence: Double,
             val totalLearningSamples: Int,
-            val loopCounter: Int
         )
 
         private data class SMealResponse(
@@ -218,8 +217,7 @@ class FCL(context: Context) {
                     sensitivityPatterns = profile.sensitivityPatterns,
                     lastUpdatedMillis = profile.lastUpdated.millis,
                     learningConfidence = profile.learningConfidence,
-                    totalLearningSamples = profile.totalLearningSamples,
-                    loopCounter = profile.loopCounter
+                    totalLearningSamples = profile.totalLearningSamples
                 )
                 val json = gson.toJson(s)
                 prefs.edit().putString("learning_profile", json).apply()
@@ -256,7 +254,6 @@ class FCL(context: Context) {
                     lastUpdated = org.joda.time.DateTime(s.lastUpdatedMillis),
                     learningConfidence = s.learningConfidence,
                     totalLearningSamples = s.totalLearningSamples,
-                    loopCounter = s.loopCounter
                 )
             } catch (e: Exception) {
                 android.util.Log.e("FCL", "Error loading learning profile", e)
@@ -415,7 +412,29 @@ class FCL(context: Context) {
                 )
             }
         }
+
+        override fun resetAllLearningData() {
+            try {
+                // Verwijder alle shared preferences keys
+                prefs.edit().clear().apply()
+
+                // Verwijder backup files
+                if (backupFile.exists()) {
+                    backupFile.delete()
+                }
+                if (backupMeta.exists()) {
+                    backupMeta.delete()
+                }
+
+                android.util.Log.d("FCL", "All learning data reset successfully")
+            } catch (e: Exception) {
+                android.util.Log.e("FCL", "Error resetting learning data", e)
+            }
+        }
+
     }
+
+
 
 
     data class MealResponseData(
@@ -504,8 +523,7 @@ class FCL(context: Context) {
         val sensitivityPatterns: Map<Int, Double> = emptyMap(),
         val lastUpdated: DateTime = DateTime.now(),
         val learningConfidence: Double = 0.0,
-        val totalLearningSamples: Int = 0,
-        val loopCounter: Int = 0   // tijdelijk debug veld
+        val totalLearningSamples: Int = 0
     ) {
         // Alleen de functies die WEL worden gebruikt behouden
 
@@ -559,7 +577,6 @@ class FCL(context: Context) {
         val isfAdjustment: Double,
         val mealTimeFactors: Map<String, Double>,
         val hourlySensitivities: Map<Int, Double>,
-        val loopCounter: Int, // <<< nieuw veld
         val parameterAdvisory: String = "",
         val mealPerformanceStats: String = ""
     )
@@ -617,6 +634,7 @@ class FCL(context: Context) {
 
     // Configuration properties
     private var NightTime: Boolean = true
+    private var resetlearning: Boolean = false
     private var currentBg: Double = 5.5
     private var bolusPercDay: Double = 100.0
     private var bolusPercNight: Double = 100.0
@@ -660,6 +678,8 @@ class FCL(context: Context) {
     init {
         loadPreferences(context)
 
+        // ★★★  Reset learning data EERST als nodig ★★★
+        resetLearningDataIfNeeded()
         // Robuust laden van learning profile
         try {
             val loadedProfile = storage.loadLearningProfile()
@@ -686,11 +706,39 @@ class FCL(context: Context) {
         processFallbackLearning()
     }
 
+    private fun resetLearningDataIfNeeded() {
+        if (resetlearning) {
+            println("DEBUG: Reset learning triggered - wiping all learning data")
+
+            try {
+                // Reset storage
+                storage.resetAllLearningData()
+
+                // Reset in-memory profile
+                learningProfile = FCLLearningProfile()
+
+                // Clear pending updates
+                pendingLearningUpdates.clear()
+                pendingCorrectionUpdates.clear()
+                activeMeals.clear()
+
+                // Reset de resetlearning flag naar false
+              //  resetlearning = false
+
+                println("DEBUG: Learning data reset complete - starting fresh")
+            } catch (e: Exception) {
+                println("DEBUG: Error during learning reset: ${e.message}")
+            }
+        }
+    }
+
 
     private fun loadPreferences(context: Context) {
         try {
             val prefs = context.getSharedPreferences("androidaps", Context.MODE_PRIVATE)
 
+            val ResetLearning = prefs.getBoolean("ResetLearning", false)
+            setResetLearning(ResetLearning)
             val perc_day = prefs.getInt("bolus_perc_day", 100)
             setbolusPercDay(perc_day)
             val perc_night = prefs.getInt("bolus_perc_night", 100)
@@ -724,6 +772,9 @@ class FCL(context: Context) {
 
             setCarbSensitivity(70)
         }
+    }
+    fun setResetLearning(value: Boolean) {
+        resetlearning = value
     }
     fun setCurrentBg(value: Double) {
         currentBg = value/18
@@ -775,13 +826,13 @@ class FCL(context: Context) {
         FCL Learning Status:
         - Confidence: ${round(learningProfile.learningConfidence * 100, 1)}%
         - Samples: ${learningProfile.totalLearningSamples}
-        - Teller: ${learningProfile.loopCounter}
+        - Reset Learning: ${resetlearning}
+        
         - Carb Ratio Adjustment: ${round(learningProfile.personalCarbRatio, 2)}
         - ISF Adjustment: ${round(learningProfile.personalISF, 2)}
         - Current Meal Factor: ${round(learningProfile.getMealTimeFactor(currentHour), 2)}
         - Current Sensitivity: ${round(learningProfile.getHourlySensitivity(currentHour), 2)}
-        - NightTime : ${NightTime},
-        - Bolus %: ${getCurrentBolusAggressiveness().toInt()}%
+        - NightTime: ${NightTime} - Bolus %: ${getCurrentBolusAggressiveness().toInt()}%
         - Early Rise %:${bolusPercEarly.toInt()}%
         - Late Rise %:${bolusPercLate.toInt()}%
         - Carb Calc %: ${carbSensitivity.toInt()}%
@@ -801,6 +852,9 @@ class FCL(context: Context) {
        ${getParameterAdvisorySummary()}
     """.trimIndent()
     }
+
+
+
 
     // Automatic peak detection from historical data
     private fun detectPeaksFromHistoricalData() {
@@ -1184,8 +1238,8 @@ class FCL(context: Context) {
         val effectiveness = if (expectedRise > 0.0) actualRise / expectedRise else 1.0
 
         // --- Additieve demping ---
-        val learningRateCR = 0.1  // max 10% per update
-        val learningRateISF = 0.05 // langzamer, en liefst met aparte correctie-data
+        val learningRateCR = 0.05  // max 5% per update
+        val learningRateISF = 0.02 // langzamer, en liefst met aparte correctie-data
 
         // A) Update Carb Ratio alleen via meals
         val crDelta = (effectiveness - 1.0) * learningRateCR
@@ -2263,6 +2317,8 @@ class FCL(context: Context) {
         maxIOB: Double    // moet doorgegeven worden vanuit DetermineBasalFCL
     ): EnhancedInsulinAdvice {
         try {
+            // ★★★  Check op reset bij elke advice call ★★★
+            resetLearningDataIfNeeded()
             val trends = analyzeTrends(historicalData)
 
             val mealAdvice = analyzeMealPerformance()
@@ -2283,10 +2339,6 @@ class FCL(context: Context) {
                 currentISF, targetBG, carbRatio, currentIOB
             )
 
-            // Debug: verhoog loopCounter elke cycle
-            learningProfile = learningProfile.copy(
-                loopCounter = learningProfile.loopCounter + 1
-            )
 
 // Probeer openstaande learning updates af te handelen
             processPendingLearningUpdates()
@@ -2295,7 +2347,6 @@ class FCL(context: Context) {
 // Sla profiel altijd op na wijzigingen
             storage.saveLearningProfile(learningProfile)
 
-            //     log("FCL Debug: loop=${learningProfile.loopCounter}, samples=${learningProfile.totalLearningSamples}, pending=${pendingLearningUpdates.size}")
 
             val shortTermTrend = calculateShortTermTrend(historicalData)
             val isDeclining = checkConsistentDecline(historicalData)
@@ -2604,7 +2655,6 @@ class FCL(context: Context) {
                     isfAdjustment = learningProfile.personalISF,
                     mealTimeFactors = learningProfile.mealTimingFactors,
                     hourlySensitivities = learningProfile.sensitivityPatterns,
-                    loopCounter = learningProfile.loopCounter,
                     parameterAdvisory = buildParameterAdvisory(mealAdvice, correctionAdvice),
                     mealPerformanceStats = getPerformanceStatsSummary()
                 ),
@@ -2627,8 +2677,7 @@ class FCL(context: Context) {
                     carbRatioAdjustment = learningProfile.personalCarbRatio,
                     isfAdjustment = learningProfile.personalISF,
                     mealTimeFactors = learningProfile.mealTimingFactors,
-                    hourlySensitivities = learningProfile.sensitivityPatterns,
-                    loopCounter = learningProfile.loopCounter
+                    hourlySensitivities = learningProfile.sensitivityPatterns
                 ),
                 reservedDose = 0.0,
                 carbsOnBoard = 0.0
