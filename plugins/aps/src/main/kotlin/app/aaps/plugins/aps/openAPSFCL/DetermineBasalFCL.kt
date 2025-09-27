@@ -1074,8 +1074,8 @@ class DetermineBasalFCL @Inject constructor(
         consoleError.add("\n")
 
         val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
-        consoleError.add("FCL resultaat")
-        consoleError.add("Dose: ${fclAdvice.dose}")
+        consoleError.add("FCL resultaat v18.7")
+        consoleError.add("Dose: ${round(fclAdvice.dose,2)}")
         consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
         consoleError.add("Reason: ${fclAdvice.reason}")
         consoleError.add("Confidence: ${fclAdvice.confidence}")
@@ -1091,7 +1091,7 @@ class DetermineBasalFCL @Inject constructor(
        
         consoleError.add("\n")
 
-        consoleError.add("\n--- FCL Learning Info ---")
+        //consoleError.add("\n--- FCL Learning Info ---")
         val learningStatus = fcl.getLearningStatus()
         learningStatus.split("\n").forEach { line ->
             consoleError.add(line)

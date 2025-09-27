@@ -629,7 +629,17 @@ class FCL(context: Context) {
         val shortTermTrend: Double,
         val acceleration: Double
     )
-
+    // ★★★ HELPER DATA CLASS FOR MEAL PROCESSING ★★★
+    private data class FinalVariables(
+        var dose: Double = 0.0,
+        var reason: String = "",
+        var deliver: Boolean = false,
+        var mealDetected: Boolean = false,
+        var detectedCarbs: Double = 0.0,
+        var reservedBolus: Double = 0.0,
+        var phase: String = "stable",
+        var confidence: Double = 0.0
+    )
 
 
     // Configuration properties
@@ -823,36 +833,43 @@ class FCL(context: Context) {
     fun getLearningStatus(): String {
         val currentHour = DateTime.now().hourOfDay
         return """
-        FCL Learning Status:
-        - Confidence: ${round(learningProfile.learningConfidence * 100, 1)}%
-        - Samples: ${learningProfile.totalLearningSamples}
-        - Reset Learning: ${resetlearning}
+    FCL Learning Status:
+    - Last Updated: ${learningProfile.lastUpdated.toString("dd-MM-yyyy  HH:mm")}
+    - Confidence: ${round(learningProfile.learningConfidence * 100, 1)}%
+    - Samples: ${learningProfile.totalLearningSamples}
+    - Reset Learning: ${resetlearning}
         
-        - Carb Ratio Adjustment: ${round(learningProfile.personalCarbRatio, 2)}
-        - ISF Adjustment: ${round(learningProfile.personalISF, 2)}
-        - Current Meal Factor: ${round(learningProfile.getMealTimeFactor(currentHour), 2)}
-        - Current Sensitivity: ${round(learningProfile.getHourlySensitivity(currentHour), 2)}
-        - NightTime: ${NightTime} - Bolus %: ${getCurrentBolusAggressiveness().toInt()}%
-        - Early Rise %:${bolusPercEarly.toInt()}%
-        - Late Rise %:${bolusPercLate.toInt()}%
-        - Carb Calc %: ${carbSensitivity.toInt()}%
-        - Max Bolus: ${round(maxBolus,2)}eh
-        - Peak Damping %: ${peakDampingPercentage.toInt()}%
-        - Hypo Risk %: ${hypoRiskPercentage.toInt()}%
-        - Carb abs. tijd: ${tauAbsorptionMinutes}min
-        - mealDetection Sens: ${mealDetectionSensitivity} mmol/l/5min
-        - Last Updated: ${learningProfile.lastUpdated.toString("yyyy-MM-dd HH:mm")}
+    - Carb Ratio Adjustment: ${round(learningProfile.personalCarbRatio, 2)}
+    - ISF Adjustment: ${round(learningProfile.personalISF, 2)}
+    - Current Meal Factor: ${round(learningProfile.getMealTimeFactor(currentHour), 2)}
+    - Current Sensitivity: ${round(learningProfile.getHourlySensitivity(currentHour), 2)}
+   -- Settings ---
+    - Max Bolus: ${round(maxBolus,2)}eh
+    - Bolus %: ${getCurrentBolusAggressiveness().toInt()}% (NightTime: ${NightTime})
         
-        Meal Time Factors:
-        ${learningProfile.mealTimingFactors.entries.joinToString("\n") { "  - ${it.key}: ${round(it.value, 2)}" }}
-        
-        Hourly Sensitivities:
-        ${learningProfile.sensitivityPatterns.entries.sortedBy { it.key }.joinToString("\n") { "  - ${it.key}:00: ${round(it.value, 2)}" }}
-  
-       ${getParameterAdvisorySummary()}
+    - Early Rise %:${bolusPercEarly.toInt()}%
+    - Late Rise %:${bolusPercLate.toInt()}%
+    - Peak Damping %: ${peakDampingPercentage.toInt()}%
+    - Hypo Risk %: ${hypoRiskPercentage.toInt()}%
+                
+    - Carb Calc %: ${carbSensitivity.toInt()}%
+    - Carb abs. tijd: ${tauAbsorptionMinutes}min
+    - mealDetection Sens: ${round(mealDetectionSensitivity,2)} mmol/l/5min
+                
+    Meal Time Factors:
+    ${learningProfile.mealTimingFactors.entries.joinToString("\n") {"${it.key.padEnd(10)}: ${round(it.value, 2)}" }}
+    
+    Hourly Sensitivities:
+    ${learningProfile.sensitivityPatterns.entries.sortedBy { it.key }.joinToString("\n") {"${it.key.toString().padStart(2)}:00: ${round(it.value, 2)}" }}
+    
+    ${getParameterAdvisorySummary()}
     """.trimIndent()
     }
+ //   Meal Time Factors:
+ //   ${learningProfile.mealTimingFactors.entries.joinToString("\n") { "  - ${it.key}: ${round(it.value, 2)}" }}
 
+ //   Hourly Sensitivities:
+ //   ${learningProfile.sensitivityPatterns.entries.sortedBy { it.key }.joinToString("\n") { "  - ${it.key}:00: ${round(it.value, 2)}" }}
 
 
 
@@ -993,7 +1010,15 @@ class FCL(context: Context) {
         val slope15 = delta15 / 15.0 * 60.0 // mmol/L per uur
 
         // Verwachte stijging uit COB
-        val predictedRiseFromCOB = estimateRiseFromCOB(carbRatio, currentISF)
+    //    val predictedRiseFromCOB = estimateRiseFromCOB(carbRatio, currentISF)
+    //    val unexplainedDelta = delta15 - predictedRiseFromCOB
+
+        val predictedRiseFromCOB = estimateRiseFromCOB(
+            carbRatio = carbRatio,
+            tauAbsorptionMinutes = tauAbsorptionMinutes,
+            detectionWindowMinutes = 60  // kan parameteriseerbaar gemaakt worden
+        )
+
         val unexplainedDelta = delta15 - predictedRiseFromCOB
 
         var localDetectedCarbs = 0.0
@@ -1041,13 +1066,32 @@ class FCL(context: Context) {
 
 
 
-    fun estimateRiseFromCOB(carbRatio: Double, currentISF: Double): Double {
+ /*   fun estimateRiseFromCOB(carbRatio: Double, currentISF: Double): Double {
         val now = DateTime.now()
         val remainingCarbs = activeMeals.sumOf { it.getRemainingCarbs(now) }
         val carbsToRiseFactor = (1.0 / carbRatio) * currentISF
         return remainingCarbs * carbsToRiseFactor
-    }
+    }   */
 
+    fun estimateRiseFromCOB(
+        carbRatio: Double,
+        tauAbsorptionMinutes: Int,
+        detectionWindowMinutes: Int = 60  // horizon voor meal detection
+    ): Double {
+        val now = DateTime.now()
+        val remainingCarbs = activeMeals.sumOf { it.getRemainingCarbs(now) }
+
+        // omzetten koolhydraten -> mmol/L stijging
+        val mmolPerGram = if (carbRatio > 0.0) (1.0 / carbRatio) else 0.0
+
+        // fractie van resterende carbs die in de detectionWindow absorbeert
+        val absorptionFraction = min(
+            1.0,
+            detectionWindowMinutes.toDouble() / tauAbsorptionMinutes.toDouble()
+        )
+
+        return remainingCarbs * mmolPerGram * absorptionFraction
+    }
 
 
 
@@ -1215,6 +1259,27 @@ class FCL(context: Context) {
     }
 
 
+    private fun adaptiveUpdate(
+        oldValue: Double,
+        observedValue: Double,
+        confidence: Double,
+        baseAlpha: Double,
+        minValue: Double? = null,
+        maxValue: Double? = null
+    ): Double {
+        // Outlier rejectie: negeer extreem afwijkende samples
+        if (observedValue <= 0 || observedValue > oldValue * 3 || observedValue < oldValue / 3) {
+            return oldValue
+        }
+
+        val alpha = baseAlpha * confidence.coerceIn(0.0, 1.0)
+        var updated = oldValue * (1 - alpha) + observedValue * alpha
+
+        if (minValue != null) updated = maxOf(minValue, updated)
+        if (maxValue != null) updated = minOf(maxValue, updated)
+
+        return updated
+    }
 
 
     private fun updateLearningFromMealResponse(
@@ -1237,17 +1302,30 @@ class FCL(context: Context) {
 
         val effectiveness = if (expectedRise > 0.0) actualRise / expectedRise else 1.0
 
-        // --- Additieve demping ---
-        val learningRateCR = 0.05  // max 5% per update
-        val learningRateISF = 0.02 // langzamer, en liefst met aparte correctie-data
+        // --- Adaptive updates ---
+        val observedCR = if (actualRise > 0.2) detectedCarbs / actualRise else null
+        val newCarbRatio = if (observedCR != null) {
+            adaptiveUpdate(
+                oldValue = learningProfile.personalCarbRatio,
+                observedValue = observedCR,
+                confidence = effectiveness.coerceIn(0.0, 2.0) - 1.0, // schaal factor op basis van effectiveness
+                baseAlpha = 0.05,
+                minValue = 3.0,
+                maxValue = 30.0
+            )
+        } else learningProfile.personalCarbRatio
 
-        // A) Update Carb Ratio alleen via meals
-        val crDelta = (effectiveness - 1.0) * learningRateCR
-        val newCarbRatio = (learningProfile.personalCarbRatio + crDelta).coerceIn(0.5, 1.5)
-
-        // B) ISF niet automatisch mee-updaten met meals (optioneel klein beetje)
-        val isfDelta = (effectiveness - 1.0) * learningRateISF
-        val newISF = (learningProfile.personalISF + isfDelta).coerceIn(0.5, 1.5)
+        val observedISF = if (adjustedGivenDose > 0) (actualRise / adjustedGivenDose) else null
+        val newISF = if (observedISF != null) {
+            adaptiveUpdate(
+                oldValue = learningProfile.personalISF,
+                observedValue = observedISF,
+                confidence = 0.5, // meals minder betrouwbaar voor ISF → lager gewicht
+                baseAlpha = 0.02,
+                minValue = 20.0,
+                maxValue = 200.0
+            )
+        } else learningProfile.personalISF
 
         // --- Meal factors ---
         val newMealFactors = learningProfile.mealTimingFactors.toMutableMap()
@@ -1292,8 +1370,9 @@ class FCL(context: Context) {
         storage.saveMealResponseData(mealData)
 
         println("DEBUG: updateLearningFromMealResponse applied. carbs=$detectedCarbs, actualRise=${"%.2f".format(actualRise)}, expectedRise=${"%.2f".format(expectedRise)}, eff=${"%.2f".format(effectiveness)}")
-        println("DEBUG: new CR=${"%.3f".format(newCarbRatio)}, old CR=${"%.3f".format(learningProfile.personalCarbRatio)}, new ISF=${"%.3f".format(newISF)}")
+        println("DEBUG: new CR=${"%.3f".format(newCarbRatio)}, new ISF=${"%.3f".format(newISF)}")
     }
+
 
     private fun updateISFFromCorrectionResponse(
         givenCorrectionInsulin: Double,
@@ -1307,17 +1386,19 @@ class FCL(context: Context) {
         if (givenCorrectionInsulin <= 0.0) return
 
         val oldISFFactor = learningProfile.personalISF
+        val effectiveness = if (predictedDrop > 0.0) actualDrop / predictedDrop else 1.0
+        val observedISF = if (givenCorrectionInsulin > 0) actualDrop / givenCorrectionInsulin else null
 
-        // Effectiveness = werkelijke daling / verwachte daling
-        val effectiveness = if (predictedDrop > 0.0) {
-            actualDrop / predictedDrop
-        } else 1.0
-
-        // Additieve demping (kleiner dan voor CR)
-        val learningRateISF = 0.05
-        val isfDelta = (effectiveness - 1.0) * learningRateISF
-
-        var newISFFactor = (oldISFFactor + isfDelta).coerceIn(0.5, 1.5)
+        val newISFFactor = if (observedISF != null) {
+            adaptiveUpdate(
+                oldValue = oldISFFactor,
+                observedValue = observedISF,
+                confidence = effectiveness.coerceIn(0.0, 2.0) - 1.0, // schaal factor
+                baseAlpha = 0.05,
+                minValue = 20.0,
+                maxValue = 200.0
+            )
+        } else oldISFFactor
 
         learningProfile = learningProfile.copy(
             personalISF = newISFFactor,
@@ -1328,10 +1409,10 @@ class FCL(context: Context) {
 
         storage.saveLearningProfile(learningProfile)
 
-        // Logging & debug
         println("DEBUG: updateISFFromCorrectionResponse -> ins=$givenCorrectionInsulin U, " +
                     "predictedDrop=${"%.2f".format(predictedDrop)}, actualDrop=${"%.2f".format(actualDrop)}, " +
                     "eff=${"%.2f".format(effectiveness)}, oldISF=${"%.3f".format(oldISFFactor)}, newISF=${"%.3f".format(newISFFactor)}")
+
         try {
             val outcome = when {
                 actualDrop > predictedDrop * 1.5 -> "TOO_AGGRESSIVE"
@@ -1350,11 +1431,11 @@ class FCL(context: Context) {
 
             storage.saveCorrectionPerformanceResult(correctionResult)
             println("DEBUG: Correction performance logged: ${correctionResult.outcome}")
-
         } catch (e: Exception) {
             println("DEBUG: Failed to log correction performance: ${e.message}")
         }
     }
+
 
 
 
@@ -1485,6 +1566,448 @@ class FCL(context: Context) {
             res.add(Pair(data[i].timestamp, s))
         }
         return res
+    }
+
+
+    // Detecteer sensorfouten inclusief compression lows.
+   // Geeft null terug als er geen fout is.
+    private fun detectSensorIssue(historicalData: List<BGDataPoint>): SensorIssueType? {
+        if (historicalData.size < 3) return null
+
+        // --- Grote sprongen ---
+        val recent3 = historicalData.takeLast(3)
+        val d1 = recent3[1].bg - recent3[0].bg
+        val d2 = recent3[2].bg - recent3[1].bg
+        if (abs(d1) > 3.0 || abs(d2) > 3.0) {
+            println("DEBUG: Sensor error detected (jump too large)")
+            return SensorIssueType.JUMP_TOO_LARGE
+        }
+
+        // --- Oscillaties ---
+        val oscillation = (
+            (recent3[0].bg < recent3[1].bg && recent3[2].bg < recent3[1].bg) || // piek
+                (recent3[0].bg > recent3[1].bg && recent3[2].bg > recent3[1].bg)    // dal
+            ) && (abs(d1) >= 0.5 && abs(d2) >= 0.5)
+
+        if (oscillation) {
+            println("DEBUG: Sensor error detected (oscillation)")
+            return SensorIssueType.OSCILLATION
+        }
+
+        // --- Compression lows ---
+        if (historicalData.size >= 5) {
+            val recent5 = historicalData.takeLast(5)
+            val first = recent5.first()
+            val minPoint = recent5.minByOrNull { it.bg } ?: return null
+            val drop = first.bg - minPoint.bg
+            val minutesToMin = Minutes.minutesBetween(first.timestamp, minPoint.timestamp).minutes
+            val rapidDrop = drop > 2.0 && minutesToMin in 5..15 && minPoint.bg < 4.0
+
+            val last = recent5.last()
+            val rebound = last.bg - minPoint.bg
+            val minutesToLast = Minutes.minutesBetween(minPoint.timestamp, last.timestamp).minutes
+            val rapidRebound = rebound > 1.5 && minutesToLast in 5..20
+
+            if (rapidDrop && rapidRebound) {
+                println("DEBUG: Compression low detected - drop=${"%.1f".format(drop)}, rebound=${"%.1f".format(rebound)}")
+                return SensorIssueType.COMPRESSION_LOW
+            }
+        }
+
+        return null
+    }
+
+
+
+
+    // ★★★ NIEUW: Meal pattern validation ★★★
+    private fun validateMealPattern(historicalData: List<BGDataPoint>): MealConfidenceLevel {
+        if (historicalData.size < 6) return MealConfidenceLevel.SUSPECTED
+
+        val recent = historicalData.takeLast(6)
+
+        // Check op consistent stijgend patroon (minimaal 4 van 5 metingen)
+        val risingCount = recent.zipWithNext { a, b ->
+            b.bg > a.bg + 0.1
+        }.count { it }
+
+        // Check op geleidelijke stijging (lage variantie in slopes)
+        val slopes = recent.zipWithNext { a, b ->
+            val minutesDiff = Minutes.minutesBetween(a.timestamp, b.timestamp).minutes.toDouble()
+            if (minutesDiff > 0) (b.bg - a.bg) / minutesDiff * 60.0 else 0.0 // mmol/L per uur
+        }
+
+        val slopeVariance = if (slopes.size > 1) {
+            val average = slopes.average()
+            slopes.map { (it - average) * (it - average) }.average()
+        } else 0.0
+
+        // Bepaal confidence level
+        return when {
+            risingCount >= 4 && slopeVariance < 0.1 -> {
+                println("DEBUG: High confidence meal pattern - risingCount: $risingCount, variance: ${"%.3f".format(slopeVariance)}")
+                MealConfidenceLevel.HIGH_CONFIDENCE
+            }
+            risingCount >= 3 -> {
+                println("DEBUG: Confirmed meal pattern - risingCount: $risingCount")
+                MealConfidenceLevel.CONFIRMED
+            }
+            else -> {
+                println("DEBUG: Suspected meal pattern - risingCount: $risingCount")
+                MealConfidenceLevel.SUSPECTED
+            }
+        }
+    }
+
+    // ★★★ NIEUWE FUNCTIES VOOR BETERE MEAL DETECTION ★★★
+    private fun hasSustainedRisePattern(historicalData: List<BGDataPoint>): Boolean {
+        if (historicalData.size < 6) return false
+
+        val recent = historicalData.takeLast(6)
+        val risingCount = recent.zipWithNext { a, b ->
+            b.bg > a.bg + 0.1
+        }.count { it }
+
+        // Minimaal 4 van 5 metingen stijgend
+        return risingCount >= 4
+    }
+
+    private fun calculateVariance(values: List<Double>): Double {
+        if (values.isEmpty()) return 0.0
+        val mean = values.average()
+        return values.map { (it - mean) * (it - mean) }.average()
+    }
+
+    private fun calculateMealConfidence(
+        historicalData: List<BGDataPoint>,
+        detectedCarbs: Double
+    ): Double {
+        var confidence = 0.5 // Baseline
+
+        if (historicalData.size < 4) return if (detectedCarbs > 20) 0.6 else 0.3
+
+        val recent = historicalData.takeLast(4)
+        val rises = recent.zipWithNext { a, b -> b.bg - a.bg }
+        val totalRise = recent.last().bg - recent.first().bg
+
+        // Bonus voor consistente stijging
+        if (hasSustainedRisePattern(historicalData)) {
+            confidence += 0.3
+            println("DEBUG: Confidence +0.3 for sustained rise pattern")
+        }
+
+        // Bonus voor substantiële carbs
+        if (detectedCarbs > 25) {
+            confidence += 0.2
+            println("DEBUG: Confidence +0.2 for substantial carbs ($detectedCarbs g)")
+        }
+
+        // Bonus voor gelijkmatige stijging (lage variantie)
+        if (rises.size > 1) {
+            val variance = calculateVariance(rises)
+            if (variance < 0.05) {
+                confidence += 0.2
+                println("DEBUG: Confidence +0.2 for low variance (${"%.3f".format(variance)})")
+            }
+        }
+
+        // Bonus voor significante totale stijging
+        if (totalRise > 2.0) {
+            confidence += 0.1
+            println("DEBUG: Confidence +0.1 for significant rise (${"%.1f".format(totalRise)} mmol/L)")
+        }
+
+        val finalConfidence = confidence.coerceIn(0.0, 1.0)
+        println("DEBUG: Final meal confidence: ${"%.0f".format(finalConfidence * 100)}%")
+        return finalConfidence
+    }
+
+    // ★★★ HELPER FUNCTIES VOOR MEAL PROCESSING ★★★
+    private fun processHighConfidenceMeal(
+        detectedCarbs: Double,
+        currentData: BGDataPoint,
+        trends: TrendAnalysis,
+        carbRatio: Double,
+        currentIOB: Double,
+        currentISF: Double,
+        targetBG: Double,
+        maxBolus: Double,
+        finalVars: FinalVariables
+    ) {
+        with(finalVars) {
+            mealDetected = true
+            val processedCarbs = detectedCarbs
+
+            // activeMeal updaten of toevoegen
+            val recentMeal = activeMeals.findLast {
+                Minutes.minutesBetween(it.timestamp, DateTime.now()).minutes < 60
+            }
+            if (recentMeal != null) {
+                recentMeal.totalCarbs += processedCarbs
+            } else {
+                activeMeals.add(
+                    ActiveCarbs(
+                        timestamp = DateTime.now(),
+                        totalCarbs = processedCarbs,
+                        tau = tauAbsorptionMinutes.toDouble()
+                    )
+                )
+            }
+
+            val (immediateBolus, reserved, bolusReason) = handleProgressiveMealBolus(
+                processedCarbs, carbRatio, currentData.bg, targetBG, currentIOB, currentISF, maxBolus, trends
+            )
+
+            reservedBolus = reserved
+            dose = immediateBolus
+            reason = "High confidence meal: ${"%.1f".format(detectedCarbs)}g | $bolusReason"
+            deliver = true
+            phase = "meal_high_confidence"
+            confidence = 0.9
+
+            println("DEBUG: High confidence meal processed - dose: ${"%.2f".format(dose)}U")
+        }
+    }
+
+    private fun processMediumConfidenceMeal(
+        detectedCarbs: Double,
+        currentData: BGDataPoint,
+        trends: TrendAnalysis,
+        carbRatio: Double,
+        currentIOB: Double,
+        currentISF: Double,
+        targetBG: Double,
+        maxBolus: Double,
+        finalVars: FinalVariables,
+        mealConfidence: Double
+    ) {
+        with(finalVars) {
+            mealDetected = true
+            val processedCarbs = detectedCarbs * 0.7 // Conservatieve schatting
+
+            val (immediateBolus, reserved, bolusReason) = handleProgressiveMealBolus(
+                processedCarbs, carbRatio, currentData.bg, targetBG, currentIOB, currentISF, maxBolus, trends
+            )
+
+            // Extra reductie voor medium confidence
+            val reducedBolus = immediateBolus * mealConfidence
+            reservedBolus = reserved * mealConfidence
+            dose = reducedBolus
+            reason = "Medium confidence meal (${"%.0f".format(mealConfidence * 100)}%): ${"%.1f".format(processedCarbs)}g | $bolusReason"
+            deliver = true
+            phase = "meal_medium_confidence"
+            confidence = mealConfidence
+
+            println("DEBUG: Medium confidence meal processed - reduced dose: ${"%.2f".format(dose)}U")
+        }
+    }
+
+    private fun applyAdditionalMealLogic(
+        currentData: BGDataPoint,
+        trends: TrendAnalysis,
+        targetBG: Double,
+        currentIOB: Double,
+        currentISF: Double,
+        maxBolus: Double,
+        finalVars: FinalVariables,
+        historicalData: List<BGDataPoint>
+    ) {
+        with(finalVars) {
+            val weakRiseThreshold = 0.5
+            val nearPeakBGMargin = 1.5
+            val minCobToDeliver = 0.1
+
+            // Alleen leveren als trend stijgend is en er voldoende COB is
+            val cobNow = getCarbsOnBoard()
+            deliver = deliver && (trends.recentTrend > 0.0 && cobNow > minCobToDeliver)
+
+            // === Peak detection en reductie ===
+            if (isAtPeakOrDeclining(historicalData, trends)) {
+                reason += " | Past peak -> reduced bolus"
+                dose *= 0.3
+                deliver = trends.recentTrend > 1.0
+            }
+
+            // Peak damping
+            if (trends.recentTrend <= 0.0) {
+                reason += " | Peak detected -> no bolus"
+                dose = 0.0
+                deliver = false
+            } else if (trends.recentTrend <= weakRiseThreshold &&
+                currentData.bg > targetBG + nearPeakBGMargin
+            ) {
+                reason += " | Peak damping (x${"%.2f".format(peakDampingFactor)})"
+                dose *= peakDampingFactor
+            }
+
+            // Hypo risk
+            if (isHypoRiskWithin(120, currentData.bg, currentIOB, currentISF)) {
+                reason += " | Hypo risk (x${"%.2f".format(hypoRiskFactor)})"
+                dose *= hypoRiskFactor
+            }
+
+            // === StartBoost (meal) ===
+            val predictedPeak = predictMealResponse(currentData.bg, trends, phase, 60)
+            val deltaMeal = (predictedPeak - currentData.bg).coerceAtLeast(0.0)
+            var startBoostFactorMeal = 1.0 + (deltaMeal / 10.0).coerceIn(0.0, 0.3)
+
+            // Beperk boost wanneer BG nog onder target is en stijging zwak/onszeker
+            val shortTermRiseThreshold = mealDetectionSensitivity  // mmol/L per uur (tweak naar behoefte)
+            if (currentData.bg < targetBG && trends.shortTermTrend <= shortTermRiseThreshold) {
+                // reduceer het extra deel van de boost (b.v. 50%)
+                startBoostFactorMeal = 1.0 + ((startBoostFactorMeal - 1.0) * 0.5)
+                reason += " | StartMealBoost limited (BG below target & weak rise)"
+
+            }
+
+            if (startBoostFactorMeal > 1.0) {
+                dose *= startBoostFactorMeal
+                reason += " | StartMealBoost(x${"%.2f".format(startBoostFactorMeal)})"
+            }
+
+            if (trends.recentTrend > 3.0 && currentData.bg < 9.0) {
+                val extraBoost = 1.2
+                dose *= extraBoost
+                reason += " | StrongEarlyBoost(x${"%.2f".format(extraBoost)})"
+            }
+
+            // Safety cap
+            val safeMax = computeSafeMaxBolus(
+                currentBG = currentData.bg,
+                currentIOB = currentIOB,
+                currentISF = currentISF,
+                maxBolusLimit = maxBolus
+            )
+            val cappedDose = min(roundDose(dose), safeMax)
+
+            if (cappedDose < roundDose(dose)) {
+                reason += " | CAPPED at ${"%.2f".format(safeMax)}U"
+            }
+
+            dose = cappedDose
+
+            // Store for learning
+            try {
+                if (deliver && dose > 0.0) {
+                    val expectedPeak = predictedPeak
+                    storeMealForLearning(
+                        detectedCarbs = detectedCarbs,
+                        givenDose = dose,
+                        startBG = currentData.bg,
+                        expectedPeak = expectedPeak,
+                        mealType = getMealTypeFromHour()
+                    )
+                }
+            } catch (ex: Exception) {
+                println("DEBUG: storeMealForLearning failed: ${ex.message}")
+            }
+        }
+    }
+
+    // ★★★ VERBETERDE SNACK/MEAL DETECTION ★★★
+    private fun distinguishMealFromSnack(
+        historicalData: List<BGDataPoint>,
+        detectedCarbs: Double
+    ): Boolean {
+        if (historicalData.size < 4) return detectedCarbs > 20 // Bij twijfel, conservatief
+
+        val recent = historicalData.takeLast(4)
+        val totalRise = recent.last().bg - recent.first().bg
+
+        // Verbeterde detectie: focus op consistentie i.p.v. absolute grenzen
+        val rises = recent.zipWithNext { a, b -> b.bg - a.bg }
+        val consistentRise = rises.all { it > 0.1 } // Alle metingen stijgend
+        val riseVariance = if (rises.size > 1) calculateVariance(rises) else 1.0
+
+        // Nieuwe, slimmere heuristiek:
+        val isLikelyMeal = when {
+            // Duidelijke maaltijd: substantiële carbs + consistente stijging
+            detectedCarbs > 30 && consistentRise && totalRise > 1.5 -> {
+                println("DEBUG: Clear meal pattern - substantial carbs with consistent rise")
+                true
+            }
+
+            // Waarschijnlijke maaltijd: matige carbs + lage variantie in stijging
+            detectedCarbs > 20 && riseVariance < 0.1 && totalRise > 1.0 -> {
+                println("DEBUG: Likely meal - moderate carbs with steady rise")
+                true
+            }
+
+            // Twijfelgeval: gebruik trendanalyse voor betere beslissing
+            detectedCarbs > 15 && hasSustainedRisePattern(historicalData) -> {
+                println("DEBUG: Sustained rise pattern suggests meal")
+                true
+            }
+
+            // Waarschijnlijk snack: kleine hoeveelheid + onregelmatige stijging
+            else -> {
+                println("DEBUG: Pattern suggests snack - carbs: ${detectedCarbs}g, rise: ${"%.1f".format(totalRise)}")
+                false
+            }
+        }
+
+        return isLikelyMeal
+    }
+
+    // ★★★ NIEUW: Veilige initiële bolus berekening ★★★
+    private fun calculateSafeInitialBolus(
+        detectedCarbs: Double,
+        confidence: MealConfidenceLevel,
+        isLikelyMeal: Boolean,
+        hasSensorError: Boolean,
+        currentIOB: Double
+    ): Double {
+        if (hasSensorError) {
+            println("DEBUG: Withholding bolus due to sensor error")
+            return 0.0
+        }
+
+        if (!isLikelyMeal && detectedCarbs < 25) {
+            println("DEBUG: Withholding bolus - pattern suggests snack or small rise")
+            return 0.0
+        }
+
+        val baseDose = detectedCarbs / learningProfile.personalCarbRatio
+        var safeDose = when (confidence) {
+            MealConfidenceLevel.SUSPECTED -> baseDose * 0.3 // Zeer conservatief
+            MealConfidenceLevel.CONFIRMED -> baseDose * 0.6 // Matig conservatief
+            MealConfidenceLevel.HIGH_CONFIDENCE -> baseDose * 0.8 // Normale respons
+        }
+
+        // Extra reductie bij hoge IOB
+        if (currentIOB > 1.5) {
+            safeDose *= max(0.3, 1.0 - (currentIOB - 1.5) * 0.3)
+            println("DEBUG: IOB reduction applied - IOB: ${"%.1f".format(currentIOB)}, dose: ${"%.2f".format(safeDose)}")
+        }
+
+        println("DEBUG: Safe initial bolus - confidence: $confidence, base: ${"%.2f".format(baseDose)}, safe: ${"%.2f".format(safeDose)}")
+        return safeDose
+    }
+
+    // ★★★ NIEUW: Real-time bijsturing ★★★
+    private fun shouldAdjustOrCancelBolus(
+        historicalData: List<BGDataPoint>,
+        initialDetection: MealDetectionState
+    ): Boolean {
+        if (historicalData.size < 4) return false
+
+        val recent = historicalData.takeLast(4)
+
+        // Stijging stopt of keert om
+        val plateauOrDecline = recent.zipWithNext { a, b ->
+            b.bg <= a.bg + 0.1
+        }.count { it } >= 2
+
+        // Onverwachte daling na initiële stijging
+        val unexpectedDrop = recent.last().bg < recent[recent.size - 2].bg - 0.5
+
+        val shouldAdjust = plateauOrDecline || unexpectedDrop
+
+        if (shouldAdjust) {
+            println("DEBUG: Adjusting bolus - plateauOrDecline: $plateauOrDecline, unexpectedDrop: $unexpectedDrop")
+        }
+
+        return shouldAdjust
     }
 
 
@@ -1706,6 +2229,33 @@ class FCL(context: Context) {
         return currentBG - effectiveDrop
     }
 
+    fun computeSafeMaxBolus(
+        currentBG: Double,
+        currentIOB: Double,
+        currentISF: Double,
+        maxBolusLimit: Double,
+        minutesAhead: Int = 240,      // kijk 4 uur vooruit
+        hypoThreshold: Double = 4.0   // ondergrens in mmol/L
+    ): Double {
+        var low = 0.0
+        var high = maxBolusLimit
+        var best = 0.0
+
+        // binary search: vind hoogste bolus die nog veilig is
+        repeat(10) {
+            val mid = (low + high) / 2.0
+            val predicted = predictIOBEffect(currentBG, currentIOB + mid, currentISF, minutesAhead)
+            if (predicted >= hypoThreshold) {
+                best = mid
+                low = mid
+            } else {
+                high = mid
+            }
+        }
+        return best
+    }
+
+
     private fun isHypoRiskWithin(minutesAhead: Int, currentBG: Double, iob: Double, isf: Double, thresholdMmol: Double = 4.0): Boolean {
         val predicted = predictIOBEffect(currentBG, iob, isf, minutesAhead)
         return predicted < thresholdMmol
@@ -1791,6 +2341,14 @@ class FCL(context: Context) {
         reservedBolus *= phaseFactor
         reason += " | Phase $phase (x${"%.2f".format(phaseFactor)})"
 
+        // --- Extra voorzichtigheid: reduceer initiële bolus als BG nog onder target zit ---
+        if (currentBG < targetBG) {
+            val reductionFactor = 0.5  // tuneerbaar: 0.5 = halve bolus; je kunt 0.6 of 0.7 proberen
+            immediateBolus *= reductionFactor
+            reason += " | Reduced (BG below target x${"%.2f".format(reductionFactor)})"
+
+        }
+
         // 4. Bestaande IOB correctie behouden
         if (currentIOB > 0.0) {
             val iobAdjustment = currentIOB / 2.0
@@ -1824,7 +2382,8 @@ class FCL(context: Context) {
         currentISF: Double,
         targetBG: Double,
         carbRatio: Double,
-        currentIOB: Double
+        currentIOB: Double,
+        maxIOB: Double
     ): InsulinAdvice {
         val currentHour = DateTime.now().hourOfDay
         val hourlySensitivity = learningProfile.getHourlySensitivity(currentHour)
@@ -1836,7 +2395,7 @@ class FCL(context: Context) {
         val trends = analyzeTrends(historicalData)
         val realTimePrediction = predictRealTime(currentData, historicalData, adjustedISF, 60, carbRatio, targetBG)
 
-        if (shouldWithholdInsulin(currentData, trends, targetBG)) {
+        if (shouldWithholdInsulin(currentData, trends, targetBG, maxIOB)) {
             return InsulinAdvice(0.0, "Safety: BG too low or falling", 0.9)
         }
 
@@ -1876,21 +2435,21 @@ class FCL(context: Context) {
         return roundDose(limitedDose)
     }
 
-    private fun shouldWithholdInsulin(currentData: BGDataPoint, trends: TrendAnalysis, targetBG: Double): Boolean {
+    private fun shouldWithholdInsulin(currentData: BGDataPoint, trends: TrendAnalysis, targetBG: Double, maxIOB: Double): Boolean {
         return when {
             // Absolute hypo-veiligheid
-            currentData.bg < 5.0 -> true
+            currentData.bg < 5.2 -> true
 
             // Daling + nog in de buurt van hypo
-            currentData.bg < 5.8 && trends.recentTrend < -0.3 -> true
-            currentData.bg < 6.5 && trends.recentTrend < -0.5 -> true
+            currentData.bg < 6.0 && trends.recentTrend < -0.3 -> true
+            currentData.bg < 6.7 && trends.recentTrend < -0.5 -> true
 
             // Hoge IOB → alleen blokkeren als BG niet duidelijk boven target zit
-            currentData.iob > 1.8 && currentData.bg < targetBG + 1.0 -> true
-
+          //  currentData.iob > 1.8 && currentData.bg < targetBG + 1.0 -> true
+            currentData.iob > maxIOB * 0.45 && currentData.bg < targetBG + 1.0 -> true // 45% van maxIOB
             // Matige IOB + duidelijke daling
-            currentData.iob > 1.0 && trends.recentTrend < -0.3 -> true
-
+          //  currentData.iob > 1.0 && trends.recentTrend < -0.3 -> true
+            currentData.iob > maxIOB * 0.25 && trends.recentTrend < -0.3 -> true // 25% van maxIOB
             else -> false
         }
     }
@@ -2336,7 +2895,7 @@ class FCL(context: Context) {
 
             val basicAdvice = getInsulinAdvice(
                 currentData, historicalData,
-                currentISF, targetBG, carbRatio, currentIOB
+                currentISF, targetBG, carbRatio, currentIOB, maxIOB
             )
 
 
@@ -2368,7 +2927,7 @@ class FCL(context: Context) {
             val minCobToDeliver = 0.1     // minimaal COB om meal actief te vinden
 
             // === Safety ===
-            if (shouldWithholdInsulin(currentData, trends, targetBG)) {
+            if (shouldWithholdInsulin(currentData, trends, targetBG, maxIOB)) {
                 val reasonDetail = explainWithholdReason(currentData, trends, targetBG)
                 finalDose = 0.0
                 finalReason = "Safety: $reasonDetail"
@@ -2403,117 +2962,105 @@ class FCL(context: Context) {
                     historicalData, currentData.bg, mealDetectionSensitivity,
                     carbRatio, currentISF, targetBG
                 )
-                if (mealState != MealDetectionState.NONE) {
-                    finalMealDetected = true
-                    finalDetectedCarbs = detectedCarbs
 
-                    // activeMeal updaten of toevoegen
-                    val recentMeal = activeMeals.findLast {
-                        Minutes.minutesBetween(it.timestamp, DateTime.now()).minutes < 60
-                    }
-                    if (recentMeal != null) {
-                        recentMeal.totalCarbs += detectedCarbs
-                    } else {
-                        activeMeals.add(
-                            ActiveCarbs(
-                                timestamp = DateTime.now(),
-                                totalCarbs = detectedCarbs,
-                                tau = tauAbsorptionMinutes.toDouble()
-                            )
-                        )
-                    }
+                // ★★★ NIEUW: Safety checks voor false positives ★★★
 
-                    val (immediateBolus, reserved, bolusReason) =
-                        handleProgressiveMealBolus(
-                            detectedCarbs,
-                            carbRatio,
-                            currentData.bg,
-                            targetBG,
-                            currentIOB,
-                            currentISF,
-                            maxBolus,
-                            trends
-                        )
-                    finalReservedBolus = reserved
 
-                    var adjustedDose = getSafeDoseWithLearning(
-                        immediateBolus, null, learningProfile.learningConfidence,
-                        currentIOB, trends, phase
-                    )
+         //       val sensorError = detectSensorErrors(historicalData)
+                val sensorIssue = detectSensorIssue(historicalData)
+                val sensorError = sensorIssue != null
+                val mealConfidence = validateMealPattern(historicalData)
+                val isLikelyMeal = distinguishMealFromSnack(historicalData, detectedCarbs)
+                val shouldAdjust = shouldAdjustOrCancelBolus(historicalData, mealState)
 
-                    finalDeliver = (trends.recentTrend > 0.0 && cobNow > minCobToDeliver)
+                // Safety: blokkeer bij sensor errors
 
-                    // === NIEUW: Peak detection en reductie ===
-                    if (isAtPeakOrDeclining(historicalData, trends)) {
-                        finalReason += " | Past peak -> reduced bolus"
-                        adjustedDose *= 0.3  // Zeer conservatief na peak
-                        finalDeliver = trends.recentTrend > 1.0  // Alleen bij sterke stijging
-                    }
 
-                    finalReason = "Meal detected: ${"%.1f".format(detectedCarbs)}g | " +
-                        bolusReason + " | BG=${"%.1f".format(currentData.bg)}, " +
-                        "target=${"%.1f".format(targetBG)}, IOB=${"%.2f".format(currentIOB)}, " +
-                        "trend=${"%.2f".format(trends.recentTrend)}"
+                if (sensorIssue != null) {
+                    finalDose = 0.0
+                    finalDeliver = false
+                    finalMealDetected = false
 
-                    if (parameterAdvisory.isNotEmpty()) {
-                        finalReason += " | $parameterAdvisory"
-                    }
-
-                    // peak damping
-                    if (trends.recentTrend <= 0.0) {
-                        finalReason += " | Peak detected -> no bolus"
-                        adjustedDose = 0.0
-                        finalDeliver = false
-                    } else if (trends.recentTrend <= weakRiseThreshold &&
-                        currentData.bg > targetBG + nearPeakBGMargin
-                    ) {
-                        finalReason += " | Peak damping (x${"%.2f".format(peakDampingFactor)})"
-                        adjustedDose *= peakDampingFactor
-                    }
-
-                    // hypo risk
-                    if (isHypoRiskWithin(120, currentData.bg, currentIOB, currentISF)) {
-                        finalReason += " | Hypo risk (x${"%.2f".format(hypoRiskFactor)})"
-                        adjustedDose *= hypoRiskFactor
-                    }
-
-                    // === StartBoost (meal) ===
-                    val deltaMeal = (predictedPeak - currentData.bg).coerceAtLeast(0.0)
-                    val startBoostFactorMeal = 1.0 + (deltaMeal / 10.0).coerceIn(0.0, 0.3)
-                    if (startBoostFactorMeal > 1.0) {
-                        adjustedDose *= startBoostFactorMeal
-                        finalReason += " | StartMealBoost(x${"%.2f".format(startBoostFactorMeal)})"
-                    }
-
-                    if (trends.recentTrend > 3.0 && currentData.bg < 9.0) {
-                        val extraBoost = 1.2
-                        adjustedDose *= extraBoost
-                        finalReason += " | StrongEarlyBoost(x${"%.2f".format(extraBoost)})"
-                    }
-
-                    val cappedDose = min(roundDose(adjustedDose), maxBolus)
-                    if (cappedDose < roundDose(adjustedDose)) {
-                        finalReason += " | CAPPED at ${"%.2f".format(maxBolus)}U"
-                    }
-
-                    try {
-                        if (finalDeliver && cappedDose > 0.0) {
-                            val expectedPeak = basicAdvice.predictedValue ?: (currentData.bg + 2.5)
-                            storeMealForLearning(
-                                detectedCarbs = finalDetectedCarbs,
-                                givenDose = cappedDose,
-                                startBG = currentData.bg,
-                                expectedPeak = expectedPeak,
-                                mealType = getMealTypeFromHour()
-                            )
+                    when (sensorIssue) {
+                        SensorIssueType.COMPRESSION_LOW -> {
+                            finalReason = "Safety: Compression low detected - withholding insulin"
+                            finalPhase = "safety_compression_low"
                         }
-                    } catch (ex: Exception) {
-                        println("DEBUG: storeMealForLearning failed: ${ex.message}")
+                        SensorIssueType.JUMP_TOO_LARGE -> {
+                            finalReason = "Safety: Sensor error (jump too large) - withholding insulin"
+                            finalPhase = "safety_sensor_error"
+                        }
+                        SensorIssueType.OSCILLATION -> {
+                            finalReason = "Safety: Sensor error (oscillation) - withholding insulin"
+                            finalPhase = "safety_sensor_error"
+                        }
                     }
+                }
 
-                    finalDose = cappedDose
-                    finalPhase = "meal"
-                    finalConfidence = basicAdvice.confidence * 0.9
+                // ★★★ VERBETERDE SAFETY CHECK ★★★
+                else if (!isLikelyMeal && detectedCarbs < 15) {
+                    // Alleen blokkeren bij zeer kleine hoeveelheden + onduidelijk patroon
+                    finalDose = 0.0
+                    finalReason = "Safety: Small uncertain rise (${"%.1f".format(detectedCarbs)}g) - monitoring pattern"
+                    finalDeliver = false
+                    finalPhase = "safety_monitoring"
+                    finalMealDetected = false
+                    println("DEBUG: Safety check activated - small uncertain rise detected")
+                }
+                // Safety: pas aan bij tegenvallende stijging
+                else if (shouldAdjust && mealInProgress) {
+                    finalMealDetected = true
+                    finalDetectedCarbs = detectedCarbs * 0.5 // Carb schatting aanpassen
+                }
+
+
+// ★★★ CONFIDENCE-BASED MEAL PROCESSING ★★★
+                else if (mealState != MealDetectionState.NONE && !sensorError) {
+                    val mealConfidence = calculateMealConfidence(historicalData, detectedCarbs)
+
+                    // Maak een FinalVariables object om de resultaten in op te slaan
+                    val finalVars = FinalVariables()
+
+                    if (mealConfidence > 0.7) {
+                        processHighConfidenceMeal(detectedCarbs, currentData, trends, carbRatio, currentIOB,
+                                                  currentISF, targetBG, maxBolus, finalVars)
+                        applyAdditionalMealLogic(currentData, trends, targetBG, currentIOB, currentISF, maxBolus, finalVars, historicalData)
+
+                        // Kopieer waarden terug naar de finale variabelen
+                        finalDose = finalVars.dose
+                        finalReason = finalVars.reason
+                        finalDeliver = finalVars.deliver
+                        finalMealDetected = finalVars.mealDetected
+                        finalDetectedCarbs = finalVars.detectedCarbs
+                        finalReservedBolus = finalVars.reservedBolus
+                        finalPhase = finalVars.phase
+                        finalConfidence = finalVars.confidence
+
+                    } else if (mealConfidence > 0.4 && detectedCarbs > 10) {
+                        processMediumConfidenceMeal(detectedCarbs, currentData, trends, carbRatio, currentIOB,
+                                                    currentISF, targetBG, maxBolus, finalVars, mealConfidence)
+                        applyAdditionalMealLogic(currentData, trends, targetBG, currentIOB, currentISF, maxBolus, finalVars, historicalData)
+
+                        // Kopieer waarden terug naar de finale variabelen
+                        finalDose = finalVars.dose
+                        finalReason = finalVars.reason
+                        finalDeliver = finalVars.deliver
+                        finalMealDetected = finalVars.mealDetected
+                        finalDetectedCarbs = finalVars.detectedCarbs
+                        finalReservedBolus = finalVars.reservedBolus
+                        finalPhase = finalVars.phase
+                        finalConfidence = finalVars.confidence
+
+                    } else {
+                        // Laag vertrouwen - monitor alleen
+                        finalDose = 0.0
+                        finalReason = "Monitoring uncertain pattern (confidence: ${"%.0f".format(mealConfidence * 100)}%)"
+                        finalDeliver = false
+                        finalPhase = "safety_monitoring"
+                        finalMealDetected = false
+                        println("DEBUG: Low confidence meal - withholding bolus")
+                        // GEEN return statement - gewoon doorgaan
+                    }
                 }
 
                 // === Correction ===
@@ -2689,3 +3236,9 @@ class FCL(context: Context) {
 }
 
 enum class MealDetectionState { NONE, EARLY_RISE, RISING, PEAK, DECLINING, DETECTED }
+enum class MealConfidenceLevel {
+    SUSPECTED,      // Initiële stijging gedetecteerd
+    CONFIRMED,      // Consistente stijging over meerdere metingen
+    HIGH_CONFIDENCE // Patroon matcht maaltijdprofiel
+}
+enum class SensorIssueType {JUMP_TOO_LARGE, OSCILLATION, COMPRESSION_LOW}
