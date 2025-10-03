@@ -50,10 +50,6 @@ enum class DoubleKey(
 
     //  Eigen
 
-    Dag_resistentie_target("Dag_resistentie_target", 5.2,4.0,8.0),
-    Nacht_resistentie_target("Dacht_resistentie_target", 5.2,4.0,8.0),
-    Uren_resistentie("Uren_resistentie", 2.5,1.0,5.0),
-
     persistent_Dagdrempel("persistent_Dagdrempel", 8.5,7.0,12.0),
     persistent_Nachtdrempel("persistent_Nachtdrempel",7.0,6.0,10.0),
     persistent_grens("persistent_grens",0.5,0.1, 1.0),
@@ -61,4 +57,11 @@ enum class DoubleKey(
     stap_TT("stap_TT", 2.0,0.5,4.0),
     max_bolus("max_bolus", 1.25,0.5,2.5),
     meal_detection_sensitivity("meal_detection_sensitivity", 0.35,0.2,0.5),
+    CarbISF_min_Factor("CarbISF_min_Factor", 0.9,0.5,1.0),
+    CarbISF_max_Factor("CarbISF_max_Factor", 1.1,1.0,2.5),
+
+    hypoThresholdDay("hypoThresholdDay", 4.0,3.8,4.5),
+    hypoThresholdNight("hypoThresholdNight", 4.5,3.8,5.0),
+    hypoRecoveryBGRange("hypoRecoveryBGRange", 2.5,1.5,3.0),
+    hypo_recovery_aggressiveness("hypo_recovery_aggressiveness", 0.7,0.1,1.0),
 }

@@ -124,6 +124,7 @@ import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import android.content.SharedPreferences
 
 class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickListener {
 
@@ -971,13 +972,16 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             rh.gs(app.aaps.core.ui.R.string.basal) + ": " + rh.gs(app.aaps.core.ui.R.string.format_insulin_units, basalIob().basaliob)
 
     private fun updateIobCob() {
-        val TIR_24h_4_10 = tirCalculator.averageTIR(tirCalculator.calculateXHour(24,70.0, 180.0))?.inRangePct()!!.roundToInt()
-        val TIR_5d_4_10 = (tirCalculator.averageTIR(tirCalculator.calculate(5,70.0, 180.0))?.inRangePct()!!).roundToInt()
+
+
+        val prefs = requireContext().getSharedPreferences("FCL_Learning_Data", Context.MODE_PRIVATE)
+        var cob = prefs.getFloat("current_cob", 0f).toInt()
 
 
         val iobText = iobText()
         val iobDialogText = iobDialogText()
-        val displayText = iobCobCalculator.getCobInfo("Overview COB").displayText(rh, decimalFormatter)
+    // val displayText = iobCobCalculator.getCobInfo("Overview COB").displayText(rh, decimalFormatter)
+        val displayText = cob.toString() + " g"
         val lastCarbsTime = persistenceLayer.getNewestCarbs()?.timestamp ?: 0L
         runOnUiThread {
             _binding ?: return@runOnUiThread
@@ -1002,7 +1006,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                 }
             }
 
-            cobText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
+        //    cobText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
             binding.infoLayout.cob.text = cobText
         }
     }
@@ -1192,7 +1196,13 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
 
 
     private fun updateSensitivity() {
+        val TIR_24h_4_10 = tirCalculator.averageTIR(tirCalculator.calculateXHour(24,70.0, 180.0))?.inRangePct()!!.roundToInt()
+        val TIR_5d_4_10 = (tirCalculator.averageTIR(tirCalculator.calculate(5,70.0, 180.0))?.inRangePct()!!).roundToInt()
+        val TIRText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
+
         _binding ?: return
+
+       /*
         val lastAutosensData = iobCobCalculator.ads.getLastAutosensData("Overview", aapsLogger, dateUtil)
         val lastAutosensRatio = lastAutosensData?.let { it.autosensResult.ratio * 100 }
         if (config.AAPSCLIENT && sp.getBoolean(app.aaps.core.utils.R.string.key_used_autosens_on_main_phone, false) ||
@@ -1285,7 +1295,11 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                 profileUtil.fromMgdlToUnits(variableSens, profileFunction.getUnits())
             )
         )
+
         binding.infoLayout.sensitivity.text = overViewText.joinToString("\n")
+        */
+        binding.infoLayout.sensitivityIcon.setImageResource(app.aaps.core.objects.R.drawable.tir)
+        binding.infoLayout.sensitivity.text = TIRText
         binding.infoLayout.sensitivity.visibility = View.VISIBLE
     }
 

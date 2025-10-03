@@ -302,6 +302,10 @@
     <string name="Info_fcl_learning">● Learning settings!:\n 1. Reset data.\n 2. .......\n \n !! Klik om te openen !!\n</string>
     <string name="ResetLearning_summary">Wanneer ingeschakeld worden bij de eerst volgende run de FCL-learnings gewist. LET OP! na de reset weer uitzetten anders blijft de data gewist</string>
     <string name="ResetLearning_title">Reset Learning</string>
+    <string name="CarbISF_min_Factor_summary">Minimum correctiefactor waarmee de ISF en CarbRatio wordt gecorrigeerdtijdens het leerproces</string>
+    <string name="CarbISF_min_Factor_title">Minimum ISF_CR Learningfactor</string>
+    <string name="CarbISF_max_Factor_summary">Maximum correctiefactor waarmee de ISF en CarbRatio wordt gecorrigeerdtijdens het leerproces</string>
+    <string name="CarbISF_max_Factor_title">Maximum ISF_CR Learningfactor</string>
 
     <string name="bolus_perc_day_summary">Bolus-percentage deliverd during DAY-Time.</string>
     <string name="bolus_perc_day_title">Bolus percentage day [%]</string>
@@ -325,4 +329,21 @@
     <string name="meal_detection_sensitivity_title">Meal detection sensitivity [mmol/l per 5 min]</string>
     <string name="tau_absorption_minutes_summary">Gemiddelde tijd hoelang carbs “in het lichaam aanwezig blijven</string>
     <string name="tau_absorption_minutes_title">COB absorption time [min]</string>
+
+    <string name="Info_fcl_safety">● Safety settings!:\n 1. hypoThreshold: 4.0 mmol/L (traditionele hypo grens).\n 2. hypoRecoveryMinutes: 90 minuten (optimale balans).\n 3. hypoRecoveryBGRange: 2.5 mmol/L (herstel van 4.0 naar 6.5) \n !! Klik om te openen !!\n</string>
+    <string name="hypoThresholdDay_summary">Bg below threshold defined as hypo</string>
+    <string name="hypoThresholdDay_title">Hypo threshold dayTime[mmol/l]</string>
+    <string name="hypoThresholdNight_summary">Bg below threshold defined as hypo</string>
+    <string name="hypoThresholdNight_title">Hypo threshold nightTime[mmol/l]</string>
+    <string name="hypoRecoveryMinutes_summary">Minutes defined to recover from hypo, during this time a bolus will be reduced</string>
+    <string name="hypoRecoveryMinutes_title">Hypo recovery time [min]</string>
+    <string name="hypoRecoveryBGRange_summary">Range above hypo threshold where in a bolus will be reduced</string>
+    <string name="hypoRecoveryBGRange_title">Hypo recovery range [mmol/l]</string>
+    <string name="hypo_recovery_aggressiveness_summary">Controls insulin increase speed after hypos. 0.7 = medium speed, 1.0 = fastest</string>
+    <string name="hypo_recovery_aggressiveness_title">Hypo Recovery Agressiveness</string>
+    <string name="min_recovery_days_summary">Days without Hypo to start recovery</string>
+    <string name="min_recovery_days_title">min Hypo recovery days</string>
+    <string name="max_recovery_days_summary">Days without Hypo to recover completely</string>
+    <string name="max_recovery_days_title">min Hypo recovery days</string>
+
    </resources>

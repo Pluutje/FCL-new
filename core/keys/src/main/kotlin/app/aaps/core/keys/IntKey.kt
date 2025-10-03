@@ -69,12 +69,6 @@ enum class IntKey(
     NsClientUrgentAlarmStaleData("ns_alarm_urgent_stale_data_value", 31, 30, 180),
 
     // eigen
-    Min_resistentiePerc("Min_resistentiePerc", 80,10,100),
-    Max_resistentiePerc("Max_resistentiePerc", 120,100,200),
-    Dag_resistentiePerc("Dag_resistentiePerc", 100,10,200),
-    Nacht_resistentiePerc("Nacht_resistentiePerc", 100,10,200),
-    Dagen_resistentie("Dagen_resistentie", 3,1,7),
-    MinDelay_resistentie("MinDelay_resistentie", 0,-60,120),
 
     Dag_MaxPersistentPerc("Dag_MaxPersistentPerc", 120,100,200),
     Nacht_MaxPersistentPerc("Nacht_MaxPersistentPerc", 120,100,200),
@@ -92,5 +86,9 @@ enum class IntKey(
     peak_damping_percentage("peak_damping_percentage", 50,10,100),
     tau_absorption_minutes("tau_absorption_minutes", 40,20,60),
     hypo_risk_percentage("hypo_risk_percentage", 35,20,50),
+
+    hypoRecoveryMinutes("hypoRecoveryMinutes", 90,45,120),
+    min_recovery_days("min_recovery_days", 2,1,3),
+    max_recovery_days("max_recovery_days", 7,3,10),
 
 }

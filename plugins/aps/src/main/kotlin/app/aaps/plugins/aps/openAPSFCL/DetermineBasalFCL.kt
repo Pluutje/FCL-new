@@ -44,7 +44,7 @@ import android.content.Context
 import kotlin.text.get
 
 @Singleton
-data class Resistentie_class(val resistentie: Double, val log: String)
+
 data class uur_minuut(val uur: Int, val minuut: Int)
 data class Persistent_class(val PercistentPercentage: Double, val log: String)
 data class Stappen_class(val StapPercentage: Float,val StapTarget: Float, val log: String)
@@ -193,129 +193,7 @@ class DetermineBasalFCL @Inject constructor(
     }
 
  // *************************************************************************************************************
-    fun Resistentie(): app.aaps.plugins.aps.openAPSFCL.Resistentie_class {
-        var log_resistentie = " ﴿ Resistentie Correctie ﴾" + "\n"
-        val enableResistentie = preferences.get(BooleanKey.Resistentie)
-        val MinresistentiePerc = preferences.get(IntKey.Min_resistentiePerc)
-        val MaxresistentiePerc = preferences.get(IntKey.Max_resistentiePerc)
-        val DagresistentiePerc = preferences.get(IntKey.Dag_resistentiePerc)
-        val NachtresistentiePerc = preferences.get(IntKey.Nacht_resistentiePerc)
-        val Dagenresistentie = preferences.get(IntKey.Dagen_resistentie)
 
-        val Urenresistentie = preferences.get(DoubleKey.Uren_resistentie)
-        val Dagresistentie_target = preferences.get(DoubleKey.Dag_resistentie_target)
-        val Nachtresistentie_target = preferences.get(DoubleKey.Nacht_resistentie_target)
-
-        val MinutenDelayresistentie = preferences.get(IntKey.MinDelay_resistentie)
-
-        if (!enableResistentie) {
-            log_resistentie = log_resistentie + " → resistentie aan/uit: uit " + "\n"
-            return Resistentie_class(1.0,log_resistentie)
-        }
-        log_resistentie = log_resistentie + " → resistentie aan/uit: aan " + "\n"
-
-        var ResistentieCfEff = 0.0
-        var resistentie_percentage = 100
-        var target = 5.2
-        val (uurVanDag,minuten) = refreshTime()
-
-        // Dag - Nacht
-        val minuutTxt = String.format("%02d", minuten)
-
-        if (Nacht()) {
-            resistentie_percentage = NachtresistentiePerc
-            target = Nachtresistentie_target
-            log_resistentie = log_resistentie + " ● Tijd: " + uurVanDag.toString() + ":" + minuutTxt + " → s'Nachts" + "\n"
-            log_resistentie = log_resistentie + "      → perc.: " + resistentie_percentage + "%" + "\n"
-            log_resistentie = log_resistentie + "      → Target: " + round(target,1) + " mmol/l" + "\n"
-        } else {
-            resistentie_percentage = DagresistentiePerc
-            target = Dagresistentie_target
-            log_resistentie += " ● Tijd: " + uurVanDag.toString() + ":" + minuutTxt + " → Overdag"+ "\n"
-            log_resistentie += "      → perc.: " + resistentie_percentage + "%" + "\n"
-            log_resistentie += "      → Target: " + round(target,1) + " mmol/l" + "\n"
-        }
-
-        // Aangepaste berekening met MinutenDelayresistentie
-        val totaleMinutenNu = uurVanDag * 60 + minuten
-        val totaleMinutenStart = totaleMinutenNu + MinutenDelayresistentie
-        val urenTotUur = (totaleMinutenStart / 60) % 24
-        val urenTotMinuut = totaleMinutenStart % 60
-
-        val totaleMinutenEind = totaleMinutenStart + (Urenresistentie * 60).toInt()
-        val urenEindUur = (totaleMinutenEind / 60) % 24
-        val urenEindMinuut = totaleMinutenEind % 60
-
-        log_resistentie += " ● Referentie periode :" + "\n"
-        log_resistentie += "      → afgelopen " + Dagenresistentie.toString() + " dagen" + "\n"
-        log_resistentie += "      → van ${String.format("%02d", urenTotUur)}:${String.format("%02d", urenTotMinuut)} tot ${String.format("%02d", urenEindUur)}:${String.format("%02d", urenEindMinuut)}\n"
-
-        val macht =  Math.pow(resistentie_percentage.toDouble(), 1.4)/2800
-        val numPairs = Dagenresistentie // Hier kies je hoeveel paren je wilt gebruiken
-
-        val x = Urenresistentie
-        val intervals = mutableListOf<Pair<Double, Double>>()
-
-        for (i in 1..numPairs) {
-            val base = (24.0 * i) - 1    // Verhoogt telkens met 24: 24, 48, 72, ...
-            intervals.add(Pair(base, base - x))
-        }
-
-        val correctionFactors = mutableListOf<Double>()
-        val formatter = DateTimeFormatter.ofPattern("dd-MM")
-        val today = LocalDate.now()
-
-        for ((index, interval) in intervals.take(numPairs).withIndex()) {
-
-            val startTime = interval.first.toLong()
-            val endTime = interval.second.toLong()
-
-            val (bgGem, bgStdDev) = logBgHistoryWithStdDev(startTime, endTime, x.toLong())
-            val rel_std = (bgStdDev / bgGem * 100).toInt()
-            val cf = calculateCorrectionFactor(bgGem, target, macht, rel_std)
-
-            val dateString = today.minusDays(index.toLong()).format(formatter)
-
-            log_resistentie += " → ${dateString} : correctie percentage = " + (cf * 100).toInt() + "%" + "\n"
-            log_resistentie += "   ϟ Bg gem: ${round(bgGem, 1)}     ϟ Rel StdDev: $rel_std %.\n"
-
-            correctionFactors.add(cf)
-        }
-// Bereken CfEff met het gekozen aantal correctiefactoren
-        var tot_gew_gem = 0
-        for (i in 0 until numPairs) {
-            val divisor = when (i) {
-                0   -> 70
-                1   -> 25
-                2   -> 5
-                3   -> 3
-                4   -> 2
-                else -> 1 // Aanpassen voor extra correctiefactoren indien nodig
-            }
-            ResistentieCfEff += correctionFactors[i] * divisor
-            tot_gew_gem += divisor
-        }
-
-        ResistentieCfEff = ResistentieCfEff / tot_gew_gem.toDouble()
-
-        val minRes = MinresistentiePerc.toDouble()/100
-        val maxRes = MaxresistentiePerc.toDouble()/100
-
-        ResistentieCfEff = ResistentieCfEff.coerceIn(minRes, maxRes)
-
-        if (ResistentieCfEff > minRes && ResistentieCfEff < maxRes){
-            log_resistentie = log_resistentie + "\n" + " »» Cf_eff = " + (ResistentieCfEff * 100).toInt() + "%" + "\n"
-        } else {
-            log_resistentie = log_resistentie + "\n" + " »» Cf_eff (begrensd) = " + (ResistentieCfEff * 100).toInt() + "%" + "\n"
-        }
-
-        val resistentie_perc = (ResistentieCfEff*100).toInt().toString()
-        val externalDir = File(Environment.getExternalStorageDirectory().absolutePath + "/Documents/AAPS/")
-        val Resitenstiefile = File(externalDir, "ANALYSE/resistentie.txt")
-        Resitenstiefile.writeText(resistentie_perc)
-
-        return Resistentie_class(ResistentieCfEff,log_resistentie)
-    }
 
     fun refreshTime() : uur_minuut {
         val calendarInstance = Calendar.getInstance() // Nieuwe tijd ophalen
@@ -325,38 +203,6 @@ class DetermineBasalFCL @Inject constructor(
         return uur_minuut(uur,minuut)
     }
 
-    fun logBgHistoryWithStdDev(startHour: Long, endHour: Long, uren: Long): Pair<Double, Double> {
-        // Constants
-        val MIN_READINGS_PER_HOUR = 8
-        val MG_DL_TO_MMOL_L_CONVERSION = 18.0
-
-        // Bereken start- en eindtijd
-        val now = dateUtil.now()
-        val startTime = now - T.hours(hour = startHour).msecs()
-        val endTime = now - T.hours(hour = endHour).msecs()
-
-        // Haal bloedglucosewaarden op
-        val bgReadings = persistenceLayer.getBgReadingsDataFromTimeToTime(startTime, endTime, false)
-
-        // Controleer of er voldoende data is
-        if (bgReadings.size < MIN_READINGS_PER_HOUR * uren) {
-            return Pair(0.0, 0.0) // Onvoldoende data
-        }
-
-        // Bereken gemiddelde in mmol/L
-        val totalBgValue = bgReadings.sumOf { it.value }
-        val bgAverage = (totalBgValue / bgReadings.size) / MG_DL_TO_MMOL_L_CONVERSION
-
-        // Bereken variantie en standaarddeviatie
-        val variance = bgReadings.sumOf {
-            val bgInMmol = it.value / MG_DL_TO_MMOL_L_CONVERSION
-            (bgInMmol - bgAverage) * (bgInMmol - bgAverage)
-        } / bgReadings.size
-
-        val stdDev = Math.sqrt(variance)
-
-        return Pair(bgAverage, stdDev)
-    }
 
     fun Nacht():Boolean {
         val OchtendStart = preferences.get(StringKey.OchtendStart)
@@ -419,22 +265,13 @@ class DetermineBasalFCL @Inject constructor(
         }
     }
 
-    fun calculateCorrectionFactor(bgGem: Double, targetProfiel: Double, macht: Double, rel_std: Int): Double {
-        var rel_std_cf = 1.0
-        if (bgGem > targetProfiel) {
-            rel_std_cf = 1.0/rel_std + 1.0
-        }
-        var cf = Math.pow(bgGem / (targetProfiel), macht) * rel_std_cf
-        if (cf < 0.1) cf = 1.0
 
-        return cf
-    }
 
     fun Persistent(): app.aaps.plugins.aps.openAPSFCL.Persistent_class {
-        var log_Persistent = " ﴿ Persistent hoog ﴾" + "\n"
+        var log_Persistent = "--- Persistent Bg Info ---" + "\n"
         var Persistent_ISF_cf = 1.0
         if (!preferences.get(BooleanKey.PersistentAanUit)) {
-            log_Persistent += " → persistent uitgeschakeld " + "\n"
+            log_Persistent += " → persistent switched off " + "\n"
             return Persistent_class(Persistent_ISF_cf,log_Persistent)
         }
 
@@ -466,12 +303,12 @@ class DetermineBasalFCL @Inject constructor(
             Persistent_Drempel = preferences.get(DoubleKey.persistent_Dagdrempel)
             Max_Persistent_perc = preferences.get(IntKey.Dag_MaxPersistentPerc)
             extraNachtrange = 0.0
-            DeelvanDag = "overdag"
+            DeelvanDag = "DayTime"
         } else {
             Persistent_Drempel = preferences.get(DoubleKey.persistent_Nachtdrempel)
             Max_Persistent_perc = preferences.get(IntKey.Nacht_MaxPersistentPerc)
             extraNachtrange = 0.5
-            DeelvanDag = "'s nachts"
+            DeelvanDag = "NightTime"
         }
 
 
@@ -482,15 +319,15 @@ class DetermineBasalFCL @Inject constructor(
             Persistent_ISF_perc = (((bg_act - Persistent_Drempel ) / 10.0) + 1.0) * 100 * 1.05
             Persistent_ISF_perc = Persistent_ISF_perc.coerceIn(100.0, Max_Persistent_perc.toDouble())
             Display_Persistent_perc = Persistent_ISF_perc.toInt()
-            log_Persistent += " → Persistent hoge Bg gedetecteerd" + "\n"
-            log_Persistent +=  " ● " + DeelvanDag + " → Drempel = " + round(Persistent_Drempel,1) + "\n"
-            log_Persistent +=  " ● Bg= " + round(bg_act, 1) + " → Insuline perc = " + Display_Persistent_perc + "%" + "\n"
+            log_Persistent += " → Persistent Bg detected" + "\n"
+            log_Persistent +=  " ● " + DeelvanDag + " → threshold = " + round(Persistent_Drempel,1) + "\n"
+            log_Persistent +=  " ● Bg= " + round(bg_act, 1) + " → Insulin perc = " + Display_Persistent_perc + "%" + "\n"
 
 
         } else {
             Persistent_ISF_perc = 100.0
-            log_Persistent +=  " ● geen Persistent hoge Bg gedetecteerd" + "\n"
-            log_Persistent +=  " ● " + DeelvanDag + " → Drempel = " + round(Persistent_Drempel,1) + "\n"
+            log_Persistent +=  " ● no Persistent Bg detected" + "\n"
+            log_Persistent +=  " ● " + DeelvanDag + " → Threshold = " + round(Persistent_Drempel,1) + "\n"
 
         }
         Persistent_ISF_cf = Persistent_ISF_perc /100
@@ -541,6 +378,16 @@ class DetermineBasalFCL @Inject constructor(
             val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity).toFloat() ?: 0.2F  // mmol/L/5min drempel
             val nightTime = Nacht()
             val resetlearning = preferences.get(BooleanKey.ResetLearning)
+            val minCrISF_cf = preferences.get(DoubleKey.CarbISF_min_Factor).toFloat()
+            val maxCrISF_cf = preferences.get(DoubleKey.CarbISF_max_Factor).toFloat()
+
+            val hypoRecoveryMinutes = preferences.get(IntKey.hypoRecoveryMinutes)
+            val hypoThresholdDay = preferences.get(DoubleKey.hypoThresholdDay).toFloat()
+            val hypoThresholdNight = preferences.get(DoubleKey.hypoThresholdNight).toFloat()
+            val hypoRecoveryBGRange = preferences.get(DoubleKey.hypoRecoveryBGRange).toFloat()
+            val hypoRecoveryAggressiveness = preferences.get(DoubleKey.hypo_recovery_aggressiveness).toFloat()
+            val minRecoveryDays = preferences.get(IntKey.min_recovery_days)
+            val maxRecoveryDays = preferences.get(IntKey.max_recovery_days)
 
 
             // Parameters instellen op FCL instance
@@ -556,8 +403,19 @@ class DetermineBasalFCL @Inject constructor(
 
             fcl.setMealDetectionSensitivity(mealDetectionSensitivity)
             fcl.setNightTime(nightTime)
-            fcl.setCurrentBg(BgNow)
+       //     fcl.setCurrentBg(BgNow/18)
             fcl.setResetLearning(resetlearning)
+            fcl.setCurrentCR(profile.carb_ratio)
+            fcl.setCurrentISF(sens/18)
+            fcl.setMinCrISFCf(minCrISF_cf)
+            fcl.setMaxCrISFCf(maxCrISF_cf)
+            fcl.sethypoThresholdDay(hypoThresholdDay)
+            fcl.sethypoThresholdNight(hypoThresholdNight)
+            fcl.sethypoRecoveryBGRange(hypoRecoveryBGRange)
+            fcl.sethypoRecoveryMinutes(hypoRecoveryMinutes)
+            fcl.setHypoRecoveryAggressiveness(hypoRecoveryAggressiveness)
+            fcl.setMinRecoveryDays(minRecoveryDays)
+            fcl.setMaxRecoveryDays(maxRecoveryDays)
 
             val iobArray = iob_data_array
             val iob_data = iobArray[0]
@@ -622,12 +480,12 @@ class DetermineBasalFCL @Inject constructor(
 
     fun Stappen(): Stappen_class {
 
-        var log_Stappen = " ﴿ Stappen ﴾" + "\n"
+        var log_Stappen = "--- Steps activity ---" + "\n"
         var stap_perc = 100f
         var stap_target = 0f
 
         if (!preferences.get(BooleanKey.stappenAanUit)) {
-            log_Stappen += " → resistentie aan/uit: uit " + "\n"
+            log_Stappen += " → Activity switched off " + "\n"
             return Stappen_class(stap_perc,stap_target,log_Stappen)
         }
 
@@ -659,8 +517,8 @@ class DetermineBasalFCL @Inject constructor(
 
 // Variabelen om de actieve duur en huidige status bij te houden
         val thresholds = mapOf(
-            " 5 minuten" to min5Stap,
-            "30 minuten" to min30Stap  //,
+            " 5 minutes" to min5Stap,
+            "30 minutes" to min30Stap  //,
 
         )
         var allThresholdsMet = true
@@ -668,20 +526,20 @@ class DetermineBasalFCL @Inject constructor(
         // Controleer de drempels
         thresholds.forEach { (label, threshold) ->
             val steps = when (label) {
-                " 5 minuten" -> recentSteps5Minutes
-                "30 minuten" -> recentSteps30Minutes
+                " 5 minutes" -> recentSteps5Minutes
+                "30 minutes" -> recentSteps30Minutes
 
                 else -> 0
             }
-            log_Stappen += " ● $label: $steps stappen ${if (steps >= threshold) ">= drempel ($threshold)" else "< drempel ($threshold)"}\n"
+            log_Stappen += " ● $label: $steps steps ${if (steps >= threshold) ">= threshold ($threshold)" else "< threshold ($threshold)"}\n"
             if (steps < threshold) allThresholdsMet = false
         }
 
         if (allThresholdsMet) {
             StapRetentie = (StapRetentie + 1).coerceAtMost(preferences.get(IntKey.stap_retentie)) // Limiteer
-            log_Stappen += " ↗ Drempel overschreden. ($StapRetentie maal).\n"
+            log_Stappen += " ↗ above threshold. ($StapRetentie times).\n"
         } else {
-            log_Stappen += " → Drempel niet overschreden.\n"
+            log_Stappen += " → below threshold.\n"
             if (StapRetentie > 0) {
                 StapRetentie = StapRetentie -1
 
@@ -692,16 +550,16 @@ class DetermineBasalFCL @Inject constructor(
         if (StapRetentie > 0) {
             if (allThresholdsMet) {
                 stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toFloat()
-                log_Stappen += " ● Overschrijding drempels → Insuline perc. $stap_perc %.\n"
+                log_Stappen += " ● above threshold → Insulin perc. $stap_perc %.\n"
                 stap_target = (preferences.get(DoubleKey.stap_TT)*18).toFloat()
             } else {
                 stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toFloat()
-                log_Stappen += " ● nog $StapRetentie * retentie → Insuline perc. $stap_perc %.\n"
+                log_Stappen += " ● $StapRetentie times retention → Insulin perc. $stap_perc %.\n"
                 stap_target = (preferences.get(DoubleKey.stap_TT)*18).toFloat()
             }
         } else {
             stap_perc = 100f
-            log_Stappen += " ● Geen activiteit → Insuline perc. $stap_perc %.\n"
+            log_Stappen += " ● No activitity → Insulin perc. $stap_perc %.\n"
         }
 
         //   val display_Stap_perc = stap_perc.toInt()
@@ -826,17 +684,14 @@ class DetermineBasalFCL @Inject constructor(
 
         val iobArray = iob_data_array
         val iob_data = iobArray[0]
+
 // *************************************************************************************************************
+
         val (bolus_SMB_AanUit,ExtraSMB, rest_aantalSMB) = BolusViaSMB()
-        val (resistentie_factor,log_res) = Resistentie()
-        consoleError.add(log_res)
-        consoleError.add("\n")
         val (persistent_factor,log_persistent) = Persistent()
-        consoleError.add(log_persistent)
-        consoleError.add("\n")
         val (stap_perc,stap_target,log_stappen) = Stappen()
-        consoleError.add(log_stappen)
-        consoleError.add("\n")
+
+
 // *************************************************************************************************************
 
         // TODO eliminate
@@ -967,18 +822,25 @@ class DetermineBasalFCL @Inject constructor(
 
 // *************************************************************************************************************
         var sens = profile.sens
-        if (preferences.get(BooleanKey.Resistentie)) {
-            sens = sens / resistentie_factor
-        }
+        var log_sens = ""
+
+        var logPers = false
         if (preferences.get(BooleanKey.PersistentAanUit)) {
             sens = sens / persistent_factor
+          if (persistent_factor != 1.0) {
+              log_sens += "Bg persistent corr: " + round(persistent_factor * 100,0).toString() + "%\n"
+              logPers = true
+          }
         }
-        if (preferences.get(BooleanKey.ApsUseAutosens)) {
-            sens = sens / sensitivityRatio
-        }
+
+        var logStap = false
         if (preferences.get(BooleanKey.stappenAanUit)) {
             target_bg += stap_target
             sens = sens / (stap_perc/100)
+            if (stap_perc != 100f) {
+                log_sens += "Bg activity corr: " + round(stap_perc.toDouble(),0).toString() + "%\n"
+                logStap
+            }
         }
 // *************************************************************************************************************
 
@@ -1067,18 +929,15 @@ class DetermineBasalFCL @Inject constructor(
             variable_sens = sens // profile.variable_sens
         )
 // *************************************************************************************************************************8
-        consoleError.add("Autosens ratio: " + sensitivityRatio.toString())
-        consoleError.add("\n")
 
-        consoleError.add("profile.sens: ${round((profile.sens)/18,1)}, sens: ${round((sens)/18,1)}")
-        consoleError.add("\n")
+        consoleError.add("=== - FCL - COB v2.6 - ===")
 
         val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
-        consoleError.add("FCL resultaat v18.7")
+        consoleError.add("\n")
         consoleError.add("Dose: ${round(fclAdvice.dose,2)}")
         consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
         consoleError.add("Reason: ${fclAdvice.reason}")
-        consoleError.add("Confidence: ${fclAdvice.confidence}")
+        consoleError.add("Confidence: ${round(fclAdvice.confidence*100)}%")
         var bg_pred = fclAdvice.predictedValue?.let { round(it, 1) }
         consoleError.add("Voorspelling: ${bg_pred ?: "nvt"}")
         consoleError.add("Phase: ${fclAdvice.phase}")
@@ -1087,18 +946,14 @@ class DetermineBasalFCL @Inject constructor(
         consoleError.add("Detected Carbs: ${det_carbs}g")
         var det_cob = fclAdvice.carbsOnBoard?.let { round(it, 0) }
         consoleError.add("COB: ${det_cob}g")
-
-       
         consoleError.add("\n")
 
-        //consoleError.add("\n--- FCL Learning Info ---")
+
         val learningStatus = fcl.getLearningStatus()
         learningStatus.split("\n").forEach { line ->
             consoleError.add(line)
         }
-        consoleError.add("\n")
 
-        consoleError.add("\n")
 
         logFCL(
             bg = glucose_status.glucose,
@@ -1107,6 +962,21 @@ class DetermineBasalFCL @Inject constructor(
             fclAdvice = fclAdvice
         )
         FCL_SMB = fclAdvice.dose
+
+        consoleError.add("\n")
+        consoleError.add( " --- ISF Info --- " )
+        if (logPers || logStap ){
+            consoleError.add(log_sens)
+            consoleError.add(" ● ISF from: ${round((profile.sens)/18,1)}  to:  ${round((sens)/18,1)}")
+            consoleError.add("\n")
+        } else {
+            consoleError.add(" ● ISF unchanged : ${round((profile.sens)/18,1)}  ")
+            consoleError.add("\n")
+        }
+        consoleError.add(log_persistent)
+        consoleError.add("\n")
+        consoleError.add(log_stappen)
+        consoleError.add("\n")
  // *************************************************************************************************************************8
 
 
@@ -1138,18 +1008,7 @@ class DetermineBasalFCL @Inject constructor(
         val uci = round((minDelta - bgi), 1)
         // ISF (mg/dL/U) / CR (g/U) = CSF (mg/dL/g)
 
-        // TODO: remove commented-out code for old behavior
-        //if (profile.temptargetSet) {
-        // if temptargetSet, use unadjusted profile.sens to allow activity mode sensitivityRatio to adjust CR
-        //var csf = profile.sens / profile.carb_ratio;
-        //} else {
-        // otherwise, use autosens-adjusted sens to counteract autosens meal insulin dosing adjustments
-        // so that autotuned CR is still in effect even when basals and ISF are being adjusted by autosens
-        //var csf = sens / profile.carb_ratio;
-        //}
-        // use autosens-adjusted sens to counteract autosens meal insulin dosing adjustments so that
-        // autotuned CR is still in effect even when basals and ISF are being adjusted by TT or autosens
-        // this avoids overdosing insulin for large meals when low temp targets are active
+
         val csf = sens / profile.carb_ratio
      //   consoleError.add("profile.sens: ${profile.sens}, sens: $sens, CSF: $csf")
 
@@ -1609,9 +1468,9 @@ class DetermineBasalFCL @Inject constructor(
         }
 
         consoleError.add("BG projected to remain above ${convert_bg(min_bg)} for $minutesAboveMinBG minutes")
-        if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
-            consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
-        }
+     //   if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
+     //       consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
+     //   }
         // include at least minutesAboveThreshold worth of zero temps in calculating carbsReq
         // always include at least 30m worth of zero temp (carbs to 80, low temp up to target)
         val zeroTempDuration = minutesAboveThreshold
