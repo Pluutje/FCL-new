@@ -195,146 +195,6 @@ class DetermineBasalFCL @Inject constructor(
  // *************************************************************************************************************
 
 
-    fun refreshTime() : uur_minuut {
-        val calendarInstance = Calendar.getInstance() // Nieuwe tijd ophalen
-
-        val uur = calendarInstance[Calendar.HOUR_OF_DAY]
-        val minuut = calendarInstance[Calendar.MINUTE]
-        return uur_minuut(uur,minuut)
-    }
-
-
-    fun Nacht():Boolean {
-        val OchtendStart = preferences.get(StringKey.OchtendStart)
-        val OchtendStartWeekend = preferences.get(StringKey.OchtendStartWeekend)
-        val NachtStart = preferences.get(StringKey.NachtStart)
-        val WeekendDagen = preferences.get(StringKey.WeekendDagen)
-        // Dag - Nacht
-        val (uurVanDag,minuten) = refreshTime()
-        val minuutTxt = String.format("%02d", minuten)
-
-        val dayMapping = mapOf(
-            "ma" to Calendar.MONDAY,
-            "di" to Calendar.TUESDAY,
-            "wo" to Calendar.WEDNESDAY,
-            "do" to Calendar.THURSDAY,
-            "vr" to Calendar.FRIDAY,
-            "za" to Calendar.SATURDAY,
-            "zo" to Calendar.SUNDAY
-        )
-
-// Converteer de invoerstring naar een lijst van Calendar-dagen
-        //    val weekendString = WeekendDagen
-        val weekendDays = WeekendDagen.split(",")
-            .mapNotNull { dayMapping[it.trim()] } // Map afkortingen naar Calendar-waarden en filter null-waarden
-
-// Wijs de lijst toe aan profile.WeekendDays
-        val calendarInstance = Calendar.getInstance() // Nieuwe tijd ophalen
-        val dayOfWeek = calendarInstance[Calendar.DAY_OF_WEEK]
-        val weekend = dayOfWeek in weekendDays
-
-
-        val (OchtendStartUur, OchtendStartMinuut) = if (weekend) {
-            OchtendStartWeekend.split(":").map { it.toInt() }
-        } else {
-            OchtendStart.split(":").map { it.toInt() }
-        }
-
-        val (NachtStartUur, NachtStartMinuut) = NachtStart.split(":").map { it.toInt() }
-
-        if (isInTijdBereik(uurVanDag, minuten, NachtStartUur, NachtStartMinuut, OchtendStartUur, OchtendStartMinuut)) {
-            return true
-        } else {
-            return false
-        }
-
-    }
-
-    fun isInTijdBereik(hh: Int, mm: Int, startUur: Int, startMinuut: Int, eindUur: Int, eindMinuut: Int): Boolean {
-        val startInMinuten = startUur * 60 + startMinuut
-        val eindInMinuten = eindUur * 60 + eindMinuut
-        val huidigeTijdInMinuten = hh * 60 + mm
-
-        // Als het eindtijdstip voor middernacht is (bijvoorbeeld van 23:00 tot 05:00), moeten we dat apart behandelen
-        return if (eindInMinuten < startInMinuten) {
-            // Tijdsbereik over de middernacht (bijvoorbeeld 23:00 tot 05:00)
-            huidigeTijdInMinuten >= startInMinuten || huidigeTijdInMinuten < eindInMinuten
-        } else {
-            // Normale tijdsbereik (bijvoorbeeld van 08:00 tot 17:00)
-            huidigeTijdInMinuten in startInMinuten..eindInMinuten
-        }
-    }
-
-
-
-    fun Persistent(): app.aaps.plugins.aps.openAPSFCL.Persistent_class {
-        var log_Persistent = "--- Persistent Bg Info ---" + "\n"
-        var Persistent_ISF_cf = 1.0
-        if (!preferences.get(BooleanKey.PersistentAanUit)) {
-            log_Persistent += " → persistent switched off " + "\n"
-            return Persistent_class(Persistent_ISF_cf,log_Persistent)
-        }
-
-
-        val startTime = dateUtil.now() -  T.mins(min = 50).msecs()     //T.hours(hour = 1).msecs()
-        val endTime = dateUtil.now()
-        val bgReadings = persistenceLayer.getBgReadingsDataFromTimeToTime(startTime, endTime, false)
-        var delta15 = 0.0
-        //    var delta15_oud = 0.0
-        var bg_act = round(bgReadings[0].value/18,2)
-        var delta5 = 0f
-        var delta30 = 0f
-        if (bgReadings.size >= 7) {
-            delta15 = (bgReadings[0].value - bgReadings[3].value)
-            //       delta15_oud = (bgReadings[1].value - bgReadings[4].value)    carb_time
-            bg_act = round(bgReadings[0].value/18,2)
-            delta5 = (bgReadings[0].value - bgReadings[1].value).toFloat()
-            delta30 = (bgReadings[0].value - bgReadings[6].value).toFloat()
-        }
-
-        var Persistent_ISF_perc: Double
-        val Display_Persistent_perc: Int
-        val Persistent_Drempel: Double
-        val extraNachtrange: Double
-        val Max_Persistent_perc: Int
-
-        val DeelvanDag: String
-        if (!Nacht()) {
-            Persistent_Drempel = preferences.get(DoubleKey.persistent_Dagdrempel)
-            Max_Persistent_perc = preferences.get(IntKey.Dag_MaxPersistentPerc)
-            extraNachtrange = 0.0
-            DeelvanDag = "DayTime"
-        } else {
-            Persistent_Drempel = preferences.get(DoubleKey.persistent_Nachtdrempel)
-            Max_Persistent_perc = preferences.get(IntKey.Nacht_MaxPersistentPerc)
-            extraNachtrange = 0.5
-            DeelvanDag = "NightTime"
-        }
-
-
-        val Pers_grensL = (preferences.get(DoubleKey.persistent_grens) * 18) - extraNachtrange
-        val Pers_grensH = (preferences.get(DoubleKey.persistent_grens) * 18) + 2 + extraNachtrange
-
-        if (delta5>-Pers_grensL && delta5<Pers_grensH && delta15>-Pers_grensL-2 && delta15<Pers_grensH+2 && delta30>-Pers_grensL-4 && delta30<Pers_grensH+4 && bg_act > Persistent_Drempel) {
-            Persistent_ISF_perc = (((bg_act - Persistent_Drempel ) / 10.0) + 1.0) * 100 * 1.05
-            Persistent_ISF_perc = Persistent_ISF_perc.coerceIn(100.0, Max_Persistent_perc.toDouble())
-            Display_Persistent_perc = Persistent_ISF_perc.toInt()
-            log_Persistent += " → Persistent Bg detected" + "\n"
-            log_Persistent +=  " ● " + DeelvanDag + " → threshold = " + round(Persistent_Drempel,1) + "\n"
-            log_Persistent +=  " ● Bg= " + round(bg_act, 1) + " → Insulin perc = " + Display_Persistent_perc + "%" + "\n"
-
-
-        } else {
-            Persistent_ISF_perc = 100.0
-            log_Persistent +=  " ● no Persistent Bg detected" + "\n"
-            log_Persistent +=  " ● " + DeelvanDag + " → Threshold = " + round(Persistent_Drempel,1) + "\n"
-
-        }
-        Persistent_ISF_cf = Persistent_ISF_perc /100
-        return Persistent_class(Persistent_ISF_cf,log_Persistent)
-
-    }
-
     // FCL code ----------------------------------------------------------------
     private fun getHistoricalBGData(hoursBack: Int = 2): List<FCL.BGDataPoint> {
         val now = dateUtil.now()
@@ -376,10 +236,13 @@ class DetermineBasalFCL @Inject constructor(
             val tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes) ?: 40  // standaard 40 min
             val hypoRiskPercentage = preferences.get(IntKey.hypo_risk_percentage) ?: 35  // standaard 35% reductie
             val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity).toFloat() ?: 0.2F  // mmol/L/5min drempel
-            val nightTime = Nacht()
+        //    val nightTime = Nacht()
             val resetlearning = preferences.get(BooleanKey.ResetLearning)
             val minCrISF_cf = preferences.get(DoubleKey.CarbISF_min_Factor).toFloat()
             val maxCrISF_cf = preferences.get(DoubleKey.CarbISF_max_Factor).toFloat()
+
+            val HourlySensmin = preferences.get(DoubleKey.Hourly_Sens_min).toFloat()
+            val HourlySensmax = preferences.get(DoubleKey.Hourly_Sens_max).toFloat()
 
             val hypoRecoveryMinutes = preferences.get(IntKey.hypoRecoveryMinutes)
             val hypoThresholdDay = preferences.get(DoubleKey.hypoThresholdDay).toFloat()
@@ -388,6 +251,20 @@ class DetermineBasalFCL @Inject constructor(
             val hypoRecoveryAggressiveness = preferences.get(DoubleKey.hypo_recovery_aggressiveness).toFloat()
             val minRecoveryDays = preferences.get(IntKey.min_recovery_days)
             val maxRecoveryDays = preferences.get(IntKey.max_recovery_days)
+
+
+            val persistentAanUit = preferences.get(BooleanKey.PersistentAanUit)
+            val persistentDagDrempel = preferences.get(DoubleKey.persistent_Dagdrempel).toFloat()
+            val persistentNachtDrempel = preferences.get(DoubleKey.persistent_Nachtdrempel).toFloat()
+            val persistentDagMaxBolus = preferences.get(DoubleKey.persistent_Dag_MaxBolus).toFloat()
+            val persistentNachtMaxBolus = preferences.get(DoubleKey.persistent_Nacht_MaxBolus).toFloat()
+            val persistentCooldown = preferences.get(IntKey.persistent_CoolDown)
+
+            val ochtendStart = preferences.get(StringKey.OchtendStart)
+            val ochtendStartWeekend = preferences.get(StringKey.OchtendStartWeekend)
+            val nachtStart = preferences.get(StringKey.NachtStart)
+            val weekendDagen = preferences.get(StringKey.WeekendDagen)
+
 
 
             // Parameters instellen op FCL instance
@@ -402,13 +279,15 @@ class DetermineBasalFCL @Inject constructor(
             fcl.setHypoRiskPercentage(hypoRiskPercentage)
 
             fcl.setMealDetectionSensitivity(mealDetectionSensitivity)
-            fcl.setNightTime(nightTime)
-       //     fcl.setCurrentBg(BgNow/18)
             fcl.setResetLearning(resetlearning)
             fcl.setCurrentCR(profile.carb_ratio)
             fcl.setCurrentISF(sens/18)
             fcl.setMinCrISFCf(minCrISF_cf)
             fcl.setMaxCrISFCf(maxCrISF_cf)
+
+            fcl.setHourlySensmin(HourlySensmin)
+            fcl.setHourlySensmax(HourlySensmax)
+
             fcl.sethypoThresholdDay(hypoThresholdDay)
             fcl.sethypoThresholdNight(hypoThresholdNight)
             fcl.sethypoRecoveryBGRange(hypoRecoveryBGRange)
@@ -416,6 +295,20 @@ class DetermineBasalFCL @Inject constructor(
             fcl.setHypoRecoveryAggressiveness(hypoRecoveryAggressiveness)
             fcl.setMinRecoveryDays(minRecoveryDays)
             fcl.setMaxRecoveryDays(maxRecoveryDays)
+
+            // ★★★ PERSISTENT HIGH BG SETTERS ★★★
+            fcl.setPersistentAanUit(persistentAanUit)
+            fcl.setPersistentDagDrempel(persistentDagDrempel)
+            fcl.setPersistentNachtDrempel(persistentNachtDrempel)
+            fcl.setPersistentDagMaxBolus(persistentDagMaxBolus)
+            fcl.setPersistentNachtMaxBolus(persistentNachtMaxBolus)
+            fcl.setPersistentCoolDownMinutes(persistentCooldown)
+
+            // ★★★ DAG/NACHT TIMING SETTERS ★★★
+            fcl.setOchtendStart(ochtendStart)
+            fcl.setOchtendStartWeekend(ochtendStartWeekend)
+            fcl.setNachtStart(nachtStart)
+            fcl.setWeekendDagen(weekendDagen)
 
             val iobArray = iob_data_array
             val iob_data = iobArray[0]
@@ -562,108 +455,13 @@ class DetermineBasalFCL @Inject constructor(
             log_Stappen += " ● No activitity → Insulin perc. $stap_perc %.\n"
         }
 
-        //   val display_Stap_perc = stap_perc.toInt()
+
 
 
         return Stappen_class(stap_perc,stap_target,log_Stappen)
 
     }
 
-    fun BolusViaSMB(): Bolus_SMB {
-        val tijdNu = System.currentTimeMillis() / (60 * 1000)
-        var bolus_basaal_check = "0"
-        var bolus_basaal_tijdstip = "0"
-        var aantal_fracties = "0"
-        var insuline = "0"
-
-        try {
-            val sc = Scanner(Bolus_SMB)
-            var teller = 1
-            while (sc.hasNextLine()) {
-                val line = sc.nextLine()
-                when (teller) {
-                    1 -> bolus_basaal_check = line
-                    2 -> bolus_basaal_tijdstip = line
-                    3 -> aantal_fracties = line
-                    4 -> insuline = line
-                }
-                teller += 1
-            }
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }
-
-        val totaal_fracties = aantal_fracties.toInt()
-
-        // Eerst controleren of dit een nieuwe bolusopdracht is
-        val opgeslagenTijdstip = leesLaatsteFractie().first
-        if (bolus_basaal_tijdstip.toInt() != opgeslagenTijdstip) {
-            schrijfLaatsteFractie(bolus_basaal_tijdstip.toInt(), -1)
-        }
-
-        // Pas hierna lezen van teller/fractie
-        val (herladenTijdstip, laatstFractie) = leesLaatsteFractie()
-        val huidigeFractie = laatstFractie + 1
-        val rest_fracties = totaal_fracties - huidigeFractie
-
-        val fractie_duur = 5
-        val verstreken_minuten = tijdNu.toInt() - bolus_basaal_tijdstip.toInt()
-        val theoretische_fractie = verstreken_minuten / fractie_duur
-
-        val fractie_aan_de_beurt = (
-            (huidigeFractie == 0 && verstreken_minuten >= 0) ||
-                (huidigeFractie > 0 && huidigeFractie <= theoretische_fractie)
-            )
-
-        return if (
-            bolus_basaal_check == "checked" &&
-            huidigeFractie < totaal_fracties &&
-            fractie_aan_de_beurt
-        ) {
-            schrijfLaatsteFractie(bolus_basaal_tijdstip.toInt(), huidigeFractie)
-
-            // Nieuwe berekening voor insuline per fractie
-            val Extra_smb = if (huidigeFractie == 0) {
-                // Eerste fractie: 40%
-                insuline.toFloat() * 0.4f
-            } else {
-                // Overige fracties: 60% gedeeld door (totaal fracties - 1)
-                insuline.toFloat() * 0.6f / (totaal_fracties - 1)
-            }
-
-            Bolus_SMB(true, Extra_smb, rest_fracties - 1)
-        } else {
-            Bolus_SMB(false, 0.0f, rest_fracties)
-        }
-    }
-
-
-    fun leesLaatsteFractie(): Pair<Int, Int> {
-        return try {
-            if (LaatsteSMBFractie.exists()) {
-                val regels = LaatsteSMBFractie.readLines()
-                if (regels.size >= 2) {
-                    val opgeslagenTijdstip = regels[0].toInt()
-                    val laatsteFractie = regels[1].toInt()
-                    Pair(opgeslagenTijdstip, laatsteFractie)
-                } else {
-                    Pair(-1, -1)
-                }
-            } else {
-                Pair(-1, -1)
-            }
-        } catch (e: Exception) {
-            Pair(-1, -1)
-        }
-    }
-
-    fun schrijfLaatsteFractie(tijdstip: Int, fractie: Int) {
-        try {
-            LaatsteSMBFractie.writeText("$tijdstip\n$fractie")
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
 
  // *************************************************************************************************************
 
@@ -687,8 +485,7 @@ class DetermineBasalFCL @Inject constructor(
 
 // *************************************************************************************************************
 
-        val (bolus_SMB_AanUit,ExtraSMB, rest_aantalSMB) = BolusViaSMB()
-        val (persistent_factor,log_persistent) = Persistent()
+
         val (stap_perc,stap_target,log_stappen) = Stappen()
 
 
@@ -806,8 +603,6 @@ class DetermineBasalFCL @Inject constructor(
         }
 
 
-     //   val iobArray = iob_data_array
-     //   val iob_data = iobArray[0]
 
         val tick: String
 
@@ -824,14 +619,6 @@ class DetermineBasalFCL @Inject constructor(
         var sens = profile.sens
         var log_sens = ""
 
-        var logPers = false
-        if (preferences.get(BooleanKey.PersistentAanUit)) {
-            sens = sens / persistent_factor
-          if (persistent_factor != 1.0) {
-              log_sens += "Bg persistent corr: " + round(persistent_factor * 100,0).toString() + "%\n"
-              logPers = true
-          }
-        }
 
         var logStap = false
         if (preferences.get(BooleanKey.stappenAanUit)) {
@@ -930,7 +717,7 @@ class DetermineBasalFCL @Inject constructor(
         )
 // *************************************************************************************************************************8
 
-        consoleError.add("=== - FCL - COB v2.6 - ===")
+        consoleError.add("=== - FCL - COB v5.2 - ===")
 
         val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
         consoleError.add("\n")
@@ -963,22 +750,22 @@ class DetermineBasalFCL @Inject constructor(
         )
         FCL_SMB = fclAdvice.dose
 
-        consoleError.add("\n")
+    /*    consoleError.add("\n")
         consoleError.add( " --- ISF Info --- " )
-        if (logPers || logStap ){
+        if (logStap ){
             consoleError.add(log_sens)
             consoleError.add(" ● ISF from: ${round((profile.sens)/18,1)}  to:  ${round((sens)/18,1)}")
             consoleError.add("\n")
         } else {
             consoleError.add(" ● ISF unchanged : ${round((profile.sens)/18,1)}  ")
             consoleError.add("\n")
-        }
-        consoleError.add(log_persistent)
+        }   */
+
         consoleError.add("\n")
         consoleError.add(log_stappen)
         consoleError.add("\n")
  // *************************************************************************************************************************8
-
+//   profilename
 
         // generate predicted future BGs based on IOB, COB, and current absorption rate
 
@@ -1246,16 +1033,7 @@ class DetermineBasalFCL @Inject constructor(
         }
 
 // *************************************************************************************************************************8
-        if (bolus_SMB_AanUit) {
 
-            rT.reason.append("=> Insuline via SMB:  $ExtraSMB eh per keer. nog $rest_aantalSMB keer resterend")
-
-            rT.deliverAt = deliverAt
-            rT.duration = 30
-            rT.rate = 0.0
-            rT.units = ExtraSMB.toDouble()
-            return rT
-        }
 
         if (FCL_SMB > 0.0 && fclAdvice.shouldDeliverBolus) {
 
@@ -1270,7 +1048,7 @@ class DetermineBasalFCL @Inject constructor(
 
             rT.deliverAt = deliverAt
             rT.duration = 30
-            rT.rate = basal / 2
+            rT.rate = 0.0    // basal / 2
             rT.units = FCL_SMB
             return rT
         }

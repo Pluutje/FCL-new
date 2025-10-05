@@ -231,29 +231,31 @@
     <string name="Info_FCL">\n ● Algemene Info \n  \n ● ------- \n\n !! Klik om te openen !!\n</string>
     <string name="Algoritme_algemeen_doc" translatable="false">https://docs.google.com/document/d/1276w2FhhqaGFjAccH8VlHJ0csGTDxkm1/edit?tab=t.0</string>
 
+    <!--
 
-    <string name="Info_resistentie">● Extra resistentie instellingen!:\n 1. Aanvullende gevoeligheids detectie op basis van tijdstip op de dag.\n \n !! Klik om te openen !!\n</string>
-    <string name="e_resistentie_doc" translatable="false">https://docs.google.com/document/d/131_ybmLgJYdDWpxgGjtA7ztaPLEZ_feT/edit</string>
-    <string name="Titel_resistentie">Gebruik resistentie functie</string>
-    <string name="min_resistentiePerc_summary">De minimum waarde van de resistentie (10% - 100%).</string>
-    <string name="min_resistentiePerc_title">Minimum resistentie percentage (%)</string>
-    <string name="max_resistentiePerc_summary">De maximum waarde van de resistentie (100% - 200%).</string>
-    <string name="max_resistentiePerc_title">Maximum resistentie percentage (%)</string>
-    <string name="dag_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
-    <string name="dag_resistentiePerc_title">Resistentie sterkte overdag (%)</string>
-    <string name="nacht_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
-    <string name="nacht_resistentiePerc_title">Resistentie sterkte snachts (%)</string>
-    <string name="dag_resistentie_target_summary">Bg target overdag ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
-    <string name="dag_resistentie_target_title">Resistentie target overdag</string>
-    <string name="nacht_resistentie_target_summary">Bg target snachts ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
-    <string name="nacht_resistentie_target_title">Resistentie target snachts</string>
-    <string name="Dagen_resistentie_summary">Het aantal dagen dat de resistentie correctie terug kijkt om in de berekening (min 1, max 7).</string>
-    <string name="Dagen_resistentie_title">Aantal dagen</string>
-    <string name="Uren_resistentie_summary">Het aantal uren per dag waarover de bg wordt gemiddeld (min 1, max 5).</string>
-    <string name="Uren_resistentie_title">Aantal uur</string>
-    <string name="MinDelay_resistentie_summary">Het aantal minuten (-60 tot + 120) waarmee de terugkijk tijd tov de huidige tijd wordt verschoven.</string>
-    <string name="MinDelay_resistentie_title">Aantal minuten verschuiving</string>
+        <string name="Titel_resistentie">Gebruik resistentie functie</string>
+        <string name="min_resistentiePerc_summary">De minimum waarde van de resistentie (10% - 100%).</string>
+        <string name="min_resistentiePerc_title">Minimum resistentie percentage (%)</string>
+        <string name="max_resistentiePerc_summary">De maximum waarde van de resistentie (100% - 200%).</string>
+        <string name="max_resistentiePerc_title">Maximum resistentie percentage (%)</string>
+        <string name="dag_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
+        <string name="dag_resistentiePerc_title">Resistentie sterkte overdag (%)</string>
+        <string name="nacht_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
+        <string name="nacht_resistentiePerc_title">Resistentie sterkte snachts (%)</string>
+        <string name="dag_resistentie_target_summary">Bg target overdag ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
+        <string name="dag_resistentie_target_title">Resistentie target overdag</string>
+        <string name="nacht_resistentie_target_summary">Bg target snachts ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
+        <string name="nacht_resistentie_target_title">Resistentie target snachts</string>
+        <string name="Dagen_resistentie_summary">Het aantal dagen dat de resistentie correctie terug kijkt om in de berekening (min 1, max 7).</string>
+        <string name="Dagen_resistentie_title">Aantal dagen</string>
+        <string name="Uren_resistentie_summary">Het aantal uren per dag waarover de bg wordt gemiddeld (min 1, max 5).</string>
+        <string name="Uren_resistentie_title">Aantal uur</string>
+        <string name="MinDelay_resistentie_summary">Het aantal minuten (-60 tot + 120) waarmee de terugkijk tijd tov de huidige tijd wordt verschoven.</string>
+        <string name="MinDelay_resistentie_title">Aantal minuten verschuiving</string>
+        -->
 
+    <string name="Info_dag_nacht">● Extra resistentie instellingen!:\n 1. Aanvullende gevoeligheids detectie op basis van tijdstip op de dag.\n \n !! Klik om te openen !!\n</string>
+    <string name="e_dag_nacht_doc" translatable="false">https://docs.google.com/document/d/131_ybmLgJYdDWpxgGjtA7ztaPLEZ_feT/edit</string>
     <string name="WeekendDagen_summary">Dagen waarop het weekend algoritme actief is (opmaak vr,za,zo,ma,di,wo,do)</string>
     <string name="WeekendDagen_title">Weekend dagen (bv vr,za,zo)</string>
     <string name="OchtendStart_summary">Tijdstip waarop het algoritme overschakelt naar de ochtend instellingen (opmaak hh:mm)</string>
@@ -271,19 +273,19 @@
     <string name="persistent_Dagdrempel_title">Overdag drempel persistent hoog</string>
     <string name="persistent_Nachtdrempel_summary">Drempel bg-waarde waarboven de extra correctie snachts wordt toegepast</string>
     <string name="persistent_Nachtdrempel_title">Nacht drempel persistent hoog</string>
-    <string name="persistent_grens_summary">Range in mmol waarbinnen de delta moet blijven voor de persistent hoge bg correctie</string>
-    <string name="persistent_grens_title">Range persistent hoog</string>
-    <string name="Dag_MaxPersistentPerc_summary">Maximum correctie percentage voor een persistente Bg overdag</string>
-    <string name="Dag_MaxPersistentPerc_title">Maximum dag percentage</string>
-    <string name="Nacht_MaxPersistentPerc_summary">Maximum correctie percentage voor een persistente Bg snachts</string>
-    <string name="Nacht_MaxPersistentPerc_title">Maximum nacht percentage</string>
+
+    <string name="persistent_Dag_MaxBolus_summary">Maximum DayTime persistent Bolus given</string>
+    <string name="persistent_Dag_MaxBolus_title">Maximum DayTime persistent Bolus [u]</string>
+    <string name="persistent_Nacht_MaxBolus_summary">Maximum NightTime persistent Bolus given</string>
+    <string name="persistent_Nacht_MaxBolus_title">Maximum NightTime persistent Bolus [u]</string>
+    <string name="persistent_CoolDown_summary">Minimum time between two bolusses during persistent high Bg</string>
+    <string name="persistent_CoolDown_title">CoolDown period [min]</string>
 
     <string name="Info_activiteit">● Activiteits instellingen gebasserd op stappen!:\n 1. Stappenteller aan/uit schakelen.\n 2. Insuline percentage bij gedetecteerde activiteit.\n \n !! Klik om te openen !!\n</string>
     <string name="b_stappen_doc" translatable="false">https://docs.google.com/document/d/12gcpIZ9B-TC0vAnB9XH_55IpHAuePFSV/edit</string>
     <string name="stappenAanUit_summary">Bij activering boven de drempel wordt de insuline afgifte gecorrigeerd</string>
     <string name="stappenAanUit_title">Stappen insuline-correctie</string>
-    <!--    <string name="stappenHorloge_summary">Indien ingeschakeld worden de stappen uit het horloge gebruikt</string>
-    <string name="stappenHorloge_title">Gebruik stappen van horloge</string>   -->
+
     <string name="stap_activiteteitPerc_summary">Insuline percentage bij overschrijding van de stappendrempel</string>
     <string name="stap_activiteteitPerc_title">Insuline percentage</string>
     <string name="stap_TT_summary">Verhoogt het target met de ingestelde waarde in mmol/l</string>
@@ -332,9 +334,9 @@
 
     <string name="Info_fcl_safety">● Safety settings!:\n 1. hypoThreshold: 4.0 mmol/L (traditionele hypo grens).\n 2. hypoRecoveryMinutes: 90 minuten (optimale balans).\n 3. hypoRecoveryBGRange: 2.5 mmol/L (herstel van 4.0 naar 6.5) \n !! Klik om te openen !!\n</string>
     <string name="hypoThresholdDay_summary">Bg below threshold defined as hypo</string>
-    <string name="hypoThresholdDay_title">Hypo threshold dayTime[mmol/l]</string>
+    <string name="hypoThresholdDay_title">Hypo threshold dayTime [mmol/l]</string>
     <string name="hypoThresholdNight_summary">Bg below threshold defined as hypo</string>
-    <string name="hypoThresholdNight_title">Hypo threshold nightTime[mmol/l]</string>
+    <string name="hypoThresholdNight_title">Hypo threshold nightTime [mmol/l]</string>
     <string name="hypoRecoveryMinutes_summary">Minutes defined to recover from hypo, during this time a bolus will be reduced</string>
     <string name="hypoRecoveryMinutes_title">Hypo recovery time [min]</string>
     <string name="hypoRecoveryBGRange_summary">Range above hypo threshold where in a bolus will be reduced</string>
@@ -344,6 +346,11 @@
     <string name="min_recovery_days_summary">Days without Hypo to start recovery</string>
     <string name="min_recovery_days_title">min Hypo recovery days</string>
     <string name="max_recovery_days_summary">Days without Hypo to recover completely</string>
-    <string name="max_recovery_days_title">min Hypo recovery days</string>
+    <string name="max_recovery_days_title">max Hypo recovery days</string>
+
+    <string name="Hourly_Sens_min_summary">Minimum hourly Sens correction (0.5 - 1.0).</string>
+    <string name="Hourly_Sens_min_title">Minimum hourly Sens</string>
+    <string name="Hourly_Sens_max_summary">Maximum hourly Sens correction (1.0 - 1.5).</string>
+    <string name="Hourly_Sens_max_title">Maximum hourly Sens</string>
 
    </resources>

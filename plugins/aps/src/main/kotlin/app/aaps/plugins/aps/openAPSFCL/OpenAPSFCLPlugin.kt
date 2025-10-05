@@ -612,7 +612,6 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     )
                 )
 
-           //     addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.FCLAanUit, summary = R.string.FCLAanUit_summary, title = R.string.FCLAanUit_title))
 
                 // safety Settings screen
                 val safetyScreen = preferenceManager.createPreferenceScreen(context).apply {
@@ -629,6 +628,8 @@ open class OpenAPSFCLPlugin @Inject constructor(
                         )
                     )
 
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Hourly_Sens_min, dialogMessage = R.string.Hourly_Sens_min_summary, title = R.string.Hourly_Sens_min_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Hourly_Sens_max, dialogMessage = R.string.Hourly_Sens_max_summary, title = R.string.Hourly_Sens_max_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoThresholdDay, dialogMessage = R.string.hypoThresholdDay_summary, title = R.string.hypoThresholdDay_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoThresholdNight, dialogMessage = R.string.hypoThresholdNight_summary, title = R.string.hypoThresholdNight_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoRecoveryBGRange, dialogMessage = R.string.hypoRecoveryBGRange_summary, title = R.string.hypoRecoveryBGRange_title))
@@ -718,21 +719,11 @@ open class OpenAPSFCLPlugin @Inject constructor(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.e_resistentie_doc)) },
-                            summary = R.string.Info_resistentie
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.e_dag_nacht_doc)) },
+                            summary = R.string.Info_dag_nacht
                         )
                     )
 
-            //        addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.Resistentie, title = R.string.Titel_resistentie))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Min_resistentiePerc, dialogMessage = R.string.min_resistentiePerc_summary, title = R.string.min_resistentiePerc_title))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Max_resistentiePerc, dialogMessage = R.string.max_resistentiePerc_summary, title = R.string.max_resistentiePerc_title))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Dag_resistentiePerc, dialogMessage = R.string.dag_resistentiePerc_summary, title = R.string.dag_resistentiePerc_title))
-            //        addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Dag_resistentie_target, dialogMessage = R.string.dag_resistentie_target_summary, title = R.string.dag_resistentie_target_title))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Nacht_resistentiePerc, dialogMessage = R.string.nacht_resistentiePerc_summary, title = R.string.nacht_resistentiePerc_title))
-            //        addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Nacht_resistentie_target, dialogMessage = R.string.nacht_resistentie_target_summary, title = R.string.nacht_resistentie_target_title))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Dagen_resistentie, dialogMessage = R.string.Dagen_resistentie_summary, title = R.string.Dagen_resistentie_title))
-            //        addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Uren_resistentie, dialogMessage = R.string.Uren_resistentie_summary, title = R.string.Uren_resistentie_title))
-            //        addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.MinDelay_resistentie, dialogMessage = R.string.MinDelay_resistentie_summary, title = R.string.MinDelay_resistentie_title))
                     addPreference(AdaptiveStringPreference(ctx = context, stringKey = StringKey.WeekendDagen, dialogMessage = R.string.WeekendDagen_summary, title = R.string.WeekendDagen_title))
                     addPreference(AdaptiveStringPreference(ctx = context, stringKey = StringKey.OchtendStart, dialogMessage = R.string.OchtendStart_summary, title = R.string.OchtendStart_title))
                     addPreference(AdaptiveStringPreference(ctx = context, stringKey = StringKey.OchtendStartWeekend, dialogMessage = R.string.OchtendStartWeekend_summary, title = R.string.OchtendStartWeekend_title))
@@ -757,10 +748,10 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
                     addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.PersistentAanUit, summary = R.string.PersistentAanUit_summary, title = R.string.PersistentAanUit_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_Dagdrempel, dialogMessage = R.string.persistent_Dagdrempel_summary, title = R.string.persistent_Dagdrempel_title))
-                    addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Dag_MaxPersistentPerc, dialogMessage = R.string.Dag_MaxPersistentPerc_summary, title = R.string.Dag_MaxPersistentPerc_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_Dag_MaxBolus, dialogMessage = R.string.persistent_Dag_MaxBolus_summary, title = R.string.persistent_Dag_MaxBolus_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_Nachtdrempel, dialogMessage = R.string.persistent_Nachtdrempel_summary, title = R.string.persistent_Nachtdrempel_title))
-                    addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Nacht_MaxPersistentPerc, dialogMessage = R.string.Nacht_MaxPersistentPerc_summary, title = R.string.Nacht_MaxPersistentPerc_title))
-                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_grens, dialogMessage = R.string.persistent_grens_summary, title = R.string.persistent_grens_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_Nacht_MaxBolus, dialogMessage = R.string.persistent_Nacht_MaxBolus_summary, title = R.string.persistent_Nacht_MaxBolus_title))
+                    addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.persistent_CoolDown, dialogMessage = R.string.persistent_CoolDown_summary, title = R.string.persistent_CoolDown_title))
                 }
                 addPreference(persistentScreen)
 
@@ -791,7 +782,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
             addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsMaxBasal, dialogMessage = R.string.openapsma_max_basal_summary, title = R.string.openapsma_max_basal_title))
             addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsSmbMaxIob, dialogMessage = R.string.openapssmb_max_iob_summary, title = R.string.openapssmb_max_iob_title))
-        //    addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.ApsUseAutosens, title = R.string.openapsama_use_autosens))
+
             addPreference(AdaptiveUnitPreference(ctx = context, unitKey = UnitDoubleKey.ApsLgsThreshold, dialogMessage = R.string.lgs_threshold_summary, title = R.string.lgs_threshold_title))
             addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.ApsSensitivityRaisesTarget, summary = R.string.sensitivity_raises_target_summary, title = R.string.sensitivity_raises_target_title))
             addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.ApsResistanceLowersTarget, summary = R.string.resistance_lowers_target_summary, title = R.string.resistance_lowers_target_title))

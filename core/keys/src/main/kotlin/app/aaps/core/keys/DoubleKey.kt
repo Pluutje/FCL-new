@@ -52,7 +52,9 @@ enum class DoubleKey(
 
     persistent_Dagdrempel("persistent_Dagdrempel", 8.5,7.0,12.0),
     persistent_Nachtdrempel("persistent_Nachtdrempel",7.0,6.0,10.0),
-    persistent_grens("persistent_grens",0.5,0.1, 1.0),
+    persistent_Dag_MaxBolus("persistent_Dag_MaxBolus", 0.5,0.1,1.0),
+    persistent_Nacht_MaxBolus("persistent_Nacht_MaxBolus",0.3,0.1,1.0),
+
 
     stap_TT("stap_TT", 2.0,0.5,4.0),
     max_bolus("max_bolus", 1.25,0.5,2.5),
@@ -64,4 +66,7 @@ enum class DoubleKey(
     hypoThresholdNight("hypoThresholdNight", 4.5,3.8,5.0),
     hypoRecoveryBGRange("hypoRecoveryBGRange", 2.5,1.5,3.0),
     hypo_recovery_aggressiveness("hypo_recovery_aggressiveness", 0.7,0.1,1.0),
+
+    Hourly_Sens_min("Hourly_Sens_min", 0.8,0.5,1.0),
+    Hourly_Sens_max("Hourly_Sens_max", 1.2,1.1,1.5),
 }

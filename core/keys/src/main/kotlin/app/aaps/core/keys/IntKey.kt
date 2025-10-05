@@ -70,8 +70,6 @@ enum class IntKey(
 
     // eigen
 
-    Dag_MaxPersistentPerc("Dag_MaxPersistentPerc", 120,100,200),
-    Nacht_MaxPersistentPerc("Nacht_MaxPersistentPerc", 120,100,200),
 
     stap_activiteteitPerc("stap_activiteteitPerc", 50,10,100),
     stap_5minuten("stap_5minuten", 200,100,300),
@@ -90,5 +88,7 @@ enum class IntKey(
     hypoRecoveryMinutes("hypoRecoveryMinutes", 90,45,120),
     min_recovery_days("min_recovery_days", 2,1,3),
     max_recovery_days("max_recovery_days", 7,3,10),
+
+    persistent_CoolDown("persistent_CoolDown", 15,10,45),
 
 }

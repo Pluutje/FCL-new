@@ -15,6 +15,7 @@
 
         <RelativeLayout
             style="@style/StyleDialogHeader"
+            android:id="@+id/header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center">
@@ -26,6 +27,7 @@
                 app:srcCompat="@drawable/ic_bolus" />
 
             <TextView
+                android:id="@+id/header_text"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_centerInParent="true"
@@ -52,92 +54,8 @@
             android:padding="5dp">
 
             <CheckBox
-                android:id="@+id/bolus_via_smb"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:checked="true"
-                android:layout_marginTop="5dp"
-                android:text="Geef insuline af via smb's" />
-
-            <LinearLayout
-                android:id="@+id/aantalsmb_layout"
-                android:layout_width="390dp"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/aantalsmb_label"
-                    android:layout_width="160dp"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_horizontal"
-                    android:width="120dp"
-                    android:padding="10dp"
-                    android:text="aantal smb's"
-                    android:textAppearance="@style/TextAppearance.AppCompat.Small"
-                    android:textStyle="bold" />
-
-
-
-                <app.aaps.core.ui.elements.MinutesNumberPicker
-                    android:id="@+id/aantalsmb"
-                    android:layout_width="130dp"
-                    android:layout_height="40dp"
-                    android:layout_marginBottom="2dp"
-                    app:customContentDescription="Tijdsduur verhoogd basaal" />
-
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:gravity="start"
-                    android:minWidth="45dp"
-                    android:paddingStart="5dp"
-                    android:paddingEnd="5dp"
-                    android:text="keer"
-                    android:textAppearance="?android:attr/textAppearanceSmall" />
-
-            </LinearLayout>
-
-            <EditText
-                android:id="@+id/editTextInput"
-                android:layout_width="316dp"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
-                android:hint="Opmerking ......"
-                android:textColor="#E67B0F"
-                android:textColorHint="#E67B0F"
-                android:textAppearance="?android:attr/textAppearanceSmall"
-                android:textSize="14sp" />
-
-            <LinearLayout
-                android:id="@+id/uitgesteldbasaal_layout"
-                android:layout_width="390dp"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"/>
-
-
-            <CheckBox
-                android:id="@+id/stop_bolus"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:layout_marginTop="5dp"
-                android:text="Stop alle insuline en boost" />
-
-            <TextView
-                android:layout_width="389dp"
-                android:layout_height="36dp"
-                android:layout_gravity="center_vertical|fill_vertical"
-                android:gravity="center|center_vertical"
-                android:minWidth="45dp"
-                android:paddingStart="5dp"
-                android:paddingEnd="5dp"
-                android:text="================================="
-                android:textAppearance="?android:attr/textAppearanceSmall" />
-
-
-            <CheckBox
                 android:id="@+id/start_eating_soon_tt"
+                style="@style/Widget.App.CheckBox"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:layout_marginTop="5dp"
@@ -145,6 +63,7 @@
 
             <CheckBox
                 android:id="@+id/record_only"
+                style="@style/Widget.App.CheckBox"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:text="@string/do_not_bolus_record_only" />
@@ -187,7 +106,6 @@
                 android:textAppearance="?android:attr/textAppearanceSmall" />
 
         </LinearLayout>
-
 
         <LinearLayout
             android:layout_width="match_parent"
