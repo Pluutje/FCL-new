@@ -1,6 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL
 
-import android.R
+//  import android.R
 import android.os.Environment
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.aps.APSResult
@@ -33,22 +33,17 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import app.aaps.core.keys.Preferences
-import app.aaps.core.keys.StringKey
-import java.util.Calendar
-import org.joda.time.Minutes
+
 import org.joda.time.DateTime
-import app.aaps.plugins.aps.openAPSFCL.FCL.EnhancedInsulinAdvice
-import java.io.IOException
-import java.util.Scanner
+
 import android.content.Context
-import kotlin.text.get
+
 
 @Singleton
 
-data class uur_minuut(val uur: Int, val minuut: Int)
-data class Persistent_class(val PercistentPercentage: Double, val log: String)
-data class Stappen_class(val StapPercentage: Float,val StapTarget: Float, val log: String)
-data class Bolus_SMB(val BolusViaSMB: Boolean, val ExtraSMB: Float, val ResterendAantalSMB: Int)
+
+  data class Stappen_class(val StapPercentage: Float,val StapTarget: Float, val log: String)
+
 
 class DetermineBasalFCL @Inject constructor(
     private val profileUtil: ProfileUtil,
@@ -62,12 +57,8 @@ class DetermineBasalFCL @Inject constructor(
 
     private val externalDir = File(Environment.getExternalStorageDirectory().absolutePath + "/Documents/AAPS/")
     private val FCLfile = File(externalDir, "ANALYSE/FCL.csv")
-    private val Bolus_SMB = File(externalDir, "ANALYSE/Bolus-via-smb.txt")
-    private val LaatsteSMBFractie = File(externalDir, "ANALYSE/laatsteSMBFractie.txt")
-    private val fcl = FCL(context)
 
-
-    private var StapRetentie: Int = 0
+    private val fcl = FCL(profileUtil,fabricPrivacy,preferences,dateUtil,persistenceLayer,context)
 
     private var FCL_SMB: Double = 0.0
 
@@ -194,7 +185,6 @@ class DetermineBasalFCL @Inject constructor(
 
  // *************************************************************************************************************
 
-
     // FCL code ----------------------------------------------------------------
     private fun getHistoricalBGData(hoursBack: Int = 2): List<FCL.BGDataPoint> {
         val now = dateUtil.now()
@@ -221,94 +211,13 @@ class DetermineBasalFCL @Inject constructor(
     }
 
 
-
     fun getFCLAdvice(profile: OapsProfileFCL, iob_data_array: Array<IobTotal>, sens: Double, target: Double, BgNow: Double): FCL.EnhancedInsulinAdvice {
         try {
-            // Eerst parameters ophalen
-            val bolusPercDay = preferences.get(IntKey.bolus_perc_day)
-            val bolusPercNight = preferences.get(IntKey.bolus_perc_night)
-            val bolusPercEarly = preferences.get(IntKey.bolus_perc_early)
-            val bolusPercLate = preferences.get(IntKey.bolus_perc_late)
-            val carbPercentage = preferences.get(IntKey.carb_percentage)
-            val maxbolus = preferences.get(DoubleKey.max_bolus).toFloat()
-            val max_bolus = maxbolus.toDouble()
-            val peakDampingPercentage = preferences.get(IntKey.peak_damping_percentage) ?: 50   // standaard 50% reductie
-            val tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes) ?: 40  // standaard 40 min
-            val hypoRiskPercentage = preferences.get(IntKey.hypo_risk_percentage) ?: 35  // standaard 35% reductie
-            val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity).toFloat() ?: 0.2F  // mmol/L/5min drempel
-        //    val nightTime = Nacht()
-            val resetlearning = preferences.get(BooleanKey.ResetLearning)
-            val minCrISF_cf = preferences.get(DoubleKey.CarbISF_min_Factor).toFloat()
-            val maxCrISF_cf = preferences.get(DoubleKey.CarbISF_max_Factor).toFloat()
 
-            val HourlySensmin = preferences.get(DoubleKey.Hourly_Sens_min).toFloat()
-            val HourlySensmax = preferences.get(DoubleKey.Hourly_Sens_max).toFloat()
-
-            val hypoRecoveryMinutes = preferences.get(IntKey.hypoRecoveryMinutes)
-            val hypoThresholdDay = preferences.get(DoubleKey.hypoThresholdDay).toFloat()
-            val hypoThresholdNight = preferences.get(DoubleKey.hypoThresholdNight).toFloat()
-            val hypoRecoveryBGRange = preferences.get(DoubleKey.hypoRecoveryBGRange).toFloat()
-            val hypoRecoveryAggressiveness = preferences.get(DoubleKey.hypo_recovery_aggressiveness).toFloat()
-            val minRecoveryDays = preferences.get(IntKey.min_recovery_days)
-            val maxRecoveryDays = preferences.get(IntKey.max_recovery_days)
-
-
-            val persistentAanUit = preferences.get(BooleanKey.PersistentAanUit)
-            val persistentDagDrempel = preferences.get(DoubleKey.persistent_Dagdrempel).toFloat()
-            val persistentNachtDrempel = preferences.get(DoubleKey.persistent_Nachtdrempel).toFloat()
-            val persistentDagMaxBolus = preferences.get(DoubleKey.persistent_Dag_MaxBolus).toFloat()
-            val persistentNachtMaxBolus = preferences.get(DoubleKey.persistent_Nacht_MaxBolus).toFloat()
-            val persistentCooldown = preferences.get(IntKey.persistent_CoolDown)
-
-            val ochtendStart = preferences.get(StringKey.OchtendStart)
-            val ochtendStartWeekend = preferences.get(StringKey.OchtendStartWeekend)
-            val nachtStart = preferences.get(StringKey.NachtStart)
-            val weekendDagen = preferences.get(StringKey.WeekendDagen)
-
-
-
-            // Parameters instellen op FCL instance
-            fcl.setbolusPercDay(bolusPercDay)
-            fcl.setbolusPercNight(bolusPercNight)
-            fcl.setbolusPercEarly(bolusPercEarly)
-            fcl.setbolusPercLate(bolusPercLate)
-            fcl.setCarbSensitivity(carbPercentage)
-            fcl.setMaxBolus(maxbolus)
-            fcl.setPeakDampingPercentage(peakDampingPercentage)
-            fcl.setTauAbsorptionMinutes(tauAbsorptionMinutes)
-            fcl.setHypoRiskPercentage(hypoRiskPercentage)
-
-            fcl.setMealDetectionSensitivity(mealDetectionSensitivity)
-            fcl.setResetLearning(resetlearning)
+           // Parameters instellen op FCL instance
             fcl.setCurrentCR(profile.carb_ratio)
             fcl.setCurrentISF(sens/18)
-            fcl.setMinCrISFCf(minCrISF_cf)
-            fcl.setMaxCrISFCf(maxCrISF_cf)
-
-            fcl.setHourlySensmin(HourlySensmin)
-            fcl.setHourlySensmax(HourlySensmax)
-
-            fcl.sethypoThresholdDay(hypoThresholdDay)
-            fcl.sethypoThresholdNight(hypoThresholdNight)
-            fcl.sethypoRecoveryBGRange(hypoRecoveryBGRange)
-            fcl.sethypoRecoveryMinutes(hypoRecoveryMinutes)
-            fcl.setHypoRecoveryAggressiveness(hypoRecoveryAggressiveness)
-            fcl.setMinRecoveryDays(minRecoveryDays)
-            fcl.setMaxRecoveryDays(maxRecoveryDays)
-
-            // ★★★ PERSISTENT HIGH BG SETTERS ★★★
-            fcl.setPersistentAanUit(persistentAanUit)
-            fcl.setPersistentDagDrempel(persistentDagDrempel)
-            fcl.setPersistentNachtDrempel(persistentNachtDrempel)
-            fcl.setPersistentDagMaxBolus(persistentDagMaxBolus)
-            fcl.setPersistentNachtMaxBolus(persistentNachtMaxBolus)
-            fcl.setPersistentCoolDownMinutes(persistentCooldown)
-
-            // ★★★ DAG/NACHT TIMING SETTERS ★★★
-            fcl.setOchtendStart(ochtendStart)
-            fcl.setOchtendStartWeekend(ochtendStartWeekend)
-            fcl.setNachtStart(nachtStart)
-            fcl.setWeekendDagen(weekendDagen)
+            fcl.setTargetBg(target/18)
 
             val iobArray = iob_data_array
             val iob_data = iobArray[0]
@@ -335,7 +244,7 @@ class DetermineBasalFCL @Inject constructor(
                 targetBG = target,
                 carbRatio = profile.carb_ratio,
                 currentIOB = currentIOB,
-                maxBolus = max_bolus,
+                maxBolus = preferences.get(DoubleKey.max_bolus),
                 maxIOB = profile.max_iob,
             )
 
@@ -356,10 +265,6 @@ class DetermineBasalFCL @Inject constructor(
 
         val headerRow = "datum,bg,iob,isf,dosis,reden,voorspelling,conf,meal,fase,carb,deliver\n"
 
-        // Haal predicted value uit fclAdvice (kan null zijn)
-        val predictedValue = round(fclAdvice.predictedValue ?: 0.0,1)
-        val phase = fclAdvice.phase
-
         val valuesToRecord = "$dateStr,$bgmmol,$iob,$isfmmol,${fclAdvice.dose},\"${fclAdvice.reason}\",${fclAdvice.predictedValue},${fclAdvice.confidence},${fclAdvice.mealDetected},${fclAdvice.phase},${fclAdvice.detectedCarbs},${fclAdvice.shouldDeliverBolus}"
 
         if (!FCLfile.exists()) {
@@ -370,97 +275,6 @@ class DetermineBasalFCL @Inject constructor(
         FCLfile.appendText(valuesToRecord + "\n")
     }
 
-
-    fun Stappen(): Stappen_class {
-
-        var log_Stappen = "--- Steps activity ---" + "\n"
-        var stap_perc = 100f
-        var stap_target = 0f
-
-        if (!preferences.get(BooleanKey.stappenAanUit)) {
-            log_Stappen += " → Activity switched off " + "\n"
-            return Stappen_class(stap_perc,stap_target,log_Stappen)
-        }
-
-        val now = System.currentTimeMillis()
-        val timeMillis5 = now - 5 * 60 * 1000 // 5 minutes en millisecondes
-        val timeMillis30 = now - 30 * 60 * 1000 // 30 minutes en millisecondes
-        val timeMillis180 = now - 180 * 60 * 1000 // 180 minutes en millisecondes
-
-        val allStepsCounts = persistenceLayer.getStepsCountFromTimeToTime(timeMillis180, now)
-
-        var recentSteps5Minutes = 1
-        var recentSteps30Minutes = 1
-
-        if (preferences.get(BooleanKey.stappenAanUit)) {
-            allStepsCounts.forEach { stepCount ->
-                val timestamp = stepCount.timestamp
-                if (timestamp >= timeMillis5) {
-                    recentSteps5Minutes = stepCount.steps5min
-                }
-                if (timestamp >= timeMillis30) {
-                    recentSteps30Minutes = stepCount.steps30min
-                }
-            }
-        }
-
-        val min5Stap = preferences.get(IntKey.stap_5minuten)
-        val min30Stap = ((min5Stap * 30 / 5)/1.6).toInt()
-
-
-// Variabelen om de actieve duur en huidige status bij te houden
-        val thresholds = mapOf(
-            " 5 minutes" to min5Stap,
-            "30 minutes" to min30Stap  //,
-
-        )
-        var allThresholdsMet = true
-
-        // Controleer de drempels
-        thresholds.forEach { (label, threshold) ->
-            val steps = when (label) {
-                " 5 minutes" -> recentSteps5Minutes
-                "30 minutes" -> recentSteps30Minutes
-
-                else -> 0
-            }
-            log_Stappen += " ● $label: $steps steps ${if (steps >= threshold) ">= threshold ($threshold)" else "< threshold ($threshold)"}\n"
-            if (steps < threshold) allThresholdsMet = false
-        }
-
-        if (allThresholdsMet) {
-            StapRetentie = (StapRetentie + 1).coerceAtMost(preferences.get(IntKey.stap_retentie)) // Limiteer
-            log_Stappen += " ↗ above threshold. ($StapRetentie times).\n"
-        } else {
-            log_Stappen += " → below threshold.\n"
-            if (StapRetentie > 0) {
-                StapRetentie = StapRetentie -1
-
-            } // Verlaag actieve duur als deze nog actief is
-        }
-
-        // Verhoog target
-        if (StapRetentie > 0) {
-            if (allThresholdsMet) {
-                stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toFloat()
-                log_Stappen += " ● above threshold → Insulin perc. $stap_perc %.\n"
-                stap_target = (preferences.get(DoubleKey.stap_TT)*18).toFloat()
-            } else {
-                stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toFloat()
-                log_Stappen += " ● $StapRetentie times retention → Insulin perc. $stap_perc %.\n"
-                stap_target = (preferences.get(DoubleKey.stap_TT)*18).toFloat()
-            }
-        } else {
-            stap_perc = 100f
-            log_Stappen += " ● No activitity → Insulin perc. $stap_perc %.\n"
-        }
-
-
-
-
-        return Stappen_class(stap_perc,stap_target,log_Stappen)
-
-    }
 
 
  // *************************************************************************************************************
@@ -486,7 +300,6 @@ class DetermineBasalFCL @Inject constructor(
 // *************************************************************************************************************
 
 
-        val (stap_perc,stap_target,log_stappen) = Stappen()
 
 
 // *************************************************************************************************************
@@ -617,18 +430,16 @@ class DetermineBasalFCL @Inject constructor(
 
 // *************************************************************************************************************
         var sens = profile.sens
-        var log_sens = ""
+    //    var log_sens = ""
+        val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
+        val effectiveISF = fclAdvice.effectiveISF
+        val step_target_corr = fclAdvice.Target_adjust
+        target_bg = target_bg + (step_target_corr * 18)
 
+      //  sens = sens / (fclAdvice.ISF_adjust / 100)
 
-        var logStap = false
-        if (preferences.get(BooleanKey.stappenAanUit)) {
-            target_bg += stap_target
-            sens = sens / (stap_perc/100)
-            if (stap_perc != 100f) {
-                log_sens += "Bg activity corr: " + round(stap_perc.toDouble(),0).toString() + "%\n"
-                logStap
-            }
-        }
+        sens = effectiveISF * 18
+
 // *************************************************************************************************************
 
         //calculate BG impact: the amount BG "should" be rising or falling based on insulin activity alone
@@ -698,7 +509,7 @@ class DetermineBasalFCL @Inject constructor(
             }
         }
 
-        //console.error(reservoir_data);
+
 
         rT = RT(
             algorithm = APSResult.Algorithm.FCL,
@@ -716,10 +527,9 @@ class DetermineBasalFCL @Inject constructor(
             variable_sens = sens // profile.variable_sens
         )
 // *************************************************************************************************************************8
+     //   val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)   AS:
 
-        consoleError.add("=== - FCL - COB v5.2 - ===")
-
-        val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)
+        consoleError.add("=== - FCL v1.0.0 - ===")
         consoleError.add("\n")
         consoleError.add("Dose: ${round(fclAdvice.dose,2)}")
         consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
@@ -750,22 +560,10 @@ class DetermineBasalFCL @Inject constructor(
         )
         FCL_SMB = fclAdvice.dose
 
-    /*    consoleError.add("\n")
-        consoleError.add( " --- ISF Info --- " )
-        if (logStap ){
-            consoleError.add(log_sens)
-            consoleError.add(" ● ISF from: ${round((profile.sens)/18,1)}  to:  ${round((sens)/18,1)}")
-            consoleError.add("\n")
-        } else {
-            consoleError.add(" ● ISF unchanged : ${round((profile.sens)/18,1)}  ")
-            consoleError.add("\n")
-        }   */
 
-        consoleError.add("\n")
-        consoleError.add(log_stappen)
-        consoleError.add("\n")
+
  // *************************************************************************************************************************8
-//   profilename
+
 
         // generate predicted future BGs based on IOB, COB, and current absorption rate
 
@@ -1046,9 +844,12 @@ class DetermineBasalFCL @Inject constructor(
             }
             FCL_SMB = Math.min(preferences.get(DoubleKey.max_bolus),FCL_SMB)
 
+            if (fclAdvice.detectedCarbs >99 ) {rT.rate = basal } else {rT.rate = 0.0}
+
             rT.deliverAt = deliverAt
             rT.duration = 30
-            rT.rate = 0.0    // basal / 2
+            if (fclAdvice.detectedCarbs >99 ) {rT.rate = basal/2 } else {rT.rate = 0.0}
+            // rT.rate = 0.0    // basal / 2
             rT.units = FCL_SMB
             return rT
         }

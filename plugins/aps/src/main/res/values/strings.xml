@@ -348,9 +348,24 @@
     <string name="max_recovery_days_summary">Days without Hypo to recover completely</string>
     <string name="max_recovery_days_title">max Hypo recovery days</string>
 
-    <string name="Hourly_Sens_min_summary">Minimum hourly Sens correction (0.5 - 1.0).</string>
-    <string name="Hourly_Sens_min_title">Minimum hourly Sens</string>
-    <string name="Hourly_Sens_max_summary">Maximum hourly Sens correction (1.0 - 1.5).</string>
-    <string name="Hourly_Sens_max_title">Maximum hourly Sens</string>
+    <string name="Titel_resistentie">Gebruik resistentie functie</string>
+    <string name="min_resistentiePerc_summary">De minimum waarde van de resistentie (10% - 100%).</string>
+    <string name="min_resistentiePerc_title">Minimum resistentie percentage (%)</string>
+    <string name="max_resistentiePerc_summary">De maximum waarde van de resistentie (100% - 200%).</string>
+    <string name="max_resistentiePerc_title">Maximum resistentie percentage (%)</string>
+    <string name="dag_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
+    <string name="dag_resistentiePerc_title">Resistentie sterkte overdag (%)</string>
+    <string name="nacht_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
+    <string name="nacht_resistentiePerc_title">Resistentie sterkte snachts (%)</string>
+    <string name="dag_resistentie_target_summary">Bg target overdag ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
+    <string name="dag_resistentie_target_title">Resistentie target overdag</string>
+    <string name="nacht_resistentie_target_summary">Bg target snachts ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
+    <string name="nacht_resistentie_target_title">Resistentie target snachts</string>
+    <string name="Dagen_resistentie_summary">Het aantal dagen dat de resistentie correctie terug kijkt om in de berekening (min 1, max 7).</string>
+    <string name="Dagen_resistentie_title">Aantal dagen</string>
+    <string name="Uren_resistentie_summary">Het aantal uren per dag waarover de bg wordt gemiddeld (min 1, max 5).</string>
+    <string name="Uren_resistentie_title">Aantal uur</string>
+    <string name="MinDelay_resistentie_summary">Het aantal minuten (-60 tot + 120) waarmee de terugkijk tijd tov de huidige tijd wordt verschoven.</string>
+    <string name="MinDelay_resistentie_title">Aantal minuten verschuiving</string>
 
    </resources>

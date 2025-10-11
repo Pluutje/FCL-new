@@ -67,6 +67,9 @@ enum class DoubleKey(
     hypoRecoveryBGRange("hypoRecoveryBGRange", 2.5,1.5,3.0),
     hypo_recovery_aggressiveness("hypo_recovery_aggressiveness", 0.7,0.1,1.0),
 
-    Hourly_Sens_min("Hourly_Sens_min", 0.8,0.5,1.0),
-    Hourly_Sens_max("Hourly_Sens_max", 1.2,1.1,1.5),
+    Dag_resistentie_target("Dag_resistentie_target", 5.2,4.0,8.0),
+    Nacht_resistentie_target("Dacht_resistentie_target", 5.2,4.0,8.0),
+    Uren_resistentie("Uren_resistentie", 2.5,1.0,5.0),
+
+
 }

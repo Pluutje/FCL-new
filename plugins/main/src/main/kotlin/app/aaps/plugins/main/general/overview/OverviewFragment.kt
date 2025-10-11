@@ -972,43 +972,43 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             rh.gs(app.aaps.core.ui.R.string.basal) + ": " + rh.gs(app.aaps.core.ui.R.string.format_insulin_units, basalIob().basaliob)
 
     private fun updateIobCob() {
+        val TIR_24h_4_10 = tirCalculator.averageTIR(tirCalculator.calculateXHour(24,70.0, 180.0))?.inRangePct()!!.roundToInt()
+        val TIR_5d_4_10 = (tirCalculator.averageTIR(tirCalculator.calculate(5,70.0, 180.0))?.inRangePct()!!).roundToInt()
+        var cobText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
+
+          //    val prefs = requireContext().getSharedPreferences("FCL_Learning_Data", Context.MODE_PRIVATE)
+         //     var cob = prefs.getFloat("current_cob", 0f).toInt()
 
 
-        val prefs = requireContext().getSharedPreferences("FCL_Learning_Data", Context.MODE_PRIVATE)
-        var cob = prefs.getFloat("current_cob", 0f).toInt()
+             val iobText = iobText()
+             val iobDialogText = iobDialogText()
+          //  val displayText = iobCobCalculator.getCobInfo("Overview COB").displayText(rh, decimalFormatter)
+          //   val displayText = cob.toString() + " g"
+             val lastCarbsTime = persistenceLayer.getNewestCarbs()?.timestamp ?: 0L
+             runOnUiThread {
+                 _binding ?: return@runOnUiThread
+                 binding.infoLayout.iob.text = iobText
+                  binding.infoLayout.iobLayout.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(app.aaps.core.ui.R.string.iob), iobDialogText) } }
+                  // cob
+        //          var cobText = displayText ?: rh.gs(app.aaps.core.ui.R.string.value_unavailable_short)
+            //   val constraintsProcessed = loop.lastRun?.constraintsProcessed
+           //    val lastRun = loop.lastRun
+            /*   if (config.APS && constraintsProcessed != null && lastRun != null) {
+                   if (constraintsProcessed.carbsReq > 0) {
+                          //only display carbsreq when carbs have not been entered recently
+                         if (lastCarbsTime < lastRun.lastAPSRun) {
+                            cobText += "\n" + constraintsProcessed.carbsReq + " " + rh.gs(app.aaps.core.ui.R.string.required)
+                         }
+                         if (carbAnimation?.isRunning == false)
+                             carbAnimation?.start()
+                     } else {
+                         carbAnimation?.stop()
+                        carbAnimation?.selectDrawable(0)
+                     }
+                  }   */
 
-
-        val iobText = iobText()
-        val iobDialogText = iobDialogText()
-    // val displayText = iobCobCalculator.getCobInfo("Overview COB").displayText(rh, decimalFormatter)
-        val displayText = cob.toString() + " g"
-        val lastCarbsTime = persistenceLayer.getNewestCarbs()?.timestamp ?: 0L
-        runOnUiThread {
-            _binding ?: return@runOnUiThread
-            binding.infoLayout.iob.text = iobText
-            binding.infoLayout.iobLayout.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(app.aaps.core.ui.R.string.iob), iobDialogText) } }
-            // cob
-            var cobText = displayText ?: rh.gs(app.aaps.core.ui.R.string.value_unavailable_short)
-
-            val constraintsProcessed = loop.lastRun?.constraintsProcessed
-            val lastRun = loop.lastRun
-            if (config.APS && constraintsProcessed != null && lastRun != null) {
-                if (constraintsProcessed.carbsReq > 0) {
-                    //only display carbsreq when carbs have not been entered recently
-                    if (lastCarbsTime < lastRun.lastAPSRun) {
-                        cobText += "\n" + constraintsProcessed.carbsReq + " " + rh.gs(app.aaps.core.ui.R.string.required)
-                    }
-                    if (carbAnimation?.isRunning == false)
-                        carbAnimation?.start()
-                } else {
-                    carbAnimation?.stop()
-                    carbAnimation?.selectDrawable(0)
-                }
-            }
-
-        //    cobText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
-            binding.infoLayout.cob.text = cobText
-        }
+                 binding.infoLayout.cob.text = cobText
+              }
     }
 
     @SuppressLint("SetTextI18n")
@@ -1196,16 +1196,15 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
 
 
     private fun updateSensitivity() {
-        val TIR_24h_4_10 = tirCalculator.averageTIR(tirCalculator.calculateXHour(24,70.0, 180.0))?.inRangePct()!!.roundToInt()
-        val TIR_5d_4_10 = (tirCalculator.averageTIR(tirCalculator.calculate(5,70.0, 180.0))?.inRangePct()!!).roundToInt()
-        val TIRText =  " " + TIR_24h_4_10.toString() + "%" + "  -  " + TIR_5d_4_10.toString() + "%"
 
-        _binding ?: return
+        val prefs = context?.getSharedPreferences("FCL_Learning_Data", Context.MODE_PRIVATE)
+        val resistance = prefs?.getFloat("current_resistance", 1.0f)?.toDouble()
 
-       /*
+
         val lastAutosensData = iobCobCalculator.ads.getLastAutosensData("Overview", aapsLogger, dateUtil)
-        val lastAutosensRatio = lastAutosensData?.let { it.autosensResult.ratio * 100 }
-        if (config.AAPSCLIENT && sp.getBoolean(app.aaps.core.utils.R.string.key_used_autosens_on_main_phone, false) ||
+      //  var lastAutosensRatio = resistance
+     //   val lastAutosensRatio = lastAutosensData?.let { it.autosensResult.ratio * 100 }
+    /*    if (config.AAPSCLIENT && sp.getBoolean(app.aaps.core.utils.R.string.key_used_autosens_on_main_phone, false) ||
             !config.AAPSCLIENT && constraintChecker.isAutosensModeEnabled().value()
         ) {
             binding.infoLayout.sensitivityIcon.setImageResource(
@@ -1229,7 +1228,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                 }
                     ?: app.aaps.core.objects.R.drawable.ic_x_swap_vert
             )
-        }
+        }   */
 
         // Show variable sensitivity
         val profile = profileFunction.getProfile()
@@ -1240,21 +1239,22 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             if (config.APS) request?.variableSens ?: 0.0
             else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.variableSens ?: 0.0
             else 0.0
-     //   val ratioUsed = request?.autosensResult?.ratio ?: 1.0
 
-        val ratioUsed = getRatioFactor(requireContext()) //ratioFactor
+        //   val ratioUsed = request?.autosensResult?.ratio ?: 1.0
+
+        val ratioUsed = resistance //ratioFactor
 
         if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
             val okDialogText: ArrayList<String> = ArrayList()
             val overViewText: ArrayList<String> = ArrayList()
-            val autoSensHiddenRange = 0.0             //Hide Autosens value if equals 100%
-            val autoSensMax = 100.0 + (preferences.get(DoubleKey.AutosensMax) - 1.0) * autoSensHiddenRange * 100.0
-            val autoSensMin = 100.0 + (preferences.get(DoubleKey.AutosensMin) - 1.0) * autoSensHiddenRange * 100.0
-            lastAutosensRatio?.let {
-                if (it < autoSensMin || it > autoSensMax)
-                    overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, it))
-                okDialogText.add(rh.gs(app.aaps.core.ui.R.string.autosens_long, it))
-            }
+      //      val autoSensHiddenRange = 0.0             //Hide Autosens value if equals 100%
+      //      val autoSensMax = 100.0 + (preferences.get(DoubleKey.AutosensMax) - 1.0) * autoSensHiddenRange * 100.0
+      //      val autoSensMin = 100.0 + (preferences.get(DoubleKey.AutosensMin) - 1.0) * autoSensHiddenRange * 100.0
+       //     lastAutosensRatio?.let {
+       //         if (it < autoSensMin || it > autoSensMax)
+       //             overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, it))
+       //         okDialogText.add(rh.gs(app.aaps.core.ui.R.string.autosens_long, it))
+       //     }
             overViewText.add(
                 String.format(
                     Locale.getDefault(), "%1$.1f→%2$.1f",
@@ -1266,7 +1266,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
             binding.infoLayout.variableSensitivity.visibility = View.GONE
             if (ratioUsed != 1.0 && ratioUsed != lastAutosensData?.autosensResult?.ratio)
-                okDialogText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_long, ratioUsed * 100))
+                okDialogText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_long, ratioUsed?.times(100)))
             okDialogText.add(rh.gs(app.aaps.core.ui.R.string.isf_for_carbs, profileUtil.fromMgdlToUnits(isfForCarbs ?: 0.0, profileFunction.getUnits())))
             if (config.APS) {
                 val aps = activePlugin.activeAPS
@@ -1280,14 +1280,14 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             binding.infoLayout.sensitivity.text =
                 lastAutosensData?.let {
                 //    rh.gs(app.aaps.core.ui.R.string.autosens_short, it.autosensResult.ratio * 100)
-                    rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed * 100)
+                    rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed?.times(100))
                 } ?: ""
             binding.infoLayout.variableSensitivity.visibility = View.GONE
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
         }
 
         val overViewText: ArrayList<String> = ArrayList()
-        overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed*100))
+        overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed?.times(100)))
         overViewText.add(
             String.format(
                 Locale.getDefault(), "%1$.1f→%2$.1f",
@@ -1296,10 +1296,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             )
         )
 
+        binding.infoLayout.sensitivityIcon.setImageResource(app.aaps.core.objects.R.drawable.ic_x_swap_vert)
         binding.infoLayout.sensitivity.text = overViewText.joinToString("\n")
-        */
-        binding.infoLayout.sensitivityIcon.setImageResource(app.aaps.core.objects.R.drawable.tir)
-        binding.infoLayout.sensitivity.text = TIRText
         binding.infoLayout.sensitivity.visibility = View.VISIBLE
     }
 

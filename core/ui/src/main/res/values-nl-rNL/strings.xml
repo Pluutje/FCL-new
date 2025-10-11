@@ -416,7 +416,7 @@
     <string name="sensitivity">Gevoeligheid</string>
     <string name="isf_for_carbs">ISF voor Bolus Calculator en Koolhydraten Absorptie: %1$.1f</string>
     <string name="autosens_long">Autosens Waarde: %.0f%%</string>
-    <string name="autosens_short">AS: %.0f%%</string>
+    <string name="autosens_short">Res: %.0f%%</string>
     <string name="algorithm_long">Autosens in algoritme: %.0f%%</string>
     <string name="algorithm_short">Alg: %.0f%%</string>
     <string name="a11y_file">bestand</string>
