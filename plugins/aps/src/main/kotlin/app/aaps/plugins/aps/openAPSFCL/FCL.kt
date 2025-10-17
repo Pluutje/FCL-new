@@ -1359,7 +1359,7 @@ class FCL@Inject constructor(
 
         return """
 ╔═══════════════════
-║  ══ FCL v1.1.1 ══ 
+║  ══ FCL v1.2.0 ══ 
 ╚═══════════════════
 
 🎯 LAATSTE BOLUS BESLISSING
@@ -1719,9 +1719,17 @@ $mealPerformanceSummary
             debugInfo = "MEAL_DETECT: unexplainedDelta=$unexplainedDelta > threshold=${mealDetectionSensitivity * 0.7}, carbs=$localDetectedCarbs"
         }
 
-        // ★★★ EXTRA: vang snelle stijgers eerder ★★★
+        // ★★★ VERBETERDE SNELHEIDS DETECTIE VOOR GROTE MAALTIJDEN ★★★
         val slope10 = delta10 / 10.0 * 60.0 // mmol/L per uur
-        if (detectedState == MealDetectionState.NONE && slope10 > 1.5 && currentBG > targetBG + 0.3) {
+
+// ★★★ NIEUW: DETECTEER GROTE MAALTIJDEN BIJ ZEER HOGERE SNELHEDEN ★★★
+        if (slope10 > 5.0) {
+            // Zeer snelle stijging - waarschijnlijk grote maaltijd
+            localDetectedCarbs = slope10 * 15.0 // Hogere multiplier voor grote maaltijden
+            detectedState = MealDetectionState.EARLY_RISE
+            debugInfo = "LARGE_MEAL_RISE: slope=$slope10 > 5.0, carbs=$localDetectedCarbs"
+        } else if (detectedState == MealDetectionState.NONE && slope10 > 1.5 && currentBG > targetBG + 0.3) {
+            // Bestaande logica voor kleinere stijgingen
             localDetectedCarbs = slope10 * 8.0
             detectedState = MealDetectionState.EARLY_RISE
             debugInfo = "RAPID_RISE: slope=$slope10 > 1.5, carbs=$localDetectedCarbs"
@@ -3684,82 +3692,84 @@ $mealPerformanceSummary
         currentBG: Double,
         targetBG: Double,
         trends: TrendAnalysis,
-        historicalData: List<BGDataPoint>
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,
+        maxIOB: Double
     ): Boolean {
         if (historicalData.size < 3) return false
 
-        // ★★★ GEBRUIK NIEUWE HULPFUNCTIE ★★★
-        val isRecentlyRising = hasRecentRise(historicalData, 2)  // 2 van 3 metingen stijgend
-
-        // ★★★ NIEUW: Korte-termijn trend check ★★★
+        val isRecentlyRising = hasRecentRise(historicalData, 2)
         val shortTermTrend = calculateShortTermTrend(historicalData)
 
-        // ★★★ VERHOOGDE GEVOELIGHEID BIJ SNEL STIJGEN ★★★
-        val isRapidRise = trends.recentTrend > 1.8 || shortTermTrend > 2.0  // ← AANPASSING: lagere drempels
-        val bgCondition = currentBG > targetBG + 0.3 || isRapidRise  // ← AANPASSING: lagere BG drempel
-        val trendCondition = trends.recentTrend > 0.2 || shortTermTrend > 0.4  // ← AANPASSING: lagere trend drempels
-        val recentlyRisingCondition = isRecentlyRising && shortTermTrend > 0.0
+        // ★★★ JOUW SPECIFIEKE IOB-AWARE LOGICA ★★★
+        val iobCapacity = maxIOB - currentIOB
 
-        // ★★★ COMBINATIE: vrijgegeven bij CONSISTENTE stijging OF SNEL STIJGEN ★★★
-        return bgCondition && (trendCondition || recentlyRisingCondition || isRapidRise) &&
-            !isAtPeakOrDeclining(historicalData, trends)
+        // ★★★ CRITISCHE CONDITIES VOOR RELEASE ★★★
+        val isVeryHighBG = currentBG > targetBG + 5.0  // BG > 10.2
+        val hasMinIOBCapacity = iobCapacity > 0.3      // Minimaal 0.3U capaciteit nodig
+        val isRising = trends.recentTrend > 0.5 || shortTermTrend > 1.0
+        val isRapidRise = trends.recentTrend > 2.0 || shortTermTrend > 2.5
+
+        // ★★★ RELEASE LOGICA ★★★
+        return when {
+            // CRITIEK: Zeer hoge BG + IOB capaciteit → ALTIJD RELEASEN
+            isVeryHighBG && hasMinIOBCapacity -> true
+
+            // HOGE BG + STIJGING + IOB CAPACITEIT → RELEASEN
+            currentBG > targetBG + 3.0 && isRising && hasMinIOBCapacity -> true
+
+            // MATIGE BG + STERKE STIJGING + IOB CAPACITEIT → RELEASEN
+            currentBG > targetBG + 1.0 && isRapidRise && hasMinIOBCapacity -> true
+
+            else -> false
+        } && !isAtPeakOrDeclining(historicalData, trends)
     }
 
     private fun calculateReservedBolusRelease(
         currentBG: Double,
         targetBG: Double,
         trends: TrendAnalysis,
-        historicalData: List<BGDataPoint>  // ★★★ NIEUWE PARAMETER ★★★
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,
+        maxIOB: Double,
+        maxBolus: Double  // ★★★ NIEUWE PARAMETER ★★★
     ): Double {
         if (pendingReservedBolus <= 0.0) return 0.0
 
-        // ★★★ NIEUW: Check op recente daling ★★★
-        val recentPoints = historicalData.takeLast(3)
-        val isRecentlyFalling = recentPoints.size >= 2 &&
-            recentPoints.last().bg < recentPoints[recentPoints.size - 2].bg - 0.1
-
-        // ★★★ VEILIGHEID: Geen release bij recente daling ★★★
-        if (isRecentlyFalling) {
-
-            return 0.0
-        }
-
+        // ★★★ JOUW SPECIFIEKE BEREKENING ★★★
         val bgAboveTarget = currentBG - targetBG
+        val iobCapacity = maxIOB - currentIOB
 
+        // Bepaal release percentage op basis van BG en IOB capaciteit
         val releasePercentage = when {
-            bgAboveTarget > 3.0 -> 0.8
-            bgAboveTarget > 2.0 -> 0.6
-            bgAboveTarget > 1.0 -> 0.4
-            bgAboveTarget > 0.5 -> 0.2
-            else -> 0.1
+            bgAboveTarget > 5.0 && iobCapacity > 1.0 -> 0.8  // Zeer hoog + ruimte
+            bgAboveTarget > 5.0 && iobCapacity > 0.5 -> 0.6  // Zeer hoog + beperkte ruimte
+            bgAboveTarget > 3.0 && iobCapacity > 0.8 -> 0.7  // Hoog + ruimte
+            bgAboveTarget > 3.0 && iobCapacity > 0.4 -> 0.5  // Hoog + beperkte ruimte
+            bgAboveTarget > 2.0 && iobCapacity > 0.6 -> 0.4  // Matig hoog + ruimte
+            else -> 0.2  // Conservatieve release
         }
 
-        // ★★★ STRENGERE TREND VOORWAARDEN ★★★
-        val trendBonus = when {
-            trends.recentTrend > 2.0 && !isRecentlyFalling -> 0.3
-            trends.recentTrend > 1.0 && !isRecentlyFalling -> 0.15
-            trends.recentTrend < 0.0 -> -0.3  // ★★★ GROTERE MALUS BIJ DALING ★★★
-            else -> 0.0
+        val releaseAmount = pendingReservedBolus * releasePercentage
+
+        // ★★★ MAX BOLUS BEGRENSING ★★★
+        val cappedRelease = minOf(releaseAmount, maxBolus, iobCapacity)
+
+        // Alleen releasen als het significant is
+        if (cappedRelease > 0.1) {
+            pendingReservedBolus -= cappedRelease
+            pendingReservedCarbs = pendingReservedCarbs * (1 - releasePercentage)
+
+            if (pendingReservedBolus < 0.1) {
+                pendingReservedBolus = 0.0
+                pendingReservedCarbs = 0.0
+                pendingReservedTimestamp = null
+            }
+
+            return cappedRelease
         }
 
-        val finalReleasePercentage = (releasePercentage + trendBonus).coerceIn(0.05, 0.8)
-
-        // ★★★ EXTRA VEILIGHEID: Verminder release bij dalende korte-termijn trend ★★★
-        val shortTermTrend = calculateShortTermTrend(historicalData)
-        val shortTermFactor = if (shortTermTrend < 0) 0.3 else 1.0
-
-        val releaseAmount = pendingReservedBolus * finalReleasePercentage * shortTermFactor
-
-        pendingReservedBolus -= releaseAmount
-        pendingReservedCarbs = pendingReservedCarbs * (1 - finalReleasePercentage)
-
-        if (pendingReservedBolus < 0.1) {
-            pendingReservedBolus = 0.0
-            pendingReservedCarbs = 0.0
-            pendingReservedTimestamp = null
-        }
-
-        return releaseAmount
+        return 0.0
     }
 
 
@@ -4335,6 +4345,37 @@ $mealPerformanceSummary
                     else -> 0.0
                 }
 
+// ★★★ VERBETERDE WISKUNDIGE CARBSCHATTING ★★★
+                var mathDetectedCarbs = detectedCarbs
+                if (mathBolusAdvice.immediatePercentage > 0) {
+                    val baseCarbs = when (robustTrends.phase) {
+                        "early_rise" -> 40.0 + (robustTrends.firstDerivative * 15.0) // Hogere basis voor grote maaltijden
+                        "mid_rise" -> 25.0 + (robustTrends.firstDerivative * 12.0)
+                        "late_rise" -> 20.0 + (robustTrends.firstDerivative * 8.0)
+                        else -> 0.0
+                    }
+
+                    // ★★★ NIEUW: DYNAMISCHE BEGRENSING OP BASIS VAN SLOPE ★★★
+                    val maxCarbs = when {
+                        robustTrends.firstDerivative > 8.0 -> 120.0  // Zeer extreme stijging
+                        robustTrends.firstDerivative > 5.0 -> 80.0   // Extreme stijging
+                        robustTrends.firstDerivative > 3.0 -> 60.0   // Hoge stijging
+                        else -> 50.0                                // Normale stijging
+                    }
+
+                    mathDetectedCarbs = baseCarbs.coerceIn(0.0, maxCarbs)
+
+                    // ★★★ OVERSCHRIJF ALTIJD BIJ WISKUNDIGE DETECTIE ★★★
+                    if (mathDetectedCarbs > detectedCarbs) {
+                        lastMealDetectionDebug = "MATH_CARBS: ${robustTrends.phase} -> ${mathDetectedCarbs}g (was: ${detectedCarbs}g)"
+                        addOrUpdateActiveMeal(mathDetectedCarbs, DateTime.now())
+                        finalCOB = getCarbsOnBoard()
+                        finalDetectedCarbs = mathDetectedCarbs
+                        finalMealDetected = true
+
+                        }
+                }
+
                 if (mathDetectedCarbs > 5) {
                     lastMealDetectionDebug = "MATH_CARBS: ${robustTrends.phase} -> ${mathDetectedCarbs}g"
                     addOrUpdateActiveMeal(mathDetectedCarbs, DateTime.now())
@@ -4483,14 +4524,48 @@ $mealPerformanceSummary
                 }
             }
 
-// ★★★ VERBETERDE SAFETY CHECK ★★★
-            else if (!isLikelyMeal && detectedCarbs < 10) {
-                // Alleen blokkeren bij zeer kleine hoeveelheden + onduidelijk patroon
-                finalDose = 0.0
-                finalReason = "Safety: Small uncertain rise (${"%.1f".format(detectedCarbs)}g) - monitoring pattern"
-                finalDeliver = false
-                finalPhase = "safety_monitoring"
-                finalMealDetected = false
+// ★★★ VERBETERDE SAFETY CHECK - STA EXTREME STIJGINGEN TOE MET IOB BEWUSTZIJN ★★★
+            else if (!isLikelyMeal && detectedCarbs < 15) {
+                // ★★★ IOB CAPACITEIT CHECK ★★★
+                val iobCapacity = maxIOB - currentIOB
+                val hasIOBCapacity = iobCapacity > 0.5  // Minimaal 0.5U beschikbaar
+
+                // ★★★ EXTREME STIJGING CONDITIES ★★★
+                val isExtremeRise = robustTrends.phase in listOf("early_rise", "mid_rise") &&
+                    robustTrends.firstDerivative > 5.0 &&  // ★★★ VERHOOGD VAN 3.0 NAAR 5.0 ★★★
+                    robustTrends.consistency > 0.6
+
+                val isVeryHighBG = currentData.bg > 10.0  // ★★★ NIEUW: Zeer hoge BG conditie ★★★
+
+                val shouldBlock = when {
+                    // BLOKKEREN: Geen IOB capaciteit + geen extreme stijging
+                    !hasIOBCapacity && !isExtremeRise && !isVeryHighBG -> true
+
+                    // BLOKKEREN: Dalende/stabiele fase + lage carbs
+                    robustTrends.phase in listOf("declining", "peak", "stable") && detectedCarbs < 10 -> true
+
+                    // TOESTAAN: Extreme stijging + IOB capaciteit
+                    hasIOBCapacity && isExtremeRise -> false
+
+                    // TOESTAAN: Zeer hoge BG + IOB capaciteit
+                    hasIOBCapacity && isVeryHighBG -> false
+
+                    else -> true
+                }
+
+                if (shouldBlock) {
+                    finalDose = 0.0
+                    finalReason = "Safety: Uncertain pattern (IOB: ${"%.1f".format(currentIOB)}/${maxIOB}U, carbs: ${"%.1f".format(detectedCarbs)}g)"
+                    finalDeliver = false
+                    finalPhase = "safety_monitoring"
+                    finalMealDetected = false
+                } else {
+                    // ★★★ TOESTAAN MET IOB BEWUSTZIJN ★★★
+                    finalDetectedCarbs = maxOf(detectedCarbs, 25.0) // ★★★ VERHOOGD VAN 20.0 NAAR 25.0 ★★★
+                    finalMealDetected = true
+                    finalReason = "Extreme rise override (slope: ${"%.1f".format(robustTrends.firstDerivative)}, IOB cap: ${"%.1f".format(iobCapacity)}U)"
+
+                     }
             }
 
 // Safety: pas aan bij tegenvallende stijging
@@ -4580,31 +4655,34 @@ $mealPerformanceSummary
             decayReservedBolusOverTime()
 
 // Check of reserved bolus vrijgegeven moet worden
-            if (pendingReservedBolus > 0.1 && shouldReleaseReservedBolus(currentData.bg, effectiveTarget, trends, historicalData)) {
+            if (pendingReservedBolus > 0.1 && shouldReleaseReservedBolus(
+                    currentData.bg, effectiveTarget, trends, historicalData, currentIOB, maxIOB)) {
+
                 val minutesSinceLastBolus = lastBolusTime?.let {
                     Minutes.minutesBetween(it, DateTime.now()).minutes
                 } ?: Int.MAX_VALUE
 
                 if (minutesSinceLastBolus >= 10) {
-                    val releasedBolus = calculateReservedBolusRelease(currentData.bg, effectiveTarget, trends, historicalData)
+                    val releasedBolus = calculateReservedBolusRelease(
+                        currentData.bg, effectiveTarget, trends, historicalData,
+                        currentIOB, maxIOB, maxBolus  // ★★★ ALLE PARAMETERS ★★★
+                    )
                     if (releasedBolus > 0.05) {
+                        finalDose += releasedBolus
+                        finalReason += if (finalReason.contains("Reserved")) {
+                            " | +${"%.2f".format(releasedBolus)}U released"
+                        } else {
+                            " | Released reserved: ${"%.2f".format(releasedBolus)}U"
+                        }
 
-                            finalDose += releasedBolus
-                            finalReason += if (finalReason.contains("Reserved")) {
-                                " | +${"%.2f".format(releasedBolus)}U released"
-                            } else {
-                                " | Released reserved: ${"%.2f".format(releasedBolus)}U"
-                            }
-
-                            // Update learning met de vrijgegeven bolus
-                            storeMealForLearning(
-                                detectedCarbs = pendingReservedCarbs,
-                                givenDose = releasedBolus,
-                                startBG = currentData.bg,
-                                expectedPeak = predictedPeak,
-                                mealType = getMealTypeFromHour()
-                            )
-
+                        // Update learning met de vrijgegeven bolus
+                        storeMealForLearning(
+                            detectedCarbs = pendingReservedCarbs,
+                            givenDose = releasedBolus,
+                            startBG = currentData.bg,
+                            expectedPeak = predictedPeak,
+                            mealType = getMealTypeFromHour()
+                        )
 
                         finalDeliver = true
                         lastBolusTime = DateTime.now()
