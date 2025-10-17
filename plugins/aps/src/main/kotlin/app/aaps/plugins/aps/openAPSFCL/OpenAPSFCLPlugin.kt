@@ -592,8 +592,8 @@ open class OpenAPSFCLPlugin @Inject constructor(
                 AdaptiveIntentPreference(
                     ctx = context,
                     intentKey = IntentKey.ApsLinkToDocs,
-                    intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Algoritme_algemeen_doc)) },
-                    summary = R.string.Info_FCL
+                 //   intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_FCL_doc)) },
+                    summary = R.string.Info_fcl
                 )
             )
 
@@ -607,27 +607,25 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     AdaptiveIntentPreference(
                         ctx = context,
                         intentKey = IntentKey.ApsLinkToDocs,
-                        intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                        summary = R.string.Info_fcl
+                        intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_FCL_doc)) },
+                        summary = R.string.Info_FCL
                     )
                 )
 
-
-                // safety Settings screen
-                val safetyScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "safety Settings"
-                    title = "safety Settings"
+                // 🛡️ VEILIGHEIDSINSTELLINGEN
+                val VEILIGHEIDSINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "VEILIGHEIDSINSTELLINGEN"
+                    title = "\uD83D\uDEE1\uFE0F VEILIGHEIDSINSTELLINGEN"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                            summary = R.string.Info_fcl_safety
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_1_VEILIGHEIDSINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_1_VEILIGHEIDSINSTELLINGEN
                         )
                     )
-
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoThresholdDay, dialogMessage = R.string.hypoThresholdDay_summary, title = R.string.hypoThresholdDay_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoThresholdNight, dialogMessage = R.string.hypoThresholdNight_summary, title = R.string.hypoThresholdNight_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.hypoRecoveryBGRange, dialogMessage = R.string.hypoRecoveryBGRange_summary, title = R.string.hypoRecoveryBGRange_title))
@@ -636,75 +634,102 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.min_recovery_days, dialogMessage = R.string.min_recovery_days_summary, title = R.string.min_recovery_days_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.max_recovery_days, dialogMessage = R.string.max_recovery_days_summary, title = R.string.max_recovery_days_title))
                 }
-                addPreference(safetyScreen)
+                addPreference(VEILIGHEIDSINSTELLINGEN)
 
-                // Bolus Settings screen
-                val bolusScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Bolus Settings"
-                    title = "Bolus Settings"
+
+                // 💉 BOLUS & MAALTIJD INSTELLINGEN
+                val BOLUSMAALTIJDINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "BOLUSMAALTIJDINSTELLINGEN"
+                    title = "\uD83D\uDC89 BOLUS & MAALTIJD INSTELLINGEN"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                            summary = R.string.Info_fcl_bolus
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_2_BOLUSMAALTIJDINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_2_BOLUSMAALTIJDINSTELLINGEN
                         )
                     )
-
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsMaxBasal, dialogMessage = R.string.openapsma_max_basal_summary, title = R.string.openapsma_max_basal_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsSmbMaxIob, dialogMessage = R.string.openapssmb_max_iob_summary, title = R.string.openapssmb_max_iob_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.max_bolus, dialogMessage = R.string.max_bolus_summary, title = R.string.max_bolus_title))
+                    addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.IOB_corr_perc, dialogMessage = R.string.IOB_corr_perc_summary, title = R.string.IOB_corr_perc_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.bolus_perc_day, dialogMessage = R.string.bolus_perc_day_summary, title = R.string.bolus_perc_day_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.bolus_perc_night, dialogMessage = R.string.bolus_perc_night_summary, title = R.string.bolus_perc_night_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.bolus_perc_early, dialogMessage = R.string.bolus_perc_early_summary, title = R.string.bolus_perc_early_title))
+                    addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.bolus_perc_mid, dialogMessage = R.string.bolus_perc_mid_summary, title = R.string.bolus_perc_mid_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.bolus_perc_late, dialogMessage = R.string.bolus_perc_late_summary, title = R.string.bolus_perc_late_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.peak_damping_percentage, dialogMessage = R.string.peak_damping_percentage_summary, title = R.string.peak_damping_percentage_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.hypo_risk_percentage, dialogMessage = R.string.hypo_risk_percentage_summary, title = R.string.hypo_risk_percentage_title))
-                }
-                addPreference(bolusScreen)
 
-                // resistentie Settings screen
-                val resistentieScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Resistentie Settings"
-                    title = "Resistentie Settings"
+                }
+                addPreference(BOLUSMAALTIJDINSTELLINGEN)
+
+                // 📈 FASE DETECTIE INSTELLINGEN
+                val FASEDETECTIEINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "Bolus/Meal Settings"
+                    title = "\uD83D\uDCC8 FASE DETECTIE INSTELLINGEN"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                            summary = R.string.Info_fcl_bolus
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_3_FASEDETECTIEINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_3_FASEDETECTIEINSTELLINGEN
+                        )
+                    )
+
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_early_rise_slope, dialogMessage = R.string.phase_early_rise_slope_summary, title = R.string.phase_early_rise_slope_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_mid_rise_slope, dialogMessage = R.string.phase_mid_rise_slope_summary, title = R.string.phase_mid_rise_slope_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_late_rise_slope, dialogMessage = R.string.phase_late_rise_slope_summary, title = R.string.phase_late_rise_slope_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_peak_slope, dialogMessage = R.string.phase_peak_slope_summary, title = R.string.phase_peak_slope_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_early_rise_accel, dialogMessage = R.string.phase_early_rise_accel_summary, title = R.string.phase_early_rise_accel_title))
+                    addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.phase_min_consistency, dialogMessage = R.string.phase_min_consistency_summary, title = R.string.phase_min_consistency_title))
+                }
+                addPreference(FASEDETECTIEINSTELLINGEN)
+
+                // 🛡️ RESISTENTIE INSTELLINGEN
+                val RESISTENTIEINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "RESISTENTIEINSTELLINGEN"
+                    title = " \uD83D\uDEE1\uFE0F RESISTENTIE INSTELLINGEN"
+                    initialExpandedChildrenCount = Int.MAX_VALUE
+
+                    addPreference(
+                        AdaptiveIntentPreference(
+                            ctx = context,
+                            intentKey = IntentKey.ApsLinkToDocs,
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_4_RESISTENTIEINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_4_RESISTENTIEINSTELLINGEN
                         )
                     )
 
                     addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.Resistentie, title = R.string.Titel_resistentie))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Min_resistentiePerc, dialogMessage = R.string.min_resistentiePerc_summary, title = R.string.min_resistentiePerc_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Max_resistentiePerc, dialogMessage = R.string.max_resistentiePerc_summary, title = R.string.max_resistentiePerc_title))
-
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Dag_resistentiePerc, dialogMessage = R.string.dag_resistentiePerc_summary, title = R.string.dag_resistentiePerc_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Dag_resistentie_target, dialogMessage = R.string.dag_resistentie_target_summary, title = R.string.dag_resistentie_target_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Nacht_resistentiePerc, dialogMessage = R.string.nacht_resistentiePerc_summary, title = R.string.nacht_resistentiePerc_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Nacht_resistentie_target, dialogMessage = R.string.nacht_resistentie_target_summary, title = R.string.nacht_resistentie_target_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.Dagen_resistentie, dialogMessage = R.string.Dagen_resistentie_summary, title = R.string.Dagen_resistentie_title))
-
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.Uren_resistentie, dialogMessage = R.string.Uren_resistentie_summary, title = R.string.Uren_resistentie_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.MinDelay_resistentie, dialogMessage = R.string.MinDelay_resistentie_summary, title = R.string.MinDelay_resistentie_title))
                 }
-                addPreference(resistentieScreen)
+                addPreference(RESISTENTIEINSTELLINGEN)
 
-                // Learning Settings scherm
-                val learningScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Learning Settings"
-                    title = "Learning Settings"
+                // 🧠 LEER SYSTEEM INSTELLINGEN
+                val LEERSYSTEEMINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "LEERSYSTEEMINSTELLINGEN"
+                    title = "\uD83E\uDDE0 LEER SYSTEEM INSTELLINGEN"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                            summary = R.string.Info_fcl_learning
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_5_LEERSYSTEEMINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_5_LEERSYSTEEMINSTELLINGEN
                         )
                     )
 
@@ -712,20 +737,20 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.CarbISF_min_Factor, dialogMessage = R.string.CarbISF_min_Factor_summary, title = R.string.CarbISF_min_Factor_title))
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.CarbISF_max_Factor, dialogMessage = R.string.CarbISF_max_Factor_summary, title = R.string.CarbISF_max_Factor_title))
                 }
-                addPreference(learningScreen)
+                addPreference(LEERSYSTEEMINSTELLINGEN)
 
-                // Carb Settings scherm
-                val CarbScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Carb Settings"
-                    title = "Carb Settings"
+                // 🍽️ KOOLHYDRATEN INSTELLINGEN
+                val KOOLHYDRATENINSTELLINGEN = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "KOOLHYDRATENINSTELLINGEN"
+                    title = "\uD83C\uDF7D\uFE0F KOOLHYDRATEN INSTELLINGEN"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_fcl_doc)) },
-                            summary = R.string.Info_fcl_learning
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_6_KOOLHYDRATENINSTELLINGEN_doc)) },
+                            summary = R.string.Info_fcl_6_KOOLHYDRATENINSTELLINGEN
                         )
                     )
 
@@ -733,22 +758,22 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.meal_detection_sensitivity, dialogMessage = R.string.meal_detection_sensitivity_summary, title = R.string.meal_detection_sensitivity_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.tau_absorption_minutes, dialogMessage = R.string.tau_absorption_minutes_summary, title = R.string.tau_absorption_minutes_title))
                 }
-                addPreference(CarbScreen)
+                addPreference(KOOLHYDRATENINSTELLINGEN)
 
 
 
-                // Dag nacht instelling scherm
-                val Day_Night_Screen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Day-Night settings"
-                    title = "Day-Night settings"
+                // 🌙 DAG-NACHT CYCLUS
+                val DAGNACHTCYCLUS = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "DAG-NACHTCYCLUS"
+                    title = "\uD83C\uDF19 DAG-NACHT CYCLUS"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.e_dag_nacht_doc)) },
-                            summary = R.string.Info_dag_nacht
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_7_DAGNACHTCYCLUS_doc)) },
+                            summary = R.string.Info_fcl_7_DAGNACHTCYCLUS
                         )
                     )
 
@@ -757,20 +782,20 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveStringPreference(ctx = context, stringKey = StringKey.OchtendStartWeekend, dialogMessage = R.string.OchtendStartWeekend_summary, title = R.string.OchtendStartWeekend_title))
                     addPreference(AdaptiveStringPreference(ctx = context, stringKey = StringKey.NachtStart, dialogMessage = R.string.NachtStart_summary, title = R.string.NachtStart_title))
                 }
-                addPreference(Day_Night_Screen)
+                addPreference(DAGNACHTCYCLUS)
 
-                // Bg Persistent instelling scherm
-                val persistentScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Bg Persistent instelling"
-                    title = "Bg Persistent instelling"
+                // 📊 PERSISTENT HOGE BG
+                val PERSISTENTHOGEBG = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "PERSISTENT HOGE BGg"
+                    title = "\uD83D\uDCCA PERSISTENT HOGE BG"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.persistent_doc)) },
-                            summary = R.string.Info_Persistent
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_8_PERSISTENTHOGEBG_doc)) },
+                            summary = R.string.Info_fcl_8_PERSISTENTHOGEBG
                         )
                     )
 
@@ -781,20 +806,20 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.persistent_Nacht_MaxBolus, dialogMessage = R.string.persistent_Nacht_MaxBolus_summary, title = R.string.persistent_Nacht_MaxBolus_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.persistent_CoolDown, dialogMessage = R.string.persistent_CoolDown_summary, title = R.string.persistent_CoolDown_title))
                 }
-                addPreference(persistentScreen)
+                addPreference(PERSISTENTHOGEBG)
 
-                // Activiteit/Stappen instelling scherm
-                val activiteitScreen = preferenceManager.createPreferenceScreen(context).apply {
-                    key = "Activity/Steps settings"
-                    title = "Activity/Steps settings"
+                // 🚶 ACTIVITEIT & BEWEGING
+                val ACTIVITEITBEWEGING = preferenceManager.createPreferenceScreen(context).apply {
+                    key = "ACTIVITEIT & BEWEGING"
+                    title = "\uD83D\uDEB6 ACTIVITEIT & BEWEGING"
                     initialExpandedChildrenCount = Int.MAX_VALUE
 
                     addPreference(
                         AdaptiveIntentPreference(
                             ctx = context,
                             intentKey = IntentKey.ApsLinkToDocs,
-                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.b_stappen_doc)) },
-                            summary = R.string.Info_activiteit
+                            intent = Intent().apply { action = Intent.ACTION_VIEW; data = Uri.parse(rh.gs(R.string.Info_fcl_9_ACTIVITEITBEWEGING_doc)) },
+                            summary = R.string.Info_fcl_9_ACTIVITEITBEWEGING
                         )
                     )
 
@@ -804,12 +829,11 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.stap_5minuten, dialogMessage = R.string.stap_5minuten_summary, title = R.string.stap_5minuten_title))
                     addPreference(AdaptiveIntPreference(ctx = context, intKey = IntKey.stap_retentie, dialogMessage = R.string.stap_retentie_summary, title = R.string.stap_retentie_title))
                 }
-                addPreference(activiteitScreen)
+                addPreference(ACTIVITEITBEWEGING)
             }
             addPreference(fclScreen)
 
-            addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsMaxBasal, dialogMessage = R.string.openapsma_max_basal_summary, title = R.string.openapsma_max_basal_title))
-            addPreference(AdaptiveDoublePreference(ctx = context, doubleKey = DoubleKey.ApsSmbMaxIob, dialogMessage = R.string.openapssmb_max_iob_summary, title = R.string.openapssmb_max_iob_title))
+
 
             addPreference(AdaptiveUnitPreference(ctx = context, unitKey = UnitDoubleKey.ApsLgsThreshold, dialogMessage = R.string.lgs_threshold_summary, title = R.string.lgs_threshold_title))
             addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = BooleanKey.ApsSensitivityRaisesTarget, summary = R.string.sensitivity_raises_target_summary, title = R.string.sensitivity_raises_target_title))

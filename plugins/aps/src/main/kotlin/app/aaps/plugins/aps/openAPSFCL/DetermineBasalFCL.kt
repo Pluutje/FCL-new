@@ -42,7 +42,6 @@ import android.content.Context
 @Singleton
 
 
-  data class Stappen_class(val StapPercentage: Float,val StapTarget: Float, val log: String)
 
 
 class DetermineBasalFCL @Inject constructor(
@@ -57,6 +56,7 @@ class DetermineBasalFCL @Inject constructor(
 
     private val externalDir = File(Environment.getExternalStorageDirectory().absolutePath + "/Documents/AAPS/")
     private val FCLfile = File(externalDir, "ANALYSE/FCL.csv")
+    private val Mathfile = File(externalDir, "ANALYSE/Math.csv")
 
     private val fcl = FCL(profileUtil,fabricPrivacy,preferences,dateUtil,persistenceLayer,context)
 
@@ -263,18 +263,48 @@ class DetermineBasalFCL @Inject constructor(
         val bgmmol = round(bg / 18.0, 1)
         val isfmmol = round(isf / 18.0, 1)
 
-        val headerRow = "datum,bg,iob,isf,dosis,reden,voorspelling,conf,meal,fase,carb,deliver\n"
+    //    val headerRow = "datum,bg,iob,isf,dosis,reden,voorspelling,conf,meal,fase,Detectedcarb,deliver,Cob\n"
+    //    val valuesToRecord = "$dateStr,$bgmmol,$iob,$isfmmol,${fclAdvice.dose},\"${fclAdvice.reason}\",${fclAdvice.predictedValue},${fclAdvice.confidence},${fclAdvice.mealDetected},${fclAdvice.phase},${fclAdvice.detectedCarbs},${fclAdvice.shouldDeliverBolus},${fclAdvice.carbsOnBoard}"
 
-        val valuesToRecord = "$dateStr,$bgmmol,$iob,$isfmmol,${fclAdvice.dose},\"${fclAdvice.reason}\",${fclAdvice.predictedValue},${fclAdvice.confidence},${fclAdvice.mealDetected},${fclAdvice.phase},${fclAdvice.detectedCarbs},${fclAdvice.shouldDeliverBolus}"
+        // Headers voor beknopte CSV
+        val compactHeaderRow = "datum,bg,iob,bolus,reden,reservedBolus,phase,mealDetected,detectedCarbs,cob\n"
+        // Data voor beknopte CSV
+        val compactValuesToRecord = "$dateStr,$bgmmol,$iob,${fclAdvice.dose},\"${fclAdvice.reason}\",${fclAdvice.reservedDose},${fclAdvice.phase},${fclAdvice.mealDetected},${fclAdvice.detectedCarbs},${fclAdvice.carbsOnBoard}"
 
         if (!FCLfile.exists()) {
             FCLfile.parentFile?.mkdirs()
             FCLfile.createNewFile()
-            FCLfile.appendText(headerRow)
+            FCLfile.appendText(compactHeaderRow)
         }
-        FCLfile.appendText(valuesToRecord + "\n")
-    }
+        FCLfile.appendText(compactValuesToRecord + "\n")
 
+        val mathPhase = fclAdvice.mathPhase
+        val mathSlope = round(fclAdvice.mathSlope,2).toString()
+        val mathAcceleration = round(fclAdvice.mathAcceleration,2).toString()
+        val mathConsistency = round(fclAdvice.mathConsistency,2).toString()
+        val mathDirectionConsistency = round(fclAdvice.mathDirectionConsistency,2).toString()
+        val mathMagnitudeConsistency = round(fclAdvice.mathMagnitudeConsistency,2).toString()
+        val mathPatternConsistency = round(fclAdvice.mathPatternConsistency,2).toString()
+        val mathDataPoints = fclAdvice.mathDataPoints
+        val usedFallback = fclAdvice.usedFallback
+
+
+    //    val MathheaderRow = "datum,bg,iob,isf,dosis,deliver,Math,mathPhase,mathSlope,mathAcceleration,mathConsistency,mathDirectionConsistency,mathMagnitudeConsistency,mathPatternConsistency,mathDataPoints,usedFallback,cob,detectedcarbs,debug\n"
+    //    val MathvaluesToRecord = "$dateStr,$bgmmol,$iob,$isfmmol,${fclAdvice.dose},${fclAdvice.shouldDeliverBolus},${fclAdvice.MathBolusAdvice},${mathPhase},${mathSlope},${mathAcceleration}," +
+    //        "${mathConsistency},${mathDirectionConsistency},${mathMagnitudeConsistency},${mathPatternConsistency},${mathDataPoints},${usedFallback},${fclAdvice.carbsOnBoard},${fclAdvice.detectedCarbs},${fclAdvice.debugLog}"
+
+        // Headers voor uitgebreide CSV
+        val detailedHeaderRow = "datum,bg,iob,isf,bolus,reden,voorspelling,conf,meal,fase,detectedCarbs,deliver,cob,reservedBolus,mathPhase,mathSlope,mathAcceleration,mathConsistency,mathDirectionConsistency,mathMagnitudeConsistency,mathPatternConsistency,mathDataPoints,usedFallback,debug\n"
+        // Data voor uitgebreide CSV
+        val detailedValuesToRecord = "$dateStr,$bgmmol,$iob,$isfmmol,${fclAdvice.dose},\"${fclAdvice.reason}\",${fclAdvice.predictedValue},${fclAdvice.confidence},${fclAdvice.mealDetected},${fclAdvice.phase},${fclAdvice.detectedCarbs},${fclAdvice.shouldDeliverBolus},${fclAdvice.carbsOnBoard},${fclAdvice.reservedDose},${mathPhase},${mathSlope},${mathAcceleration},${mathConsistency},${mathDirectionConsistency},${mathMagnitudeConsistency},${mathPatternConsistency},${mathDataPoints},${usedFallback},\"${fclAdvice.debugLog}\""
+
+        if (!Mathfile.exists()) {
+            Mathfile.parentFile?.mkdirs()
+            Mathfile.createNewFile()
+            Mathfile.appendText(detailedHeaderRow)
+        }
+        Mathfile.appendText(detailedValuesToRecord + "\n")
+    }
 
 
  // *************************************************************************************************************
@@ -297,12 +327,7 @@ class DetermineBasalFCL @Inject constructor(
         val iobArray = iob_data_array
         val iob_data = iobArray[0]
 
-// *************************************************************************************************************
 
-
-
-
-// *************************************************************************************************************
 
         // TODO eliminate
         val deliverAt = currentTime
@@ -415,8 +440,6 @@ class DetermineBasalFCL @Inject constructor(
             }
         }
 
-
-
         val tick: String
 
         tick = if (glucose_status.delta > -0.5) {
@@ -527,23 +550,23 @@ class DetermineBasalFCL @Inject constructor(
             variable_sens = sens // profile.variable_sens
         )
 // *************************************************************************************************************************8
-     //   val fclAdvice = getFCLAdvice(profile, iob_data_array, sens, target_bg, bg)   AS:
 
-        consoleError.add("=== - FCL v1.0.0 - ===")
-        consoleError.add("\n")
-        consoleError.add("Dose: ${round(fclAdvice.dose,2)}")
-        consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
-        consoleError.add("Reason: ${fclAdvice.reason}")
-        consoleError.add("Confidence: ${round(fclAdvice.confidence*100)}%")
-        var bg_pred = fclAdvice.predictedValue?.let { round(it, 1) }
-        consoleError.add("Voorspelling: ${bg_pred ?: "nvt"}")
-        consoleError.add("Phase: ${fclAdvice.phase}")
-        consoleError.add("Meal Detected: ${fclAdvice.mealDetected}")
-        var det_carbs = fclAdvice.detectedCarbs?.let { round(it, 1) }
-        consoleError.add("Detected Carbs: ${det_carbs}g")
-        var det_cob = fclAdvice.carbsOnBoard?.let { round(it, 0) }
-        consoleError.add("COB: ${det_cob}g")
-        consoleError.add("\n")
+
+        /*    consoleError.add("=== - FCL v1.7.1 - ===")
+            consoleError.add("\n")
+            consoleError.add("Dose: ${round(fclAdvice.dose,2)}")
+            consoleError.add("Should Deliver Bolus: ${fclAdvice.shouldDeliverBolus}")
+            consoleError.add("Reason: ${fclAdvice.reason}")
+            consoleError.add("Confidence: ${round(fclAdvice.confidence*100)}%")
+            var bg_pred = fclAdvice.predictedValue?.let { round(it, 1) }
+            consoleError.add("Voorspelling: ${bg_pred ?: "nvt"}")
+            consoleError.add("Phase: ${fclAdvice.phase}")
+            consoleError.add("Meal Detected: ${fclAdvice.mealDetected}")
+            var det_carbs = fclAdvice.detectedCarbs?.let { round(it, 1) }
+            consoleError.add("Detected Carbs: ${det_carbs}g")
+            var det_cob = fclAdvice.carbsOnBoard?.let { round(it, 0) }
+            consoleError.add("COB: ${det_cob}g")
+            consoleError.add("\n")    */
 
 
         val learningStatus = fcl.getLearningStatus()
@@ -831,7 +854,7 @@ class DetermineBasalFCL @Inject constructor(
         }
 
 // *************************************************************************************************************************8
-
+// *************************************************************************************************************************8
 
         if (FCL_SMB > 0.0 && fclAdvice.shouldDeliverBolus) {
 
@@ -844,17 +867,23 @@ class DetermineBasalFCL @Inject constructor(
             }
             FCL_SMB = Math.min(preferences.get(DoubleKey.max_bolus),FCL_SMB)
 
-            if (fclAdvice.detectedCarbs >99 ) {rT.rate = basal } else {rT.rate = 0.0}
+
+            rT.rate = when (fclAdvice.mathPhase) {
+                "early_rise" -> basal/2
+                "mid_rise" -> basal/3
+                "late_rise" -> basal/4
+                 else -> 0.0
+            }
+            if (fclAdvice.detectedCarbs >99 ) {rT.rate = basal/2 } else {rT.rate = 0.0}
 
             rT.deliverAt = deliverAt
             rT.duration = 30
-            if (fclAdvice.detectedCarbs >99 ) {rT.rate = basal/2 } else {rT.rate = 0.0}
-            // rT.rate = 0.0    // basal / 2
+
             rT.units = FCL_SMB
             return rT
         }
 // *************************************************************************************************************************8
-
+// *************************************************************************************************************************8
       //  consoleError.add("UAM Impact: $uci mg/dL per 5m; UAM Duration: $UAMduration hours")
         consoleLog.add("EventualBG is $eventualBG ;")
 
@@ -1047,9 +1076,7 @@ class DetermineBasalFCL @Inject constructor(
         }
 
         consoleError.add("BG projected to remain above ${convert_bg(min_bg)} for $minutesAboveMinBG minutes")
-     //   if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
-     //       consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
-     //   }
+
         // include at least minutesAboveThreshold worth of zero temps in calculating carbsReq
         // always include at least 30m worth of zero temp (carbs to 80, low temp up to target)
         val zeroTempDuration = minutesAboveThreshold

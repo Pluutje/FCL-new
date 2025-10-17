@@ -72,13 +72,15 @@ enum class IntKey(
 
 
     stap_activiteteitPerc("stap_activiteteitPerc", 50,10,100),
-    stap_5minuten("stap_5minuten", 200,100,300),
+    stap_5minuten("stap_5minuten", 200,100,400),
     stap_retentie("stap_retentie", 6,2,12),
 
     bolus_perc_day("bolus_perc_day", 100,10,200),
-    bolus_perc_night("bolus_perc_night", 20,5,50),
+    bolus_perc_night("bolus_perc_night", 20,5,100),
     bolus_perc_early("bolus_perc_early", 100,10,200),
-    bolus_perc_late("bolus_perc_late", 100,10,200),
+    bolus_perc_mid("bolus_perc_mid", 60,10,200),
+    bolus_perc_late("bolus_perc_late", 30,10,200),
+    IOB_corr_perc("IOB_corr_perc", 100,50,150),
 
     carb_percentage("carb_percentage", 100,10,200),
     peak_damping_percentage("peak_damping_percentage", 50,10,100),

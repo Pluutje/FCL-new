@@ -14,6 +14,7 @@ import com.google.gson.reflect.TypeToken
 import java.io.File
 import java.util.Date
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
@@ -59,6 +60,8 @@ class FCL@Inject constructor(
         fun resetAllLearningData()
         fun saveCurrentCOB(cob: Double)
         fun saveCurrentResistance(resistance: Double)
+        fun saveStapRetentie(retentie: Int)
+        fun loadStapRetentie(): Int
     }
 
     // Android implementatie met geïsoleerde storage
@@ -137,6 +140,14 @@ class FCL@Inject constructor(
             val actualDrop: Double,
             val outcome: String
         )
+
+        override fun saveStapRetentie(retentie: Int) {
+            prefs.edit().putInt("stap_retentie", retentie).apply()
+        }
+
+        override fun loadStapRetentie(): Int {
+            return prefs.getInt("stap_retentie", 0)
+        }
 
         override fun saveMealPerformanceResult(result: MealPerformanceResult) {
             val current = loadMealPerformanceResultsSerializable().toMutableList()
@@ -218,18 +229,18 @@ class FCL@Inject constructor(
         override fun saveCurrentCOB(cob: Double) {
             try {
                 prefs.edit().putFloat("current_cob", cob.toFloat()).apply()
-                android.util.Log.d("FCL_COB", "COB saved to prefs: ${cob}g")
+
             } catch (e: Exception) {
-                android.util.Log.e("FCL_COB", "Error saving COB to prefs", e)
+
             }
         }
 
         override fun saveCurrentResistance(resistance: Double) {
             try {
                 prefs.edit().putFloat("current_resistance", resistance.toFloat()).apply()
-                android.util.Log.d("FCL_RESISTENCE", "Resistance saved to prefs: ${(resistance * 100).toInt()}%")
+
             } catch (e: Exception) {
-                android.util.Log.e("FCL_RESISTENCE", "Error saving resistance to prefs", e)
+
             }
         }
 
@@ -277,10 +288,10 @@ class FCL@Inject constructor(
                 if (now - lastBackup > backupIntervalMs) {
                     backupFile.writeText(json)
                     backupMeta.writeText(now.toString())
-                    android.util.Log.d("FCL", "Backup updated at ${Date(now)}")
+
                 }
             } catch (e: Exception) {
-                android.util.Log.e("FCL", "Error saving learning profile", e)
+
             }
         }
 
@@ -290,7 +301,7 @@ class FCL@Inject constructor(
             return try {
                 val json = prefs.getString("learning_profile", null)
                     ?: if (backupFile.exists()) {
-                        android.util.Log.w("FCL", "Prefs empty, loading backup")
+
                         backupFile.readText()
                     } else return null
 
@@ -304,7 +315,7 @@ class FCL@Inject constructor(
                     totalLearningSamples = s.totalLearningSamples,
                 )
             } catch (e: Exception) {
-                android.util.Log.e("FCL", "Error loading learning profile", e)
+
                 null
             }
         }
@@ -468,6 +479,7 @@ class FCL@Inject constructor(
                 // Verwijder alle shared preferences keys
                 prefs.edit().clear().apply()
 
+
                 // Verwijder backup files
                 if (backupFile.exists()) {
                     backupFile.delete()
@@ -476,9 +488,9 @@ class FCL@Inject constructor(
                     backupMeta.delete()
                 }
 
-                android.util.Log.d("FCL", "All learning data reset successfully")
+
             } catch (e: Exception) {
-                android.util.Log.e("FCL", "Error resetting learning data", e)
+
             }
         }
 
@@ -499,11 +511,7 @@ class FCL@Inject constructor(
         val log: String
     )
 
-   data class StepsCount(
-       val timestamp: Long,
-       val steps5min: Int,
-       val steps30min: Int
-    )
+
 
     data class MealResponseData(
         val timestamp: DateTime,
@@ -609,7 +617,19 @@ class FCL@Inject constructor(
         val ISF_adjust: Double = 0.0,
         val activityLog: String = "",
         val resistentieLog: String = "",
-        val effectiveISF: Double = 0.0
+        val effectiveISF: Double = 0.0,
+        val MathBolusAdvice: String = "",
+        // ★★★ NIEUWE VELDEN VOOR WISKUNDIGE FASE HERKENNING ★★★
+        val mathPhase: String = "uncertain",
+        val mathSlope: Double = 0.0,
+        val mathAcceleration: Double = 0.0,
+        val mathConsistency: Double = 0.0,
+        val mathDirectionConsistency: Double = 0.0,
+        val mathMagnitudeConsistency: Double = 0.0,
+        val mathPatternConsistency: Double = 0.0,
+        val mathDataPoints: Int = 0,
+        val usedFallback: Boolean = false,
+        val debugLog: String = ""
     )
 
     data class LearningMetrics(
@@ -667,12 +687,26 @@ class FCL@Inject constructor(
         val acceleration: Double
     )
 
+    // ★★★ WISKUNDIGE FASE HERKENNING DATA CLASSES ★★★
+    data class RobustTrendAnalysis(
+        val firstDerivative: Double,  // mmol/L per uur (helling)
+        val secondDerivative: Double, // mmol/L per uur² (versnelling)
+        val consistency: Double,      // 0-1 betrouwbaarheidsscore
+        val phase: String = "uncertain"
+    )
+
+    data class MathematicalBolusAdvice(
+        val immediatePercentage: Double,
+        val reservedPercentage: Double,
+        val reason: String
+    )
+
     // Configuration properties
     private var currentBg: Double = 5.5
     private var currentCR: Double = 7.0
     private var currentISF: Double = 8.0
     private var Target_Bg: Double = 5.2
-    private var StapRetentie: Int = 0
+
 
     private val persistentLogHistory = mutableListOf<String>()
     private val MAX_LOG_HISTORY = 5
@@ -690,8 +724,13 @@ class FCL@Inject constructor(
     private var mealInProgress = false
     private var peakDetected = false
     private var mealDetectionState = MealDetectionState.NONE
-    private var lastMealDetectionTime: DateTime? = null
-    private var lastRiseDetectionTime: DateTime? = null
+
+    // ★★★ DEBUG VARIABELEN VOOR CSV ★★★
+    private var lastMealDetectionDebug: String = ""
+    private var lastCOBDebug: String = ""
+    private var lastReservedBolusDebug: String = ""
+
+ //   private var lastRiseDetectionTime: DateTime? = null
 
     // ★★★ RESISTENTIE STATE TRACKING ★★★
     private var currentResistentieFactor: Double = 1.0
@@ -699,14 +738,16 @@ class FCL@Inject constructor(
     private var lastResistentieCalculation: DateTime? = null
     private val RESISTENTIE_CALCULATION_INTERVAL = 15 * 60 * 1000L // 15 minuten
 
+    // ★★★ FALLBACK TRACKING ★★★
+    private var usedFallback: Boolean = false
+    private var recentDataForAnalysis: List<BGDataPoint> = emptyList()
+
     // ★★★ NIEUW: Reserved bolus tracking ★★★
     private var pendingReservedBolus: Double = 0.0
     private var pendingReservedCarbs: Double = 0.0
     private var pendingReservedTimestamp: DateTime? = null
     private var pendingReservedPhase: String = "stable"
 
-    private val MEAL_DETECTION_COOLDOWN_MINUTES = 45
-    private var lastBolusTime: DateTime? = null
 
     // Progressieve bolus tracking
     private val activeMeals = mutableListOf<ActiveCarbs>()
@@ -714,24 +755,31 @@ class FCL@Inject constructor(
     private val pendingCorrectionUpdates = mutableListOf<CorrectionUpdate>()
 
     // ★★★ STAPPEN GLOBALE VARIABELEN ★★★
-    private var recentSteps5Minutes = 1
-    private var recentSteps30Minutes = 1
+
     private var currentStappenPercentage: Double = 100.0
     private var currentStappenTargetAdjust: Double = 0.0
     private var currentStappenLog: String = "--- Steps activity ---\nStep counter switched OFF"
     private var lastStappenBerekeningsTijd: DateTime? = null
     private val STAPPEN_BEREKENING_INTERVAL = 5 * 60 * 1000L // 5 minuten in milliseconden
 
-    // Cache voor stappenresultaat per 5-minuten blok
-    private data class CachedStappenResult(val cacheKey: Long, val result: StappenResult)
-    private var cachedStappenResult: CachedStappenResult? = null
+
 
     // Learning system
     private val storage: FCLStorage = AndroidFCLStorage(context)
     private var learningProfile: FCLLearningProfile = storage.loadLearningProfile() ?: FCLLearningProfile()
+    private var StapRetentie: Int = storage.loadStapRetentie()
 
-    fun convert_bg(value: Double): String =
-        profileUtil.fromMgdlToStringInUnits(value).replace("-0.0", "0.0")
+    // ★★★ WISKUNDIGE FASE STATE TRACKING ★★★
+    private var lastRobustTrends: RobustTrendAnalysis? = null
+    private var lastMathBolusAdvice: String = ""
+    private var lastMathAnalysisTime: DateTime? = null
+
+    // ★★★ Tracking van laatste afgegeven bolus ★★★
+    private var lastDeliveredBolus: Double = 0.0
+    private var lastBolusReason: String = ""
+    private var lastBolusTime: DateTime? = null
+    private val MEAL_DETECTION_COOLDOWN_MINUTES = 45
+
 
     init {
       //  loadPreferences(context)
@@ -841,7 +889,7 @@ class FCL@Inject constructor(
             if (bgGem > 0) {
                 val rel_std = (bgStdDev / bgGem * 100).toInt()
                 val cf = calculateCorrectionFactor(bgGem, target, macht, rel_std)
-                val dateString = today.minusDays(index).toString(formatter)
+                val dateString = today.minusDays(index + 1).toString(formatter)
 
                 log_resistentie += " → $dateString : correctie percentage = ${(cf * 100).toInt()}%\n"
                 log_resistentie += "   ϟ Bg gem: ${round(bgGem, 1)}     ϟ Rel StdDev: $rel_std %.\n"
@@ -924,8 +972,7 @@ class FCL@Inject constructor(
             currentResistentieLog = result.log
             lastResistentieCalculation = now
 
-            android.util.Log.d("FCL_RESISTENTIE",
-                               "Resistentie updated: ${(currentResistentieFactor * 100).toInt()}%")
+
         }
     }
 
@@ -944,7 +991,10 @@ class FCL@Inject constructor(
                 pendingLearningUpdates.clear()
                 pendingCorrectionUpdates.clear()
                 activeMeals.clear()
-
+                // ★★★ RESET WISKUNDIGE STATE ★★★
+                lastRobustTrends = null
+                lastMathBolusAdvice = ""
+                lastMathAnalysisTime = null
 
             } catch (e: Exception) {
 
@@ -1039,7 +1089,7 @@ class FCL@Inject constructor(
     ): PersistentResult {
 
         // ★★★ DEBUG LOG TOEVOEGEN ★★★
-        android.util.Log.d("FCL_Persistent", "Checking persistent high BG: currentBG=${historicalData.lastOrNull()?.bg ?: 0.0}, IOB=$currentIOB")
+
 
         if (!preferences.get(BooleanKey.PersistentAanUit)) {
             return PersistentResult(0.0, "Persistent high BG correction uitgeschakeld", false)
@@ -1072,8 +1122,6 @@ class FCL@Inject constructor(
         val maxBolus = if (isNacht) preferences.get(DoubleKey.persistent_Nacht_MaxBolus) else preferences.get(DoubleKey.persistent_Dag_MaxBolus)
         val dagDeel = if (isNacht) "NightTime" else "DayTime"
 
-        // ★★★ EXTRA DEBUG LOG ★★★
-        android.util.Log.d("FCL_Persistent", "Persistent analysis - $dagDeel: BG=$currentBG, threshold=$persistentDrempel, IOB=$currentIOB")
 
         var logEntries = mutableListOf<String>()
         logEntries.add("Persistent BG Analysis - $dagDeel")
@@ -1148,92 +1196,110 @@ class FCL@Inject constructor(
 
 
     fun berekenStappenAdjustment(): StappenResult {
-        // ★★★ CACHE STAPPENDATA PER 5 MINUTEN ★★★
-        val now = System.currentTimeMillis()
-        val cacheKey = now / (5 * 60 * 1000) // 5-minuten blok
 
-        // Als we recent dezelfde data hebben berekend, retourneer dan cached result
-        if (cachedStappenResult?.cacheKey == cacheKey) {
-            return cachedStappenResult!!.result
-        }
-
-
-        var log_Stappen = "--- Steps activity ---" + "\n"
+        StapRetentie = storage.loadStapRetentie()
+        var log_Stappen = ""
         var stap_perc = 100.0
         var stap_target_adjust = 0.0
         val nowTime = System.currentTimeMillis()
-        val timeMillis5 = now - 5 * 60 * 1000
-        val timeMillis30 = now - 30 * 60 * 1000
-        val timeMillis180 = now - 180 * 60 * 1000 // Terug naar 180 minuten zoals origineel
+        val timeMillis5 = nowTime - 5 * 60 * 1000
+        val timeMillis30 = nowTime - 30 * 60 * 1000
+        val timeMillis180 = nowTime - 180 * 60 * 1000
 
-        // ★★★ VERWIJDER OVERBODIGE CHECK - stappenAanUit wordt al buiten gecontroleerd ★★★
-        val allStepsCounts = persistenceLayer.getStepsCountFromTimeToTime(timeMillis180, nowTime)
+        // ★★★ BEREKEN EFFECTIEF TARGET ★★★
+        val baseTarget = Target_Bg
+        val activityTarget = Target_Bg + preferences.get(DoubleKey.stap_TT)
+       // val effectiveTarget = if (stap_perc < 100.0) activityTarget else baseTarget
 
+        // ★★★ ALLEEN 30-MINUTEN STAPPEN ★★★
+      //  val allStepsCounts = persistenceLayer.getStepsCountFromTimeToTime(timeMillis30, nowTime)
+        val allStepsCounts = persistenceLayer.getStepsCountFromTime(timeMillis180)
         var localRecentSteps5Minutes = 0
         var localRecentSteps30Minutes = 0
-
         allStepsCounts.forEach { stepCount ->
-            val timestamp = stepCount.timestamp
-            if (timestamp >= timeMillis5) {
+            if (stepCount.timestamp >= timeMillis5) {
                 localRecentSteps5Minutes = stepCount.steps5min
             }
-            if (timestamp >= timeMillis30) {
+            if (stepCount.timestamp >= timeMillis30) {
                 localRecentSteps30Minutes = stepCount.steps30min
             }
         }
 
-        val min5Stap = preferences.get(IntKey.stap_5minuten)
-        val min30Stap = ((min5Stap * 30 / 5)/1.6).toInt()
+        // ★★★ DYNAMISCHE THRESHOLDS ★★★
+        val Threshold5 = round((preferences.get(IntKey.stap_5minuten) * 0.8),0)
+        val basisThreshold30 = preferences.get(IntKey.stap_5minuten) * 6
+        val maxThreshold = basisThreshold30 * 2
+        val retentieStappen = preferences.get(IntKey.stap_retentie)
 
-        val thresholds = mapOf(
-            " 5 minutes" to min5Stap,
-            "30 minutes" to min30Stap
-        )
-
-        var allThresholdsMet = true
-        thresholds.forEach { (label, threshold) ->
-            val steps = when (label) {
-                " 5 minutes" -> localRecentSteps5Minutes
-                "30 minutes" -> localRecentSteps30Minutes
-                else -> 0
-            }
-            log_Stappen += " ● $label: $steps steps ${if (steps >= threshold) ">= threshold ($threshold)" else "< threshold ($threshold)"}\n"
-            if (steps < threshold) allThresholdsMet = false
+        val huidigeThreshold = when {
+            StapRetentie == 0 -> basisThreshold30
+            StapRetentie == 1 -> (basisThreshold30 * 1.5).toInt()
+            else -> maxThreshold
         }
 
-        if (allThresholdsMet) {
-            StapRetentie = (StapRetentie + 1).coerceAtMost(preferences.get(IntKey.stap_retentie))
-            log_Stappen += " ↗ above threshold. ($StapRetentie times).\n"
+
+        log_Stappen += " ● 5 minutes: $localRecentSteps5Minutes steps\n"
+        log_Stappen += "   Threshold: $Threshold5 \n"
+        log_Stappen += " ● 30 minutes: $localRecentSteps30Minutes steps\n"
+        log_Stappen += "   Threshold: $huidigeThreshold (basis: $basisThreshold30, max: $maxThreshold)\n"
+        log_Stappen += "   Retention: $StapRetentie/$retentieStappen\n"
+
+        // ★★★ VERBETERDE DETECTIE LOGICA ★★★
+
+
+        if ((localRecentSteps30Minutes > huidigeThreshold.toDouble()) && (localRecentSteps5Minutes > Threshold5)) {
+            StapRetentie = (StapRetentie + 1).coerceAtMost(retentieStappen)
+            storage.saveStapRetentie(StapRetentie)
+
+            when (StapRetentie) {
+                1 -> log_Stappen += " ↗ Initial activity detected\n"
+                retentieStappen -> log_Stappen += " ↗ Maximum retention reached\n"
+                else -> log_Stappen += " ↗ Building retention\n"
+            }
         } else {
-            log_Stappen += " → below threshold.\n"
-            if (StapRetentie > 0) {
+            val afbouwSnelheid = when {
+                StapRetentie >= 3 -> 0.3
+                StapRetentie == 2 -> 0.5
+                else -> 1.0
+            }
+
+            val shouldDecrease = Math.random() < afbouwSnelheid
+
+            if (shouldDecrease && StapRetentie > 0) {
                 StapRetentie = StapRetentie - 1
+                storage.saveStapRetentie(StapRetentie)
+                log_Stappen += when {
+                    StapRetentie == 0 -> " ↘ Activity stopped\n"
+                    else -> " ↘ Decreasing retention (slow decay)\n"
+                }
+            } else if (StapRetentie > 0) {
+                log_Stappen += " → Below threshold but maintaining retention\n"
+            } else {
+
+                log_Stappen += ""
             }
         }
 
+        // ★★★ ACTIVITEIT TOEPASSEN MET TARGET IN LOG ★★★
         if (StapRetentie > 0) {
-            if (allThresholdsMet) {
-                stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toDouble()
-                log_Stappen += " ● above threshold → Insulin perc. $stap_perc %.\n"
-                stap_target_adjust = preferences.get(DoubleKey.stap_TT)
-            } else {
-                stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toDouble()
-                log_Stappen += " ● $StapRetentie times retention → Insulin perc. $stap_perc %.\n"
-                stap_target_adjust = preferences.get(DoubleKey.stap_TT)
+            stap_perc = preferences.get(IntKey.stap_activiteteitPerc).toDouble()
+            stap_target_adjust = preferences.get(DoubleKey.stap_TT)
+
+            when (StapRetentie) {
+                1 -> log_Stappen += " ● Initial activity → Insulin $stap_perc% → Target: ${"%.1f".format(activityTarget)} mmol/L\n"
+                2 -> log_Stappen += " ● Medium retention → Insulin $stap_perc% → Target: ${"%.1f".format(activityTarget)} mmol/L\n"
+                else -> log_Stappen += " ● High retention → Insulin $stap_perc% → Target: ${"%.1f".format(activityTarget)} mmol/L\n"
             }
         } else {
             stap_perc = 100.0
-            log_Stappen += " ● No activitity → Insulin perc. $stap_perc %.\n"
-            stap_target_adjust = 0.0
+            log_Stappen += " ● No activity → Insulin $stap_perc% → Target: ${"%.1f".format(baseTarget)} mmol/L\n"
         }
 
-        recentSteps5Minutes = localRecentSteps5Minutes
-        recentSteps30Minutes = localRecentSteps30Minutes
+     //   recentSteps30Minutes = localRecentSteps30Minutes
+
 
         val result = StappenResult(stap_perc, stap_target_adjust, log_Stappen)
 
-        // Cache het resultaat
-        cachedStappenResult = CachedStappenResult(cacheKey, result)
         return result
     }
 
@@ -1250,8 +1316,7 @@ class FCL@Inject constructor(
             currentStappenLog = stappenResult.log  // ← LOG OPSLAAN
             lastStappenBerekeningsTijd = now
 
-            android.util.Log.d("FCL_STAPPEN",
-                               "Stappen updated: ${currentStappenPercentage}%, target adjust: ${currentStappenTargetAdjust}")
+
         } else if (!preferences.get(BooleanKey.stappenAanUit)) {
             // ★★★ RESET BIJ UITGESCHAKELDE STAPPEN ★★★
             currentStappenPercentage = 100.0
@@ -1275,83 +1340,134 @@ class FCL@Inject constructor(
             "    No meal data yet"
         }
 
-        var StapOnOff = ""
-        if(preferences.get(BooleanKey.stappenAanUit)) { StapOnOff = " - Step counter switched ON" }
-        else { StapOnOff = " - Step counter switched OFF" }
+        // ★★★ VERVANGDE STAPPEN WEERGAVE - GEBRUIK DIRECT DE LOG ★★★
+        val stappenStatus = if (preferences.get(BooleanKey.stappenAanUit)) {
+            // Toon de complete stappenlog
+            currentStappenLog
+        } else {
+            "Step counter switched OFF"
+        }
 
         var PersiOnOff = ""
-        if(preferences.get(BooleanKey.PersistentAanUit)) { PersiOnOff = " - Persistent Bg detection switched ON" }
-        else { PersiOnOff = " - Persistent Bg detection switched OFF" }
+        if (preferences.get(BooleanKey.PersistentAanUit)) {
+            PersiOnOff = " - Persistent Bg detection switched ON"
+        } else {
+            PersiOnOff = " - Persistent Bg detection switched OFF"
+        }
+
+
 
         return """
-    FCL Learning Status:
-    - Last Updated: ${learningProfile.lastUpdated.toString("dd-MM-yyyy HH:mm")}
-    - Confidence: ${(learningProfile.learningConfidence * 100).toInt()}%
-    - Samples: ${learningProfile.totalLearningSamples}
-    - Reset Learning: ${preferences.get(BooleanKey.ResetLearning)}
-    
-    -- RESISTENTIE --
-    ${currentResistentieLog.split("\n").joinToString("\n    ") { it }}
-    
-    -- LEARNING --
-    - Carb Ratio Adjustment: ${round(learningProfile.personalCarbRatio, 2)}
-    - Current Meal Factor: ${round(learningProfile.getMealTimeFactor(currentHour), 2)}
-   
-   -- SETTINGS ---
-    - CR ISF Adjustement range:  ${round(preferences.get(DoubleKey.CarbISF_min_Factor),2)} - ${round(preferences.get(DoubleKey.CarbISF_max_Factor),2)} 
-    - Max Bolus: ${round(preferences.get(DoubleKey.max_bolus),2)}U
-    - Bolus %: ${Day_Night} → ${getCurrentBolusAggressiveness().toInt()}% 
-        
-    - Early Rise %:${preferences.get(IntKey.bolus_perc_early)}%
-    - Late Rise %:${preferences.get(IntKey.bolus_perc_late)}%
-    - Peak Damping %: ${preferences.get(IntKey.peak_damping_percentage)}%
-    - Hypo Risk %: ${preferences.get(IntKey.hypo_risk_percentage)}%
-                
-    - Carb Calc %: ${preferences.get(IntKey.carb_percentage)}%
-    - Carb abs. time: ${preferences.get(IntKey.tau_absorption_minutes)}min
-    - mealDetection Sens: ${round(preferences.get(DoubleKey.meal_detection_sensitivity),2)} mmol/l/5min
-    
-    -- DAY/NIGHT Timing --
-       - Ochtend start: ${preferences.get(StringKey.OchtendStart)} (weekend: ${preferences.get(StringKey.OchtendStartWeekend)})
-       - Nacht start: ${preferences.get(StringKey.NachtStart)}
-       - Weekend dagen: ${preferences.get(StringKey.WeekendDagen)}
-    
-    -- HYPO SETTINGS --
-       - Hypo threshold: ${round(gethypoThreshold(),1)}mmol/l
-       - Hypo recover range: ${round(gethypoThreshold(),1)}-${round(gethypoThreshold()+preferences.get(DoubleKey.hypoRecoveryBGRange),1)}mmol/l
-       - Hypo recovery time: ${preferences.get(IntKey.hypoRecoveryMinutes)}min
-       - Hypo Recovery Aggressiveness: ${(preferences.get(DoubleKey.hypo_recovery_aggressiveness) * 100).toInt()}%
-       - Recovery Days Range: ${preferences.get(IntKey.min_recovery_days)} - ${preferences.get(IntKey.max_recovery_days)} days
-    
-    -- PERSISTENT HIGH BG SETTINGS --
-       ${PersiOnOff}
-       - Dag Drempel: ${"%.1f".format(preferences.get(DoubleKey.persistent_Dagdrempel))} mmol/L
-       - Nacht Drempel: ${"%.1f".format(preferences.get(DoubleKey.persistent_Nachtdrempel))} mmol/L
-       - Max Bolus: Dag ${"%.2f".format(preferences.get(DoubleKey.persistent_Dag_MaxBolus))}U, Nacht ${"%.2f".format(preferences.get(DoubleKey.persistent_Nacht_MaxBolus))}U
-       - Vaste stabiliteitsgrens: ${"%.1f".format(persistentGrens)} mmol/L
-       - Bolus cooldown: ${preferences.get(IntKey.persistent_CoolDown)}min
-              
-      -- RECENT CHECKS (last ${MAX_LOG_HISTORY}) 
-        ${if (persistentLogHistory.isEmpty()) "No recent checks" else persistentLogHistory.joinToString("\n  ") { it.trim() }}
-      
-    -- STEP/ACTIVITY SETTINGS --
-       ${StapOnOff}
-       - 5 minutes steps: ${recentSteps5Minutes} threshold: ${preferences.get(IntKey.stap_5minuten)}
-       - 30 minutes steps: ${recentSteps30Minutes} threshold: ${((preferences.get(IntKey.stap_5minuten) * 30 / 5)/1.6).toInt()}
-       - Retentie: max ${preferences.get(IntKey.stap_retentie)} cycli, current: $StapRetentie
-       - Activiteit Percentage: ${preferences.get(IntKey.stap_activiteteitPerc)}%
-       - Activiteit Target: ${"%.1f".format(Target_Bg + preferences.get(DoubleKey.stap_TT))} mmol/L
-        
-        
-    -- RECENT MEAL PERFORMANCE --
-    $mealPerformanceSummary
-                
-    MEAL TIME FACTORS:
-    ${learningProfile.mealTimingFactors.entries.joinToString("\n    ") {"${it.key.padEnd(10)}: ${round(it.value, 2)}" }}
-    
-    """.trimIndent()
-    }
+╔═══════════════════
+║  ══ FCL v1.1.1 ══ 
+╚═══════════════════
 
+🎯 LAATSTE BOLUS BESLISSING
+─────────────────────
+• Fase/advies: ${lastMathBolusAdvice?.take(100) ?: "Geen berekend"}${if (lastMathBolusAdvice?.length ?: 0 > 100) "..." else ""}
+• Laatste update: ${lastMathAnalysisTime?.toString("HH:mm:ss") ?: "Nooit"}
+
+[💉 AFGEGEVEN BOLUS]
+• Laatste bolus: ${"%.2f".format(lastDeliveredBolus)}U
+• Reden: ${lastBolusReason.take(80)}${if (lastBolusReason.length > 80) "..." else ""}
+• Tijd: ${lastBolusTime?.toString("HH:mm:ss") ?: "Geen"}
+
+[💾 GERESERVEERDE BOLUS]
+• Huidig gereserveerd: ${"%.2f".format(pendingReservedBolus)}U
+• Bijbehorende carbs: ${"%.1f".format(pendingReservedCarbs)}g
+• Sinds: ${pendingReservedTimestamp?.toString("HH:mm") ?: "Geen"}
+
+
+📈 FASE DETECTIE & BEREKENINGEN
+─────────────────────
+[ WISKUNDIGE ANALYSE ]
+• Fase: ${lastRobustTrends?.phase ?: "Niet berekend"}
+• Helling: ${"%.2f".format(lastRobustTrends?.firstDerivative ?: 0.0)} mmol/L/uur
+• Versnelling: ${"%.2f".format(lastRobustTrends?.secondDerivative ?: 0.0)} mmol/L/uur²
+• Consistentie: ${((lastRobustTrends?.consistency ?: 0.0) * 100).toInt()}%
+• Datapunten gebruikt: ${recentDataForAnalysis.size}
+• Fallback gebruikt: ${if (usedFallback) "JA" else "NEE"}
+
+[ BOLUS ADVIES DETAILS ]
+${lastMathBolusAdvice ?: "Geen wiskundig advies berekend"}
+
+🛡️ VEILIGHEIDSSYSTEEM
+─────────────────────
+[ PERSISTENTE HOGE BG ]
+${PersiOnOff}
+• Dag drempel: ${"%.1f".format(preferences.get(DoubleKey.persistent_Dagdrempel))} mmol/L
+• Nacht drempel: ${"%.1f".format(preferences.get(DoubleKey.persistent_Nachtdrempel))} mmol/L
+• Max bolus: Dag ${"%.2f".format(preferences.get(DoubleKey.persistent_Dag_MaxBolus))}U, Nacht ${"%.2f".format(preferences.get(DoubleKey.persistent_Nacht_MaxBolus))}U
+• Stabiliteitsgrens: ${"%.1f".format(persistentGrens)} mmol/L
+• Cooldown: ${preferences.get(IntKey.persistent_CoolDown)} min
+
+[ PERSISTENTE CHECKS (laatste ${MAX_LOG_HISTORY}) ]
+${if (persistentLogHistory.isEmpty()) "Geen recente checks" else persistentLogHistory.joinToString("\n  ") { it.trim() }}
+
+[ HYPO BESCHERMING ]
+• Hypo drempel: ${round(gethypoThreshold(), 1)} mmol/L
+• Herstelbereik: ${round(gethypoThreshold(), 1)}-${round(gethypoThreshold() + preferences.get(DoubleKey.hypoRecoveryBGRange), 1)} mmol/L
+• Hersteltijd: ${preferences.get(IntKey.hypoRecoveryMinutes)} min
+• Herstel agressiviteit: ${(preferences.get(DoubleKey.hypo_recovery_aggressiveness) * 100).toInt()}%
+• Hersteldagen: ${preferences.get(IntKey.min_recovery_days)} - ${preferences.get(IntKey.max_recovery_days)} dagen
+
+⚙️ INSTELLINGEN & CONFIGURATIE
+─────────────────────
+[ BOLUS INSTELLINGEN ]
+• Overall Aggressiveness: ${Day_Night} → ${getCurrentBolusAggressiveness().toInt()}% 
+• Early Rise: ${preferences.get(IntKey.bolus_perc_early)}% → ${(preferences.get(IntKey.bolus_perc_early).toDouble() * getCurrentBolusAggressiveness() / 100.0).toInt()}%
+• Mid Rise: ${preferences.get(IntKey.bolus_perc_mid)}% → ${(preferences.get(IntKey.bolus_perc_mid).toDouble() * getCurrentBolusAggressiveness() / 100.0).toInt()}%
+• Late Rise: ${preferences.get(IntKey.bolus_perc_late)}% → ${(preferences.get(IntKey.bolus_perc_late).toDouble() * getCurrentBolusAggressiveness() / 100.0).toInt()}%
+• Max bolus: ${round(preferences.get(DoubleKey.max_bolus), 2)}U
+
+[ FASE DETECTIE INSTELLINGEN ]
+• Vroege stijging: ${round(preferences.get(DoubleKey.phase_early_rise_slope), 1)} mmol/L/uur
+• Mid stijging: ${round(preferences.get(DoubleKey.phase_mid_rise_slope), 1)} mmol/L/uur  
+• Late stijging: ${round(preferences.get(DoubleKey.phase_late_rise_slope), 1)} mmol/L/uur
+• Piekgrens: ${round(preferences.get(DoubleKey.phase_peak_slope), 1)} mmol/L/uur
+• Vroege versnelling: ${round(preferences.get(DoubleKey.phase_early_rise_accel), 1)}
+• Minimale consistentie: ${(preferences.get(DoubleKey.phase_min_consistency) * 100).toInt()}%
+
+[ MAALTIJD INSTELLINGEN ]
+• Carb berekening: ${preferences.get(IntKey.carb_percentage)}%
+• Absorptietijd: ${preferences.get(IntKey.tau_absorption_minutes)} min
+• Detectie sensitiviteit: ${round(preferences.get(DoubleKey.meal_detection_sensitivity), 2)} mmol/L/5min
+• Piek demping: ${preferences.get(IntKey.peak_damping_percentage)}%
+• Hypo risico: ${preferences.get(IntKey.hypo_risk_percentage)}%
+• CR/ISF aanpassingsbereik: ${round(preferences.get(DoubleKey.CarbISF_min_Factor), 2)} - ${round(preferences.get(DoubleKey.CarbISF_max_Factor), 2)}
+
+[ TIJDINSTELLINGEN ]
+• Ochtend start: ${preferences.get(StringKey.OchtendStart)} (weekend: ${preferences.get(StringKey.OchtendStartWeekend)})
+• Nacht start: ${preferences.get(StringKey.NachtStart)}
+• Weekend dagen: ${preferences.get(StringKey.WeekendDagen)}
+
+📊 LEARNING SYSTEEM
+─────────────────────
+• Laatste update: ${learningProfile.lastUpdated.toString("dd-MM-yyyy HH:mm")}
+• Betrouwbaarheid: ${(learningProfile.learningConfidence * 100).toInt()}%
+• Leersamples: ${learningProfile.totalLearningSamples}
+• Reset learning: ${preferences.get(BooleanKey.ResetLearning)}
+• Carb ratio aanpassing: ${round(learningProfile.personalCarbRatio, 2)}
+• Huidige maaltijdfactor: ${round(learningProfile.getMealTimeFactor(currentHour), 2)}
+
+[ MAALTIJD FACTOREN ]
+${learningProfile.mealTimingFactors.entries.joinToString("\n  ") { "${it.key.padEnd(10)}: ${round(it.value, 2)}" }}
+
+[ ACTIVITEIT DETECTIE ]
+${stappenStatus.split("\n").joinToString("\n  ") { it }}
+
+🔄 RESISTENTIE ANALYSE
+─────────────────────
+${currentResistentieLog.split("\n").joinToString("\n  ") { it }}
+
+📈 RECENTE ACTIVITEIT
+─────────────────────
+[ MAALTIJD PRESTATIES ]
+$mealPerformanceSummary
+
+""".trimIndent()
+
+    }
 
     // ★★★ VERVANG DE BESTAANDE PIEKDETECTIE ★★★
     private fun detectPeaksFromHistoricalData() {
@@ -1409,7 +1525,7 @@ class FCL@Inject constructor(
                     )
                     processed.add(update)
                 } catch (ex: Exception) {
-                    android.util.Log.e("FCL", "Error in peak-based learning", ex)
+
                 }
             }
         }
@@ -1570,8 +1686,7 @@ class FCL@Inject constructor(
     }
 
 
-    // Meal detection functie
-    fun detectMealFromBG(
+    private fun detectMealFromBG(
         historicalData: List<BGDataPoint>,
         currentBG: Double,
         mealDetectionSensitivity: Double,
@@ -1580,96 +1695,49 @@ class FCL@Inject constructor(
         targetBG: Double
     ): Pair<Double, MealDetectionState> {
 
-        val trends = analyzeTrends(historicalData)
-        if (shouldBlockMealDetectionForHypoRecovery(currentBG, historicalData, trends)) {
-            return Pair(0.0, MealDetectionState.NONE)
-        }
-
-
-        // ★★★ VERBETERDE COOLDOWN LOGICA ★★★
-
-        val isRapidRise = trends.recentTrend > 2.0 || trends.shortTermTrend > 2.5
-        val isHighBG = currentBG > targetBG + 2.0
-
-// ★★★ GEEN COOLDOWN BIJ SNEL STIJGEN OF HOGE BG ★★★
-        if (!isRapidRise && !isHighBG && currentBG <= targetBG + 1.0) {
-            lastMealDetectionTime?.let { lastTime ->
-                val minutesSinceLast = Minutes.minutesBetween(lastTime, DateTime.now()).minutes
-                if (minutesSinceLast < MEAL_DETECTION_COOLDOWN_MINUTES) {
-                    return Pair(0.0, MealDetectionState.NONE)
-                }
-            }
-        }
         if (historicalData.size < 4) return Pair(0.0, MealDetectionState.NONE)
 
+        val bg10minAgo = historicalData.getOrNull(historicalData.size - 3)?.bg ?: currentBG
+        val delta10 = currentBG - bg10minAgo
 
-        val bg15minAgo = historicalData[historicalData.size - 4].bg
-        val delta15 = currentBG - bg15minAgo
-        val slope15 = delta15 / 15.0 * 60.0 // mmol/L per uur
         val effectiveCR = getEffectiveCarbRatio()
-
-
         val predictedRiseFromCOB = estimateRiseFromCOB(
             effectiveCR = effectiveCR,
             tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes),
-            detectionWindowMinutes = 60  // kan parameteriseerbaar gemaakt worden
+            detectionWindowMinutes = 45
         )
 
-        val unexplainedDelta = delta15 - predictedRiseFromCOB
+        val unexplainedDelta = delta10 - predictedRiseFromCOB
 
         var localDetectedCarbs = 0.0
         var detectedState = MealDetectionState.NONE
+        var debugInfo = ""
 
-        // === 1. Normale meal-detectie ===
-        if (unexplainedDelta > mealDetectionSensitivity) {
+        if (unexplainedDelta > mealDetectionSensitivity * 0.7) {
             localDetectedCarbs = unexplainedDelta * effectiveCR * preferences.get(IntKey.carb_percentage).toDouble()/100.0
-            detectedState = MealDetectionState.RISING
-
+            detectedState = MealDetectionState.EARLY_RISE
+            debugInfo = "MEAL_DETECT: unexplainedDelta=$unexplainedDelta > threshold=${mealDetectionSensitivity * 0.7}, carbs=$localDetectedCarbs"
         }
 
-        // === 2. Trage stijging extensie ===
-        if (slope15 > 0.2 && delta15 > 0.5 && unexplainedDelta <= mealDetectionSensitivity) {
-            val cobNow = getCarbsOnBoard()
-            if (cobNow > 10.0) {
-                localDetectedCarbs += 10.0
-                detectedState = MealDetectionState.RISING
-
-            }
+        // ★★★ EXTRA: vang snelle stijgers eerder ★★★
+        val slope10 = delta10 / 10.0 * 60.0 // mmol/L per uur
+        if (detectedState == MealDetectionState.NONE && slope10 > 1.5 && currentBG > targetBG + 0.3) {
+            localDetectedCarbs = slope10 * 8.0
+            detectedState = MealDetectionState.EARLY_RISE
+            debugInfo = "RAPID_RISE: slope=$slope10 > 1.5, carbs=$localDetectedCarbs"
         }
 
-        // === 3. Fallback meal-detectie bij stevige stijging ===
-        val hasRecentRisePattern = hasRecentRise(historicalData, 2) // Snellere detectie
-
-        if (detectedState == MealDetectionState.NONE) {
-            if (slope15 > 0.5 && currentBG > targetBG + 2.0) {
-                localDetectedCarbs = slope15 * 12.0 // Iets hoger voor snelle response
-                detectedState = MealDetectionState.RISING
-
-            } else if (hasRecentRisePattern && currentBG > targetBG + 1.5) {
-                // ★★★ NIEUW: Snellere detectie bij recente stijging ★★★
-                localDetectedCarbs = 15.0 + (slope15 * 8.0) // Basis + dynamisch component
-                detectedState = MealDetectionState.RISING
-               
-            }
-        }
-
-        // === 4. COB-correctie ===
-        val cobNow = getCarbsOnBoard()
-        if (cobNow < 10.0 && slope15 > 0.5 && unexplainedDelta > mealDetectionSensitivity) {
-            // Only add carbs if there's ACTUAL unexplained rise
-            localDetectedCarbs += min(10.0, unexplainedDelta * 8.0) // More conservative
-            detectedState = MealDetectionState.RISING
-        }
-
-        // ★★★ NIEUW: Update detection time bij succes ★★★
-        if (detectedState != MealDetectionState.NONE && localDetectedCarbs > 15) {
-            lastMealDetectionTime = DateTime.now()
+        // ★★★ OPSLAAN IN GLOBALE DEBUG VARIABELE ★★★
+        if (debugInfo.isNotEmpty()) {
+            lastMealDetectionDebug = debugInfo
+        } else {
+            lastMealDetectionDebug = "NO_MEAL: delta10=$delta10, slope10=$slope10, unexplainedDelta=$unexplainedDelta, threshold=${mealDetectionSensitivity * 0.7}"
         }
 
         return Pair(localDetectedCarbs, detectedState)
     }
 
-    // ★★★ NIEUW: Safety check voor meal detectie boven target ★★★
+    // ★★★ Safety check voor meal detectie boven target ★★★
     private fun canDetectMealAboveTarget(
         currentBG: Double,
         targetBG: Double,
@@ -1678,9 +1746,9 @@ class FCL@Inject constructor(
         MaxIOB: Double
     ): Boolean {
         return when {
-            currentBG > targetBG + 3.0 -> false  // Te hoog voor meal detectie
-            trends.recentTrend < -1.0 -> false    // Sterk dalend
-            currentIOB > MaxIOB * 0.62 -> false             // Te veel IOB
+            currentBG > targetBG + 5.0 -> false  // Verhoog van 3.0 naar 5.0
+            trends.recentTrend < -2.0 -> false    // Minder strict voor lichte daling
+            currentIOB > MaxIOB * 0.8 -> false   // Verhoog van 0.62 naar 0.8
             else -> true
         }
     }
@@ -1920,15 +1988,7 @@ class FCL@Inject constructor(
 
         storage.saveLearningProfile(learningProfile)
 
-        // LOGGING TOEVOEGEN
-   /*     logLearningUpdate(
-            detectedCarbs = detectedCarbs,
-            effectiveness = observedCarbRatioEffectiveness,
-            oldCarbRatio = learningProfile.personalCarbRatio,
-            newCarbRatio = newCarbRatio,
-            oldISF = learningProfile.personalISF,
-            newISF = 1.0
-        )  */
+
     }
 
     private fun calculateSimpleConfidence(): Double {
@@ -1944,21 +2004,6 @@ class FCL@Inject constructor(
         return successRate.coerceIn(0.1, 0.9)
     }
 
-  /*  private fun logLearningUpdate(
-        detectedCarbs: Double,
-        effectiveness: Double,
-        oldCarbRatio: Double,
-        newCarbRatio: Double,
-        oldISF: Double,
-        newISF: Double
-    ) {
-        println("DEBUG: Learning Update - Carbs: ${"%.1f".format(detectedCarbs)}g")
-        println("DEBUG: Effectiveness: ${"%.2f".format(effectiveness)}")
-        println("DEBUG: CarbRatio: ${"%.3f".format(oldCarbRatio)} -> ${"%.3f".format(newCarbRatio)}")
-        println("DEBUG: ISF: ${"%.3f".format(oldISF)} -> ${"%.3f".format(newISF)}")
-        println("DEBUG: Effective CR: ${"%.3f".format(getEffectiveCarbRatio())}")
-        println("DEBUG: Effective ISF: ${"%.3f".format(getEffectiveISF())}")
-    }   */
 
 
     private fun calculateLearningConfidence(): Double {
@@ -2039,14 +2084,6 @@ class FCL@Inject constructor(
         val finalConfidence = (baseConfidence + sampleBonus + timeCompensation)
             .coerceIn(0.0, 1.0)
 
-        // DEBUG LOGGING
-        android.util.Log.d("FCL_Confidence_Detailed",
-                           "Base: ${(baseConfidence * 100).toInt()}% " +
-                               "SampleBonus: ${(sampleBonus * 100).toInt()}% " +
-                               "RecentSamples: $totalRecentSamples " +
-                               "TotalSamples: ${learningProfile.totalLearningSamples} " +
-                               "Final: ${(finalConfidence * 100).toInt()}%"
-        )
 
         return finalConfidence
     }
@@ -2074,7 +2111,7 @@ class FCL@Inject constructor(
 
         // Als we veel samples hebben maar lage confidence, reset de berekening
         if (totalSamples > 30 && currentConfidence < 0.3) {
-            android.util.Log.w("FCL", "Confidence stagnation detected - recalculating")
+
 
             // Forceer herberekening met huidige data
             val recalculatedConfidence = calculateLearningConfidence()
@@ -2082,10 +2119,12 @@ class FCL@Inject constructor(
             if (recalculatedConfidence > currentConfidence) {
                 learningProfile = learningProfile.copy(learningConfidence = recalculatedConfidence)
                 storage.saveLearningProfile(learningProfile)
-                android.util.Log.d("FCL", "Confidence reset to ${(recalculatedConfidence * 100).toInt()}%")
+
             }
         }
     }
+
+
 
 
     private fun updateISFFromCorrectionResponse(
@@ -2099,37 +2138,8 @@ class FCL@Inject constructor(
     ) {
         if (givenCorrectionInsulin <= 0.0) return
 
-        val oldISFFactor = learningProfile.personalISF
-        val effectiveness = if (predictedDrop > 0.0) actualDrop / predictedDrop else 1.0
-
-        // VERBETERDE ISF BEREKENING
-        val expectedDropFromISF = givenCorrectionInsulin * currentISF
-        val observedISFEffectiveness = if (expectedDropFromISF > 0)
-            actualDrop / expectedDropFromISF
-        else 1.0
-
-        val newISFFactor = adaptiveUpdate(
-            oldValue = oldISFFactor,
-            observedValue = observedISFEffectiveness,
-            confidence = min(1.0, abs(observedISFEffectiveness - 1.0)),
-            baseAlpha = 0.05,
-            minValue = preferences.get(DoubleKey.CarbISF_min_Factor),
-            maxValue = preferences.get(DoubleKey.CarbISF_max_Factor)
-        )
-
-        val newConfidence = calculateLearningConfidence()
-
-        learningProfile = learningProfile.copy(
-            personalISF = newISFFactor,
-            lastUpdated = DateTime.now(),
-            totalLearningSamples = learningProfile.totalLearningSamples + 1,
-            learningConfidence = newConfidence
-        )
-
-        storage.saveLearningProfile(learningProfile)
-
-
         try {
+            // ★★★ ALLEEN PERFORMANCE TRACKING BEHOUDEN ★★★
             val outcome = when {
                 actualDrop > predictedDrop * 1.5 -> "TOO_AGGRESSIVE"
                 actualDrop < predictedDrop * 0.5 -> "TOO_CONSERVATIVE"
@@ -2156,10 +2166,6 @@ class FCL@Inject constructor(
 
     private fun updateLearningFromHypoAfterMeal(
         mealType: String,
-        hour: Int,
-        detectedCarbs: Double,
-        givenDose: Double,
-        actualPeak: Double,
         bgEnd: Double
     ) {
         val severity = when {
@@ -2181,9 +2187,7 @@ class FCL@Inject constructor(
 
         storage.saveLearningProfile(learningProfile)
 
-        android.util.Log.d("FCL_HYPO_LEARNING",
-                           "Hypo learning: $mealType at $hour:00, severity: $severity, " +
-                               "factor: ${currentFactor} -> ${newMealFactors[mealType]}")
+
     }
 
     private fun getTimeBasedRecoveryFactor(mealType: String, hour: Int): Double {
@@ -2282,8 +2286,6 @@ class FCL@Inject constructor(
 
             val adjustedFactor = baseFactor * recoveryFactor
 
-            android.util.Log.d("FCL_HYPO_RECOVERY",
-                               "Recovery: $mealType, $recentSuccessCount successes in ${preferences.get(IntKey.max_recovery_days)}d -> ${(recoveryFactor * 100).toInt()}% recovery")
 
             return adjustedFactor.coerceIn(0.7, 1.3)
         }
@@ -2306,10 +2308,6 @@ class FCL@Inject constructor(
 
         val finalFactor = baseFactor * reductionFactor * overallRecovery
 
-        android.util.Log.d("FCL_HYPO_RECOVERY",
-                           "Reduction: $mealType, $recentHypoCount hypos in ${preferences.get(IntKey.max_recovery_days)}d -> ${(reductionFactor * 100).toInt()}% reduction, " +
-                               "Time recovery: ${(timeRecovery * 100).toInt()}% (${preferences.get(IntKey.min_recovery_days)}-${preferences.get(IntKey.max_recovery_days)}d), " +
-                               "Overall: ${(overallRecovery * 100).toInt()}%")
 
         return finalFactor.coerceIn(0.5, 1.5)
     }
@@ -2336,7 +2334,7 @@ class FCL@Inject constructor(
         confidence: Double,
         currentIOB: Double,
         trends: TrendAnalysis,
-        phase: String = "stable",
+        phase: String = "stable", // ← Deze wordt nu altijd de robuuste fase
         MaxIOB: Double
     ): Double {
         val base = when {
@@ -2345,8 +2343,9 @@ class FCL@Inject constructor(
             else -> calculatedDose * 0.7
         }
 
-        // Combinatie van bestaande en nieuwe correcties
-        val phaseFactor = getPhaseSpecificAggressiveness(phase)
+        // ★★★ ALGEMENE AGGRESSIVITEIT TOEPASSEN ★★★
+        val overallAggressiveness = getCurrentBolusAggressiveness() / 100.0
+        val phaseFactor = getPhaseSpecificAggressiveness(phase) // ← Gebruik robuuste fase
 
         val iobFactor = when {
             currentIOB > MaxIOB * 0.5 -> 0.45
@@ -2357,7 +2356,7 @@ class FCL@Inject constructor(
         val accelPenalty = if (trends.acceleration > 1.0) 1.1 else 1.0
         val trendPenalty = if (trends.recentTrend > 2.5) 0.95 else 1.0
 
-        return (base * iobFactor / accelPenalty * trendPenalty * phaseFactor).coerceAtLeast(0.0)
+        return (base * iobFactor / accelPenalty * trendPenalty * phaseFactor * overallAggressiveness).coerceAtLeast(0.0)
     }
 
 
@@ -2374,13 +2373,11 @@ class FCL@Inject constructor(
     // ★★★ NIEUWE FUNCTIE VOOR COB MANAGEMENT ★★★
     private fun addOrUpdateActiveMeal(detectedCarbs: Double, timestamp: DateTime) {
         val now = DateTime.now()
-
-        // Opruimen van oude maaltijden
         cleanUpMeals()
 
-        // Zoek of er een recente maaltijd is (binnen 30 minuten)
+        // ★★★ VERWIJDER DE 30-MINUTEN RESTRICTIE ★★★
         val recentMeal = activeMeals.firstOrNull {
-            Minutes.minutesBetween(it.timestamp, now).minutes < 30
+            Minutes.minutesBetween(it.timestamp, now).minutes < preferences.get(IntKey.tau_absorption_minutes)
         }
 
         if (recentMeal == null) {
@@ -2391,16 +2388,26 @@ class FCL@Inject constructor(
                 tau = preferences.get(IntKey.tau_absorption_minutes).toDouble()
             )
             activeMeals.add(newMeal)
-            android.util.Log.d("FCL_COB", "Nieuwe maaltijd: ${detectedCarbs}g om ${timestamp.toString("HH:mm")}")
-        } else if (abs(recentMeal.totalCarbs - detectedCarbs) > 5.0) {
-            // Significant andere hoeveelheid - bijwerken
-            recentMeal.totalCarbs = detectedCarbs
-            android.util.Log.d("FCL_COB", "Maaltijd bijgewerkt: ${recentMeal.totalCarbs}g -> ${detectedCarbs}g")
+            lastCOBDebug = "NEW_MEAL: ${detectedCarbs}g at ${timestamp.toString("HH:mm")}"
+
+            // ★★★ DIRECT COB OPSLAAN ★★★
+            storage.saveCurrentCOB(detectedCarbs)
+        } else {
+            // Bestaande maaltijd bijwerken
+            val oldCarbs = recentMeal.totalCarbs
+            recentMeal.totalCarbs = max(oldCarbs, detectedCarbs)
+            lastCOBDebug = "UPDATE_MEAL: ${oldCarbs}g -> ${recentMeal.totalCarbs}g"
+
+            // ★★★ DIRECT COB OPSLAAN ★★★
+            val currentCOB = getCarbsOnBoard()
+            storage.saveCurrentCOB(currentCOB)
         }
 
-        // Debug info
         val currentCOB = getCarbsOnBoard()
-        android.util.Log.d("FCL_COB", "Aantal activeMeals: ${activeMeals.size}, Totaal COB: ${currentCOB}g")
+        lastCOBDebug += " | TOTAL_COB: ${currentCOB}g, ACTIVE_MEALS: ${activeMeals.size}"
+
+        // ★★★ FORCEER COB OPSLAG ★★★
+        storage.saveCurrentCOB(currentCOB)
     }
 
 
@@ -2456,6 +2463,7 @@ class FCL@Inject constructor(
         }
         return res
     }
+
 
 
     // Detecteer sensorfouten inclusief compression lows.
@@ -2676,6 +2684,595 @@ class FCL@Inject constructor(
         return isLikelyMeal
     }
 
+
+
+    // ★★★ NIEUWE VERBETERDE CONSISTENCY BEREKENING ★★★
+    private fun calculateEnhancedConsistency(data: List<BGDataPoint>): Double {
+        if (data.size < 4) return 0.0
+
+        val slopes = mutableListOf<Double>()
+
+        // Bereken slopes tussen opeenvolgende punten
+        for (i in 1 until data.size) {
+            val timeDiff = Minutes.minutesBetween(data[i-1].timestamp, data[i].timestamp).minutes / 60.0
+            if (timeDiff > 0) {
+                slopes.add((data[i].bg - data[i-1].bg) / timeDiff)
+            }
+        }
+
+        if (slopes.size < 2) return 0.0
+
+        // Drie componenten voor consistency
+        val directionConsistency = calculateDirectionConsistency(slopes)
+        val magnitudeConsistency = calculateMagnitudeConsistency(slopes)
+        val patternConsistency = calculatePatternConsistency(data)
+
+        // Gewogen gemiddelde
+        return (directionConsistency * 0.5 + magnitudeConsistency * 0.3 + patternConsistency * 0.2)
+    }
+
+    private fun calculateDirectionConsistency(slopes: List<Double>): Double {
+        if (slopes.isEmpty()) return 0.0
+
+        // Tel hoeveel slopes dezelfde richting hebben (boven noise threshold)
+        val positiveSlopes = slopes.count { it > 0.05 }  // > 0.05 mmol/L/u om noise te filteren
+        val negativeSlopes = slopes.count { it < -0.05 }
+        val totalValidSlopes = positiveSlopes + negativeSlopes
+
+        if (totalValidSlopes == 0) return 0.0
+
+        // Consistentie gebaseerd op dominantie van één richting
+        val maxDirection = max(positiveSlopes, negativeSlopes)
+        return maxDirection.toDouble() / totalValidSlopes
+    }
+
+    private fun calculateMagnitudeConsistency(slopes: List<Double>): Double {
+        if (slopes.size < 2) return 0.0
+
+        // Filter near-zero slopes voor magnitude analyse
+        val significantSlopes = slopes.filter { abs(it) > 0.05 }
+        if (significantSlopes.size < 2) return 0.0
+
+        val mean = significantSlopes.average()
+        val variance = significantSlopes.map { (it - mean) * (it - mean) }.average()
+
+        // Hoe lager de variantie, hoe hoger de consistentie
+        return exp(-variance * 5.0).coerceIn(0.0, 1.0)
+    }
+
+    private fun calculatePatternConsistency(data: List<BGDataPoint>): Double {
+        if (data.size < 4) return 0.0
+
+        // Check op monotone stijging/daling (sterk consistent patroon)
+        val isMonotonicRise = data.zipWithNext().all { (a, b) -> b.bg >= a.bg - 0.1 }
+        val isMonotonicFall = data.zipWithNext().all { (a, b) -> b.bg <= a.bg + 0.1 }
+
+        if (isMonotonicRise || isMonotonicFall) return 0.9
+
+        // Check op concave/convexe patronen
+        val secondDifferences = mutableListOf<Double>()
+        for (i in 1 until data.size - 1) {
+            val firstDiff = data[i].bg - data[i-1].bg
+            val secondDiff = data[i+1].bg - data[i].bg
+            secondDifferences.add(secondDiff - firstDiff)
+        }
+
+        // Consistentie van versnelling/vertraging
+        val consistentAcceleration = secondDifferences.all { it > -0.1 && it < 0.1 }
+        if (consistentAcceleration && secondDifferences.isNotEmpty()) return 0.7
+
+        return 0.3
+    }
+
+
+
+    private fun calculateMagnitudeConsistencyFromData(data: List<BGDataPoint>): Double {
+        val slopes = mutableListOf<Double>()
+        for (i in 1 until data.size) {
+            val timeDiff = Minutes.minutesBetween(data[i-1].timestamp, data[i].timestamp).minutes / 60.0
+            if (timeDiff > 0) slopes.add((data[i].bg - data[i-1].bg) / timeDiff)
+        }
+        return calculateMagnitudeConsistency(slopes)
+    }
+
+
+    // Hulpfuncties voor debugging
+    private fun calculateDirectionConsistencyFromData(data: List<BGDataPoint>): Double {
+        val slopes = mutableListOf<Double>()
+        for (i in 1 until data.size) {
+            val timeDiff = Minutes.minutesBetween(data[i-1].timestamp, data[i].timestamp).minutes / 60.0
+            if (timeDiff > 0) slopes.add((data[i].bg - data[i-1].bg) / timeDiff)
+        }
+        return calculateDirectionConsistency(slopes)
+    }
+
+
+    // ★★★ GEWOGEN EERSTE AFGELEIDE ★★★
+    private fun calculateWeightedFirstDerivative(smoothedData: List<Pair<DateTime, Double>>): Double {
+        if (smoothedData.size < 3) return calculateSimpleFirstDerivative(smoothedData)
+
+        // Gebruik laatste 3 punten voor betrouwbaarheid
+        val slopes = mutableListOf<Double>()
+        val weights = mutableListOf<Double>()
+
+        for (i in 1 until smoothedData.size) {
+            val timeDiff = Minutes.minutesBetween(smoothedData[i-1].first, smoothedData[i].first).minutes / 60.0
+            if (timeDiff > 0) {
+                slopes.add((smoothedData[i].second - smoothedData[i-1].second) / timeDiff)
+                weights.add(1.0 / (1.0 + (smoothedData.size - 1 - i))) // Meer gewicht voor recentere
+            }
+        }
+
+        return if (slopes.isNotEmpty()) {
+            val totalWeight = weights.sum()
+            slopes.zip(weights).sumByDouble { it.first * it.second } / totalWeight
+        } else 0.0
+    }
+
+    private fun calculateSimpleFirstDerivative(smoothedData: List<Pair<DateTime, Double>>): Double {
+        if (smoothedData.size < 2) return 0.0
+
+        val current = smoothedData.last()
+        val previous = smoothedData[smoothedData.size - 2]
+
+        val timeDiff = Minutes.minutesBetween(previous.first, current.first).minutes / 60.0
+        return if (timeDiff > 0) (current.second - previous.second) / timeDiff else 0.0
+    }
+
+    // ★★★ ROBUUSTE TWEEDE AFGELEIDE ★★★
+    private fun calculateRobustSecondDerivative(smoothedData: List<Pair<DateTime, Double>>): Double {
+        if (smoothedData.size < 4) return 0.0
+
+        // Eenvoudige maar robuuste tweede afgeleide
+        val t1 = smoothedData[smoothedData.size - 4]
+        val t2 = smoothedData[smoothedData.size - 3]
+        val t3 = smoothedData[smoothedData.size - 2]
+        val t4 = smoothedData[smoothedData.size - 1]
+
+        val dt1 = Minutes.minutesBetween(t1.first, t2.first).minutes / 60.0
+        val dt2 = Minutes.minutesBetween(t2.first, t3.first).minutes / 60.0
+        val dt3 = Minutes.minutesBetween(t3.first, t4.first).minutes / 60.0
+
+        if (dt1 > 0 && dt2 > 0 && dt3 > 0) {
+            val slope1 = (t2.second - t1.second) / dt1
+            val slope2 = (t3.second - t2.second) / dt2
+            val slope3 = (t4.second - t3.second) / dt3
+
+            // Gemiddelde versnelling
+            return ((slope2 - slope1) + (slope3 - slope2)) / 2.0
+        }
+        return 0.0
+    }
+    private fun calculateRobustTrends(historicalData: List<BGDataPoint>): RobustTrendAnalysis {
+        if (historicalData.size < 5) {
+            val result = RobustTrendAnalysis(0.0, 0.0, 0.0, "uncertain")
+            lastRobustTrends = result
+            return result
+        }
+
+        // ★★★ BEWAAR DATA VOOR LATER GEBRUIK ★★★
+        recentDataForAnalysis = historicalData.takeLast(6).filter { it.bg > 3.0 && it.bg < 20.0 }
+        if (recentDataForAnalysis.size < 4) {
+            val result = RobustTrendAnalysis(0.0, 0.0, 0.0, "uncertain")
+            lastRobustTrends = result
+            return result
+        }
+
+        val smoothed = smoothBGSeries(recentDataForAnalysis, 0.4)
+        if (smoothed.size < 3) {
+            val result = RobustTrendAnalysis(0.0, 0.0, 0.0, "uncertain")
+            lastRobustTrends = result
+            return result
+        }
+
+        // ★★★ VERBETERDE AFGELEIDEN ★★★
+        val firstDerivative = calculateWeightedFirstDerivative(smoothed)
+        val secondDerivative = calculateRobustSecondDerivative(smoothed)
+
+        // ★★★ NIEUWE CONSISTENCY BEREKENING ★★★
+        val consistency = calculateEnhancedConsistency(recentDataForAnalysis)
+
+        var phase = determineBalancedPhase(firstDerivative, secondDerivative, consistency)
+        usedFallback = false
+
+// ★★★ NIEUW: Fasevolgorde validatie ★★★
+        // ★★★ GEEN VALIDATIE: vertrouw op wiskundige faseherkenning ★★★
+       // phase blijft zoals bepaald door determineBalancedPhase
+      //  phase = validatePhaseProgression(phase, lastRobustTrends?.phase)
+
+// ★★★ GEEN FALLBACK - we gebruiken altijd dezelfde faseherkenning ★★★
+// phase blijft zoals bepaald door determineBalancedPhase
+        usedFallback = false
+
+        val result = RobustTrendAnalysis(firstDerivative, secondDerivative, consistency, phase)
+        lastRobustTrends = result
+
+        return result
+    }
+
+    private fun determineBalancedPhase(
+        firstDerivative: Double,
+        secondDerivative: Double,
+        consistency: Double
+    ): String {
+        // ★★★ GEEN consistentie-check meer - we gebruiken altijd deze logica ★★★
+        // Consistentie wordt later gebruikt voor bolus scaling
+
+        val earlyRiseSlope = preferences.get(DoubleKey.phase_early_rise_slope)  // 1.2
+        val midRiseSlope = preferences.get(DoubleKey.phase_mid_rise_slope)      // 0.8
+        val lateRiseSlope = preferences.get(DoubleKey.phase_late_rise_slope)    // 0.4
+        val peakSlope = preferences.get(DoubleKey.phase_peak_slope)
+        val earlyRiseAccel = preferences.get(DoubleKey.phase_early_rise_accel)  // 0.2
+
+        // ★★★ VERBETERDE DETECTIE MET JOUW WAARDEN ★★★
+        return when {
+            // Dalende trend
+            firstDerivative < -1.0 -> "declining"
+            firstDerivative < -0.3 -> "declining"  // ← Minder strict
+
+            // ★★★ VROEGERE DETECTIE ZONDER STRIKTE ACCELERATIE ★★★
+            firstDerivative > earlyRiseSlope -> "early_rise"  // ← Vereenvoudigd: alleen slope check
+            firstDerivative > midRiseSlope -> "mid_rise"
+            firstDerivative > lateRiseSlope -> "late_rise"
+
+            // Peak detectie
+            abs(firstDerivative) < peakSlope -> "peak"
+
+            // Stabiel
+            else -> "stable"
+        }
+    }
+
+    // ★★★ WISKUNDIGE BOLUS ADVIES ★★★
+    private fun getMathematicalBolusAdvice(
+        robustTrends: RobustTrendAnalysis,
+        detectedCarbs: Double,
+        currentBG: Double,
+        targetBG: Double,
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,  // ★★★ NIEUW: IOB parameter ★★★
+        maxIOB: Double       // ★★★ NIEUW: Max IOB parameter ★★★
+    ): MathematicalBolusAdvice {
+
+        // ★★★ IOB-BASED AGGRESSIVENESS REDUCTION ★★★
+        val iobRatio = currentIOB / maxIOB
+        val IOB_safety_perc = preferences.get(IntKey.IOB_corr_perc)
+        val iobAggressivenessFactor = when {
+            iobRatio > 0.8 -> 0.2 * (IOB_safety_perc /100)  // 80% reductie bij hoge IOB
+            iobRatio > 0.6 -> 0.4 * (IOB_safety_perc /100)  // 60% reductie
+            iobRatio > 0.4 -> 0.6 * (IOB_safety_perc /100)  // 40% reductie
+            iobRatio > 0.2 -> 0.8 * (IOB_safety_perc /100)  // 20% reductie
+            else -> 1.0 * (IOB_safety_perc /100)
+        }
+
+        // ★★★ ABSOLUTE IOB BLOKKADE ★★★
+        if (shouldBlockMathematicalBolusForHighIOB(currentIOB, maxIOB, robustTrends, detectedCarbs > 0)) {
+            return MathematicalBolusAdvice(
+                immediatePercentage = 0.0,
+                reservedPercentage = 0.0,
+                reason = "Math: Blocked due to high IOB (${"%.1f".format(currentIOB)}U)"
+            )
+        }
+
+        // ★★★ BASIS PERCENTAGES MET IOB REDUCTIE ★★★
+        val baseEarlyPerc = (preferences.get(IntKey.bolus_perc_early).toDouble() / 100.0) * iobAggressivenessFactor
+        val baseMidPerc = (preferences.get(IntKey.bolus_perc_mid).toDouble() / 100.0) * iobAggressivenessFactor
+        val baseLatePerc = (preferences.get(IntKey.bolus_perc_late).toDouble() / 100.0) * iobAggressivenessFactor
+
+        // ★★★ NIEUW: CONSISTENCY-BASED SCALING ★★★
+        val consistencyFactor = calculateConsistencyBasedScaling(robustTrends.consistency)
+
+        // ★★★ PAS CONSISTENCY FACTOR TOE ★★★
+        val consistentEarlyPerc = baseEarlyPerc * consistencyFactor
+        val consistentMidPerc = baseMidPerc * consistencyFactor
+        val consistentLatePerc = baseLatePerc * consistencyFactor
+
+// ★★★ ALGEMENE AGGRESSIVITEIT (DAG/NACHT) - BLIJFT BEHOUDEN! ★★★
+        val overallAggressiveness = getCurrentBolusAggressiveness() / 100.0
+
+// ★★★ COMBINATIE: consistent percentages × algemene agressiviteit ★★★
+        val combinedEarlyPerc = consistentEarlyPerc * overallAggressiveness
+        val combinedMidPerc = consistentMidPerc * overallAggressiveness
+        val combinedLatePerc = consistentLatePerc * overallAggressiveness
+
+
+        // ★★★ DYNAMISCHE CORRECTIES ★★★
+        val dynamicFactors = calculateDynamicFactors(
+            robustTrends = robustTrends,
+            currentBG = currentBG,
+            targetBG = targetBG,
+            historicalData = historicalData,
+            currentIOB = currentIOB,  // ★★★ PASS IOB ★★★
+            maxIOB = maxIOB           // ★★★ PASS MAX IOB ★★★
+        )
+        val trendFactor = dynamicFactors.trendFactor
+        val safetyFactor = dynamicFactors.safetyFactor
+        val confidenceFactor = dynamicFactors.confidenceFactor
+
+
+        // ★★★ TOTALE DYNAMISCHE FACTOR ★★★
+        val totalDynamicFactor = trendFactor * safetyFactor * confidenceFactor
+
+        return when (robustTrends.phase) {
+
+            "early_rise" -> {
+                // ★★★ BOOST VOOR VROEGE FASE ★★★
+                val earlyRiseBoost = 1.3  // 30% boost voor vroege detectie
+                val boostedEarlyPerc = combinedEarlyPerc * earlyRiseBoost
+                val finalImmediate = (boostedEarlyPerc * totalDynamicFactor).coerceIn(0.0, 1.5)
+                MathematicalBolusAdvice(
+                    immediatePercentage = finalImmediate,
+                    reservedPercentage = 0.2,
+                    reason = "Math: Early Rise BOOSTED (base=${(baseEarlyPerc*100).toInt()}% × overall=${(overallAggressiveness*100).toInt()}% × boost=${earlyRiseBoost} → ${(finalImmediate*100).toInt()}%, IOB=${"%.1f".format(currentIOB)}U, trend=${"%.1f".format(robustTrends.firstDerivative)})"
+                )
+            }
+
+            "mid_rise" -> {
+                val finalImmediate = (combinedMidPerc * totalDynamicFactor).coerceIn(0.0, 1.5)
+                MathematicalBolusAdvice(
+                    immediatePercentage = finalImmediate,
+                    reservedPercentage = 0.15,
+                    reason = "Math: Mid Rise (base=${(baseMidPerc*100).toInt()}% × overall=${(overallAggressiveness*100).toInt()}% → ${(finalImmediate*100).toInt()}%, IOB=${"%.1f".format(currentIOB)}U, trend=${"%.1f".format(robustTrends.firstDerivative)})"
+                )
+            }
+
+            "late_rise" -> {
+                val finalImmediate = (combinedLatePerc * totalDynamicFactor).coerceIn(0.0, 1.2)
+                MathematicalBolusAdvice(
+                    immediatePercentage = finalImmediate,
+                    reservedPercentage = 0.1,
+                    reason = "Math: Late Rise (base=${(baseLatePerc*100).toInt()}% × overall=${(overallAggressiveness*100).toInt()}% → ${(finalImmediate*100).toInt()}%, IOB=${"%.1f".format(currentIOB)}U, trend=${"%.1f".format(robustTrends.firstDerivative)})"
+                )
+            }
+
+            "peak" -> {
+                MathematicalBolusAdvice(
+                    immediatePercentage = 0.0,
+                    reservedPercentage = 0.0,
+                    reason = "Math: Peak"
+                )
+            }
+
+            "declining" -> {
+                MathematicalBolusAdvice(
+                    immediatePercentage = 0.0,
+                    reservedPercentage = 0.0,
+                    reason = "Math: Declining"
+                )
+            }
+
+            "stable" -> {
+                MathematicalBolusAdvice(
+                    immediatePercentage = 0.0,
+                    reservedPercentage = 0.0,
+                    reason = "Math: Stable"
+                )
+            }
+
+            else -> {
+                MathematicalBolusAdvice(
+                    immediatePercentage = 0.0,
+                    reservedPercentage = 0.0,
+                    reason = "Math: ${robustTrends.phase}"
+                )
+            }
+        }
+    }
+
+    // ★★★ NIEUWE FUNCTIE: CONSISTENCY-BASED SCALING ★★★
+    private fun calculateConsistencyBasedScaling(consistency: Double): Double {
+        return when {
+            consistency > 0.8 -> 1.0   // Hoge consistentie: 100%
+            consistency > 0.6 -> 0.8   // Matige consistentie: 80%
+            consistency > 0.4 -> 0.6   // Lage consistentie: 60%
+            consistency > 0.2 -> 0.4   // Zeer lage consistentie: 40%
+            else -> 0.2                // Minimale consistentie: 20%
+        }
+    }
+
+    // ★★★ WISKUNDIGE METHODE ALS ENIGE METHODE ★★★
+    private fun getMathematicalBolusAsOnlyMethod(
+        robustTrends: RobustTrendAnalysis,
+        detectedCarbs: Double,
+        currentBG: Double,
+        targetBG: Double,
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,
+        maxIOB: Double,
+        effectiveCR: Double
+    ): Triple<Double, Double, String> { // Returns (immediateBolus, reservedBolus, reason)
+
+        // Gebruik de BESTAANDE uitgebreide wiskundige methode
+        val mathAdvice = getMathematicalBolusAdvice(
+            robustTrends = robustTrends,
+            detectedCarbs = detectedCarbs,
+            currentBG = currentBG,
+            targetBG = targetBG,
+            historicalData = historicalData,
+            currentIOB = currentIOB,
+            maxIOB = maxIOB
+        )
+
+        // Bereken totale bolus op basis van carbs
+        val totalCarbBolus = detectedCarbs / effectiveCR
+
+        // Gebruik de wiskundige percentages voor splitsing
+        val immediateBolus = totalCarbBolus * mathAdvice.immediatePercentage
+        val reservedBolus = totalCarbBolus * mathAdvice.reservedPercentage
+
+        return Triple(immediateBolus, reservedBolus, mathAdvice.reason)
+    }
+
+    // ★★★ WISKUNDIGE CORRECTIE METHODE ★★★
+    private fun getMathematicalCorrectionDose(
+        robustTrends: RobustTrendAnalysis,
+        currentBG: Double,
+        targetBG: Double,
+        effectiveISF: Double,
+        currentIOB: Double,
+        maxIOB: Double
+    ): Double {
+
+        // Gebruik dezelfde veiligheidslogica als de meal methode
+        val mathAdvice = getMathematicalBolusAdvice(
+            robustTrends = robustTrends,
+            detectedCarbs = 0.0, // Geen carbs voor correctie
+            currentBG = currentBG,
+            targetBG = targetBG,
+            historicalData = listOf(), // Lege historical data voor correctie
+            currentIOB = currentIOB,
+            maxIOB = maxIOB
+        )
+
+        // Bereken correctie dose
+        val bgAboveTarget = currentBG - targetBG
+        val requiredCorrection = bgAboveTarget / effectiveISF
+
+        // Pas wiskundige percentages toe op correctie
+        return requiredCorrection * mathAdvice.immediatePercentage
+    }
+
+    // ★★★ NIEUW: Absolute IOB veiligheidsgrens ★★★
+    private fun shouldBlockMathematicalBolusForHighIOB(
+        currentIOB: Double,
+        maxIOB: Double,
+        robustTrends: RobustTrendAnalysis,
+        mealDetected: Boolean = false
+    ): Boolean {
+
+
+        if (mealDetected) {
+            return when {
+                // ★★★ MILDER BELEID BIJ MAALTIJDEN ★★★
+                currentIOB > maxIOB * 1.1 -> {
+
+                    true
+                }
+                currentIOB > maxIOB * 0.9 && robustTrends.firstDerivative < 1.0 -> {
+
+                    true
+                }
+                currentIOB > maxIOB * 0.7 && robustTrends.firstDerivative < 0.5 -> {
+
+                    true
+                }
+                else -> false
+            }
+        } else {
+            // Originele logica voor correcties (behoud conservatief)
+            return when {
+                currentIOB > maxIOB * 0.8 -> {
+
+                    true
+                }
+                currentIOB > maxIOB * 0.6 && robustTrends.firstDerivative < 2.0 -> {
+
+                    true
+                }
+                currentIOB > maxIOB * 0.4 && robustTrends.firstDerivative < 1.5 -> {
+
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    // ★★★ DYNAMISCHE FACTOREN BEREKENING ★★★
+    private fun calculateDynamicFactors(
+        robustTrends: RobustTrendAnalysis,
+        currentBG: Double,
+        targetBG: Double,
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,  // ★★★ NIEUW PARAMETERS ★★★
+        maxIOB: Double
+    ): DynamicFactors {
+
+        val trendFactor = calculateTrendFactor(robustTrends.firstDerivative)
+
+        // ★★★ VEILIGHEIDSFACTOR MET IOB ★★★
+        val safetyFactor = calculateSafetyFactorWithIOB(
+            currentBG, targetBG, historicalData, currentIOB, maxIOB
+        )
+
+        val confidenceFactor = calculateConfidenceFactor(robustTrends.consistency, historicalData)
+
+        return DynamicFactors(trendFactor, safetyFactor, confidenceFactor)
+    }
+
+    private fun calculateSafetyFactorWithIOB(
+        currentBG: Double,
+        targetBG: Double,
+        historicalData: List<BGDataPoint>,
+        currentIOB: Double,
+        maxIOB: Double
+    ): Double {
+        val bgAboveTarget = currentBG - targetBG
+        val iobRatio = currentIOB / maxIOB
+
+        val IOB_safety_perc = preferences.get(IntKey.IOB_corr_perc)
+
+        // ★★★ MILDER IOB BELEID ★★★
+        val iobPenalty = when {
+            iobRatio > 0.8 -> 0.6 * (IOB_safety_perc / 100.0)  // was 0.4
+            iobRatio > 0.6 -> 0.75 * (IOB_safety_perc / 100.0) // was 0.5
+            iobRatio > 0.4 -> 0.85 * (IOB_safety_perc / 100.0) // was 0.6
+            iobRatio > 0.2 -> 0.9 * (IOB_safety_perc / 100.0)  // was 0.7
+            else -> 1.0 * (IOB_safety_perc / 100.0)
+        }
+
+        val baseSafety = when {
+            currentBG < targetBG -> 0.2
+            bgAboveTarget > 3.0 -> 1.0
+            bgAboveTarget > 2.0 -> 0.8
+            bgAboveTarget > 1.0 -> 0.6
+            else -> 0.4
+        }
+
+        val volatility = calculateVolatility(historicalData)
+        val volatilityPenalty = if (volatility > 1.0) 0.7 else 1.0
+
+        val finalSafety = (baseSafety * iobPenalty * volatilityPenalty).coerceIn(0.1, 1.0)
+
+        return finalSafety
+    }
+
+    private fun calculateTrendFactor(slope: Double): Double {
+        // ★★★ TREND FACTOR: 0.8 bij lage trend, 1.2 bij hoge trend ★★★
+        return when {
+            slope > 3.0 -> 1.2  // Zeer sterke stijging
+            slope > 2.0 -> 1.1  // Sterke stijging
+            slope > 1.0 -> 1.0  // Normale stijging
+            slope > 0.5 -> 0.9  // Lichte stijging
+            else -> 0.8         // Zeer lichte stijging
+        }
+    }
+
+
+
+    private fun calculateConfidenceFactor(consistency: Double, historicalData: List<BGDataPoint>): Double {
+        // ★★★ CONFIDENCE FACTOR: betrouwbaarheid van de faseherkenning ★★★
+        val dataPoints = historicalData.takeLast(6).size
+        val dataFactor = if (dataPoints >= 4) 1.0 else 0.7
+
+        return (consistency * dataFactor).coerceIn(0.5, 1.0)
+    }
+
+    private fun calculateVolatility(data: List<BGDataPoint>): Double {
+        if (data.size < 2) return 0.0
+        val changes = data.zipWithNext().map { (a, b) -> abs(b.bg - a.bg) }
+        return changes.average()
+    }
+
+
+    // ★★★ DATA CLASS VOOR DYNAMISCHE FACTOREN ★★★
+    private data class DynamicFactors(
+        val trendFactor: Double,
+        val safetyFactor: Double,
+        val confidenceFactor: Double
+    )
+
+
     // ★★★ NIEUW: Real-time bijsturing ★★★
     private fun shouldAdjustOrCancelBolus(
         historicalData: List<BGDataPoint>,
@@ -2765,9 +3362,12 @@ class FCL@Inject constructor(
     private fun shouldBlockBolusForShortTermTrend(
         currentData: BGDataPoint,
         historicalData: List<BGDataPoint>,
-        trends: TrendAnalysis
+        trends: TrendAnalysis,
+        maxIOB: Double
     ): Boolean {
         if (historicalData.size < 4) return false
+
+        val iobRatio = currentData.iob / maxIOB
 
         // Korte-termijn trend (laatste 15-20 minuten)
         val shortTermTrend = calculateShortTermTrend(historicalData)
@@ -2783,7 +3383,7 @@ class FCL@Inject constructor(
             shortTermTrend < -2.0 && isConsistentDecline -> true
 
             // Dalende trend + hoge IOB
-            shortTermTrend < -1.0 && currentData.iob > 2.0 -> true
+            shortTermTrend < -1.0 && iobRatio > 0.5 -> true
 
             // Zeer consistente daling (3 van 3 metingen dalend)
             isConsistentDecline && shortTermTrend < -0.5 -> true
@@ -2861,7 +3461,7 @@ class FCL@Inject constructor(
     ): Boolean {
         // 1. Directe hypo-herstel detectie
         if (isLikelyHypoRecovery(currentBG, historicalData, trends)) {
-            android.util.Log.d("FCL_SAFETY", "Meal detection blocked: hypo recovery detected")
+
             return true
         }
 
@@ -2872,7 +3472,7 @@ class FCL@Inject constructor(
                     Minutes.minutesBetween(it.timestamp, DateTime.now()).minutes <= preferences.get(IntKey.hypoRecoveryMinutes)
             }
             if (recentLow) {
-                android.util.Log.d("FCL_SAFETY", "Meal detection blocked: recent low + rising")
+
                 return true
             }
         }
@@ -2902,15 +3502,16 @@ class FCL@Inject constructor(
     private fun shouldBlockCorrectionForTrendReversal(
         currentData: BGDataPoint,
         historicalData: List<BGDataPoint>,
-        trends: TrendAnalysis
+        trends: TrendAnalysis,
+        maxIOB: Double
     ): Boolean {
         if (!isTrendReversingToDecline(historicalData, trends)) return false
-
+        val iobRatio = currentData.iob / maxIOB
         // Bij trend-omkering: veel strengere IOB limieten
         return when {
-            currentData.iob > 2.0 -> true  // Blokkeer bij IOB > 2.0
-            currentData.iob > 1.5 && trends.recentTrend < 1.0 -> true
-            currentData.iob > 1.0 && trends.recentTrend < 0.5 -> true
+            iobRatio > 0.5 -> true  // Blokkeer bij IOB > 2.0
+            iobRatio > 0.375 && trends.recentTrend < 1.0 -> true
+            iobRatio > 0.25 && trends.recentTrend < 0.5 -> true
             else -> false
         }
     }
@@ -2987,7 +3588,7 @@ class FCL@Inject constructor(
 
     private fun predictMealResponse(currentBG: Double, trends: TrendAnalysis, phase: String, minutesAhead: Int): Double {
         val dynamicMaxRise = calculateDynamicMaxRise(currentBG)
-        val predictedRise = when (phase) {
+        val predictedRise = when (phase) { // ← phase is nu altijd de robuuste fase
             "early_rise" -> min(dynamicMaxRise * 0.6, trends.recentTrend * 0.8)
             "mid_rise" -> min(dynamicMaxRise * 0.8, trends.recentTrend * 0.6)
             "late_rise" -> min(dynamicMaxRise * 0.4, trends.recentTrend * 0.3)
@@ -3029,12 +3630,14 @@ class FCL@Inject constructor(
 
         val (detectedCarbs, mealState) = detectMealFromBG(historicalData, currentData.bg, preferences.get(DoubleKey.meal_detection_sensitivity), carbRatio, currentISF, targetBG)
         val mealDetected = (mealState != MealDetectionState.NONE)
-        val phase = determineMealPhase(trends.recentTrend, trends.shortTermTrend, trends.acceleration)
 
-        updateMealStatusAutomatically(currentData, historicalData, trends, phase, mealState)
+        // ★★★ GEBRUIK ROBUUSTE FASE ★★★
+        val robustPhase = lastRobustTrends?.phase ?: "stable"
+
+        updateMealStatusAutomatically(currentData, historicalData, trends, mealState) // ← phase parameter verwijderd
 
         val prediction = when {
-            mealInProgress -> predictMealResponse(currentData.bg, trends, phase, minutesAhead)
+            mealInProgress -> predictMealResponse(currentData.bg, trends, robustPhase, minutesAhead) // ← Gebruik robustPhase
             currentData.iob > minIOBForEffect -> predictIOBEffect(currentData.bg, currentData.iob, ISF, minutesAhead)
             else -> predictBasalResponse(currentData.bg, trends, minutesAhead)
         }
@@ -3044,165 +3647,24 @@ class FCL@Inject constructor(
             trend = trends.recentTrend,
             mealDetected = mealDetected,
             mealInProgress = mealInProgress,
-            phase = phase
+            phase = robustPhase // ← Gebruik robustPhase
         )
     }
 
     private fun getPhaseSpecificAggressiveness(phase: String): Double {
-        // Behoud bestaande correcties als basis, maak ze instelbaar
-        val baseFactor = when (phase) {
-            "early_rise" -> preferences.get(IntKey.bolus_perc_early).toDouble() / 100.0 * 0.8  // 0.8 was vast, nu instelbaar
-            "mid_rise" -> getCurrentBolusAggressiveness() / 100.0 * 0.6  // behoud relatieve verhouding
-            "late_rise" -> preferences.get(IntKey.bolus_perc_late).toDouble() / 100.0 * 0.4    // 0.4 was vast, nu instelbaar
-            "peak" -> preferences.get(IntKey.bolus_perc_late).toDouble() / 100.0 * 0.3         // 0.3 was vast, nu instelbaar
-            else -> getCurrentBolusAggressiveness() / 100.0
+        // ★★★ COMBINATIE: fase-specifiek × algemene agressiviteit ★★★
+        val overallAggressiveness = getCurrentBolusAggressiveness() / 100.0
+
+        return when (phase) {
+            "early_rise" -> (preferences.get(IntKey.bolus_perc_early).toDouble() / 100.0) * overallAggressiveness
+            "mid_rise" -> (preferences.get(IntKey.bolus_perc_mid).toDouble() / 100.0) * overallAggressiveness
+            "late_rise" -> (preferences.get(IntKey.bolus_perc_late).toDouble() / 100.0) * overallAggressiveness
+            "peak" -> 0.0
+            else -> overallAggressiveness // Voor stable, declining, etc.
         }
-        return baseFactor.coerceIn(0.1, 2.0)
     }
 
-    // ★★★ VERBETERDE GEFASEERDE BOLUS MET DYNAMISCHE RESPONSE ★★★
-    fun calculateStagedBolus(
-        detectedCarbs: Double,
-        carbRatio: Double,
-        currentISF: Double,
-        currentIOB: Double,
-        MaxIOB: Double,
-        currentBG: Double,
-        targetBG: Double,
-        maxBolus: Double,
-        phase: String = "stable",
-        peakConfidence: Double = 0.5,
-        trends: TrendAnalysis? = null  // ★★★ NIEUWE PARAMETER
-    ): Triple<Double, Double, String> {
 
-        // ★★★ NIEUW: Pas hypo-adjusted factor toe ★★★
-        val mealType = getMealTypeFromHour()
-        val currentHour = DateTime.now().hourOfDay
-        val hypoAdjustedFactor = getHypoAdjustedMealFactor(mealType, currentHour)
-
-        val effectiveCR = getEffectiveCarbRatio() * hypoAdjustedFactor
-        val totalCarbBolus = detectedCarbs / effectiveCR
-
-        var reason = "Carb bolus=${"%.2f".format(totalCarbBolus)}U for ${"%.1f".format(detectedCarbs)}g (effCR=${"%.1f".format(effectiveCR)})"
-
-        // ★★★ DYNAMISCH DIRECT PERCENTAGE OP BASIS VAN BG EN TREND ★★★
-        val bgAboveTarget = currentBG - targetBG
-        val recentTrend = trends?.recentTrend ?: 0.0
-
-        // Bepaal direct percentage op basis van urgentie
-        val baseImmediatePercentage = when {
-            bgAboveTarget > 3.0 && recentTrend > 2.5 -> 0.6  // Zeer urgente situatie: 60% direct
-            bgAboveTarget > 2.0 && recentTrend > 2.0 -> 0.5  // Snelle stijging: 50% direct
-            bgAboveTarget > 1.5 && recentTrend > 1.5 -> 0.4  // Matige stijging: 40% direct
-            bgAboveTarget > 1.0 -> 0.3                       // Lichte stijging: 30% direct
-            else -> 0.2                                      // Standaard: 20% direct
-        }
-
-        // ★★★ CONFIDENCE BONUS ★★★
-        val confidenceBonus = when {
-            peakConfidence > 0.8 -> 0.1
-            peakConfidence > 0.6 -> 0.05
-            else -> 0.0
-        }
-
-        // ★★★ TREND BONUS ★★★
-        val trendBonus = when {
-            recentTrend > 3.0 -> 0.15
-            recentTrend > 2.0 -> 0.1
-            recentTrend > 1.0 -> 0.05
-            else -> 0.0
-        }
-
-        val adjustedPercentage = (baseImmediatePercentage + confidenceBonus + trendBonus)
-            .coerceIn(0.15, 0.7)  // Min 15%, max 70%
-
-        var immediateBolus = totalCarbBolus * adjustedPercentage
-        var reservedBolus = totalCarbBolus * (1 - adjustedPercentage)
-
-        reason += " | Direct:${(adjustedPercentage*100).toInt()}% (BG+${"%.1f".format(bgAboveTarget)}, trend:${"%.1f".format(recentTrend)})"
-
-        // ★★★ BG-BASED FACTORS ★★★
-        val bgBelowTargetFactor = when {
-            currentBG < targetBG - 1.0 -> 0.0
-            currentBG < targetBG - 0.5 -> 0.3
-            currentBG < targetBG -> 0.6
-            currentBG < targetBG + 0.4 -> 0.8
-            else -> 1.0
-        }
-
-        immediateBolus *= bgBelowTargetFactor
-        reservedBolus = totalCarbBolus - immediateBolus
-
-        if (bgBelowTargetFactor < 1.0) {
-            reason += " | BG-factor:${(bgBelowTargetFactor*100).toInt()}%"
-        }
-
-        // ★★★ IOB LIMIETEN ★★★
-        val dynamicMaxReserved = maxBolus * 1.2  // Iets hogere reserved limiet
-        val currentTotalReserved = pendingReservedBolus + reservedBolus
-
-        if (currentTotalReserved > dynamicMaxReserved) {
-            val excess = currentTotalReserved - dynamicMaxReserved
-            reservedBolus = max(0.0, reservedBolus - excess)
-            immediateBolus += excess
-            reason += " | Reserved cap: +${"%.2f".format(excess)}U direct"
-        }
-
-        // ★★★ IOB ADJUSTMENT - MINDER CONSERVATIEF BIJ SNEL STIJGEN ★★★
-        if (currentIOB > 0.0) {
-            val iobAdjustment = when {
-                currentIOB > MaxIOB * 0.5 && recentTrend < 1.0 -> currentIOB * 0.9  // Alleen streng bij lage trend
-                currentIOB > MaxIOB * 0.5 -> currentIOB * 0.6  // Minder streng bij stijging
-                currentIOB > MaxIOB * 0.25 -> currentIOB * 0.4
-                else -> currentIOB * 0.2
-            }
-            immediateBolus = (immediateBolus - iobAdjustment).coerceAtLeast(0.0)
-            if (iobAdjustment > 0) {
-                reason += " | IOB adj -${"%.2f".format(iobAdjustment)}U"
-            }
-        }
-
-        // Phase factor
-        val phaseFactor = getPhaseSpecificAggressiveness(phase)
-        immediateBolus *= phaseFactor
-        reservedBolus *= phaseFactor
-        reason += " | Phase $phase (x${"%.2f".format(phaseFactor)})"
-
-        // ★★★ VERHOOGDE INITIAL BOLUS CAP BIJ SNEL STIJGEN ★★★
-        val initialBolusCap = when {
-            recentTrend > 2.5 -> maxBolus * 0.5  // Hogere cap bij snelle stijging
-            recentTrend > 1.5 -> maxBolus * 0.4
-            else -> maxBolus * 0.3
-        }
-
-        if (immediateBolus > initialBolusCap) {
-            val excess = immediateBolus - initialBolusCap
-            immediateBolus = initialBolusCap
-            reservedBolus += excess
-            reason += " | Capped at ${"%.2f".format(initialBolusCap)}U"
-        }
-
-        return Triple(roundDose(immediateBolus), roundDose(reservedBolus), reason)
-    }
-
-    // ★★★ NIEUWE FUNCTIE: HISTORISCHE SUCCESSRATE ★★★
-    private fun calculateHistoricalSuccessRate(): Double {
-        val mealResults = storage.loadMealPerformanceResults()
-        if (mealResults.isEmpty()) return 0.7 // Standaard bij geen data
-
-        val recentResults = mealResults.takeLast(20) // Laatste 20 maaltijden
-
-        val successCount = recentResults.count { result ->
-            when (result.outcome) {
-                "SUCCESS" -> true
-                "TOO_HIGH" -> result.actualPeak < 12.0 // Niet te hoog
-                "TOO_LOW" -> result.actualPeak > 5.0   // Niet te laag
-                else -> false
-            }
-        }
-
-        return successCount.toDouble() / recentResults.size.coerceAtLeast(1)
-    }
 
     // ★★★ HULPFUNCTIE VOOR RECENTE STIJGING ★★★
     private fun hasRecentRise(historicalData: List<BGDataPoint>, minRisingPoints: Int = 2): Boolean {
@@ -3215,6 +3677,8 @@ class FCL@Inject constructor(
 
         return risingCount >= minRisingPoints
     }
+
+
 
     private fun shouldReleaseReservedBolus(
         currentBG: Double,
@@ -3231,9 +3695,9 @@ class FCL@Inject constructor(
         val shortTermTrend = calculateShortTermTrend(historicalData)
 
         // ★★★ VERHOOGDE GEVOELIGHEID BIJ SNEL STIJGEN ★★★
-        val isRapidRise = trends.recentTrend > 2.0 || shortTermTrend > 2.5
-        val bgCondition = currentBG > targetBG + 0.5 || isRapidRise
-        val trendCondition = trends.recentTrend > 0.3 || shortTermTrend > 0.5
+        val isRapidRise = trends.recentTrend > 1.8 || shortTermTrend > 2.0  // ← AANPASSING: lagere drempels
+        val bgCondition = currentBG > targetBG + 0.3 || isRapidRise  // ← AANPASSING: lagere BG drempel
+        val trendCondition = trends.recentTrend > 0.2 || shortTermTrend > 0.4  // ← AANPASSING: lagere trend drempels
         val recentlyRisingCondition = isRecentlyRising && shortTermTrend > 0.0
 
         // ★★★ COMBINATIE: vrijgegeven bij CONSISTENTE stijging OF SNEL STIJGEN ★★★
@@ -3256,7 +3720,7 @@ class FCL@Inject constructor(
 
         // ★★★ VEILIGHEID: Geen release bij recente daling ★★★
         if (isRecentlyFalling) {
-            android.util.Log.d("FCL_SAFETY", "Reserved bolus blocked: recent decline detected")
+
             return 0.0
         }
 
@@ -3339,7 +3803,6 @@ class FCL@Inject constructor(
         maxIOB: Double
     ): InsulinAdvice {
 
-
         if (historicalData.size < 10) {
             return InsulinAdvice(0.0, "Insufficient data", 0.0)
         }
@@ -3364,7 +3827,7 @@ class FCL@Inject constructor(
                     confidence = calculateConfidence(trends),
                     predictedValue = realTimePrediction.value,
                     mealDetected = realTimePrediction.mealDetected,
-                    phase = realTimePrediction.phase
+                    phase = realTimePrediction.phase // ← Gebruik robuuste fase van prediction
                 )
             }
         }
@@ -3382,7 +3845,11 @@ class FCL@Inject constructor(
         val requiredCorrection = excess / ISF
         val effectiveIOB = max(0.0, currentData.iob - 0.5)
         val netCorrection = max(0.0, requiredCorrection - effectiveIOB)
-        val conservativeDose = netCorrection * 0.6 * dailyReductionFactor
+
+        // ★★★ ALGEMENE AGGRESSIVITEIT TOEPASSEN ★★★
+        val overallAggressiveness = getCurrentBolusAggressiveness() / 100.0
+        val conservativeDose = netCorrection * 0.6 * dailyReductionFactor * overallAggressiveness
+
         val limitedDose = min(conservativeDose, preferences.get(DoubleKey.max_bolus))
         return roundDose(limitedDose)
     }
@@ -3396,7 +3863,6 @@ class FCL@Inject constructor(
     ): Boolean {
         // ★★★ NIEUWE HYPO RECOVERY CHECK ★★★
         if (isLikelyHypoRecovery(currentData.bg, historicalData, trends)) {
-            android.util.Log.d("FCL_SAFETY", "Insulin withheld: hypo recovery in progress")
             return true
         }
 
@@ -3406,19 +3872,16 @@ class FCL@Inject constructor(
         return when {
             // Absolute hypo-veiligheid - blijft strikt
             currentData.bg < gethypoThreshold() + 1.0 -> {
-                android.util.Log.d("FCL_SAFETY", "Insulin withheld: BG too low (${currentData.bg})")
                 true
             }
 
             // Voor hoge BG, gebruik minder restrictieve IOB limieten
             currentData.iob > maxIOB * (if (isHighBG) 0.7 else 0.45) && currentData.bg < targetBG + (if (isHighBG) 2.0 else 1.0) -> {
-                android.util.Log.d("FCL_SAFETY", "Insulin withheld: IOB limit (${currentData.iob} > ${maxIOB * (if (isHighBG) 0.7 else 0.45)})")
                 true
             }
 
             // Sterke daling + dicht bij hypo
             currentData.bg < gethypoThreshold() + 2.0 && trends.recentTrend < -1.0 -> {
-                android.util.Log.d("FCL_SAFETY", "Insulin withheld: Strong decline near hypo")
                 true
             }
 
@@ -3426,37 +3889,10 @@ class FCL@Inject constructor(
         }
     }
 
-    // ★★★ VERBETERDE IOB REDUCTIE MET BG EN TREND SENSITIVITEIT ★★★
-    private fun calculateIOBBolusReductionFactor(
-        currentIOB: Double,
-        maxIOB: Double,
-        currentBG: Double,
-        targetBG: Double,
-        trends: TrendAnalysis
-    ): Double {
-        val iobRatio = currentIOB / maxIOB
-        val bgAboveTarget = currentBG - targetBG
-        val isRapidRise = trends.recentTrend > 2.0 || trends.shortTermTrend > 2.5
 
-        // ★★★ MINDER REDUCTIE BIJ SNEL STIJGENDE BG ★★★
-        return when {
-            iobRatio >= 1.0 -> 0.0  // Blokkeer volledig bij max IOB
 
-            iobRatio > 0.8 && (bgAboveTarget > 3.0 || isRapidRise) -> 0.7  // 30% reductie ipv 70%
-            iobRatio > 0.8 -> 0.5
-
-            iobRatio > 0.6 && (bgAboveTarget > 2.0 || isRapidRise) -> 0.8  // 20% reductie ipv 50%
-            iobRatio > 0.6 -> 0.6
-
-            iobRatio > 0.4 && (bgAboveTarget > 1.0 || trends.recentTrend > 1.0) -> 0.9  // 10% reductie
-            iobRatio > 0.4 -> 0.8
-
-            iobRatio > 0.2 -> 0.95 // 5% reductie
-            else -> 1.0
-        }
-    }
-
-    private fun explainWithholdReason(currentData: BGDataPoint, trends: TrendAnalysis, targetBG: Double): String {
+    private fun explainWithholdReason(currentData: BGDataPoint, trends: TrendAnalysis, targetBG: Double, maxIOB: Double): String {
+        val iobRatio = currentData.iob / maxIOB
         return when {
             currentData.bg < 5.0 ->
                 "Withheld: BG ${"%.1f".format(currentData.bg)} < 5.0 mmol/L (hypo risk)"
@@ -3467,10 +3903,10 @@ class FCL@Inject constructor(
             currentData.bg < 6.5 && trends.recentTrend < -0.5 ->
                 "Withheld: BG ${"%.1f".format(currentData.bg)} with strong downward trend (${String.format("%.2f", trends.recentTrend)} mmol/L/h)"
 
-            currentData.iob > 1.8 && currentData.bg < targetBG + 1.0 ->
+            iobRatio > 0.5 && currentData.bg < targetBG + 1.0 ->
                 "Withheld: IOB ${"%.2f".format(currentData.iob)} > 1.8U and BG ${"%.1f".format(currentData.bg)} < target+1.0 (${String.format("%.1f", targetBG + 1.0)})"
 
-            currentData.iob > 1.0 && trends.recentTrend < -0.3 ->
+            iobRatio > 0.25 && trends.recentTrend < -0.3 ->
                 "Withheld: IOB ${"%.2f".format(currentData.iob)} and falling trend (${String.format("%.2f", trends.recentTrend)} mmol/L/h)"
 
             else -> "Withheld: unspecified safety condition"
@@ -3494,16 +3930,6 @@ class FCL@Inject constructor(
         }
     }
 
-    private fun determineMealPhase(recentTrend: Double, shortTermTrend: Double, acceleration: Double): String {
-        return when {
-            recentTrend > 2.0 && acceleration > 0.1 -> "early_rise"
-            recentTrend > 1.0 && acceleration > 0 -> "mid_rise"
-            recentTrend > 0.3 && acceleration < 0 -> "late_rise"
-            abs(recentTrend) < 0.5 -> "peak"
-            else -> "stable"
-        }
-    }
-
 
 
     private fun calculateDynamicMaxRise(startBG: Double): Double {
@@ -3522,25 +3948,19 @@ class FCL@Inject constructor(
     }
 
 
-    // Automatische update van maaltijdstatus
     private fun updateMealStatusAutomatically(
         currentData: BGDataPoint,
         historicalData: List<BGDataPoint>,
         trends: TrendAnalysis,
-        phase: String,
         currentMealState: MealDetectionState,
-
     ) {
         val currentTime = currentData.timestamp
 
+        // ★★★ GEBRUIK ROBUUSTE FASE ★★★
+        val robustPhase = lastRobustTrends?.phase ?: "stable"
+
         if (currentMealState != MealDetectionState.NONE) {
             mealDetectionState = currentMealState
-            if (currentMealState == MealDetectionState.DETECTED) {
-                lastMealDetectionTime = currentTime
-            }
-            if (currentMealState == MealDetectionState.EARLY_RISE || currentMealState == MealDetectionState.RISING) {
-                lastRiseDetectionTime = currentTime
-            }
         }
 
         if (peakDetected && trends.recentTrend < -0.5) {
@@ -3553,7 +3973,7 @@ class FCL@Inject constructor(
             peakDetected = false
         }
 
-        if (mealInProgress && !peakDetected && phase == "peak") {
+        if (mealInProgress && !peakDetected && robustPhase == "peak") { // ← Gebruik robustPhase
             peakDetected = true
         }
 
@@ -3565,7 +3985,7 @@ class FCL@Inject constructor(
             val detectedCarbs = recentUpdate?.detectedCarbs ?: 0.0
             val peakConfidence = calculatePeakConfidence(historicalData, detectedCarbs)
             val mealType = getMealTypeFromHour()
-            logMealPerformanceResult(currentData, historicalData,peakConfidence,mealType)
+            logMealPerformanceResult(currentData, historicalData, peakConfidence, mealType)
             mealInProgress = false
             lastMealTime = null
             peakDetected = false
@@ -3627,10 +4047,6 @@ class FCL@Inject constructor(
             if (outcome == "TOO_LOW") {
                 updateLearningFromHypoAfterMeal(
                     mealType = finalMealType,
-                    hour = latestUpdate.timestamp.hourOfDay,
-                    detectedCarbs = latestUpdate.detectedCarbs,
-                    givenDose = latestUpdate.givenDose,
-                    actualPeak = actualPeak,
                     bgEnd = currentData.bg
                 )
             }
@@ -3662,11 +4078,9 @@ class FCL@Inject constructor(
 
 
         } catch (e: Exception) {
-            android.util.Log.e("FCL", "Error logging meal performance", e)
+
         }
     }
-
-
 
 
     private fun shouldStartMealPhase(historicalData: List<BGDataPoint>, trends: TrendAnalysis): Boolean {
@@ -3738,10 +4152,14 @@ class FCL@Inject constructor(
             resetLearningDataIfNeeded()
             val trends = analyzeTrends(historicalData)
 
+            // ★★★ ALTIJD ROBUUSTE FASE GEBRUIKEN ★★★
+            val robustTrends = calculateRobustTrends(historicalData)
+            val robustPhase = robustTrends.phase
+
 
             processPendingLearningUpdates()
             processPendingCorrectionUpdates()
-            val phase = determineMealPhase(trends.recentTrend, trends.shortTermTrend, trends.acceleration)
+         //   val phase = determineMealPhase(trends.recentTrend, trends.shortTermTrend, trends.acceleration)
             // housekeeping
             cleanUpMeals()
 
@@ -3797,32 +4215,43 @@ class FCL@Inject constructor(
                     )
 
                     return EnhancedInsulinAdvice(
-                        dose = persistentBolusAmount,
-                        reason = "Persistent high BG: ${"%.2f".format(persistentBolusAmount)}U",
-                        confidence = 0.9,
-                        predictedValue = currentData.bg,
-                        mealDetected = false,
-                        detectedCarbs = 100.0,
-                        shouldDeliverBolus = true,
-                        phase = "persistent",
+                        dose = finalDose,
+                        reason = finalReason,
+                        confidence = finalConfidence,
+                        predictedValue = predictedPeak,
+                        mealDetected = finalMealDetected,
+                        detectedCarbs = finalDetectedCarbs,
+                        shouldDeliverBolus = finalDeliver,
+                        phase = finalPhase,
                         learningMetrics = LearningMetrics(
                             confidence = learningProfile.learningConfidence,
                             samples = learningProfile.totalLearningSamples,
                             carbRatioAdjustment = learningProfile.personalCarbRatio,
                             isfAdjustment = learningProfile.personalISF,
                             mealTimeFactors = learningProfile.mealTimingFactors,
-
                         ),
-                        reservedDose = 0.0,
+                        reservedDose = finalReservedBolus,
                         carbsOnBoard = finalCOB,
                         Target_adjust = currentStappenTargetAdjust,
                         ISF_adjust = currentStappenPercentage,
                         activityLog = currentStappenLog,
                         resistentieLog = currentResistentieLog,
-                        effectiveISF = effectiveISF
+                        effectiveISF = effectiveISF,
+                        MathBolusAdvice = lastMathBolusAdvice,
+                        // ★★★ NIEUWE WISKUNDIGE DATA - gebruik de opgeslagen variabelen ★★★
+                        mathPhase = lastRobustTrends?.phase ?: "uncertain",
+                        mathSlope = lastRobustTrends?.firstDerivative ?: 0.0,
+                        mathAcceleration = lastRobustTrends?.secondDerivative ?: 0.0,
+                        mathConsistency = lastRobustTrends?.consistency ?: 0.0,
+                        mathDirectionConsistency = if (recentDataForAnalysis.isNotEmpty()) calculateDirectionConsistencyFromData(recentDataForAnalysis) else 0.0,
+                        mathMagnitudeConsistency = if (recentDataForAnalysis.isNotEmpty()) calculateMagnitudeConsistencyFromData(recentDataForAnalysis) else 0.0,
+                        mathPatternConsistency = if (recentDataForAnalysis.isNotEmpty()) calculatePatternConsistency(recentDataForAnalysis) else 0.0,
+                        mathDataPoints = recentDataForAnalysis.size,
+                        usedFallback = usedFallback,
+                        debugLog = "Persistent"
                     )
                 } else {
-                    android.util.Log.d("FCL_Persistent", "Persistent bolus blocked by safety: BG=${currentData.bg}, IOB=${currentIOB}, trend=${trends.recentTrend}")
+
                 }
             }
 
@@ -3832,14 +4261,14 @@ class FCL@Inject constructor(
             val safetyBlock = shouldWithholdInsulin(currentData, trends, effectiveTarget, maxIOB, historicalData)
             if (safetyBlock ) {
                 finalDose = 0.0
-                finalReason = "Safety: ${explainWithholdReason(currentData, trends, effectiveTarget)}"
+                finalReason = "Safety: ${explainWithholdReason(currentData, trends, effectiveTarget, maxIOB)}"
                 finalDeliver = false
                 finalPhase = "safety"
             }
 
             // === NIEUW: Korte-termijn trend safety check ===
             if (finalDeliver && finalDose > 0 ) {
-                if (shouldBlockBolusForShortTermTrend(currentData, historicalData, trends)) {
+                if (shouldBlockBolusForShortTermTrend(currentData, historicalData, trends, maxIOB)) {
                     val shortTermTrend = calculateShortTermTrend(historicalData)
                     finalDose = 0.0
                     finalDeliver = false
@@ -3850,7 +4279,7 @@ class FCL@Inject constructor(
 
             // === NIEUW: Trend reversal detection ===
             if (finalDeliver && finalDose > 0 ) {
-                if (shouldBlockCorrectionForTrendReversal(currentData, historicalData, trends)) {
+                if (shouldBlockCorrectionForTrendReversal(currentData, historicalData, trends, maxIOB)) {
                     finalDose = 0.0
                     finalDeliver = false
                     finalReason = "Safety: Trend reversing to decline (IOB=${"%.1f".format(currentData.iob)}U)"
@@ -3873,6 +4302,105 @@ class FCL@Inject constructor(
                 historicalData, currentData.bg, preferences.get(DoubleKey.meal_detection_sensitivity),
                 carbRatio, effectiveISF, effectiveTarget
             )
+
+// ★★★ WISKUNDIGE FASE HERKENNING ★★★
+
+
+     //       val robustTrends = calculateRobustTrends(historicalData)
+            val mathBolusAdvice = getMathematicalBolusAdvice(
+                robustTrends = robustTrends,
+                detectedCarbs = detectedCarbs,
+                currentBG = currentData.bg,
+                targetBG = effectiveTarget,
+                historicalData = historicalData,
+                currentIOB = currentIOB,
+                maxIOB = maxIOB
+            )
+
+// ★★★ OPSLAAN VOOR STATUS WEERGAVE ★★★
+            lastRobustTrends = robustTrends
+            lastMathBolusAdvice = "Phase: ${robustTrends.phase} | " +
+                "Immediate: ${(mathBolusAdvice.immediatePercentage * 100).toInt()}% | " +
+                "Reserved: ${(mathBolusAdvice.reservedPercentage * 100).toInt()}% | " +
+                "Reason: ${mathBolusAdvice.reason}"
+            lastMathAnalysisTime = DateTime.now()
+
+// ★★★ STANDAARD CARBS BIJ WISKUNDIGE DETECTIE ★★★
+            var mathDetectedCarbs = detectedCarbs
+            if (detectedCarbs == 0.0 && mathBolusAdvice.immediatePercentage > 0) {
+                mathDetectedCarbs = when (robustTrends.phase) {
+                    "early_rise" -> 30.0 + (robustTrends.firstDerivative * 10.0).coerceIn(0.0, 50.0)
+                    "mid_rise" -> 20.0 + (robustTrends.firstDerivative * 8.0).coerceIn(0.0, 40.0)
+                    "late_rise" -> 15.0 + (robustTrends.firstDerivative * 5.0).coerceIn(0.0, 30.0)
+                    else -> 0.0
+                }
+
+                if (mathDetectedCarbs > 5) {
+                    lastMealDetectionDebug = "MATH_CARBS: ${robustTrends.phase} -> ${mathDetectedCarbs}g"
+                    addOrUpdateActiveMeal(mathDetectedCarbs, DateTime.now())
+                    finalCOB = getCarbsOnBoard()
+                    finalDetectedCarbs = mathDetectedCarbs
+                    finalMealDetected = true
+
+                    android.util.Log.d("FCL_MATH_CARBS",
+                                       "Wiskundige carb detectie: ${robustTrends.phase} -> ${mathDetectedCarbs}g, COB: ${finalCOB}g")
+                }
+            }
+
+
+// Alleen overwegen bij voldoende betrouwbaarheid
+            if (robustTrends.consistency > preferences.get(DoubleKey.phase_min_consistency) &&
+                mathBolusAdvice.immediatePercentage > 0 && detectedCarbs > 0) {
+
+                // ★★★ BEREKEN totalCarbBolus (DIT WAS MISSENDE CODE) ★★★
+                val effectiveCR = getEffectiveCarbRatio()
+                val totalCarbBolus = detectedCarbs / effectiveCR
+
+                // ★★★ PAS HYPO-ADJUSTED FACTOR TOE (zelfde als in calculateStagedBolus) ★★★
+                val mealType = getMealTypeFromHour()
+                val currentHour = DateTime.now().hourOfDay
+                val hypoAdjustedFactor = getHypoAdjustedMealFactor(mealType, currentHour)
+                val adjustedTotalCarbBolus = totalCarbBolus * hypoAdjustedFactor
+
+                val mathImmediateBolus = adjustedTotalCarbBolus * mathBolusAdvice.immediatePercentage
+                val mathReservedBolus = adjustedTotalCarbBolus * mathBolusAdvice.reservedPercentage
+
+                // Alleen toepassen als we meer vertrouwen hebben dan de standaard methode
+                if (robustTrends.consistency > 0.7 || detectedCarbs > 20) {
+                    finalDose = mathImmediateBolus
+                    finalReservedBolus = mathReservedBolus
+                    finalReason = mathBolusAdvice.reason
+                    finalPhase = robustTrends.phase
+
+                    // ★★★ RESERVED BOLUS MET CARBS ★★★
+                    if (finalReservedBolus > 0.1 && finalDetectedCarbs > 5) {
+                        pendingReservedBolus = finalReservedBolus
+                        pendingReservedCarbs = finalDetectedCarbs
+                        pendingReservedTimestamp = DateTime.now()
+                        pendingReservedPhase = robustTrends.phase
+
+                        lastReservedBolusDebug = "RESERVED: ${finalReservedBolus}U for ${finalDetectedCarbs}g carbs"
+
+                        android.util.Log.d("FCL_RESERVED",
+                                           "Reserved bolus: ${finalReservedBolus}U voor ${finalDetectedCarbs}g carbs")
+                    } else {
+                        lastReservedBolusDebug = "NO_RESERVED: carbs=$finalDetectedCarbs, reservedBolus=$finalReservedBolus"
+                    }
+
+                    // Store voor learning met wiskundige fase
+                    storeMealForLearning(
+                        detectedCarbs = detectedCarbs,
+                        givenDose = finalDose,
+                        startBG = currentData.bg,
+                        expectedPeak = predictedPeak,
+                        mealType = robustTrends.phase  // Gebruik fase als meal type voor learning
+                    )
+                }
+            }
+
+
+
+
 
 // ★★★ NIEUW: Safety checks voor false positives ★★★
             val sensorIssue = detectSensorIssue(historicalData)
@@ -3914,11 +4442,16 @@ class FCL@Inject constructor(
                     addOrUpdateActiveMeal(detectedCarbs, DateTime.now())
                     finalCOB = getCarbsOnBoard() // Update COB voor return waarde
 
-                    // ★★★ COMBINEER meal met correction ★★★
-                    val peakConfidence = calculatePeakConfidence(historicalData, detectedCarbs)
-                    val (immediateBolus, reservedBolus, bolusReason) = calculateStagedBolus(
-                        detectedCarbs, carbRatio, effectiveISF, currentIOB, maxIOB,
-                        currentData.bg, effectiveTarget, maxBolus, phase, peakConfidence, trends  // ★★★ trends toegevoegd
+
+                    val (immediateBolus, reservedBolus, bolusReason) = getMathematicalBolusAsOnlyMethod(
+                        robustTrends = robustTrends,
+                        detectedCarbs = detectedCarbs,
+                        currentBG = currentData.bg,
+                        targetBG = effectiveTarget,
+                        historicalData = historicalData,
+                        currentIOB = currentIOB,
+                        maxIOB = maxIOB,
+                        effectiveCR = getEffectiveCarbRatio()
                     )
 
                     // Bereken correction component (30% van benodigde correction)
@@ -3944,7 +4477,7 @@ class FCL@Inject constructor(
                         pendingReservedBolus = reservedBolus
                         pendingReservedCarbs = detectedCarbs
                         pendingReservedTimestamp = DateTime.now()
-                        pendingReservedPhase = phase
+                        pendingReservedPhase = robustPhase
                         finalReason += " | Reserved: ${"%.2f".format(reservedBolus)}U"
                     }
                 }
@@ -3974,49 +4507,52 @@ class FCL@Inject constructor(
                     // ★★★ TOEVOEGING: Voeg gedetecteerde koolhydraten toe aan COB ★★★
                     addOrUpdateActiveMeal(detectedCarbs, DateTime.now())
                     finalCOB = getCarbsOnBoard() // Update COB voor return waarde
-                    // ★★★ IOB-BASED BOLUS REDUCTION ★★★
-                    val iobReductionFactor = calculateIOBBolusReductionFactor(currentIOB, maxIOB, currentData.bg, effectiveTarget, trends)
 
-                    if (iobReductionFactor <= 0.0) {
-                        // Volledige blokkering alleen bij IOB >= maxIOB
+                    // ★★★ ALLEEN WISKUNDIGE METHODE ★★★
+                    val (immediateBolus, reservedBolus, bolusReason) = getMathematicalBolusAsOnlyMethod(
+                        robustTrends = robustTrends,
+                        detectedCarbs = detectedCarbs,
+                        currentBG = currentData.bg,
+                        targetBG = effectiveTarget,
+                        historicalData = historicalData,
+                        currentIOB = currentIOB,
+                        maxIOB = maxIOB,
+                        effectiveCR = getEffectiveCarbRatio()
+                    )
+
+                    // ★★★ IOB VEILIGHEID ZIT AL IN WISKUNDIGE METHODE ★★★
+                    // GEEN extra IOB reductie nodig - het zit al in de wiskundige methode
+
+                    if (immediateBolus <= 0.0) {
+                        // Bolus geblokkeerd door wiskundige veiligheidschecks
                         finalDose = 0.0
-                        finalReason = "Safety: Max IOB reached (${"%.1f".format(currentIOB)}U/${"%.1f".format(maxIOB)}U) - blocking meal bolus"
+                        finalReason = "Math-Safety: ${bolusReason}"
                         finalDeliver = false
-                        finalPhase = "safety_max_iob"
+                        finalPhase = "safety_math_blocked"
                         finalMealDetected = false
                     } else {
-                        // Gebruik staged bolus met IOB reductie
-                        val (immediateBolus, reservedBolus, bolusReason) = calculateStagedBolus(
-                            detectedCarbs, carbRatio, effectiveISF, currentIOB, maxIOB,
-                            currentData.bg, effectiveTarget, maxBolus, phase
-                        )
-
-                        // ★★★ APPLY IOB REDUCTION ★★★
-                        val reducedImmediateBolus = immediateBolus * iobReductionFactor
-                        val reducedReservedBolus = reservedBolus * iobReductionFactor
+                        // ★★★ GEEN IOB REDUCTIE - al verwerkt in wiskundige methode ★★★
+                        val finalImmediateBolus = immediateBolus
+                        val finalReservedBolus = reservedBolus
 
                         // Bewaar reserved bolus voor later
-                        if (reducedReservedBolus > 0.1) {
-                            pendingReservedBolus = reducedReservedBolus
+                        if (finalReservedBolus > 0.1) {
+                            pendingReservedBolus = finalReservedBolus
                             pendingReservedCarbs = detectedCarbs
                             pendingReservedTimestamp = DateTime.now()
-                            pendingReservedPhase = phase
+                            pendingReservedPhase = robustPhase
                         }
 
-                        // Alleen immediate bolus afgeven
-                        finalDose = reducedImmediateBolus
-                        finalReason = when {
-                            iobReductionFactor < 1.0 -> "IOB-adjusted (${(iobReductionFactor * 100).toInt()}%): $bolusReason"
-                            else -> bolusReason
-                        }
-                        finalDeliver = reducedImmediateBolus > 0.05 // Alleen leveren als significant
+                        finalDose = finalImmediateBolus
+                        finalReason = bolusReason
+                        finalDeliver = finalImmediateBolus > 0.05
                         finalMealDetected = true
                         finalDetectedCarbs = detectedCarbs
                         finalPhase = if (mealConfidence > 0.7) "meal_high_confidence" else "meal_medium_confidence"
                         finalConfidence = mealConfidence
 
-                        if (reducedReservedBolus > 0.1) {
-                            finalReason += " | Reserved: ${"%.2f".format(reducedReservedBolus)}U"
+                        if (finalReservedBolus > 0.1) {
+                            finalReason += " | Reserved: ${"%.2f".format(finalReservedBolus)}U"
                         }
 
                         // Store for learning (alleen de initiële bolus)
@@ -4079,7 +4615,15 @@ class FCL@Inject constructor(
             // === Correction (alleen als GEEN maaltijd gedetecteerd EN GEEN persistent bolus) ===
             else if (!finalMealDetected  && currentData.bg > effectiveTarget + 0.5) {
 
-                var correctionDose = max(0.0, (currentData.bg - effectiveTarget) / effectiveISF)
+                // ★★★ WISKUNDIGE CORRECTIE ★★★
+                var correctionDose = getMathematicalCorrectionDose(
+                    robustTrends = robustTrends,
+                    currentBG = currentData.bg,
+                    targetBG = effectiveTarget,
+                    effectiveISF = effectiveISF,
+                    currentIOB = currentIOB,
+                    maxIOB = maxIOB
+                )
 
                 if (trends.recentTrend > 0.2) {
                     val factor = 1.0 + (trends.recentTrend / 0.3).coerceAtMost(2.0)
@@ -4088,7 +4632,7 @@ class FCL@Inject constructor(
 
                 correctionDose = getSafeDoseWithLearning(
                     correctionDose, null,
-                    learningProfile.learningConfidence, currentIOB, trends, phase, maxIOB
+                    learningProfile.learningConfidence, currentIOB, trends, robustPhase, maxIOB
                 )
 
                 if (trends.recentTrend <= 0.0 && currentData.bg < effectiveTarget + 3.0) {
@@ -4201,7 +4745,7 @@ class FCL@Inject constructor(
                 // Optioneel: ook naar bestand schrijven voor backup
 
             } catch (e: Exception) {
-                android.util.Log.e("FCL_COB", "Error writing COB", e)
+
             }
 
             // ★★★ VEILIGHEID: Controleer of de totale dosis niet te hoog is ★★★
@@ -4210,6 +4754,24 @@ class FCL@Inject constructor(
                 finalReason += " | Capped at maxBolus ${"%.2f".format(maxBolus)}U"
             }
 
+            // ★★★ Track de afgegeven bolus voor status weergave ★★★
+            if (finalDeliver && finalDose > 0.05) {
+                lastDeliveredBolus = finalDose
+                lastBolusReason = finalReason
+                lastBolusTime = DateTime.now()
+            }
+
+            // ★★★ BOUW DEBUG LOG VOOR CSV ★★★
+            val debugLog = StringBuilder().apply {
+                append("MealDetect: $lastMealDetectionDebug")
+                append(" | COB: $lastCOBDebug")
+                append(" | Reserved: $lastReservedBolusDebug")
+                if (mathDetectedCarbs > 0) {
+                    append(" | MathCarbs: ${mathDetectedCarbs}g")
+                }
+            }.toString()
+
+            android.util.Log.d("FCL_DEBUG", debugLog)
 
             // === Centrale return ===
             return EnhancedInsulinAdvice(
@@ -4227,7 +4789,6 @@ class FCL@Inject constructor(
                     carbRatioAdjustment = learningProfile.personalCarbRatio,
                     isfAdjustment = learningProfile.personalISF,
                     mealTimeFactors = learningProfile.mealTimingFactors,
-
                 ),
                 reservedDose = finalReservedBolus,
                 carbsOnBoard = finalCOB,
@@ -4235,8 +4796,21 @@ class FCL@Inject constructor(
                 ISF_adjust = currentStappenPercentage,
                 activityLog = currentStappenLog,
                 resistentieLog = currentResistentieLog,
-                effectiveISF = effectiveISF
+                effectiveISF = effectiveISF,
+                MathBolusAdvice = if (hasPersistentBolus) "Persistent " else "" + lastMathBolusAdvice,
+                // ★★★ NIEUWE WISKUNDIGE DATA - gebruik de opgeslagen variabelen ★★★
+                mathPhase = lastRobustTrends?.phase ?: "uncertain",
+                mathSlope = lastRobustTrends?.firstDerivative ?: 0.0,
+                mathAcceleration = lastRobustTrends?.secondDerivative ?: 0.0,
+                mathConsistency = lastRobustTrends?.consistency ?: 0.0,
+                mathDirectionConsistency = if (recentDataForAnalysis.isNotEmpty()) calculateDirectionConsistencyFromData(recentDataForAnalysis) else 0.0,
+                mathMagnitudeConsistency = if (recentDataForAnalysis.isNotEmpty()) calculateMagnitudeConsistencyFromData(recentDataForAnalysis) else 0.0,
+                mathPatternConsistency = if (recentDataForAnalysis.isNotEmpty()) calculatePatternConsistency(recentDataForAnalysis) else 0.0,
+                mathDataPoints = recentDataForAnalysis.size,
+                usedFallback = usedFallback,
+                debugLog = debugLog
             )
+
         } catch (e: Exception) {
             return EnhancedInsulinAdvice(
                 dose = 0.0,
@@ -4260,10 +4834,31 @@ class FCL@Inject constructor(
                 ISF_adjust = 0.0,
                 activityLog = "",
                 resistentieLog = currentResistentieLog,
-                effectiveISF = 0.0
+                effectiveISF = 0.0,
+                MathBolusAdvice = lastMathBolusAdvice,
+                debugLog = "error"
             )
         }
     }
+
+ /*   private fun validatePhaseProgression(currentPhase: String, previousPhase: String?): String {
+        if (previousPhase == null) return currentPhase
+
+        val phaseHierarchy = listOf("stable", "early_rise", "mid_rise", "late_rise", "peak", "declining")
+        val currentIndex = phaseHierarchy.indexOf(currentPhase)
+        val previousIndex = phaseHierarchy.indexOf(previousPhase)
+
+        if (currentIndex == -1 || previousIndex == -1) return currentPhase
+
+        // ★★★ MILDE VALIDATIE: sta 1 stap terug toe voor natuurlijke fluctuaties ★★★
+        return when {
+            currentIndex >= previousIndex -> currentPhase // Normale progressie
+            currentIndex == previousIndex - 1 -> currentPhase // 1 stap terug toegestaan
+            currentPhase == "stable" || currentPhase == "declining" -> currentPhase
+            else -> previousPhase
+        }
+    }  */
+
 
 
 }

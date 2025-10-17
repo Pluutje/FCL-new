@@ -57,8 +57,8 @@ enum class DoubleKey(
 
 
     stap_TT("stap_TT", 2.0,0.5,4.0),
-    max_bolus("max_bolus", 1.25,0.5,2.5),
-    meal_detection_sensitivity("meal_detection_sensitivity", 0.35,0.2,0.5),
+    max_bolus("max_bolus", 1.25,0.5,8.0),
+    meal_detection_sensitivity("meal_detection_sensitivity", 0.35,0.1,0.5),
     CarbISF_min_Factor("CarbISF_min_Factor", 0.9,0.5,1.0),
     CarbISF_max_Factor("CarbISF_max_Factor", 1.1,1.0,2.5),
 
@@ -70,6 +70,13 @@ enum class DoubleKey(
     Dag_resistentie_target("Dag_resistentie_target", 5.2,4.0,8.0),
     Nacht_resistentie_target("Dacht_resistentie_target", 5.2,4.0,8.0),
     Uren_resistentie("Uren_resistentie", 2.5,1.0,5.0),
+
+    phase_early_rise_slope("phase_early_rise_slope", 1.2,0.5,2.5),
+    phase_mid_rise_slope("phase_mid_rise_slope", 0.8,0.3,1.8),
+    phase_late_rise_slope("phase_late_rise_slope", 0.4,0.1,1.0),
+    phase_peak_slope("phase_peak_slope", 0.3,0.1,0.8),
+    phase_early_rise_accel("phase_early_rise_accel", 0.2,0.05,0.5),
+    phase_min_consistency("phase_min_consistency", 0.6,0.3,0.9),
 
 
 }

@@ -228,34 +228,6 @@
 
 
     <!--    Eigen -->
-    <string name="Info_FCL">\n ● Algemene Info \n  \n ● ------- \n\n !! Klik om te openen !!\n</string>
-    <string name="Algoritme_algemeen_doc" translatable="false">https://docs.google.com/document/d/1276w2FhhqaGFjAccH8VlHJ0csGTDxkm1/edit?tab=t.0</string>
-
-    <!--
-
-        <string name="Titel_resistentie">Gebruik resistentie functie</string>
-        <string name="min_resistentiePerc_summary">De minimum waarde van de resistentie (10% - 100%).</string>
-        <string name="min_resistentiePerc_title">Minimum resistentie percentage (%)</string>
-        <string name="max_resistentiePerc_summary">De maximum waarde van de resistentie (100% - 200%).</string>
-        <string name="max_resistentiePerc_title">Maximum resistentie percentage (%)</string>
-        <string name="dag_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
-        <string name="dag_resistentiePerc_title">Resistentie sterkte overdag (%)</string>
-        <string name="nacht_resistentiePerc_summary">Het effect van de resistentie sterkte kan worden gecorrigeerd tussen 10% en 200%.</string>
-        <string name="nacht_resistentiePerc_title">Resistentie sterkte snachts (%)</string>
-        <string name="dag_resistentie_target_summary">Bg target overdag ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
-        <string name="dag_resistentie_target_title">Resistentie target overdag</string>
-        <string name="nacht_resistentie_target_summary">Bg target snachts ten opzichte waarvan de afwijking tbv de resistentie wordt berekend</string>
-        <string name="nacht_resistentie_target_title">Resistentie target snachts</string>
-        <string name="Dagen_resistentie_summary">Het aantal dagen dat de resistentie correctie terug kijkt om in de berekening (min 1, max 7).</string>
-        <string name="Dagen_resistentie_title">Aantal dagen</string>
-        <string name="Uren_resistentie_summary">Het aantal uren per dag waarover de bg wordt gemiddeld (min 1, max 5).</string>
-        <string name="Uren_resistentie_title">Aantal uur</string>
-        <string name="MinDelay_resistentie_summary">Het aantal minuten (-60 tot + 120) waarmee de terugkijk tijd tov de huidige tijd wordt verschoven.</string>
-        <string name="MinDelay_resistentie_title">Aantal minuten verschuiving</string>
-        -->
-
-    <string name="Info_dag_nacht">● Extra resistentie instellingen!:\n 1. Aanvullende gevoeligheids detectie op basis van tijdstip op de dag.\n \n !! Klik om te openen !!\n</string>
-    <string name="e_dag_nacht_doc" translatable="false">https://docs.google.com/document/d/131_ybmLgJYdDWpxgGjtA7ztaPLEZ_feT/edit</string>
     <string name="WeekendDagen_summary">Dagen waarop het weekend algoritme actief is (opmaak vr,za,zo,ma,di,wo,do)</string>
     <string name="WeekendDagen_title">Weekend dagen (bv vr,za,zo)</string>
     <string name="OchtendStart_summary">Tijdstip waarop het algoritme overschakelt naar de ochtend instellingen (opmaak hh:mm)</string>
@@ -265,15 +237,13 @@
     <string name="NachtStart_summary">Tijdstip waarop het algoritme overschakelt naar de nacht instellingen (opmaak hh:mm)</string>
     <string name="NachtStart_title">Nachtstart tijdstip (bv 23:30)</string>
 
-    <string name="persistent_doc" translatable="false">https://docs.google.com/document/d/13lPl9WChpcA5mbfXRdtsC0fT18HHaNL1/edit</string>
-    <string name="Info_Persistent">﴿. Persistente Bg: \n 1. Drempelwaarde dag/nacht (mmol/l) \n ●  Waarde waaronder geen persistent hoge Bg wordt gedecteerd. \n 2. Maximum percentage dag/nacht. (%) \n 3. Range (mmol/l) \n ● Range (+/- in mmol/l) waarbinnen de Bg als stabiel wordt beschouwd.\n \n\n !! Klik om te openen !!\n</string>
+
     <string name="PersistentAanUit_summary">Bij activering wordt boven de drempel waarde de insuline afgifte naar boven gecorrigeerd</string>
     <string name="PersistentAanUit_title">Persistent correctie</string>
     <string name="persistent_Dagdrempel_summary">Drempel bg-waarde waarboven de extra correctie overdag wordt toegepast</string>
     <string name="persistent_Dagdrempel_title">Overdag drempel persistent hoog</string>
     <string name="persistent_Nachtdrempel_summary">Drempel bg-waarde waarboven de extra correctie snachts wordt toegepast</string>
     <string name="persistent_Nachtdrempel_title">Nacht drempel persistent hoog</string>
-
     <string name="persistent_Dag_MaxBolus_summary">Maximum DayTime persistent Bolus given</string>
     <string name="persistent_Dag_MaxBolus_title">Maximum DayTime persistent Bolus [u]</string>
     <string name="persistent_Nacht_MaxBolus_summary">Maximum NightTime persistent Bolus given</string>
@@ -281,8 +251,8 @@
     <string name="persistent_CoolDown_summary">Minimum time between two bolusses during persistent high Bg</string>
     <string name="persistent_CoolDown_title">CoolDown period [min]</string>
 
-    <string name="Info_activiteit">● Activiteits instellingen gebasserd op stappen!:\n 1. Stappenteller aan/uit schakelen.\n 2. Insuline percentage bij gedetecteerde activiteit.\n \n !! Klik om te openen !!\n</string>
-    <string name="b_stappen_doc" translatable="false">https://docs.google.com/document/d/12gcpIZ9B-TC0vAnB9XH_55IpHAuePFSV/edit</string>
+
+
     <string name="stappenAanUit_summary">Bij activering boven de drempel wordt de insuline afgifte gecorrigeerd</string>
     <string name="stappenAanUit_title">Stappen insuline-correctie</string>
 
@@ -295,13 +265,11 @@
     <string name="stap_retentie_summary">Maximum aantal keren dat de stappen acitvatie na-ijlt.</string>
     <string name="stap_retentie_title">Max aantal retenties</string>
 
-    <string name="Info_fcl">● Full Closed Loop settings!:\n 1. \n 2. \n \n !! Klik to open !!\n</string>
-    <string name="Info_fcl_bolus">● Bolus strenght settings!:\n 1. Day- and Night-time percentage.\n 2. Early- and Late-rise percentage.\n \n !! Klik om te openen !!\n</string>
 
-    <string name="b_fcl_doc" translatable="false">https://docs.google.com/document/d/12gcpIZ9B-TC0vAnB9XH_55IpHAuePFSV/edit</string>
+
+
     <string name="FCLAanUit_summary">Bij activering wordt bij stijging van de BG en maaltijd detectie automatisch de insuline afgifte verhoogd</string>
     <string name="FCLAanUit_title">Full Closed Loop</string>
-    <string name="Info_fcl_learning">● Learning settings!:\n 1. Reset data.\n 2. .......\n \n !! Klik om te openen !!\n</string>
     <string name="ResetLearning_summary">Wanneer ingeschakeld worden bij de eerst volgende run de FCL-learnings gewist. LET OP! na de reset weer uitzetten anders blijft de data gewist</string>
     <string name="ResetLearning_title">Reset Learning</string>
     <string name="CarbISF_min_Factor_summary">Minimum correctiefactor waarmee de ISF en CarbRatio wordt gecorrigeerdtijdens het leerproces</string>
@@ -315,11 +283,15 @@
     <string name="bolus_perc_night_title">Bolus percentage night [%]</string>
     <string name="bolus_perc_early_summary">Bolus-percentage deliverd during EARLY meal detection</string>
     <string name="bolus_perc_early_title">Bolus percentage early-rise [%]</string>
+    <string name="bolus_perc_mid_summary">Bolus-percentage deliverd during MID meal detection</string>
+    <string name="bolus_perc_mid_title">Bolus percentage mid-rise [%]</string>
     <string name="bolus_perc_late_summary">Bolus-percentage deliverd during LATE meal detection</string>
     <string name="bolus_perc_late_title">Bolus percentage late-rise [%]</string>
 
     <string name="max_bolus_summary">Percentage van de berekende bolus wat daadwerkelijk afgegeven wordt</string>
     <string name="max_bolus_title">Max Bolus [eh]</string>
+    <string name="IOB_corr_perc_summary">Percentage IOB correction for bolus calculation. Higher number = more bolus</string>
+    <string name="IOB_corr_perc_title">Bolus correction strenght for IOB[%]</string>
     <string name="carb_percentage_summary">Percentage waarmee de FCL code de berekende carbs vermenigvuldigd</string>
     <string name="carb_percentage_title">Carb berekenings percentage [%]</string>
 
@@ -332,7 +304,7 @@
     <string name="tau_absorption_minutes_summary">Gemiddelde tijd hoelang carbs “in het lichaam aanwezig blijven</string>
     <string name="tau_absorption_minutes_title">COB absorption time [min]</string>
 
-    <string name="Info_fcl_safety">● Safety settings!:\n 1. hypoThreshold: 4.0 mmol/L (traditionele hypo grens).\n 2. hypoRecoveryMinutes: 90 minuten (optimale balans).\n 3. hypoRecoveryBGRange: 2.5 mmol/L (herstel van 4.0 naar 6.5) \n !! Klik om te openen !!\n</string>
+
     <string name="hypoThresholdDay_summary">Bg below threshold defined as hypo</string>
     <string name="hypoThresholdDay_title">Hypo threshold dayTime [mmol/l]</string>
     <string name="hypoThresholdNight_summary">Bg below threshold defined as hypo</string>
@@ -367,5 +339,44 @@
     <string name="Uren_resistentie_title">Aantal uur</string>
     <string name="MinDelay_resistentie_summary">Het aantal minuten (-60 tot + 120) waarmee de terugkijk tijd tov de huidige tijd wordt verschoven.</string>
     <string name="MinDelay_resistentie_title">Aantal minuten verschuiving</string>
+
+    <string name="phase_early_rise_slope_summary"></string>
+    <string name="phase_early_rise_slope_title">Phase EarlyRise Slope</string>
+    <string name="phase_mid_rise_slope_summary"></string>
+    <string name="phase_mid_rise_slope_title">Phase MidRise Slope</string>
+    <string name="phase_late_rise_slope_summary"></string>
+    <string name="phase_late_rise_slope_title">Phase LateRise Slope</string>
+    <string name="phase_peak_slope_summary"></string>
+    <string name="phase_peak_slope_title">Phase Peak Slope</string>
+    <string name="phase_early_rise_accel_summary"></string>
+    <string name="phase_early_rise_accel_title">Phase EarlyRise Accelaration</string>
+    <string name="phase_min_consistency_summary"></string>
+    <string name="phase_min_consistency_title">Phase Minimum consistency</string>
+
+    <string name="Info_fcl">  ●=●=●=●  </string>
+    <string name="Info_fcl_doc" translatable="false">https://docs.google.com/document/d/1VLXDzYsdYFz9g3YLdUQq2mUbw_yOSPqD/edit</string>
+    <string name="Info_fcl_1_VEILIGHEIDSINSTELLINGEN">🛡️ VEILIGHEIDSINSTELLINGEN \n \n Bescherming tegen hypos en veilig herstel na lage bloedsuikers. Deze parameters bepalen wanneer het systeem insuline moet beperken en hoe voorzichtig het moet zijn tijdens herstelfasen. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_1_VEILIGHEIDSINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/1LvS7Rp9v1yi2K1r4HbG4zuBJinHgtU3r/edit</string>
+    <string name="Info_fcl_2_BOLUSMAALTIJDINSTELLINGEN">💉 BOLUS en MAALTIJD INSTELLINGEN \n \n Bepalen van insuline afgifte voor maaltijden en correcties. Controleren hoeveel en wanneer insuline wordt toegediend. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_2_BOLUSMAALTIJDINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/14TyBq-YuJbibtHSHZXbZOnt3wEyQ4cq7/edit</string>
+    <string name="Info_fcl_3_FASEDETECTIEINSTELLINGEN">📈 FASE DETECTIE INSTELLINGEN \n \n Herkenning van verschillende BG patronen voor optimale timing van insuline afgifte. Wiskundige detectie van stijgingsfasen. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_3_FASEDETECTIEINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/1hJaWvgj_cHd4DvJ9BrZeZXC-95Je8LY6/edit</string>
+    <string name="Info_fcl_4_RESISTENTIEINSTELLINGEN">🛡️ RESISTENTIE INSTELLINGEN \n \n Herkenning van verschillende BG patronen voor optimale timing van insuline afgifte. Wiskundige detectie van stijgingsfasen. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_4_RESISTENTIEINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/1RpkaIBsWt8bl7JvQYTrW2cjIvQ6FgrlQ/edit</string>
+    <string name="Info_fcl_5_LEERSYSTEEMINSTELLINGEN">🧠 LEER SYSTEEM INSTELLINGEN \n \n Automatische aanpassing van CR/ISF gebaseerd op eerdere maaltijd responsen. Adaptief leren voor persoonlijke optimalisatie. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_5_LEERSYSTEEMINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/1HAMNOlVeXKp6bJ-hvfEjbjXzUxKZ5Cx_/edit</string>
+    <string name="Info_fcl_6_KOOLHYDRATENINSTELLINGEN">🍽️ KOOLHYDRATEN INSTELLINGEN \n \n Detectie en verwerking van maaltijden zonder handmatige input. Automatische herkenning en insuline respons. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_6_KOOLHYDRATENINSTELLINGEN_doc" translatable="false">https://docs.google.com/document/d/1PwIw9TqIX0wvMVxqh0lRIbmZs--T53TP/edit</string>
+    <string name="Info_fcl_7_DAGNACHTCYCLUS">🌙 DAG-NACHT CYCLUS \n \n Tijdsgebonden instellingen voor verschillende dagdelen. Aanpassing aan circadiane ritmes. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_7_DAGNACHTCYCLUS_doc" translatable="false">https://docs.google.com/document/d/1tbHXJ3_D7AA-rVyodhn2RVWo0pf73m9h/edit</string>
+    <string name="Info_fcl_8_PERSISTENTHOGEBG">📊 PERSISTENT HOGE BG \n \n Correctie voor aanhoudende verhogingen wanneer standaard correcties onvoldoende zijn. Aanvullende veiligheid voor persistente hoge waardes. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_8_PERSISTENTHOGEBG_doc" translatable="false">https://docs.google.com/document/d/1-os1rPRNrjm7jIXdlaoyNNIsAX5awHau/edit</string>
+    <string name="Info_fcl_9_ACTIVITEITBEWEGING">🚶 ACTIVITEIT en BEWEGING \n \n Aanpassing van insuline afgifte bij fysieke activiteit. Automatische compensatie voor beweging. \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_fcl_9_ACTIVITEITBEWEGING_doc" translatable="false">https://docs.google.com/document/d/1cpUoII457sD6d8YgGroBGAT8OeA9Fx7K/edit</string>
+
+
+    <string name="Info_FCL">\n ● Algemene Info \n  \n ● ------- \n\n !! Klik om te openen !!\n</string>
+    <string name="Info_FCL_doc" translatable="false">https://docs.google.com/document/d/1276w2FhhqaGFjAccH8VlHJ0csGTDxkm1/edit?tab=t.0</string>
+
 
    </resources>
