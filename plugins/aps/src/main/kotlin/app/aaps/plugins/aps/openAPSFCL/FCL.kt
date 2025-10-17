@@ -762,6 +762,10 @@ class FCL@Inject constructor(
     private var lastStappenBerekeningsTijd: DateTime? = null
     private val STAPPEN_BEREKENING_INTERVAL = 5 * 60 * 1000L // 5 minuten in milliseconden
 
+    // ★★★ CARBS TRACKING VARIABELEN ★★★
+    private var lastDetectedCarbs: Double = 0.0
+    private var lastCarbsOnBoard: Double = 0.0
+    private var lastCOBUpdateTime: DateTime? = null
 
 
     // Learning system
@@ -1359,7 +1363,7 @@ class FCL@Inject constructor(
 
         return """
 ╔═══════════════════
-║  ══ FCL v1.2.0 ══ 
+║  ══ FCL v1.2.1 ══ 
 ╚═══════════════════
 
 🎯 LAATSTE BOLUS BESLISSING
@@ -1376,6 +1380,12 @@ class FCL@Inject constructor(
 • Huidig gereserveerd: ${"%.2f".format(pendingReservedBolus)}U
 • Bijbehorende carbs: ${"%.1f".format(pendingReservedCarbs)}g
 • Sinds: ${pendingReservedTimestamp?.toString("HH:mm") ?: "Geen"}
+
+[🍽️  KOOLHYDRATEN DETECTIE]
+• Laatste detectie: ${"%.1f".format(lastDetectedCarbs)}g
+• Huidige COB: ${"%.1f".format(lastCarbsOnBoard)}g
+• Actieve maaltijden: ${activeMeals.size}
+• Laatste COB update: ${lastCOBUpdateTime?.toString("HH:mm:ss") ?: "Nooit"}
 
 
 📈 FASE DETECTIE & BEREKENINGEN
@@ -4838,6 +4848,11 @@ $mealPerformanceSummary
                 lastBolusReason = finalReason
                 lastBolusTime = DateTime.now()
             }
+
+            // ★★★ BIJWERKEN CARBS TRACKING VOOR STATUS ★★★
+            lastDetectedCarbs = finalDetectedCarbs
+            lastCarbsOnBoard = finalCOB
+            lastCOBUpdateTime = DateTime.now()
 
             // ★★★ BOUW DEBUG LOG VOOR CSV ★★★
             val debugLog = StringBuilder().apply {
