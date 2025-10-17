@@ -1363,7 +1363,7 @@ class FCL@Inject constructor(
 
         return """
 ╔═══════════════════
-║  ══ FCL v1.2.1 ══ 
+║  ══ FCL v1.3.0 ══ 
 ╚═══════════════════
 
 🎯 LAATSTE BOLUS BESLISSING
@@ -2890,7 +2890,13 @@ $mealPerformanceSummary
         // ★★★ NIEUWE CONSISTENCY BEREKENING ★★★
         val consistency = calculateEnhancedConsistency(recentDataForAnalysis)
 
-        var phase = determineBalancedPhase(firstDerivative, secondDerivative, consistency)
+        var phase = determineBalancedPhase(
+            firstDerivative = firstDerivative,
+            secondDerivative = secondDerivative,
+            consistency = consistency,
+            currentBG = recentDataForAnalysis.last().bg,  // ★★★ NIEUW: huidige BG meegeven
+            previousPhase = lastRobustTrends?.phase  // ★★★ NIEUW: vorige fase voor hysteresis
+        )
         usedFallback = false
 
 // ★★★ NIEUW: Fasevolgorde validatie ★★★
@@ -2911,32 +2917,39 @@ $mealPerformanceSummary
     private fun determineBalancedPhase(
         firstDerivative: Double,
         secondDerivative: Double,
-        consistency: Double
+        consistency: Double,
+        currentBG: Double,  // ★★★ NIEUW: huidige BG waarde
+        previousPhase: String? = null  // ★★★ NIEUW: vorige fase voor hysteresis
     ): String {
-        // ★★★ GEEN consistentie-check meer - we gebruiken altijd deze logica ★★★
-        // Consistentie wordt later gebruikt voor bolus scaling
-
-        val earlyRiseSlope = preferences.get(DoubleKey.phase_early_rise_slope)  // 1.2
-        val midRiseSlope = preferences.get(DoubleKey.phase_mid_rise_slope)      // 0.8
-        val lateRiseSlope = preferences.get(DoubleKey.phase_late_rise_slope)    // 0.4
+        val earlyRiseSlope = preferences.get(DoubleKey.phase_early_rise_slope)
+        val midRiseSlope = preferences.get(DoubleKey.phase_mid_rise_slope)
+        val lateRiseSlope = preferences.get(DoubleKey.phase_late_rise_slope)
         val peakSlope = preferences.get(DoubleKey.phase_peak_slope)
-        val earlyRiseAccel = preferences.get(DoubleKey.phase_early_rise_accel)  // 0.2
 
-        // ★★★ VERBETERDE DETECTIE MET JOUW WAARDEN ★★★
+        // ★★★ HYSTERESIS: hogere drempel om uit "peak" fase te komen ★★★
+        val peakExitThreshold = peakSlope * 1.5
+
+        // ★★★ BEPERK PIEK TOT HOGE BG WAARDEN ★★★
+        val canBePeak = currentBG > 7.0  // Alleen piek boven 7.0 mmol/L
+        val isLowStable = currentBG < 6.0 && abs(firstDerivative) < 0.5
+
         return when {
             // Dalende trend
             firstDerivative < -1.0 -> "declining"
-            firstDerivative < -0.3 -> "declining"  // ← Minder strict
+            firstDerivative < -0.3 -> "declining"
 
-            // ★★★ VROEGERE DETECTIE ZONDER STRIKTE ACCELERATIE ★★★
-            firstDerivative > earlyRiseSlope -> "early_rise"  // ← Vereenvoudigd: alleen slope check
+            // ★★★ EERST CHECKEN VOOR LOW STABLE ★★★
+            isLowStable -> "low_stable"
+
+            // ★★★ VERBETERDE PIEK LOGICA MET HYSTERESIS EN BG CONTEXT ★★★
+            previousPhase == "peak" && abs(firstDerivative) < peakExitThreshold && canBePeak -> "peak"
+            abs(firstDerivative) < peakSlope && canBePeak -> "peak"
+
+            // Stijgende fasen
+            firstDerivative > earlyRiseSlope -> "early_rise"
             firstDerivative > midRiseSlope -> "mid_rise"
             firstDerivative > lateRiseSlope -> "late_rise"
 
-            // Peak detectie
-            abs(firstDerivative) < peakSlope -> "peak"
-
-            // Stabiel
             else -> "stable"
         }
     }
