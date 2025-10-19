@@ -700,6 +700,11 @@ class FCL@Inject constructor(
         val reservedPercentage: Double,
         val reason: String
     )
+    private data class UnifiedCarbsResult(
+        val detectedCarbs: Double,
+        val detectionReason: String,
+        val confidence: Double
+    )
 
     // Configuration properties
     private var currentBg: Double = 5.5
@@ -924,6 +929,143 @@ class FCL@Inject constructor(
         storage.saveCurrentResistance(ResistentieCfEff)
 
         return ResistentieResult(ResistentieCfEff, log_resistentie)
+    }
+
+
+    // ★★★ UNIFORME CARB DETECTIE METHODE - VERVANGT BEIDE OUDE METHODES ★★★
+    private fun calculateUnifiedCarbsDetection(
+        historicalData: List<BGDataPoint>,
+        robustTrends: RobustTrendAnalysis,
+        currentBG: Double,
+        targetBG: Double,
+        currentIOB: Double,
+        maxIOB: Double,
+        effectiveCR: Double
+    ): UnifiedCarbsResult {
+
+        if (historicalData.size < 4) return UnifiedCarbsResult(0.0, "Insufficient data", 0.0)
+
+        val recent = historicalData.takeLast(4)
+        val bg10minAgo = recent.getOrNull(recent.size - 3)?.bg ?: currentBG
+        val delta10 = currentBG - bg10minAgo
+        val slope10 = delta10 / 10.0 * 60.0 // mmol/L per uur
+
+        // ★★★ BASIS CARBS BEREKENING - COMBINATIE VAN BEIDE METHODES ★★★
+        var detectedCarbs = 0.0
+        var detectionReason = "No carb detection"
+        var confidence = 0.0
+
+        // 1. Onverklaarde stijging (van oude detectMealFromBG)
+        val predictedRiseFromCOB = estimateRiseFromCOB(
+            effectiveCR = effectiveCR,
+            tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes),
+            detectionWindowMinutes = 45
+        )
+        val unexplainedDelta = delta10 - predictedRiseFromCOB
+        val mealDetectionSensitivity = preferences.get(DoubleKey.meal_detection_sensitivity)
+
+        // 2. Wiskundige trend-based detectie
+        val mathCarbs = calculateMathematicalCarbsComponent(robustTrends, slope10)
+
+        // 3. COB-gecorrigeerde detectie
+        val cobAdjustedCarbs = calculateCOBAdjustedCarbs(unexplainedDelta, effectiveCR, mealDetectionSensitivity)
+
+        // ★★★ BESLISSINGSLOGICA - COMBINEER ALLE SIGNALEN ★★★
+        when {
+            // Zeer sterke stijging - prioriteit 1
+            slope10 > 5.0 -> {
+                detectedCarbs = slope10 * 12.0
+                detectionReason = "Rapid rise detection: slope=${"%.1f".format(slope10)} mmol/L/h"
+                confidence = 0.8
+            }
+
+            // Hoge wiskundige carbs met goede consistentie - prioriteit 2
+            mathCarbs > 20.0 && robustTrends.consistency > 0.6 -> {
+                detectedCarbs = mathCarbs
+                detectionReason = "Mathematical detection: ${robustTrends.phase}, slope=${"%.1f".format(robustTrends.firstDerivative)}"
+                confidence = robustTrends.consistency
+            }
+
+            // Onverklaarde stijging boven drempel - prioriteit 3
+            unexplainedDelta > mealDetectionSensitivity * 0.7 -> {
+                detectedCarbs = cobAdjustedCarbs
+                detectionReason = "Unexplained rise: ${"%.1f".format(unexplainedDelta)} mmol/L"
+                confidence = 0.6
+            }
+
+            // Matige stijging met consistente trend - prioriteit 4
+            slope10 > 1.5 && currentBG > targetBG + 0.3 && robustTrends.consistency > 0.4 -> {
+                detectedCarbs = slope10 * 8.0
+                detectionReason = "Moderate rise with consistent trend"
+                confidence = 0.5
+            }
+
+            else -> {
+                detectedCarbs = 0.0
+                detectionReason = "No significant carb detection signals"
+                confidence = 0.0
+            }
+        }
+
+        // ★★★ IOB-BASED REDUCTIE ★★★
+        val iobRatio = currentIOB / maxIOB
+        val iobCarbReduction = when {
+            iobRatio > 0.8 -> 0.3
+            iobRatio > 0.6 -> 0.5
+            iobRatio > 0.4 -> 0.7
+            iobRatio > 0.2 -> 0.85
+            else -> 1.0
+        }
+
+        detectedCarbs *= iobCarbReduction
+
+        // ★★★ CARB PERCENTAGE INSTELLING TOEPASSEN ★★★
+        detectedCarbs *= preferences.get(IntKey.carb_percentage).toDouble() / 100.0
+
+        // ★★★ DYNAMISCHE BEGRENSING OP BASIS VAN SLOPE ★★★
+        val maxCarbs = when {
+            robustTrends.firstDerivative > 8.0 -> 50.0
+            robustTrends.firstDerivative > 5.0 -> 40.0
+            robustTrends.firstDerivative > 3.0 -> 30.0
+            else -> 20.0
+        } * (preferences.get(IntKey.carb_percentage).toDouble() / 100.0)
+
+        detectedCarbs = detectedCarbs.coerceIn(0.0, maxCarbs)
+
+        // ★★★ CONFIDENCE AFSTEMMING ★★★
+        confidence *= when {
+            detectedCarbs > 30.0 -> 0.9
+            detectedCarbs > 20.0 -> 0.8
+            detectedCarbs > 10.0 -> 0.7
+            else -> 0.5
+        }
+
+        if (iobCarbReduction < 1.0) {
+            detectionReason += " (IOB reduced: ${(iobCarbReduction * 100).toInt()}%)"
+        }
+
+        return UnifiedCarbsResult(detectedCarbs, detectionReason, confidence)
+    }
+
+    // ★★★ HULPFUNCTIES VOOR UNIFORME METHODE ★★★
+    private fun calculateMathematicalCarbsComponent(
+        robustTrends: RobustTrendAnalysis,
+        slope10: Double
+    ): Double {
+        return when (robustTrends.phase) {
+            "early_rise" -> 10.0 + (robustTrends.firstDerivative * 7.0).coerceAtMost(30.0)
+            "mid_rise" -> 5.0 + (robustTrends.firstDerivative * 5.0).coerceAtMost(25.0)
+            "late_rise" -> 0.0 + (robustTrends.firstDerivative * 4.0).coerceAtMost(20.0)
+            else -> 0.0
+        }
+    }
+
+    private fun calculateCOBAdjustedCarbs(
+        unexplainedDelta: Double,
+        effectiveCR: Double,
+        mealDetectionSensitivity: Double
+    ): Double {
+        return unexplainedDelta * effectiveCR * preferences.get(IntKey.carb_percentage).toDouble() / 100.0
     }
 
     private fun calculateCorrectionFactor(bgGem: Double, targetProfiel: Double, macht: Double, rel_std: Int): Double {
@@ -1363,7 +1505,7 @@ class FCL@Inject constructor(
 
         return """
 ╔═══════════════════
-║  ══ FCL v1.3.0 ══ 
+║  ══ FCL v1.6.0 ══ 
 ╚═══════════════════
 
 🎯 LAATSTE BOLUS BESLISSING
@@ -1696,64 +1838,6 @@ $mealPerformanceSummary
     }
 
 
-    private fun detectMealFromBG(
-        historicalData: List<BGDataPoint>,
-        currentBG: Double,
-        mealDetectionSensitivity: Double,
-        carbRatio: Double,
-        currentISF: Double,
-        targetBG: Double
-    ): Pair<Double, MealDetectionState> {
-
-        if (historicalData.size < 4) return Pair(0.0, MealDetectionState.NONE)
-
-        val bg10minAgo = historicalData.getOrNull(historicalData.size - 3)?.bg ?: currentBG
-        val delta10 = currentBG - bg10minAgo
-
-        val effectiveCR = getEffectiveCarbRatio()
-        val predictedRiseFromCOB = estimateRiseFromCOB(
-            effectiveCR = effectiveCR,
-            tauAbsorptionMinutes = preferences.get(IntKey.tau_absorption_minutes),
-            detectionWindowMinutes = 45
-        )
-
-        val unexplainedDelta = delta10 - predictedRiseFromCOB
-
-        var localDetectedCarbs = 0.0
-        var detectedState = MealDetectionState.NONE
-        var debugInfo = ""
-
-        if (unexplainedDelta > mealDetectionSensitivity * 0.7) {
-            localDetectedCarbs = unexplainedDelta * effectiveCR * preferences.get(IntKey.carb_percentage).toDouble()/100.0
-            detectedState = MealDetectionState.EARLY_RISE
-            debugInfo = "MEAL_DETECT: unexplainedDelta=$unexplainedDelta > threshold=${mealDetectionSensitivity * 0.7}, carbs=$localDetectedCarbs"
-        }
-
-        // ★★★ VERBETERDE SNELHEIDS DETECTIE VOOR GROTE MAALTIJDEN ★★★
-        val slope10 = delta10 / 10.0 * 60.0 // mmol/L per uur
-
-// ★★★ NIEUW: DETECTEER GROTE MAALTIJDEN BIJ ZEER HOGERE SNELHEDEN ★★★
-        if (slope10 > 5.0) {
-            // Zeer snelle stijging - waarschijnlijk grote maaltijd
-            localDetectedCarbs = slope10 * 15.0 // Hogere multiplier voor grote maaltijden
-            detectedState = MealDetectionState.EARLY_RISE
-            debugInfo = "LARGE_MEAL_RISE: slope=$slope10 > 5.0, carbs=$localDetectedCarbs"
-        } else if (detectedState == MealDetectionState.NONE && slope10 > 1.5 && currentBG > targetBG + 0.3) {
-            // Bestaande logica voor kleinere stijgingen
-            localDetectedCarbs = slope10 * 8.0
-            detectedState = MealDetectionState.EARLY_RISE
-            debugInfo = "RAPID_RISE: slope=$slope10 > 1.5, carbs=$localDetectedCarbs"
-        }
-
-        // ★★★ OPSLAAN IN GLOBALE DEBUG VARIABELE ★★★
-        if (debugInfo.isNotEmpty()) {
-            lastMealDetectionDebug = debugInfo
-        } else {
-            lastMealDetectionDebug = "NO_MEAL: delta10=$delta10, slope10=$slope10, unexplainedDelta=$unexplainedDelta, threshold=${mealDetectionSensitivity * 0.7}"
-        }
-
-        return Pair(localDetectedCarbs, detectedState)
-    }
 
     // ★★★ Safety check voor meal detectie boven target ★★★
     private fun canDetectMealAboveTarget(
@@ -2619,48 +2703,32 @@ $mealPerformanceSummary
         historicalData: List<BGDataPoint>,
         detectedCarbs: Double
     ): Double {
-        var confidence = 0.5 // Baseline
+        var confidence = 0.3 // Lagere baseline
 
-        if (historicalData.size < 4) return if (detectedCarbs > 20) 0.6 else 0.3
+        if (historicalData.size < 4) return if (detectedCarbs > 20) 0.4 else 0.2
 
         val recent = historicalData.takeLast(4)
-        val rises = recent.zipWithNext { a, b -> b.bg - a.bg }
         val totalRise = recent.last().bg - recent.first().bg
 
-        // ★★★ NIEUW: Gebruik hasRecentRise voor snellere confidence boost ★★★
-        val hasQuickRise = hasRecentRise(historicalData, 2) // 2 van 3 metingen stijgend
+// Strengere voorwaarden voor hoge confidence
+        val hasQuickRise = hasRecentRise(historicalData, 2)
+        val hasStrongRise = totalRise > 2.0
+        val hasConsistentPattern = hasSustainedRisePattern(historicalData)
 
-        // Bonus voor consistente stijging
-        if (hasSustainedRisePattern(historicalData)) {
-            confidence += 0.3
-        } else if (hasQuickRise) { // ★★★ SNELDERE BONUS ★★★
+        if (hasConsistentPattern && hasStrongRise) {
+            confidence += 0.4
+        } else if (hasQuickRise && totalRise > 1.0) {
             confidence += 0.2
         }
 
-        // Bonus voor substantiële carbs
+// Hogere carbs vereist voor meer confidence
         if (detectedCarbs > 25) {
             confidence += 0.2
-
-        }
-
-        // Bonus voor gelijkmatige stijging (lage variantie)
-        if (rises.size > 1) {
-            val variance = calculateVariance(rises)
-            if (variance < 0.05) {
-                confidence += 0.2
-
-            }
-        }
-
-        // Bonus voor significante totale stijging
-        if (totalRise > 2.0) {
+        } else if (detectedCarbs > 15) {
             confidence += 0.1
-
         }
 
-        val finalConfidence = confidence.coerceIn(0.0, 1.0)
-
-        return finalConfidence
+        return confidence.coerceIn(0.0, 0.8)  // Max 80% confidence
     }
 
 
@@ -2899,14 +2967,6 @@ $mealPerformanceSummary
         )
         usedFallback = false
 
-// ★★★ NIEUW: Fasevolgorde validatie ★★★
-        // ★★★ GEEN VALIDATIE: vertrouw op wiskundige faseherkenning ★★★
-       // phase blijft zoals bepaald door determineBalancedPhase
-      //  phase = validatePhaseProgression(phase, lastRobustTrends?.phase)
-
-// ★★★ GEEN FALLBACK - we gebruiken altijd dezelfde faseherkenning ★★★
-// phase blijft zoals bepaald door determineBalancedPhase
-        usedFallback = false
 
         val result = RobustTrendAnalysis(firstDerivative, secondDerivative, consistency, phase)
         lastRobustTrends = result
@@ -3175,16 +3235,13 @@ $mealPerformanceSummary
         if (mealDetected) {
             return when {
                 // ★★★ MILDER BELEID BIJ MAALTIJDEN ★★★
-                currentIOB > maxIOB * 1.1 -> {
-
+                currentIOB > maxIOB * 0.9 -> {
                     true
                 }
-                currentIOB > maxIOB * 0.9 && robustTrends.firstDerivative < 1.0 -> {
-
+                currentIOB > maxIOB * 0.8 && robustTrends.firstDerivative < 1.0 -> {
                     true
                 }
                 currentIOB > maxIOB * 0.7 && robustTrends.firstDerivative < 0.5 -> {
-
                     true
                 }
                 else -> false
@@ -3193,15 +3250,12 @@ $mealPerformanceSummary
             // Originele logica voor correcties (behoud conservatief)
             return when {
                 currentIOB > maxIOB * 0.8 -> {
-
                     true
                 }
                 currentIOB > maxIOB * 0.6 && robustTrends.firstDerivative < 2.0 -> {
-
                     true
                 }
                 currentIOB > maxIOB * 0.4 && robustTrends.firstDerivative < 1.5 -> {
-
                     true
                 }
                 else -> false
@@ -3278,8 +3332,6 @@ $mealPerformanceSummary
             else -> 0.8         // Zeer lichte stijging
         }
     }
-
-
 
     private fun calculateConfidenceFactor(consistency: Double, historicalData: List<BGDataPoint>): Double {
         // ★★★ CONFIDENCE FACTOR: betrouwbaarheid van de faseherkenning ★★★
@@ -3548,19 +3600,31 @@ $mealPerformanceSummary
     }
 
     private fun isAtPeakOrDeclining(historicalData: List<BGDataPoint>, trends: TrendAnalysis): Boolean {
-        if (historicalData.size < 4) return false
+        if (historicalData.size < 6) return false
 
-        val recentPoints = historicalData.takeLast(4)
+        val recentPoints = historicalData.takeLast(6)
 
-        // Peak detectie: hoogste punt gevolgd door daling
+        // Verbeterde peak detectie met plateau herkenning
         val maxIndex = recentPoints.withIndex().maxByOrNull { it.value.bg }?.index ?: -1
-        val isPeak = maxIndex in 1..2 && // Peak ergens in het midden
-            recentPoints.last().bg < recentPoints[maxIndex].bg - 0.3
+        val isClearPeak = maxIndex in 2..4 &&
+            recentPoints.last().bg < recentPoints[maxIndex].bg - 0.5
 
-        // Versnellings-based peak detectie
-        val isDecelerating = trends.acceleration < -0.5 && trends.recentTrend < 2.0
+        // Plateau detectie - kleine variaties rond het maximum
+        val plateauPoints = recentPoints.takeLast(4)
+        val maxBG = plateauPoints.maxOf { it.bg }
+        val minBG = plateauPoints.minOf { it.bg }
+        val isPlateau = (maxBG - minBG) < 0.4 && trends.recentTrend < 0.8
 
-        return isPeak || isDecelerating
+        // Versnellings-based peak detectie - gevoeliger gemaakt
+        val isDecelerating = trends.acceleration < -0.3 && trends.recentTrend < 1.5
+
+        // Dalende trend over meerdere punten
+        val decliningCount = recentPoints.zipWithNext().count { (first, second) ->
+            second.bg < first.bg - 0.1
+        }
+        val isConsistentDecline = decliningCount >= 3
+
+        return isClearPeak || isPlateau || isDecelerating || isConsistentDecline
     }
 
     private fun calculateAcceleration(data: List<BGDataPoint>, points: Int): Double {
@@ -3654,13 +3718,28 @@ $mealPerformanceSummary
         ISF: Double,
         minutesAhead: Int = 60,
         carbRatio: Double,
-        targetBG: Double
+        targetBG: Double,
+        currentIOB: Double, // ★★★ TOEVOEGEN
+        maxIOB: Double      // ★★★ TOEVOEGEN
     ): PredictionResult {
 
         val trends = analyzeTrends(historicalData)
 
-        val (detectedCarbs, mealState) = detectMealFromBG(historicalData, currentData.bg, preferences.get(DoubleKey.meal_detection_sensitivity), carbRatio, currentISF, targetBG)
-        val mealDetected = (mealState != MealDetectionState.NONE)
+       // ★★★ UNIFORME CARB DETECTIE ★★★
+        val carbsResult = calculateUnifiedCarbsDetection(
+            historicalData = historicalData,
+            robustTrends = calculateRobustTrends(historicalData),
+            currentBG = currentData.bg,
+            targetBG = targetBG,
+            currentIOB = currentData.iob,
+            maxIOB = maxIOB, // Je moet maxIOB als parameter toevoegen aan predictRealTime
+            effectiveCR = carbRatio
+        )
+
+        val detectedCarbs = carbsResult.detectedCarbs
+        val mealState = if (detectedCarbs > 10.0) MealDetectionState.DETECTED else MealDetectionState.NONE
+        val mealDetected = mealState != MealDetectionState.NONE
+
 
         // ★★★ GEBRUIK ROBUUSTE FASE ★★★
         val robustPhase = lastRobustTrends?.phase ?: "stable"
@@ -3696,7 +3775,6 @@ $mealPerformanceSummary
     }
 
 
-
     // ★★★ HULPFUNCTIE VOOR RECENTE STIJGING ★★★
     private fun hasRecentRise(historicalData: List<BGDataPoint>, minRisingPoints: Int = 2): Boolean {
         if (historicalData.size < minRisingPoints + 1) return false
@@ -3708,7 +3786,6 @@ $mealPerformanceSummary
 
         return risingCount >= minRisingPoints
     }
-
 
 
     private fun shouldReleaseReservedBolus(
@@ -3735,17 +3812,11 @@ $mealPerformanceSummary
 
         // ★★★ RELEASE LOGICA ★★★
         return when {
-            // CRITIEK: Zeer hoge BG + IOB capaciteit → ALTIJD RELEASEN
-            isVeryHighBG && hasMinIOBCapacity -> true
-
-            // HOGE BG + STIJGING + IOB CAPACITEIT → RELEASEN
-            currentBG > targetBG + 3.0 && isRising && hasMinIOBCapacity -> true
-
-            // MATIGE BG + STERKE STIJGING + IOB CAPACITEIT → RELEASEN
-            currentBG > targetBG + 1.0 && isRapidRise && hasMinIOBCapacity -> true
-
+            isVeryHighBG && hasMinIOBCapacity && isRising -> true
+            currentBG > targetBG + 4.0 && isRising && hasMinIOBCapacity -> true  // was 3.0
+            currentBG > targetBG + 2.0 && isRapidRise && hasMinIOBCapacity -> true  // was 1.0
             else -> false
-        } && !isAtPeakOrDeclining(historicalData, trends)
+        } && !isAtPeakOrDeclining(historicalData, trends) && currentIOB < maxIOB * 0.7  // EXTRA IOB CHECK
     }
 
     private fun calculateReservedBolusRelease(
@@ -3841,7 +3912,7 @@ $mealPerformanceSummary
         }
 
         val trends = analyzeTrends(historicalData)
-        val realTimePrediction = predictRealTime(currentData, historicalData, ISF, 60, carbRatio, targetBG)
+        val realTimePrediction = predictRealTime(currentData, historicalData, ISF, 60, carbRatio, targetBG, currentIOB, maxIOB)
 
         if (shouldWithholdInsulin(currentData, trends, targetBG, maxIOB, historicalData)) {
             return InsulinAdvice(0.0, "Safety: BG too low or falling", 0.9)
@@ -4192,7 +4263,7 @@ $mealPerformanceSummary
 
             processPendingLearningUpdates()
             processPendingCorrectionUpdates()
-         //   val phase = determineMealPhase(trends.recentTrend, trends.shortTermTrend, trends.acceleration)
+
             // housekeeping
             cleanUpMeals()
 
@@ -4330,11 +4401,26 @@ $mealPerformanceSummary
                 finalDeliver = false
             }
 
-// === Meal detection (ALTIJD uitvoeren, ook boven target) ===
-            val (detectedCarbs, mealState) = detectMealFromBG(
-                historicalData, currentData.bg, preferences.get(DoubleKey.meal_detection_sensitivity),
-                carbRatio, effectiveISF, effectiveTarget
+// ★★★ UNIFORME CARB DETECTIE ★★★
+            val carbsResult = calculateUnifiedCarbsDetection(
+                historicalData = historicalData,
+                robustTrends = robustTrends,
+                currentBG = currentData.bg,
+                targetBG = effectiveTarget,
+                currentIOB = currentIOB,
+                maxIOB = maxIOB,
+                effectiveCR = getEffectiveCarbRatio()
             )
+
+            val detectedCarbs = carbsResult.detectedCarbs
+            val mealState = if (detectedCarbs > 10.0 && carbsResult.confidence > 0.4) {
+                MealDetectionState.DETECTED
+            } else {
+                MealDetectionState.NONE
+            }
+
+// Update debug info
+            lastMealDetectionDebug = carbsResult.detectionReason
 
 // ★★★ WISKUNDIGE FASE HERKENNING ★★★
 
@@ -4358,58 +4444,16 @@ $mealPerformanceSummary
                 "Reason: ${mathBolusAdvice.reason}"
             lastMathAnalysisTime = DateTime.now()
 
-// ★★★ STANDAARD CARBS BIJ WISKUNDIGE DETECTIE ★★★
-            var mathDetectedCarbs = detectedCarbs
-            if (detectedCarbs == 0.0 && mathBolusAdvice.immediatePercentage > 0) {
-                mathDetectedCarbs = when (robustTrends.phase) {
-                    "early_rise" -> 30.0 + (robustTrends.firstDerivative * 10.0).coerceIn(0.0, 50.0)
-                    "mid_rise" -> 20.0 + (robustTrends.firstDerivative * 8.0).coerceIn(0.0, 40.0)
-                    "late_rise" -> 15.0 + (robustTrends.firstDerivative * 5.0).coerceIn(0.0, 30.0)
-                    else -> 0.0
-                }
 
-// ★★★ VERBETERDE WISKUNDIGE CARBSCHATTING ★★★
-                var mathDetectedCarbs = detectedCarbs
-                if (mathBolusAdvice.immediatePercentage > 0) {
-                    val baseCarbs = when (robustTrends.phase) {
-                        "early_rise" -> 40.0 + (robustTrends.firstDerivative * 15.0) // Hogere basis voor grote maaltijden
-                        "mid_rise" -> 25.0 + (robustTrends.firstDerivative * 12.0)
-                        "late_rise" -> 20.0 + (robustTrends.firstDerivative * 8.0)
-                        else -> 0.0
-                    }
 
-                    // ★★★ NIEUW: DYNAMISCHE BEGRENSING OP BASIS VAN SLOPE ★★★
-                    val maxCarbs = when {
-                        robustTrends.firstDerivative > 8.0 -> 120.0  // Zeer extreme stijging
-                        robustTrends.firstDerivative > 5.0 -> 80.0   // Extreme stijging
-                        robustTrends.firstDerivative > 3.0 -> 60.0   // Hoge stijging
-                        else -> 50.0                                // Normale stijging
-                    }
-
-                    mathDetectedCarbs = baseCarbs.coerceIn(0.0, maxCarbs)
-
-                    // ★★★ OVERSCHRIJF ALTIJD BIJ WISKUNDIGE DETECTIE ★★★
-                    if (mathDetectedCarbs > detectedCarbs) {
-                        lastMealDetectionDebug = "MATH_CARBS: ${robustTrends.phase} -> ${mathDetectedCarbs}g (was: ${detectedCarbs}g)"
-                        addOrUpdateActiveMeal(mathDetectedCarbs, DateTime.now())
-                        finalCOB = getCarbsOnBoard()
-                        finalDetectedCarbs = mathDetectedCarbs
-                        finalMealDetected = true
-
-                        }
-                }
-
-                if (mathDetectedCarbs > 5) {
-                    lastMealDetectionDebug = "MATH_CARBS: ${robustTrends.phase} -> ${mathDetectedCarbs}g"
-                    addOrUpdateActiveMeal(mathDetectedCarbs, DateTime.now())
-                    finalCOB = getCarbsOnBoard()
-                    finalDetectedCarbs = mathDetectedCarbs
-                    finalMealDetected = true
-
-                    android.util.Log.d("FCL_MATH_CARBS",
-                                       "Wiskundige carb detectie: ${robustTrends.phase} -> ${mathDetectedCarbs}g, COB: ${finalCOB}g")
-                }
+            // ★★★ ALTIJD COB BIJWERKEN BIJ GEDETECTEERDE CARBS ★★★
+            if (detectedCarbs > 5.0 && carbsResult.confidence > 0.3) {
+                addOrUpdateActiveMeal(detectedCarbs, DateTime.now())
+                finalCOB = getCarbsOnBoard()
+                finalDetectedCarbs = detectedCarbs
+                finalMealDetected = mealState != MealDetectionState.NONE
             }
+
 
 
 // Alleen overwegen bij voldoende betrouwbaarheid
@@ -4443,12 +4487,12 @@ $mealPerformanceSummary
                         pendingReservedTimestamp = DateTime.now()
                         pendingReservedPhase = robustTrends.phase
 
-                        lastReservedBolusDebug = "RESERVED: ${finalReservedBolus}U for ${finalDetectedCarbs}g carbs"
+                        lastReservedBolusDebug = "RESERVED: ${round(finalReservedBolus,1)}U for ${finalDetectedCarbs.toInt()}g carbs"
 
-                        android.util.Log.d("FCL_RESERVED",
-                                           "Reserved bolus: ${finalReservedBolus}U voor ${finalDetectedCarbs}g carbs")
+
                     } else {
-                        lastReservedBolusDebug = "NO_RESERVED: carbs=$finalDetectedCarbs, reservedBolus=$finalReservedBolus"
+                        val ResBolus = round(finalReservedBolus,1)
+                        lastReservedBolusDebug = "NO_RESERVED: carbs=${finalDetectedCarbs.toInt()}, reservedBolus=$ResBolus"
                     }
 
                     // Store voor learning met wiskundige fase
@@ -4503,7 +4547,7 @@ $mealPerformanceSummary
                     canDetectMealAboveTarget(currentData.bg, effectiveTarget, trends, currentIOB, maxIOB)) {
 
                     // ★★★ TOEVOEGING: Voeg gedetecteerde koolhydraten toe aan COB ★★★
-                    addOrUpdateActiveMeal(detectedCarbs, DateTime.now())
+              //xxx      addOrUpdateActiveMeal(detectedCarbs, DateTime.now())
                     finalCOB = getCarbsOnBoard() // Update COB voor return waarde
 
 
@@ -4872,8 +4916,8 @@ $mealPerformanceSummary
                 append("MealDetect: $lastMealDetectionDebug")
                 append(" | COB: $lastCOBDebug")
                 append(" | Reserved: $lastReservedBolusDebug")
-                if (mathDetectedCarbs > 0) {
-                    append(" | MathCarbs: ${mathDetectedCarbs}g")
+                if (detectedCarbs > 0) {
+                    append(" | MathCarbs: ${detectedCarbs.toInt()}g")
                 }
             }.toString()
 
@@ -4947,23 +4991,7 @@ $mealPerformanceSummary
         }
     }
 
- /*   private fun validatePhaseProgression(currentPhase: String, previousPhase: String?): String {
-        if (previousPhase == null) return currentPhase
 
-        val phaseHierarchy = listOf("stable", "early_rise", "mid_rise", "late_rise", "peak", "declining")
-        val currentIndex = phaseHierarchy.indexOf(currentPhase)
-        val previousIndex = phaseHierarchy.indexOf(previousPhase)
-
-        if (currentIndex == -1 || previousIndex == -1) return currentPhase
-
-        // ★★★ MILDE VALIDATIE: sta 1 stap terug toe voor natuurlijke fluctuaties ★★★
-        return when {
-            currentIndex >= previousIndex -> currentPhase // Normale progressie
-            currentIndex == previousIndex - 1 -> currentPhase // 1 stap terug toegestaan
-            currentPhase == "stable" || currentPhase == "declining" -> currentPhase
-            else -> previousPhase
-        }
-    }  */
 
 
 
