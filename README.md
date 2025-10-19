@@ -2,14 +2,8 @@ Let op !!!!!
 
 In de map ....\documents\aaps  moet een map ANALYSE staan en een map extra met daarin een leeg bestand "engineering_mode"
 
-interneopslag/
-└── documents/
-        └── aaps/
-             ├── ANALYSE/      <==== aanmaken !!!
-             ├── preferences/
-             ├── exports/
-             └── extra/
-                   └── engineering_mode   <====  nodig tbv dev versie
+
+
 
 
 
