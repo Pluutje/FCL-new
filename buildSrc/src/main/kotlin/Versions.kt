@@ -4,11 +4,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 @Suppress("ConstPropertyName")
 object Versions {
 
-    const val appVersion = "3.4.0.0"
+    const val appVersion = "3.4.1.0"
     const val versionCode = 1500
 
     const val compileSdk = 36
-    const val minSdk = 31
+    const val minSdk = 30
     const val targetSdk = 32
     const val wearMinSdk = 30
     const val wearTargetSdk = 30
