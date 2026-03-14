@@ -350,7 +350,7 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL meal V4 v5.0.0
+ 🧠 FCL meal V4 v5.0.1
  
 ════════════════════════
 • Height (sterkte)     : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}

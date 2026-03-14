@@ -312,8 +312,9 @@ class DetermineBasalFCL @Inject constructor(
             // Resistentie corrigeert ALLEEN ISF
             sensMgdl /= resistanceFactor
             sensitivityRatio = resistanceFactor
-
-        basal = profile.current_basal * sensitivityRatio
+        if (isNight) {
+            basal = profile.current_basal * sensitivityRatio
+        }
         basal = round_basal(basal)
 
 
