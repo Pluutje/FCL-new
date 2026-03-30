@@ -47,11 +47,20 @@ class FCLvNextStatusFormatter(
         }
     private fun HypoProtectionLabel(value: String): String =
         when (value) {
-            "MINIMAL" -> "\uD83D\uDFE2 Minimale bescherming"
-            "RELAXED"      -> "\uD83D\uDD35 Licht beschermend"
+            "MINIMAL" -> "\uD83D\uDFE2 Minimaal"
+            "RELAXED"      -> "\uD83D\uDD35 Licht"
             "BALANCED"    -> "⚖\uFE0F Gebalanceerd"
-            "SAFE"   -> "\uD83D\uDFE1 Verhoogde bescherming"
-            "ULTRA_SAFE"  -> "\uD83D\uDD34 Maximale bescherming"
+            "SAFE"   -> "\uD83D\uDFE1 Verhoogd"
+            "ULTRA_SAFE"  -> "\uD83D\uDD34 Maximaal"
+            else          -> value
+        }
+    private fun NightResponsLabel(value: String): String =
+        when (value) {
+            "VERY_GUARDED" -> "\uD83D\uDED1 Zeer terughoudend"
+            "GUARDED"      -> "\uD83E\uDDEF Terughoudend"
+            "BALANCED"    -> "⚖\uFE0F Gebalanceerd"
+            "RESPONSIVE"   -> "\uD83C\uDF19 Reageert eerder"
+            "PROACTIVE"  -> "\uD83D\uDE80 Proactief"
             else          -> value
         }
 
@@ -350,7 +359,7 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL meal V4 v5.0.1
+ 🧠 FCL meal V4 v7.0.4
  
 ════════════════════════
 • Height (sterkte)     : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}
@@ -358,6 +367,7 @@ ${metricsText ?: "Nog geen data"}
 • Maaltijd behandeling : ${mealLabel(prefs.get(StringKey.fcl_vnext_meal_handling_style))}
 • Persistentie         : ${correctionStyleLabel(prefs.get(StringKey.fcl_vnext_correction_style))}
 • Hypoprotectie        : ${HypoProtectionLabel(prefs.get(StringKey.fcl_vnext_hypo_protection_style))}
+• Nacht respons        : ${NightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}
 • Insulineverdeling    : ${doseDistributionLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}
 
 

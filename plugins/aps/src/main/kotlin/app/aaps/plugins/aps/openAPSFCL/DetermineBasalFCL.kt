@@ -13,6 +13,7 @@ import app.aaps.core.interfaces.aps.OapsProfileFCL
 import app.aaps.core.interfaces.aps.Predictions
 import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
@@ -59,6 +60,8 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.meal.MealIntentOverlay
 import com.google.gson.Gson
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclUiSnapshot
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclBasalProfileNightLogger
+
 @Singleton
 
 class DetermineBasalFCL @Inject constructor(
@@ -67,10 +70,12 @@ class DetermineBasalFCL @Inject constructor(
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
     private val persistenceLayer: PersistenceLayer,
+    private val activePlugin: ActivePlugin,
     private val context: Context,
     private val mealIntentOverlay: MealIntentOverlay,
     private val iobCobCalculator: IobCobCalculator,   // ✅ toevoegen
-    private val profileFunction: ProfileFunction      // ✅ toevoegen
+    private val profileFunction: ProfileFunction,      // ✅ toevoegen
+
 ) {
 
     private val fclMetrics = FCLMetrics(context = context,preferences = preferences,persistenceLayer = persistenceLayer)
@@ -78,6 +83,12 @@ class DetermineBasalFCL @Inject constructor(
     private val fclResistance = FCLResistance(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
 
     private val bgHistoryProvider = FCLvNextBgHistoryProvider(persistenceLayer)
+    private val basalProfileNightLogger =
+        FclBasalProfileNightLogger(
+            context = context,
+            persistenceLayer = persistenceLayer,
+            activePlugin = activePlugin
+        )
 
     private val preBolusController = PreBolusController()
     private val fclvNext =
@@ -90,14 +101,8 @@ class DetermineBasalFCL @Inject constructor(
         )
 
 
-
-
-
     private val consoleError = mutableListOf<String>()
     private val consoleLog = mutableListOf<String>()
-
-
-
 
     private fun Double.toFixed2(): String = DecimalFormat("0.00#").format(round(this, 2))
 
@@ -178,11 +183,9 @@ class DetermineBasalFCL @Inject constructor(
  // *************************************************************************************************************
 
 
-
-
     fun determine_basal(
         glucose_status: GlucoseStatus, currenttemp: CurrentTemp, iob_data_array: Array<IobTotal>, profile: OapsProfileFCL, autosens_data: AutosensResult, meal_data: MealData,
-        microBolusAllowed: Boolean, currentTime: Long, flatBGsDetected: Boolean, dynIsfMode: Boolean
+        microBolusAllowed: Boolean, currentTime: Long, flatBGsDetected: Boolean
     ): RT {
         consoleError.clear()
         consoleLog.clear()
@@ -270,7 +273,7 @@ class DetermineBasalFCL @Inject constructor(
             // 0️⃣ BASIS INPUT UIT determineBasal
             // ─────────────────────────────────────────────
 
-            val profile = profile      // OapsProfileFCL
+         //   val profile = profile      // OapsProfileFCL
             val iobData = iob_data_array[0]
             val currentIOB = iobData.iob
 
@@ -297,6 +300,11 @@ class DetermineBasalFCL @Inject constructor(
 
             val dayNightHelper = FCLvNextDayNightHelper(preferences)
             val isNight: Boolean = dayNightHelper.isNightNow()
+
+            basalProfileNightLogger.onFiveMinuteTick(
+                currentTimeMillis = currentTime,
+                isNight = isNight
+            )
 
             fclResistance.updateTargetMmol(target_bg/18.0)
             fclResistance.updateResistentieIndienNodig(isNight)
@@ -816,12 +824,7 @@ class DetermineBasalFCL @Inject constructor(
         minUAMPredBG = max(39.0, minUAMPredBG)
         minPredBG = round(minIOBPredBG, 0)
 
-    //    val fSensBG = min(minPredBG, bg)
-
-    //    var future_sens = 0.0
-
-
-        val fractionCarbsLeft = meal_data.mealCOB / meal_data.carbs
+        val fractionCarbsLeft = if (meal_data.carbs != 0.0) meal_data.mealCOB / meal_data.carbs else 0.0
         // if we have COB and UAM is enabled, average both
         if (minUAMPredBG < 999 && minCOBPredBG < 999) {
             // weight COBpredBG vs. UAMpredBG based on how many carbs remain as COB
@@ -898,13 +901,6 @@ class DetermineBasalFCL @Inject constructor(
         }
         // make sure minPredBG isn't higher than avgPredBG
         minPredBG = min(minPredBG, avgPredBG)
-
-        if (minCOBPredBG < 999) {
-
-        }
-        if (minUAMPredBG < 999) {
-
-        }
 
         // But if the COB line falls off a cliff, don't trust UAM too much:
         // use maxCOBPredBG if it's been set and lower than minPredBG

@@ -421,6 +421,30 @@ Beïnvloedt alleen veiligheid, niet agressiviteit van stijgingscorrectie.
         <item>ULTRA_SAFE</item>
     </string-array>
 
+    <!-- ===============================
+     Nachtrespons stijl
+     =============================== -->
+    <string name="fcl_vnext_night_response_style_title">🌙 Nachtrespons</string>
+
+    <string name="fcl_vnext_night_response_style_summary">
+Hoe vroeg en hoe gelijkmatig FCL snachts reageert bij aanhoudende stijging, zonder te laat te moeten inhalen.</string>
+
+    <string-array name="fcl_vnext_night_response_style_entries">
+        <item>🛑 Zeer terughoudend</item>
+        <item>🧯 Terughoudend</item>
+        <item>⚖️ Gebalanceerd (standaard)</item>
+        <item>🌙 Reageert eerder</item>
+        <item>🚀 Proactief</item>
+    </string-array>
+
+    <string-array name="fcl_vnext_night_response_style_values">
+        <item>VERY_GUARDED</item>
+        <item>GUARDED</item>
+        <item>BALANCED</item>
+        <item>RESPONSIVE</item>
+        <item>PROACTIVE</item>
+    </string-array>
+
 
     <!-- ===============================
      Dosis verhouding gedrag

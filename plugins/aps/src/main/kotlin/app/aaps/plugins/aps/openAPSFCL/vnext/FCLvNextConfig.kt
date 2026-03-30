@@ -21,6 +21,7 @@ data class FCLvNextConfig(
     val mealHandlingStyle: String,
     val hypoProtectionStyle: String,
     val doseDistributionStyle: String,
+    val nightResponseStyle: String,
 
 
     // smoothing
@@ -182,12 +183,30 @@ fun loadFCLvNextConfig(
     isNight: Boolean
 ): FCLvNextConfig {
 
-    val profileName =  prefs.get(StringKey.fcl_vnext_profile)       // height
-    val mealDetectSpeed =  prefs.get(StringKey.fcl_vnext_meal_detect_speed)
-    val correctionStyle =  prefs.get(StringKey.fcl_vnext_correction_style)
-    val mealHandlingStyle = prefs.get(StringKey.fcl_vnext_meal_handling_style)
-    val hypoProtectionStyle = prefs.get(StringKey.fcl_vnext_hypo_protection_style)
+    // ── Config override (geschreven door FCL Analyzer na handmatige goedkeuring) ──
+    // Als er een geldig JSON-bestand staat in Documents/AAPS/ANALYSE/ worden de
+    // 5 as-waarden daaruit gelezen. Onbekende waarden vallen automatisch terug op prefs.
+    // De rest van de config (veiligheidslogica, hardcoded waarden) is NOOIT extern aanpasbaar.
+    val override = FCLvNextConfigOverride.load()
+
+    val validProfiles    = setOf("VERY_STRICT","STRICT","BALANCED","AGGRESSIVE","VERY_AGGRESSIVE")
+    val validSpeeds      = setOf("VERY_SLOW","SLOW","MODERATE","FAST","VERY_FAST")
+    val validCorrection  = setOf("VERY_CAUTIOUS","CAUTIOUS","NORMAL","PERSISTENT","VERY_PERSISTENT")
+    val validMealH       = setOf("VERY_CONSERVATIVE","CONSERVATIVE","BALANCED","ANTICIPATORY","AGGRESSIVE")
+    val validHypo        = setOf("MINIMAL","RELAXED","BALANCED","SAFE","ULTRA_SAFE")
+
+    val profileName       = override?.profile?.takeIf { it in validProfiles }
+        ?: prefs.get(StringKey.fcl_vnext_profile)
+    val mealDetectSpeed   = override?.mealDetectSpeed?.takeIf { it in validSpeeds }
+        ?: prefs.get(StringKey.fcl_vnext_meal_detect_speed)
+    val correctionStyle   = override?.correctionStyle?.takeIf { it in validCorrection }
+        ?: prefs.get(StringKey.fcl_vnext_correction_style)
+    val mealHandlingStyle = override?.mealHandlingStyle?.takeIf { it in validMealH }
+        ?: prefs.get(StringKey.fcl_vnext_meal_handling_style)
+    val hypoProtectionStyle = override?.hypoProtectionStyle?.takeIf { it in validHypo }
+        ?: prefs.get(StringKey.fcl_vnext_hypo_protection_style)
     val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
+    val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
 
 
     val gain =
@@ -200,8 +219,8 @@ fun loadFCLvNextConfig(
 
 
     // ─────────────────────────────────────────────
-   // Meal detect speed mapping (TIMING ONLY)
-   // ─────────────────────────────────────────────
+    // Meal detect speed mapping (TIMING ONLY)
+    // ─────────────────────────────────────────────
 
     val base = FCLvNextConfig(
 
@@ -219,6 +238,7 @@ fun loadFCLvNextConfig(
         mealHandlingStyle = mealHandlingStyle,
         hypoProtectionStyle = hypoProtectionStyle,          // ✅ FIX: ontbrak
         doseDistributionStyle = doseDistributionStyle,
+        nightResponseStyle = nightResponseStyle,
 
         // smoothing
         bgSmoothingAlpha = 0.40,
@@ -262,18 +282,18 @@ fun loadFCLvNextConfig(
         maxTempBasalRate = 15.0,
 
         // meal detect
-        mealSlopeMin = 0.405,
+        mealSlopeMin = 0.35,
         mealSlopeSpan = 0.8,
-        mealAccelMin = 0.090,
+        mealAccelMin = 0.08,
         mealAccelSpan = 0.6,
-        mealDeltaMin = 0.540,
+        mealDeltaMin = 0.40,
         mealDeltaSpan = 1.0,
-        mealUncertainConfidence = 0.30,
-        mealConfirmConfidence = 0.60,
-        mealConfidenceSpeedMul = 1.25,
+        mealUncertainConfidence = 0.2,
+        mealConfirmConfidence = 0.45,
+        mealConfidenceSpeedMul = 1.4,
 
-        mealDetectThresholdMul = 1.0,
-        microRampThresholdMul = 1.0,
+        mealDetectThresholdMul = 0.9,
+        microRampThresholdMul = 0.9,
 
         // commit logic
         commitCooldownMinutes = 15,
@@ -311,7 +331,7 @@ fun loadFCLvNextConfig(
 
         // early-dose & fast-carb behavior
         earlyPeakEscalationBonus = 0.10,
-        earlyStage1ThresholdMul = 1.00,
+        earlyStage1ThresholdMul = 0.8,
         enableFastCarbOverride = true,
 
         // peak prediction
@@ -343,10 +363,10 @@ fun loadFCLvNextConfig(
         watchingMaxIobRatio = 0.75,
 
         // ✅ FIX: hypo protection defaults (BALANCED)
-        hypoBlockThreshold = 4.60,
-        hypoInsulinFrac30 = 0.25,
-        hypoInsulinFrac60 = 0.55,
-        hypoInsulinFrac90 = 0.80
+        hypoBlockThreshold = 4.70,
+        hypoInsulinFrac30 = 0.27,
+        hypoInsulinFrac60 = 0.60,
+        hypoInsulinFrac90 = 0.90
     )
 
     return base
@@ -357,6 +377,7 @@ fun loadFCLvNextConfig(
         .let { applyMealHandlingStyle(it) }
         .let { applyMealHandlingGainScaling(it) } // 👈 nieuw
         .let { applyHypoProtectionStyle(it) }
+        .let { applyNightResponseStyle(it, isNight) }
 }
 
 private fun applyProfileDoseStrength(
@@ -425,26 +446,26 @@ private fun applyMealDetectSpeed(
             microRampThresholdMul = cfg.microRampThresholdMul + 0.08,
             mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul - 0.08,
             earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul + 0.05,
-            commitCooldownMinutes = 15
+            commitCooldownMinutes = 10
         )
 
         "FAST" -> cfg.copy(
             mealSlopeMin = (cfg.mealSlopeMin - 0.15).coerceAtLeast(0.2),
-            mealAccelMin = (cfg.mealAccelMin - 0.05).coerceAtLeast(0.05),
-            mealDeltaMin = (cfg.mealDeltaMin - 0.20).coerceAtLeast(0.3),
+            mealAccelMin = (cfg.mealAccelMin - 0.05).coerceAtLeast(0.03),
+            mealDeltaMin = (cfg.mealDeltaMin - 0.20).coerceAtLeast(0.2),
             mealUncertainConfidence = (cfg.mealUncertainConfidence - 0.05).coerceIn(0.0, 1.0),
             mealConfirmConfidence = (cfg.mealConfirmConfidence - 0.10).coerceIn(0.0, 1.0),
             mealDetectThresholdMul = cfg.mealDetectThresholdMul - 0.10,
             microRampThresholdMul = cfg.microRampThresholdMul  - 0.08,
             mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul + 0.10,
             earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul - 0.10,
-            commitCooldownMinutes = 10
+            commitCooldownMinutes = 5
         )
 
         "VERY_FAST" -> cfg.copy(
             mealSlopeMin = (cfg.mealSlopeMin - 0.30).coerceAtLeast(0.15),
-            mealAccelMin = (cfg.mealAccelMin - 0.10).coerceAtLeast(0.03),
-            mealDeltaMin = (cfg.mealDeltaMin - 0.35).coerceAtLeast(0.25),
+            mealAccelMin = (cfg.mealAccelMin - 0.10).coerceAtLeast(0.015),
+            mealDeltaMin = (cfg.mealDeltaMin - 0.35).coerceAtLeast(0.1),
             mealUncertainConfidence = (cfg.mealUncertainConfidence - 0.15).coerceIn(0.0, 1.0),
             mealConfirmConfidence = (cfg.mealConfirmConfidence - 0.20).coerceIn(0.0, 1.0),
             mealDetectThresholdMul = cfg.mealDetectThresholdMul - 0.20,
@@ -610,6 +631,58 @@ private fun applyHypoProtectionStyle(
         )
 
         else -> cfg // BALANCED = baseline uit base()
+    }
+}
+
+private fun applyNightResponseStyle(
+    cfg: FCLvNextConfig,
+    isNight: Boolean
+): FCLvNextConfig {
+
+    if (!isNight) return cfg
+
+    fun scaleCooldown(value: Int, factor: Double): Int =
+        (value * factor).toInt().coerceAtLeast(1)
+
+    return when (cfg.nightResponseStyle) {
+
+        "VERY_GUARDED" -> cfg.copy(
+            stagnationDeltaMin = cfg.stagnationDeltaMin + 0.35,
+            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 0.75,
+            persistentAggressionMul = cfg.persistentAggressionMul - 0.12,
+            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 1.25),
+            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.85,
+            absorptionDoseFactor = (cfg.absorptionDoseFactor * 0.85).coerceIn(0.08, 0.40)
+        )
+
+        "GUARDED" -> cfg.copy(
+            stagnationDeltaMin = cfg.stagnationDeltaMin + 0.18,
+            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 0.88,
+            persistentAggressionMul = cfg.persistentAggressionMul - 0.06,
+            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 1.10),
+            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.92,
+            absorptionDoseFactor = (cfg.absorptionDoseFactor * 0.92).coerceIn(0.08, 0.40)
+        )
+
+        "RESPONSIVE" -> cfg.copy(
+            stagnationDeltaMin = (cfg.stagnationDeltaMin - 0.15).coerceAtLeast(0.40),
+            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 1.12,
+            persistentAggressionMul = cfg.persistentAggressionMul + 0.08,
+            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.90),
+            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.08,
+            absorptionDoseFactor = (cfg.absorptionDoseFactor * 1.05).coerceIn(0.08, 0.40)
+        )
+
+        "PROACTIVE" -> cfg.copy(
+            stagnationDeltaMin = (cfg.stagnationDeltaMin - 0.30).coerceAtLeast(0.40),
+            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 1.25,
+            persistentAggressionMul = cfg.persistentAggressionMul + 0.16,
+            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.78),
+            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.18,
+            absorptionDoseFactor = (cfg.absorptionDoseFactor * 1.10).coerceIn(0.08, 0.40)
+        )
+
+        else -> cfg // BALANCED
     }
 }
 

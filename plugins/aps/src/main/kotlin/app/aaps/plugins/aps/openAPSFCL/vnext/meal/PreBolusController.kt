@@ -12,7 +12,8 @@ import kotlin.math.min
 import kotlin.math.pow
 
 @Singleton
-class PreBolusController @Inject constructor() {
+class
+PreBolusController @Inject constructor() {
 
 
     // ===============================
@@ -119,7 +120,7 @@ class PreBolusController @Inject constructor() {
     // Chunking / delivery
     // ===============================
     fun computeChunk(now: DateTime, maxSmb: Double): Double =
-        if (!isActive(DateTime.now())) 0.0
+        if (!isActive(now)) 0.0
         else min(state.remainingU, maxSmb)
 
     fun consumePlannedChunk(chunkU: Double) {

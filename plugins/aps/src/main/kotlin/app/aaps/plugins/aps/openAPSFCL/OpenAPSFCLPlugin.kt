@@ -337,8 +337,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             meal_data = mealData,
             microBolusAllowed = microBolusAllowed,
             currentTime = now,
-            flatBGsDetected = flatBGsDetected,
-            dynIsfMode = false
+            flatBGsDetected = flatBGsDetected
         ).also { rt ->
 
             val determineBasalResult = apsResultProvider.get().with(rt)
@@ -657,6 +656,34 @@ open class OpenAPSFCLPlugin @Inject constructor(
                         .toTypedArray()
                 )
             )
+
+
+            addPreference(
+                AdaptiveInfoPreference(
+                    context,
+                    R.string.fcl_vnext_night_response_style_title,
+                    R.string.fcl_vnext_night_response_style_summary
+                )
+            )
+
+            addPreference(
+                AdaptiveListPreference(
+                    ctx = context,
+                    stringKey = StringKey.fcl_vnext_night_response_style,
+                    title = R.string.fcl_vnext_generic_choice_title,
+                    summary = null,
+                    entries = context.resources
+                        .getStringArray(R.array.fcl_vnext_night_response_style_entries)
+                        .map { it as CharSequence }
+                        .toTypedArray(),
+                    entryValues = context.resources
+                        .getStringArray(R.array.fcl_vnext_night_response_style_values)
+                        .map { it as CharSequence }
+                        .toTypedArray()
+                )
+            )
+
+
             // Hypo Protection (Safety axis)
             addPreference(
                 AdaptiveInfoPreference(

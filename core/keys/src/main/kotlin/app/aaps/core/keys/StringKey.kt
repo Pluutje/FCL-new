@@ -73,14 +73,11 @@ enum class StringKey(
     fcl_vnext_correction_style(key = "fcl_vnext_correction_style", "NORMAL"),
     fcl_vnext_hypo_protection_style(key = "fcl_vnext_hypo_protection_style", "BALANCED"),
     fcl_vnext_dose_distribution_style(key = "fcl_vnext_dose_distribution_style", "BALANCED"),
+    fcl_vnext_night_response_style(key = "fcl_vnext_night_response_style", "BALANCED"),
 
     fcl_vnext_resistance_behavior("fcl_vnext_resistance_behavior", "NORMAL"),
     fcl_vnext_resistance_stability("fcl_vnext_resistance_stability", "STANDARD"),
 
-    fcl_vnext_obs_learning_state(key = "fcl_vnext_obs_learning_state", ""),
 
-    fcl_vnext_learning_parameters_json(key = "fcl_vnext_learning_parameters_json", ""),
-
-    fcl_vnext_obs_debug(key = "fcl_vnext_obs_debug", ""),
 
 }

@@ -38,16 +38,9 @@ data class FCLvNextCsvLogRow(
     var minutesSinceMealStart: Int = -1,
     var riseSinceMealStart: Double = 0.0,
 
-    // ── Energy breakdown ──
-    var energySlope: Double = 0.0,
-    var energyAccel: Double = 0.0,
-    var energyDelta: Double = 0.0,
-
-    // ── Stagnation ──
+// ── Stagnation ──
     var stagnationActive: Boolean = false,
     var stagnationBoost: Double = 0.0,
-    var stagnationAccel: Double = 0.0,
-    var stagnationAccelLimit: Double = 0.0,
 
     // ── Dose math ──
     var rawDose: Double = 0.0,
@@ -79,7 +72,7 @@ data class FCLvNextCsvLogRow(
     var predictedPeak: Double = 0.0,
     var peakIobBoost: Double = 1.0,
     var effectiveIobRatio: Double = 0.0,
-    var peakBand: Int = 0,
+
     var peakMaxSlope: Double = 0.0,
     var peakMomentum: Double = 0.0,
     var peakRiseSinceStart: Double = 0.0,
@@ -99,8 +92,6 @@ data class FCLvNextCsvLogRow(
     var watchingPeakRiseOk: Boolean = false,
     var watchingIobOk: Boolean = false,
 
-    // ── Height learning (observe-only) ──
-    var heightIntent: String = "NONE",
 
     // ── Rescue ──
     var pred60: Double = 0.0,
@@ -115,6 +106,7 @@ data class FCLvNextCsvLogRow(
     var mealhandlingStyle: String = "",
     var hypoProtectionStyle: String = "",
     var doseDistributionStyle: String = "",
+    var nightResponseStyle: String = "",
 
     // ── Pre-bolus ──
     var preBolusActive: Boolean = false,
@@ -176,16 +168,53 @@ data class FCLvNextCsvLogRow(
 // Aggression
     var mealAggressionA: Double = 0.0,
     var mealAggressionMul: Double = 0.0,
+    var shouldDeliver: Boolean = false,
 
-    var shouldDeliver: Boolean = false
+// ✅ NIEUW: piek-nadering rem diagnostics
+    var peakIobBrakeActive: Boolean = false,
+    var peakApproachFactor: Double = 1.0,
+
+    // ── V5: Suppress/lockout reden detail ──
+    var suppressReason: String = "NONE",
+    var lockoutReason: String = "NONE",
+    var commitBlockReason: String = "NONE",
+
+    // ── V5: Marges tot drempels ──
+    var iobMarginToBrake: Double = 0.0,
+    var iobMarginToLockout: Double = 0.0,
+    var predMarginToWatching: Double = 0.0,
+    var predMarginToTarget: Double = 0.0,
+    var slopeMarginToBrake: Double = 0.0,
+
+    // ── V5: Peak-voorspelling internals ──
+    var predictedPeakBallistic: Double = 0.0,
+    var futureDrop60: Double = 0.0,
+    var peakFloorActive: Boolean = false,
+    var peakFloorValue: Double = 0.0,
+    var hEff: Double = 0.0,
+    var iobScaleUsed: Double = 0.0,
+    var vUsed: Double = 0.0,
+
+    // ── V5: Doseerruimte context ──
+    var iobHeadroom: Double = 0.0,
+    var doseSuppressedU: Double = 0.0,
+    var peakApproachActive: Boolean = false,
+    var earlyResetThisCycle: Boolean = false,
+    var downtrendLocked: Boolean = false,
+    var sensorBlipActive: Boolean = false,
+
+    // ── V5: Config-traceerbaarheid ──
+    var configSource: String = "HARDCODED",
+    var configVersion: String = "1"
 )
+
 
 object FCLvNextCsvLogger {
 
     @Volatile
     private var schemaVerified = false
-    private const val SCHEMA_VERSION = "3"
-    private const val FILE_NAME = "FCLvNext_Log_v3.csv"
+    private const val SCHEMA_VERSION = "5"
+    private const val FILE_NAME = "FCLvNext_Log_v5.csv"
 
     // rolling window
     private const val MAX_DAYS = 30
@@ -225,6 +254,7 @@ object FCLvNextCsvLogger {
         "mealhandlingStyle",
         "hypoProtectionStyle",
         "doseDistributionStyle",
+        "nightResponseStyle",
 
         // GLUCOSE/IOB
         "bg_mmol",
@@ -250,24 +280,19 @@ object FCLvNextCsvLogger {
         "recent_delta5m",
         "consistency",
 
-        // MODEL
+// MODEL
         "effective_isf",
         "gain",
         "energy_base",
         "energy_total",
-        "energy_slope",
-        "energy_accel",
-        "energy_delta",
         "raw_dose",
         "iob_factor",
         "normal_dose",
         "desired_dose_pre_guards",
 
-        // STAGNATION
+// STAGNATION
         "stagnation_active",
         "stagnation_boost",
-        "stagnation_accel",
-        "stagnation_accel_limit",
 
         // GUARDS
         "guard_iob_limited",
@@ -292,7 +317,6 @@ object FCLvNextCsvLogger {
         "predicted_peak",
         "peak_iob_boost",
         "effective_iob_ratio",
-        "peak_band",
         "peak_max_slope",
         "peak_momentum",
         "peak_rise_since_start",
@@ -310,8 +334,7 @@ object FCLvNextCsvLogger {
         "watching_peak_rise_ok",
         "watching_iob_ok",
 
-        // HEIGHT/RESCUE
-        "height_intent",
+        // RESCUE
         "pred60",
         "rescue_state",
         "rescue_confidence",
@@ -360,7 +383,41 @@ object FCLvNextCsvLogger {
         "top_plateau_confirmed",
 
         "meal_aggression_a",
-        "meal_aggression_mul"
+        "meal_aggression_mul",
+        "peak_iob_brake_active",
+        "peak_approach_factor",
+        // V5: SUPPRESS/LOCKOUT REDEN
+        "suppress_reason",
+        "lockout_reason",
+        "commit_block_reason",
+
+        // V5: MARGES TOT DREMPELS
+        "iob_margin_to_brake",
+        "iob_margin_to_lockout",
+        "pred_margin_to_watching",
+        "pred_margin_to_target",
+        "slope_margin_to_brake",
+
+        // V5: PEAK INTERNALS
+        "predicted_peak_ballistic",
+        "future_drop_60",
+        "peak_floor_active",
+        "peak_floor_value",
+        "h_eff",
+        "iob_scale_used",
+        "v_used",
+
+        // V5: DOSEERRUIMTE
+        "iob_headroom",
+        "dose_suppressed_u",
+        "peak_approach_active",
+        "early_reset_this_cycle",
+        "downtrend_locked",
+        "sensor_blip_active",
+
+        // V5: CONFIG TRACEERBAARHEID
+        "config_source",
+        "config_version"
     ).joinToString(SEP)
 
     fun log(row: FCLvNextCsvLogRow) {
@@ -439,6 +496,7 @@ object FCLvNextCsvLogger {
             sanitize(row.mealhandlingStyle),
             sanitize(row.hypoProtectionStyle),
             sanitize(row.doseDistributionStyle),
+            sanitize(row.nightResponseStyle),
 
             bg1(row.bg),
             bg1(row.target),
@@ -465,9 +523,6 @@ object FCLvNextCsvLogger {
             u2(row.gain),
             e2(row.energyBase),
             e2(row.energyTotal),
-            e2(row.energySlope),
-            e2(row.energyAccel),
-            e2(row.energyDelta),
             u2(row.rawDose),
             u2(row.iobFactor),
             u2(row.normalDose),
@@ -475,8 +530,6 @@ object FCLvNextCsvLogger {
 
             row.stagnationActive,
             e2(row.stagnationBoost),
-            a2(row.stagnationAccel),
-            a2(row.stagnationAccelLimit),
 
             row.guardIobLimited,
             row.guardPeakLimited,
@@ -498,7 +551,6 @@ object FCLvNextCsvLogger {
             bg1(row.predictedPeak),
             u2(row.peakIobBoost),
             u2(row.effectiveIobRatio),
-            row.peakBand,
             t2(row.peakMaxSlope),
             t2(row.peakMomentum),
             bg1(row.peakRiseSinceStart),
@@ -515,7 +567,6 @@ object FCLvNextCsvLogger {
             row.watchingPeakRiseOk,
             row.watchingIobOk,
 
-            sanitize(row.heightIntent),
             bg1(row.pred60),
             sanitize(row.rescueState),
             t2(row.rescueConfidence),
@@ -562,7 +613,37 @@ object FCLvNextCsvLogger {
             row.topPlateauConfirmed,
 
             t2(row.mealAggressionA),
-            t2(row.mealAggressionMul)
+            t2(row.mealAggressionMul),
+            row.peakIobBrakeActive,
+            t2(row.peakApproachFactor),
+
+            sanitize(row.suppressReason),
+            sanitize(row.lockoutReason),
+            sanitize(row.commitBlockReason),
+
+            d2(row.iobMarginToBrake),
+            d2(row.iobMarginToLockout),
+            d2(row.predMarginToWatching),
+            d2(row.predMarginToTarget),
+            d2(row.slopeMarginToBrake),
+
+            bg1(row.predictedPeakBallistic),
+            bg1(row.futureDrop60),
+            row.peakFloorActive,
+            bg1(row.peakFloorValue),
+            t2(row.hEff),
+            t2(row.iobScaleUsed),
+            t2(row.vUsed),
+
+            u2(row.iobHeadroom),
+            u2(row.doseSuppressedU),
+            row.peakApproachActive,
+            row.earlyResetThisCycle,
+            row.downtrendLocked,
+            row.sensorBlipActive,
+
+            sanitize(row.configSource),
+            sanitize(row.configVersion)
 
         ).joinToString(SEP)
     }
