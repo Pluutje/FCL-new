@@ -140,7 +140,7 @@ class FCLvNextStatusFormatter(
     private fun extractPersistLines(statusText: String?): List<String> {
         if (statusText.isNullOrBlank()) return emptyList()
 
-        val out = ArrayList<String>()
+        val out = ArrayList<String>(3)
         for (line in statusText.split("\n")) {
             val t = line.trim()
             if (t.length >= 7 && t.substring(0, 7) == "PERSIST") {
@@ -173,13 +173,6 @@ class FCLvNextStatusFormatter(
     }
 
 
-    /**
-     * Maak statusText compacter:
-     * - toont eerst profiel + learning advice (als aanwezig)
-     * - daarna eventueel de rest van statusText (optioneel, compact)
-     */
-
-
     private fun buildFclBlock(
         advice: FCLvNextAdvice?,
         ui: FclUiSnapshot,
@@ -194,7 +187,6 @@ class FCLvNextStatusFormatter(
         sb.append("🧠 FCL vNext\n")
         sb.append("─────────────────────\n")
 
-        // Basis gegevens
         sb.append("📈 Situatie\n")
         sb.append("─────────────────────\n")
         sb.append("• Glucose: ${"%.1f".format(ui.bgNow)} mmol/L\n")
@@ -204,17 +196,12 @@ class FCLvNextStatusFormatter(
             sb.append("• Verandering (5m): ${"%.2f".format(it)} mmol/L\n")
         }
 
-
-// ─────────────────────────────
-// 🔎 FCL core status (belangrijker dan curve)
-// ─────────────────────────────
-
         advice.peakState?.let { state ->
             val uitleg = when (state) {
-                "IDLE" -> "Geen actieve stijging"
-                "WATCHING" -> "Sterke stijging actief"
+                "IDLE"      -> "Geen actieve stijging"
+                "WATCHING"  -> "Sterke stijging actief"
                 "CONFIRMED" -> "Piek bevestigd – afremming verwacht"
-                else -> state
+                else        -> state
             }
             sb.append("\n")
             sb.append("• FCL piekstatus: $uitleg\n")
@@ -226,7 +213,6 @@ class FCLvNextStatusFormatter(
 
         sb.append("\n")
 
-        // Advies sectie (bestaande logica, verkort)
         sb.append("💉 Advies\n")
         sb.append("─────────────────────\n")
         if (!shouldDeliver || (bolusAmount == 0.0 && basalRate == 0.0)) {
@@ -247,6 +233,118 @@ class FCLvNextStatusFormatter(
     private fun minutesBetween(a: DateTime, b: DateTime): Long =
         (b.millis - a.millis) / 60000
 
+
+    // ── Fijnafstelling status-sectie ─────────────────────────────────────
+
+    /**
+     * Bouwt een compacte sectie met de zes Groep A parameters zoals ze
+     * werkelijk actief zijn in AAPS, plus default en afwijking.
+     *
+     * Wordt aangeroepen vanuit buildStatus() met de final FCLvNextConfig.
+     *
+     * Opmaak per regel:
+     *   • Naam  : actief  (default / Δ afwijking  [bron])
+     *
+     * Bron-labels:
+     *   "default"  → waarde gelijk aan hardcoded default
+     *   "as-keten" → gewijzigd door een as-functie (applyMealHandling etc.)
+     *   "override" → expliciet overschreven via param_overrides JSON
+     *
+     * Voor de bron gebruiken we FCLvNextActiveParamsWriter.Defaults om te
+     * vergelijken — die is de enige bron van default-kennis.
+     */
+    private fun buildFijnafstellingBlock(config: FCLvNextConfig): String {
+        val D = FCLvNextActiveParamsWriter.Defaults
+
+        fun fmtDouble(v: Double) = String.format(java.util.Locale.US, "%.2f", v)
+        fun fmtDelta(active: Double, default: Double): String {
+            val d = active - default
+            return when {
+                kotlin.math.abs(d) < 0.001 -> "= default"
+                d > 0  -> "Δ +${String.format(java.util.Locale.US, "%.2f", d)}"
+                else   -> "Δ ${String.format(java.util.Locale.US, "%.2f", d)}"
+            }
+        }
+        fun srcLabel(active: Double, default: Double, hasOverride: Boolean): String = when {
+            kotlin.math.abs(active - default) < 0.001 -> "default"
+            hasOverride                                -> "override"
+            else                                       -> "as-keten"
+        }
+        fun srcLabelInt(active: Int, default: Int, hasOverride: Boolean): String = when {
+            active == default -> "default"
+            hasOverride       -> "override"
+            else              -> "as-keten"
+        }
+
+        // Lees het override-bestand om te weten welke params een override hebben
+        val ovr = FCLvNextConfigOverride.load()?.paramOverrides
+
+        // Hulpfunctie: schrijft elke parameter op twee regels
+        //   Regel 1: "• Naam  : actief eenheid"
+        //   Regel 2: "  ↳ def XX, Δ YY  [bron]"
+        val sb = StringBuilder()
+        sb.appendLine("⚙️ FIJNAFSTELLING - ACTIEF")
+        sb.appendLine("─────────────────────")
+
+        fun paramRegel(
+            naam: String,
+            actief: String,
+            eenheid: String,
+            defVal: String,
+            delta: String,
+            bron: String,
+            isLast: Boolean = false
+        ) {
+            sb.appendLine("• $naam: $actief $eenheid".trimEnd())
+            val regel2 = "  ↳ def $defVal, $delta  [$bron]"
+            if (isLast) sb.append(regel2) else sb.appendLine(regel2)
+        }
+
+
+        // peakPredictionThreshold
+        val ptActive  = config.peakPredictionThreshold
+        val ptDefault = D.PEAK_PREDICTION_THRESHOLD
+        val ptHasOvr  = ovr?.peakPredictionThreshold != null
+        paramRegel("Piekdrempel",    "${fmtDouble(ptActive)} mmol", "",
+                   "${fmtDouble(ptDefault)} mmol", fmtDelta(ptActive, ptDefault), srcLabel(ptActive, ptDefault, ptHasOvr))
+
+        // watchingFrontloadFrac
+        val ffActive  = config.watchingFrontloadFrac
+        val ffDefault = D.WATCHING_FRONTLOAD_FRAC
+        val ffHasOvr  = ovr?.watchingFrontloadFrac != null
+        paramRegel("Frontload frac", fmtDouble(ffActive), "",
+                   fmtDouble(ffDefault), fmtDelta(ffActive, ffDefault), srcLabel(ffActive, ffDefault, ffHasOvr))
+
+        // watchingMinDeltaToTarget
+        val dtActive  = config.watchingMinDeltaToTarget
+        val dtDefault = D.WATCHING_MIN_DELTA_TARGET
+        val dtHasOvr  = ovr?.watchingMinDeltaToTarget != null
+        paramRegel("Delta-drempel",  "${fmtDouble(dtActive)} mmol", "",
+                   "${fmtDouble(dtDefault)} mmol", fmtDelta(dtActive, dtDefault), srcLabel(dtActive, dtDefault, dtHasOvr))
+
+        // commitCooldownMinutes
+        val ccActive  = config.commitCooldownMinutes
+        val ccDefault = D.COMMIT_COOLDOWN_MINUTES
+        val ccHasOvr  = ovr?.commitCooldownMinutes != null
+        paramRegel("Commit cooldown", "$ccActive min", "",
+                   "$ccDefault min", fmtDelta(ccActive.toDouble(), ccDefault.toDouble()), srcLabelInt(ccActive, ccDefault, ccHasOvr))
+
+        // peakPredictionHorizonH
+        val phActive  = config.peakPredictionHorizonH
+        val phDefault = D.PEAK_PREDICTION_HORIZON_H
+        val phHasOvr  = ovr?.peakPredictionHorizonH != null
+        paramRegel("Piek horizon",   "${fmtDouble(phActive)} uur", "",
+                   "${fmtDouble(phDefault)} uur", fmtDelta(phActive, phDefault), srcLabel(phActive, phDefault, phHasOvr))
+
+        // iobStart
+        val isActive  = config.iobStart
+        val isDefault = D.IOB_START
+        val isHasOvr  = ovr?.iobStart != null
+        paramRegel("IOB remdrempel", fmtDouble(isActive), "",
+                   fmtDouble(isDefault), fmtDelta(isActive, isDefault), srcLabel(isActive, isDefault, isHasOvr), isLast = true)
+
+        return sb.toString().trimEnd()
+    }
 
 
     private fun nextFaster(current: String) = when (current) {
@@ -298,7 +396,6 @@ class FCLvNextStatusFormatter(
     }
 
 
-
     fun buildStatus(
         isNight: Boolean,
         advice: FCLvNextAdvice?,
@@ -309,7 +406,7 @@ class FCLvNextStatusFormatter(
         activityLog: String?,
         resistanceLog: String?,
         metricsText: String?,
-
+        activeConfig: FCLvNextConfig? = null       // ← nieuw, optioneel voor backward compat
     ): String {
 
         val coreStatus = """
@@ -333,9 +430,7 @@ ${formatDeliveryHistory(advice?.let { deliveryHistory.toList() })}
             shouldDeliver = shouldDeliver
         )
 
-
         val mealIntentBlock = buildMealIntentBlock()
-
 
         val activityStatus = """
 🏃 ACTIVITEIT
@@ -356,10 +451,14 @@ ${resistanceLog ?: "Geen resistentie-log"}
 ${metricsText ?: "Nog geen data"}
 """.trimIndent()
 
+        // Fijnafstelling sectie — alleen als activeConfig meegegeven is
+        val fijnafstellingStatus = activeConfig?.let { cfg ->
+            buildFijnafstellingBlock(cfg)
+        } ?: ""
 
         return """
 ════════════════════════
- 🧠 FCL meal V4 v7.0.4
+ 🧠 FCL meal V4 v7.0.9
  
 ════════════════════════
 • Height (sterkte)     : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}
@@ -382,6 +481,8 @@ $activityStatus
 $resistanceStatus
 
 $metricsStatus
+
+$fijnafstellingStatus
 """.trimIndent()
     }
 }

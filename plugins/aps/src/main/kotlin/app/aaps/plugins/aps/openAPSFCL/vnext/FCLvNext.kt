@@ -2341,6 +2341,9 @@ class FCLvNext(
     private var activeMealEpisodeId: Long = -1
     private var mealEpisodeStartTime: DateTime? = null
     private var mealEpisodeStartBg: Double? = null
+    var lastActiveConfig: FCLvNextConfig? = null
+         private set
+
 
 
     private fun computeFutureInsulinDrop60m(
@@ -2705,7 +2708,7 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 1️⃣ Config & context (trends, IOB, delta)
         var config = loadFCLvNextConfig(preferences, input.isNight)
-
+        lastActiveConfig = config
         // 🍽️ MealIntent overlay (timing only, TTL-based)
 
 

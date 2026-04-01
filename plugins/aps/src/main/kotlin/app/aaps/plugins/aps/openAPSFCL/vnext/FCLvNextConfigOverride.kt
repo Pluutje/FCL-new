@@ -7,21 +7,24 @@ import java.io.File
  * Leest FCLvNext_config_override.json uit de gedeelde ANALYSE-map.
  *
  * Dit bestand wordt geschreven door de FCL Analyzer app na handmatige goedkeuring
- * door de gebruiker. Het overschrijft de 5 as-instellingen (profile, mealDetectSpeed,
- * correctionStyle, mealHandlingStyle, hypoProtectionStyle) vóór de rest van de
- * config-keten (applyProfileDoseStrength, applyMealDetectSpeed, etc.) deze verwerkt.
+ * door de gebruiker. Het overschrijft:
+ *   1. De 5 as-instellingen (profile, mealDetectSpeed, correctionStyle,
+ *      mealHandlingStyle, hypoProtectionStyle) vóór de rest van de config-keten.
+ *   2. Individuele param_overrides (Groep A fijnafstelling) NA de as-keten,
+ *      als laatste stap in loadFCLvNextConfig().
  *
  * Veiligheidsgaranties:
- * - Als het bestand niet bestaat → null → loadFCLvNextConfig valt terug op prefs
+ * - Als het bestand niet bestaat → null → loadFCLvNextConfig valt terug op defaults
  * - Als het bestand corrupt/onleesbaar is → null → idem
- * - Onbekende waarden worden nooit doorgegeven; loadFCLvNextConfig gebruikt ze
- *   alleen als ze overeenkomen met bekende enum-waarden
- * - De rest van de FCLvNextConfig (hardcoded veiligheidslogica) is NOOIT extern aanpasbaar
+ * - Alle numerieke overrides worden geclamped binnen veilige grenzen
+ * - Groep C parameters (veiligheidslogica) zijn NOOIT extern aanpasbaar
  */
 object FCLvNextConfigOverride {
 
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val FILENAME       = "FCLvNext_config_override.json"
+
+    // ── As-overrides (bestaand) ─────────────────────────────────────────
 
     data class Override(
         val profile:             String? = null,
@@ -31,12 +34,28 @@ object FCLvNextConfigOverride {
         val hypoProtectionStyle: String? = null,
         val writtenAt:           String? = null,
         val basedOnEpisodes:     Int?    = null,
-        val reason:              String? = null
+        val reason:              String? = null,
+
+        // ── Groep A: individuele param fijnafstelling ───────────────────
+        val paramOverrides:      ParamOverrides? = null
+    )
+
+    /**
+     * Individuele parameter-overrides (Groep A).
+     * Null = gebruik de waarde die uit de as-keten rolt (geen override).
+     * Alle waarden worden geclamped op veilige grenzen in applyParamOverrides().
+     */
+    data class ParamOverrides(
+        val peakPredictionThreshold:  Double? = null,  // 9.5 – 14.0 mmol
+        val watchingFrontloadFrac:    Double? = null,  // 0.40 – 0.90
+        val watchingMinDeltaToTarget: Double? = null,  // 0.5 – 3.5 mmol
+        val commitCooldownMinutes:    Int?    = null,  // 5 – 25 min
+        val peakPredictionHorizonH:   Double? = null,  // 0.8 – 1.8 uur
+        val iobStart:                 Double? = null   // 0.25 – 0.55
     )
 
     /**
      * Laad het override-bestand. Geeft null terug als het niet bestaat of niet leesbaar is.
-     * Wordt aangeroepen aan het begin van loadFCLvNextConfig().
      */
     fun load(): Override? {
         return try {
@@ -48,12 +67,11 @@ object FCLvNextConfigOverride {
             val text = file.readText(Charsets.UTF_8)
             parse(text)
         } catch (_: Exception) {
-            // Nooit een crash veroorzaken in het algoritme-pad
             null
         }
     }
 
-    // ── Validatie-helpers voor gebruik in loadFCLvNextConfig ────────────
+    // ── Validatie-helpers voor as-overrides ─────────────────────────────
 
     private val validProfiles = setOf(
         "VERY_STRICT", "STRICT", "BALANCED", "AGGRESSIVE", "VERY_AGGRESSIVE"
@@ -71,18 +89,18 @@ object FCLvNextConfigOverride {
         "MINIMAL", "RELAXED", "BALANCED", "SAFE", "ULTRA_SAFE"
     )
 
-    /** Geeft de override-waarde terug als geldig, anders de fallback. */
     fun Override.safeProfile(fallback: String)             = profile?.takeIf { it in validProfiles }             ?: fallback
     fun Override.safeMealDetectSpeed(fallback: String)     = mealDetectSpeed?.takeIf { it in validSpeeds }      ?: fallback
     fun Override.safeCorrectionStyle(fallback: String)     = correctionStyle?.takeIf { it in validCorrection }   ?: fallback
     fun Override.safeMealHandlingStyle(fallback: String)   = mealHandlingStyle?.takeIf { it in validMealHandling } ?: fallback
     fun Override.safeHypoProtectionStyle(fallback: String) = hypoProtectionStyle?.takeIf { it in validHypo }    ?: fallback
 
-    // ── Interne JSON parser (geen extra dependency) ──────────────────────
+    // ── Interne JSON parser ──────────────────────────────────────────────
 
     private fun parse(json: String): Override? {
         return try {
-            val settings = extractBlock(json, "settings")
+            val settings      = extractBlock(json, "settings")
+            val paramOverBlock = extractBlock(json, "param_overrides")
 
             Override(
                 profile             = settings?.let { extractString(it, "fcl_vnext_profile") },
@@ -92,15 +110,33 @@ object FCLvNextConfigOverride {
                 hypoProtectionStyle = settings?.let { extractString(it, "fcl_vnext_hypo_protection_style") },
                 writtenAt           = extractString(json, "written_at"),
                 basedOnEpisodes     = extractString(json, "based_on_episodes")?.toIntOrNull(),
-                reason              = extractString(json, "reason")
+                reason              = extractString(json, "reason"),
+                paramOverrides      = paramOverBlock?.let { parseParamOverrides(it) }
             )
         } catch (_: Exception) {
             null
         }
     }
 
+    private fun parseParamOverrides(block: String): ParamOverrides? {
+        return try {
+            ParamOverrides(
+                peakPredictionThreshold  = extractDouble(block, "peakPredictionThreshold"),
+                watchingFrontloadFrac    = extractDouble(block, "watchingFrontloadFrac"),
+                watchingMinDeltaToTarget = extractDouble(block, "watchingMinDeltaToTarget"),
+                commitCooldownMinutes    = extractString(block, "commitCooldownMinutes")?.toIntOrNull(),
+                peakPredictionHorizonH   = extractDouble(block, "peakPredictionHorizonH"),
+                iobStart                 = extractDouble(block, "iobStart")
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun extractDouble(json: String, key: String): Double? =
+        extractString(json, key)?.toDoubleOrNull()
+
     private fun extractString(json: String, key: String): String? {
-        // Matcht zowel "key": "value" als "key": 123
         val pattern = """"$key"\s*:\s*"?([^",}\n]+)"?""".toRegex()
         return pattern.find(json)?.groupValues?.get(1)?.trim()?.removeSurrounding("\"")
     }

@@ -427,6 +427,7 @@ class DetermineBasalFCL @Inject constructor(
                 activityLog = activity.log,
                 resistanceLog = resistanceLog,
                 metricsText = fclMetrics.getUserStatsString(isNight),
+                activeConfig = fclvNext.lastActiveConfig,    // ← NIEUW
 
             )
 

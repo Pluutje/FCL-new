@@ -5,6 +5,7 @@ import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
 import kotlin.Double
+import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 
 data class FCLvNextConfig(
 
@@ -208,6 +209,22 @@ fun loadFCLvNextConfig(
     val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
     val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
 
+    // ── Schrijf override-waarden terug naar prefs ──────────────────────
+    // Zodat StatusFormatter, OpenAPSFCLPlugin en andere prefs.get() aanroepen
+    // altijd de actuele waarden tonen — ook als ze via de JSON-override zijn gezet.
+    if (override != null) {
+        if (profileName       != prefs.get(StringKey.fcl_vnext_profile))
+            prefs.put(StringKey.fcl_vnext_profile, profileName)
+        if (mealDetectSpeed   != prefs.get(StringKey.fcl_vnext_meal_detect_speed))
+            prefs.put(StringKey.fcl_vnext_meal_detect_speed, mealDetectSpeed)
+        if (correctionStyle   != prefs.get(StringKey.fcl_vnext_correction_style))
+            prefs.put(StringKey.fcl_vnext_correction_style, correctionStyle)
+        if (mealHandlingStyle != prefs.get(StringKey.fcl_vnext_meal_handling_style))
+            prefs.put(StringKey.fcl_vnext_meal_handling_style, mealHandlingStyle)
+        if (hypoProtectionStyle != prefs.get(StringKey.fcl_vnext_hypo_protection_style))
+            prefs.put(StringKey.fcl_vnext_hypo_protection_style, hypoProtectionStyle)
+    }
+
 
     val gain =
         if (isNight) prefs.get(DoubleKey.fcl_vnext_gain_night)
@@ -378,6 +395,8 @@ fun loadFCLvNextConfig(
         .let { applyMealHandlingGainScaling(it) } // 👈 nieuw
         .let { applyHypoProtectionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
+        .let { applyParamOverrides(it, override?.paramOverrides) }
+        .also { FCLvNextActiveParamsWriter.writeIfChanged(it) }   // ← NIEUW
 }
 
 private fun applyProfileDoseStrength(
@@ -731,6 +750,51 @@ private fun applyDoseDistributionStyle(
         else -> cfg // BALANCED
     }
 }
+/**
+ * Past individuele Groep A parameter-overrides toe NA de volledige as-keten.
+ *
+ * Volgorde is cruciaal: de as-keten (applyMealDetectSpeed, applyMealHandlingStyle, etc.)
+ * mag deze waarden niet overschrijven. Door hier ná de keten toe te passen,
+ * wint de fijnafstelling altijd van de as-logica.
+ *
+ * Veiligheid:
+ * - Null = geen override, keten-waarde blijft intact
+ * - Alle waarden worden geclamped op hun toegestane bereik
+ * - Groep C parameters (hypoBlockThreshold, maxSMB, etc.) zitten niet in deze functie
+ */
+private fun applyParamOverrides(
+    cfg: FCLvNextConfig,
+    overrides: FCLvNextConfigOverride.ParamOverrides?
+): FCLvNextConfig {
+    if (overrides == null) return cfg
+
+    return cfg.copy(
+        peakPredictionThreshold = overrides.peakPredictionThreshold
+            ?.coerceIn(9.5, 14.0)
+            ?: cfg.peakPredictionThreshold,
+
+        watchingFrontloadFrac = overrides.watchingFrontloadFrac
+            ?.coerceIn(0.40, 0.90)
+            ?: cfg.watchingFrontloadFrac,
+
+        watchingMinDeltaToTarget = overrides.watchingMinDeltaToTarget
+            ?.coerceIn(0.5, 3.5)
+            ?: cfg.watchingMinDeltaToTarget,
+
+        commitCooldownMinutes = overrides.commitCooldownMinutes
+            ?.coerceIn(5, 25)
+            ?: cfg.commitCooldownMinutes,
+
+        peakPredictionHorizonH = overrides.peakPredictionHorizonH
+            ?.coerceIn(0.8, 1.8)
+            ?: cfg.peakPredictionHorizonH,
+
+        iobStart = overrides.iobStart
+            ?.coerceIn(0.25, 0.55)
+            ?: cfg.iobStart
+    )
+}
+
 
 
 
