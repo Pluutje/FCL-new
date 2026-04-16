@@ -424,7 +424,7 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL meal V4 v8.2.1a
+ 🧠 FCL V5 v1.0.0
  
 ════════════════════════
 • Sterkte (S)          : ${prefs.get(IntKey.fcl_vnext_sterkte)}%
