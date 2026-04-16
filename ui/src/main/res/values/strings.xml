@@ -181,14 +181,7 @@
         <item>Negative only</item>
     </string-array>
 
-    <!--    Eigen-->
-    <string name="meal_intent_title">Maaltijd</string>
-    <string name="meal_intent_description1">Geef aan wat je verwacht te gaan eten.</string>
-    <string name="meal_intent_description2">Zodra het veilig kan wordt onderstaande bolus toegediend:</string>
-    <string name="meal_intent_small">Klein</string>
-    <string name="meal_intent_normal">Normaal</string>
-    <string name="meal_intent_large">Groot</string>
-    <string name="meal_intent_snack">Snack / borrel (langdurig)</string>
+
 
 
 

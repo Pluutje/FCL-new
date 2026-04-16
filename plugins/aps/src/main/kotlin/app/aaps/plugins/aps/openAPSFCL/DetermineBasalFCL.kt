@@ -46,7 +46,6 @@ import android.content.Context
 import org.joda.time.Hours
 import app.aaps.core.data.model.SC
 import app.aaps.core.interfaces.iob.IobCobCalculator
-import app.aaps.core.interfaces.meal.MealIntentRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.plugins.aps.openAPSFCL.vnext.model.BGDataPoint
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextStatusFormatter
@@ -55,8 +54,6 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextBgHistoryProvider
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextTrends
 
 
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.PreBolusController
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.MealIntentOverlay
 import com.google.gson.Gson
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclUiSnapshot
 
@@ -72,7 +69,6 @@ class DetermineBasalFCL @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val activePlugin: ActivePlugin,
     private val context: Context,
-    private val mealIntentOverlay: MealIntentOverlay,
     private val iobCobCalculator: IobCobCalculator,   // ✅ toevoegen
     private val profileFunction: ProfileFunction,      // ✅ toevoegen
 
@@ -90,12 +86,9 @@ class DetermineBasalFCL @Inject constructor(
             activePlugin = activePlugin
         )
 
-    private val preBolusController = PreBolusController()
     private val fclvNext =
         FCLvNext(
             preferences = preferences,
-            preBolusController = preBolusController,
-            mealIntentOverlay = mealIntentOverlay,
             iobCobCalculator = iobCobCalculator,     // ✅ toevoegen
             profileFunction = profileFunction        // ✅ toevoegen
         )
@@ -180,7 +173,7 @@ class DetermineBasalFCL @Inject constructor(
         }
     }
 
- // *************************************************************************************************************
+    // *************************************************************************************************************
 
 
     fun determine_basal(
@@ -223,8 +216,8 @@ class DetermineBasalFCL @Inject constructor(
         } else if (bg > 60 && flatBGsDetected) {
             rT.reason.append("Error: CGM data is unchanged for the past ~45m")
         }
-      //  if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
-            if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 ) {
+        //  if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
+        if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 ) {
             if (currenttemp.rate > basal) { // high temp is running
                 rT.reason.append(". Replacing high temp basal of ${currenttemp.rate} with neutral temp of $basal")
                 rT.deliverAt = deliverAt
@@ -269,57 +262,57 @@ class DetermineBasalFCL @Inject constructor(
         // ─────────────────────────────────────────────
         // FCL vNext – determineBasal integratie
         // ─────────────────────────────────────────────
-            // ─────────────────────────────────────────────
-            // 0️⃣ BASIS INPUT UIT determineBasal
-            // ─────────────────────────────────────────────
+        // ─────────────────────────────────────────────
+        // 0️⃣ BASIS INPUT UIT determineBasal
+        // ─────────────────────────────────────────────
 
-         //   val profile = profile      // OapsProfileFCL
-            val iobData = iob_data_array[0]
-            val currentIOB = iobData.iob
+        //   val profile = profile      // OapsProfileFCL
+        val iobData = iob_data_array[0]
+        val currentIOB = iobData.iob
 
-            var sensMgdl: Double = profile.sens        // mg/dL per U
-            var targetMgdl: Double = target_bg         // mg/dL
+        var sensMgdl: Double = profile.sens        // mg/dL per U
+        var targetMgdl: Double = target_bg         // mg/dL
 
-            // ─────────────────────────────────────────────
-            // 1️⃣ ACTIVITEIT (STAPPEN)
-            // ─────────────────────────────────────────────
+        // ─────────────────────────────────────────────
+        // 1️⃣ ACTIVITEIT (STAPPEN)
+        // ─────────────────────────────────────────────
 
-            val activity = fclActivityModule.evaluate()
-
-
-            // ISF correctie door activiteit
-            sensMgdl /= (activity.insulinPercentage / 100.0)
-
-            // target correctie (mmol → mg/dL)
-            targetMgdl += activity.targetAdjust * 18.0
-
-            target_bg = targetMgdl
-            // ─────────────────────────────────────────────
-            // 2️⃣ DAG / NACHT + RESISTENTIE
-            // ─────────────────────────────────────────────
-
-            val dayNightHelper = FCLvNextDayNightHelper(preferences)
-            val isNight: Boolean = dayNightHelper.isNightNow()
-
-            basalProfileNightLogger.onFiveMinuteTick(
-                currentTimeMillis = currentTime,
-                isNight = isNight
-            )
-
-            fclResistance.updateTargetMmol(target_bg/18.0)
-            fclResistance.updateResistentieIndienNodig(isNight)
-
-            val resistanceFactor: Double =
-                fclResistance.getCurrentResistanceFactor()
-
-            val resistanceLog: String =
-                fclResistance.getCurrentResistanceLog()
+        val activity = fclActivityModule.evaluate()
 
 
+        // ISF correctie door activiteit
+        sensMgdl /= (activity.insulinPercentage / 100.0)
 
-            // Resistentie corrigeert ALLEEN ISF
-            sensMgdl /= resistanceFactor
-            sensitivityRatio = resistanceFactor
+        // target correctie (mmol → mg/dL)
+        targetMgdl += activity.targetAdjust * 18.0
+
+        target_bg = targetMgdl
+        // ─────────────────────────────────────────────
+        // 2️⃣ DAG / NACHT + RESISTENTIE
+        // ─────────────────────────────────────────────
+
+        val dayNightHelper = FCLvNextDayNightHelper(preferences)
+        val isNight: Boolean = dayNightHelper.isNightNow()
+
+        basalProfileNightLogger.onFiveMinuteTick(
+            currentTimeMillis = currentTime,
+            isNight = isNight
+        )
+
+        fclResistance.updateTargetMmol(target_bg/18.0)
+        fclResistance.updateResistentieIndienNodig(isNight)
+
+        val resistanceFactor: Double =
+            fclResistance.getCurrentResistanceFactor()
+
+        val resistanceLog: String =
+            fclResistance.getCurrentResistanceLog()
+
+
+
+        // Resistentie corrigeert ALLEEN ISF
+        sensMgdl /= resistanceFactor
+        sensitivityRatio = resistanceFactor
         if (isNight) {
             basal = profile.current_basal * sensitivityRatio
         }
@@ -330,7 +323,7 @@ class DetermineBasalFCL @Inject constructor(
         var basalRate = 0.0
         var shouldDeliver = false
 
-     //   val bgHistoryPoints = getHistoricalBGData(2)
+        //   val bgHistoryPoints = getHistoricalBGData(2)
 
         val bgHistoryPoints =
             bgHistoryProvider
@@ -405,8 +398,6 @@ class DetermineBasalFCL @Inject constructor(
             val statusFormatter =
                 FCLvNextStatusFormatter(
                     prefs = preferences,
-                    mealIntentRepository = MealIntentRepository,
-                    preBolusController = preBolusController
                 )
 
 
@@ -532,7 +523,7 @@ class DetermineBasalFCL @Inject constructor(
 
 
 
- // *************************************************************************************************************************8
+        // *************************************************************************************************************************8
 
 
         // generate predicted future BGs based on IOB, COB, and current absorption rate
@@ -954,7 +945,7 @@ class DetermineBasalFCL @Inject constructor(
                 }
             }
             for (i in IOBpredBGs.indices) {
-               if (IOBpredBGs[i] < threshold) {
+                if (IOBpredBGs[i] < threshold) {
                     minutesAboveThreshold = 5 * i
                     break
                 }

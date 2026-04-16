@@ -111,7 +111,6 @@ data class UserEntry(
         OTP_RESET,
         STOP_SMS,
         FOOD,
-        MEAL_INTENT,
         EXPORT_CSV,
         START_AAPS,
         EXIT_AAPS,
@@ -127,7 +126,6 @@ data class UserEntry(
     enum class Sources {
         TreatmentDialog,
         InsulinDialog,
-        MealIntentDialog,
         CarbDialog,
         WizardDialog,
         QuickWizard,

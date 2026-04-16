@@ -28,7 +28,6 @@ import app.aaps.ui.dialogs.ExtendedBolusDialog
 import app.aaps.ui.dialogs.FillDialog
 import app.aaps.ui.dialogs.InsulinDialog
 import app.aaps.ui.dialogs.LoopDialog
-import app.aaps.ui.dialogs.MealIntentDialog
 import app.aaps.ui.dialogs.ProfileSwitchDialog
 import app.aaps.ui.dialogs.ProfileViewerDialog
 import app.aaps.ui.dialogs.SiteRotationDialog
@@ -53,7 +52,7 @@ abstract class UiModule {
     @ContributesAndroidInjector abstract fun contributesWizardDialog(): WizardDialog
     @ContributesAndroidInjector abstract fun contributesCalibrationDialog(): CalibrationDialog
     @ContributesAndroidInjector abstract fun contributesCarbsDialog(): CarbsDialog
-    @ContributesAndroidInjector abstract fun contributesMealIntentDialog(): MealIntentDialog
+
     @ContributesAndroidInjector abstract fun contributesCareDialog(): CareDialog
     @ContributesAndroidInjector abstract fun contributesWizardInfoDialog(): WizardInfoDialog
     @ContributesAndroidInjector abstract fun contributesProfileViewerDialog(): ProfileViewerDialog

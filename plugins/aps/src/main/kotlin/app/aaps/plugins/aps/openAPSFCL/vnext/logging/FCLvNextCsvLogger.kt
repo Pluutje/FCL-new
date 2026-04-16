@@ -14,6 +14,16 @@ data class FCLvNextCsvLogRow(
     var bg: Double = 0.0,
     var target: Double = 0.0,
 
+    // ── S/T/V/N — vervangt de 5 enum-stijl kolommen ──
+    var sterktePct: Int = 100,
+    var timingPct: Int = 100,
+    var volhoudendheidPct: Int = 100,
+    var nachtFactorPct: Int = 85,
+
+    // ── Log-only stijl labels (voor achterwaartse leesbaarbaarheid) ──
+    var doseDistributionStyle: String = "",
+    var nightResponseStyle: String = "",
+
     // ── Trends ──
     var slope: Double = 0.0,
     var accel: Double = 0.0,
@@ -33,12 +43,12 @@ data class FCLvNextCsvLogRow(
     var energyBase: Double = 0.0,
     var energyTotal: Double = 0.0,
 
-    // ── Meal episode reconstructie ──
+    // ── Meal episode ──
     var mealEpisodeId: Long = -1,
     var minutesSinceMealStart: Int = -1,
     var riseSinceMealStart: Double = 0.0,
 
-// ── Stagnation ──
+    // ── Stagnation ──
     var stagnationActive: Boolean = false,
     var stagnationBoost: Double = 0.0,
 
@@ -46,8 +56,6 @@ data class FCLvNextCsvLogRow(
     var rawDose: Double = 0.0,
     var iobFactor: Double = 0.0,
     var normalDose: Double = 0.0,
-
-    // ── Intent vóór guards ──
     var desiredDosePreGuards: Double = 0.0,
 
     // ── Guards ──
@@ -61,6 +69,9 @@ data class FCLvNextCsvLogRow(
     var earlyStage: Int = 0,
     var earlyConfidence: Double = 0.0,
     var earlyTargetU: Double = 0.0,
+    var earlyBoostActive: Boolean = false,   // was boost actief in deze cyclus?
+    var earlyBoostCount: Int = 0,            // aantal boost-commits tot nu toe in episode
+    var earlyBoostFactor: Double = 1.0,      // effectieve boost-factor die gebruikt is
 
     // ── Decision / phase ──
     var mealState: String = "",
@@ -72,26 +83,22 @@ data class FCLvNextCsvLogRow(
     var predictedPeak: Double = 0.0,
     var peakIobBoost: Double = 1.0,
     var effectiveIobRatio: Double = 0.0,
-
     var peakMaxSlope: Double = 0.0,
     var peakMomentum: Double = 0.0,
     var peakRiseSinceStart: Double = 0.0,
     var peakEpisodeActive: Boolean = false,
-
     var suppressForPeak: Boolean = false,
     var absorptionActive: Boolean = false,
     var reentrySignal: Boolean = false,
     var decisionReason: String = "",
 
-    // ── Meal handling (watching frontload) ──
+    // ── Watching frontload ──
     var watchingFrontloadTriggered: Boolean = false,
     var watchingFrontloadTargetU: Double = 0.0,
-
     var watchingSlopeOk: Boolean = false,
     var watchingDeltaOk: Boolean = false,
     var watchingPeakRiseOk: Boolean = false,
     var watchingIobOk: Boolean = false,
-
 
     // ── Rescue ──
     var pred60: Double = 0.0,
@@ -99,23 +106,7 @@ data class FCLvNextCsvLogRow(
     var rescueConfidence: Double = 0.0,
     var rescueReason: String = "",
 
-    // ── Profile/Styles ──
-    var profielNaam: String = "",
-    var mealDetectSpeed: String = "",
-    var correctionStyle: String = "",
-    var mealhandlingStyle: String = "",
-    var hypoProtectionStyle: String = "",
-    var doseDistributionStyle: String = "",
-    var nightResponseStyle: String = "",
-
     // ── Pre-bolus ──
-    var preBolusActive: Boolean = false,
-    var preBolusType: String = "NONE",
-    var preBolusTotalU: Double = 0.0,
-    var preBolusDeliveredU: Double = 0.0,
-    var preBolusRemainingU: Double = 0.0,
-    var preBolusMinutesSinceArmed: Int = -1,
-    var preBolusMinutesRemaining: Int = -1,
 
     // ── Execution ──
     var finalDose: Double = 0.0,
@@ -123,6 +114,7 @@ data class FCLvNextCsvLogRow(
     var deliveredTotal: Double = 0.0,
     var bolus: Double = 0.0,
     var basalRate: Double = 0.0,
+    var shouldDeliver: Boolean = false,
 
     // ── Reserve ──
     var reserveU: Double = 0.0,
@@ -130,13 +122,11 @@ data class FCLvNextCsvLogRow(
     var reserveDeltaU: Double = 0.0,
     var reserveAgeMin: Int = -1,
 
-    // ── FORENSIC V2 ──
-
-// Trajectory
+    // ── Trajectory ──
     var trajectoryFactor: Double = 1.0,
     var trajectoryHardBlock: Boolean = false,
 
-// Commit causality
+    // ── Commit causality ──
     var commitAllowed: Boolean = false,
     var effectiveCommitAllowed: Boolean = false,
     var baseCommitFraction: Double = 0.0,
@@ -148,45 +138,44 @@ data class FCLvNextCsvLogRow(
     var commitDoseRaw: Double = 0.0,
     var commitDoseFinal: Double = 0.0,
 
-// IOB overshoot
+    // ── IOB overshoot ──
     var iobOvershootFactor: Double = 1.0,
 
-// Burst cap
+    // ── Burst cap ──
     var burstDelivered10m: Double = 0.0,
     var burstCap10m: Double = 0.0,
     var burstRemaining10m: Double = 0.0,
 
-// Hypo
+    // ── Hypo ──
     var hypoActive: Boolean = false,
     var hypoProjectedBg: Double = 0.0,
 
-// Top guard
+    // ── Top guard ──
     var topGuardActive: Boolean = false,
     var topGuardCapFactor: Double = 1.0,
     var topPlateauConfirmed: Boolean = false,
 
-// Aggression
+    // ── Aggression ──
     var mealAggressionA: Double = 0.0,
     var mealAggressionMul: Double = 0.0,
-    var shouldDeliver: Boolean = false,
 
-// ✅ NIEUW: piek-nadering rem diagnostics
+    // ── Peak benadering ──
     var peakIobBrakeActive: Boolean = false,
     var peakApproachFactor: Double = 1.0,
 
-    // ── V5: Suppress/lockout reden detail ──
+    // ── Suppress/lockout reden ──
     var suppressReason: String = "NONE",
     var lockoutReason: String = "NONE",
     var commitBlockReason: String = "NONE",
 
-    // ── V5: Marges tot drempels ──
+    // ── Marges tot drempels ──
     var iobMarginToBrake: Double = 0.0,
     var iobMarginToLockout: Double = 0.0,
     var predMarginToWatching: Double = 0.0,
     var predMarginToTarget: Double = 0.0,
     var slopeMarginToBrake: Double = 0.0,
 
-    // ── V5: Peak-voorspelling internals ──
+    // ── Peak internals ──
     var predictedPeakBallistic: Double = 0.0,
     var futureDrop60: Double = 0.0,
     var peakFloorActive: Boolean = false,
@@ -195,17 +184,13 @@ data class FCLvNextCsvLogRow(
     var iobScaleUsed: Double = 0.0,
     var vUsed: Double = 0.0,
 
-    // ── V5: Doseerruimte context ──
+    // ── Doseerruimte context ──
     var iobHeadroom: Double = 0.0,
     var doseSuppressedU: Double = 0.0,
     var peakApproachActive: Boolean = false,
     var earlyResetThisCycle: Boolean = false,
     var downtrendLocked: Boolean = false,
-    var sensorBlipActive: Boolean = false,
-
-    // ── V5: Config-traceerbaarheid ──
-    var configSource: String = "HARDCODED",
-    var configVersion: String = "1"
+    var sensorBlipActive: Boolean = false
 )
 
 
@@ -213,16 +198,13 @@ object FCLvNextCsvLogger {
 
     @Volatile
     private var schemaVerified = false
-    private const val SCHEMA_VERSION = "5"
-    private const val FILE_NAME = "FCLvNext_Log_v5.csv"
+    private const val SCHEMA_VERSION = "6"
+    private const val FILE_NAME = "FCLvNext_Log_v6.csv"
 
-    // rolling window
-    private const val MAX_DAYS = 30
-    private const val MAX_LINES = MAX_DAYS * 288 // 5-min ticks
-
+    private const val MAX_DAYS  = 30
+    private const val MAX_LINES = MAX_DAYS * 288
     private const val SEP = ";"
 
-    // Trim 1x per dag (UTC dagkey)
     @Volatile
     private var lastTrimDayKeyUtc: String? = null
 
@@ -241,18 +223,19 @@ object FCLvNextCsvLogger {
     private fun utcDayKey(ts: DateTime): String =
         ts.withZone(DateTimeZone.UTC).toString("yyyy-MM-dd")
 
+    // ── Header ────────────────────────────────────────────────────────────
+    // Schema v6: 5 enum-stijl kolommen vervangen door sterkte/timing/volhoudendheid/nacht_factor
     private val header = listOf(
         // META
         "schema_version",
         "ts_utc",
 
-        // CONTEXT
+        // CONTEXT — S/T/V/N vervangt de oude enum-kolommen
         "is_night",
-        "profile_name",
-        "mealDetectSpeed",
-        "correctionStyle",
-        "mealhandlingStyle",
-        "hypoProtectionStyle",
+        "sterkte_pct",
+        "timing_pct",
+        "volhoudendheid_pct",
+        "nacht_factor_pct",
         "doseDistributionStyle",
         "nightResponseStyle",
 
@@ -280,7 +263,7 @@ object FCLvNextCsvLogger {
         "recent_delta5m",
         "consistency",
 
-// MODEL
+        // MODEL
         "effective_isf",
         "gain",
         "energy_base",
@@ -290,7 +273,7 @@ object FCLvNextCsvLogger {
         "normal_dose",
         "desired_dose_pre_guards",
 
-// STAGNATION
+        // STAGNATION
         "stagnation_active",
         "stagnation_boost",
 
@@ -308,6 +291,9 @@ object FCLvNextCsvLogger {
         "early_stage",
         "early_confidence",
         "early_target_u",
+        "early_boost_active",
+        "early_boost_count",
+        "early_boost_factor",
         "meal_state",
         "commit_fraction",
         "minutes_since_commit",
@@ -341,23 +327,16 @@ object FCLvNextCsvLogger {
         "rescue_reason",
 
         // PREBOLUS
-        "prebolus_active",
-        "prebolus_type",
-        "prebolus_total_u",
-        "prebolus_delivered_u",
-        "prebolus_remaining_u",
-        "prebolus_minutes_since_armed",
-        "prebolus_minutes_remaining",
 
         // RESERVE
         "reserve_u",
         "reserve_action",
         "reserve_delta_u",
         "reserve_age_min",
-        // FORENSIC V2
+
+        // FORENSIC
         "trajectory_factor",
         "trajectory_hard_block",
-
         "commit_allowed",
         "effective_commit_allowed",
         "base_commit_fraction",
@@ -368,37 +347,33 @@ object FCLvNextCsvLogger {
         "commit_aggression_mul",
         "commit_dose_raw",
         "commit_dose_final",
-
         "iob_overshoot_factor",
-
         "burst_delivered_10m",
         "burst_cap_10m",
         "burst_remaining_10m",
-
         "hypo_active",
         "hypo_projected_bg",
-
         "topguard_active",
         "topguard_cap_factor",
         "top_plateau_confirmed",
-
         "meal_aggression_a",
         "meal_aggression_mul",
         "peak_iob_brake_active",
         "peak_approach_factor",
-        // V5: SUPPRESS/LOCKOUT REDEN
+
+        // SUPPRESS/LOCKOUT
         "suppress_reason",
         "lockout_reason",
         "commit_block_reason",
 
-        // V5: MARGES TOT DREMPELS
+        // MARGES
         "iob_margin_to_brake",
         "iob_margin_to_lockout",
         "pred_margin_to_watching",
         "pred_margin_to_target",
         "slope_margin_to_brake",
 
-        // V5: PEAK INTERNALS
+        // PEAK INTERNALS
         "predicted_peak_ballistic",
         "future_drop_60",
         "peak_floor_active",
@@ -407,17 +382,13 @@ object FCLvNextCsvLogger {
         "iob_scale_used",
         "v_used",
 
-        // V5: DOSEERRUIMTE
+        // DOSEERRUIMTE
         "iob_headroom",
         "dose_suppressed_u",
         "peak_approach_active",
         "early_reset_this_cycle",
         "downtrend_locked",
-        "sensor_blip_active",
-
-        // V5: CONFIG TRACEERBAARHEID
-        "config_source",
-        "config_version"
+        "sensor_blip_active"
     ).joinToString(SEP)
 
     fun log(row: FCLvNextCsvLogRow) {
@@ -427,250 +398,147 @@ object FCLvNextCsvLogger {
                 verifySchemaIntegrity()
                 schemaVerified = true
             }
-
             if (!file.exists() || file.length() == 0L) {
                 file.writeText(header + "\n")
             } else {
                 val firstLine = file.useLines { it.firstOrNull() }
-
                 if (firstLine != header) {
                     val backupName = file.nameWithoutExtension +
-                        "_backup_" +
-                        DateTime.now().toString("yyyyMMdd_HHmmss") +
-                        ".csv"
-
-                    val backupFile = File(file.parentFile, backupName)
-                    file.renameTo(backupFile)
+                        "_backup_" + DateTime.now().toString("yyyyMMdd_HHmmss") + ".csv"
+                    file.renameTo(File(file.parentFile, backupName))
                     file.writeText(header + "\n")
                 }
             }
-
-            val line = buildLine(row)
-            file.appendText(line + "\n")
-
+            file.appendText(buildLine(row) + "\n")
             val todayKey = utcDayKey(row.ts)
             if (lastTrimDayKeyUtc != todayKey) {
                 lastTrimDayKeyUtc = todayKey
                 trimIfNeeded(file)
             }
-
-        } catch (_: Exception) {
-            // logging mag NOOIT FCL blokkeren
-        }
+        } catch (_: Exception) { }
     }
-
 
     private fun trimIfNeeded(file: File) {
         try {
             if (!file.exists() || file.length() == 0L) return
-
             val lines = file.readLines()
-            if (lines.size <= MAX_LINES + 1) return // +1 header
-
+            if (lines.size <= MAX_LINES + 1) return
             val headerLine = lines.first()
             val body = lines.drop(1).takeLast(MAX_LINES)
-
             file.writeText(headerLine + "\n")
             file.appendText(body.joinToString("\n") + "\n")
-        } catch (_: Exception) {
-            // trim mag NOOIT FCL blokkeren
-        }
+        } catch (_: Exception) { }
     }
 
     private fun sanitize(text: String): String =
         text.replace(SEP, ",").replace("\n", " ").replace("\r", " ").trim()
 
     private fun buildLine(row: FCLvNextCsvLogRow): String {
-
         val tsUtc = utcIso(row.ts)
         val deltaTarget = row.bg - row.target
 
         return listOf(
-            SCHEMA_VERSION,
-            tsUtc,
+            SCHEMA_VERSION, tsUtc,
 
+            // Context — S/T/V/N
             row.isNight,
-            sanitize(row.profielNaam),
-            sanitize(row.mealDetectSpeed),
-            sanitize(row.correctionStyle),
-            sanitize(row.mealhandlingStyle),
-            sanitize(row.hypoProtectionStyle),
+            row.sterktePct,
+            row.timingPct,
+            row.volhoudendheidPct,
+            row.nachtFactorPct,
             sanitize(row.doseDistributionStyle),
             sanitize(row.nightResponseStyle),
 
-            bg1(row.bg),
-            bg1(row.target),
-            d2(deltaTarget),
-            u2(row.iob),
-            u2(row.iobRatio),
-            sanitize(row.bgZone),
-            sanitize(row.doseAccess),
+            bg1(row.bg), bg1(row.target), d2(deltaTarget),
+            u2(row.iob), u2(row.iobRatio),
+            sanitize(row.bgZone), sanitize(row.doseAccess),
 
-            u2(row.finalDose),
-            u2(row.commandedDose),
-            u2(row.deliveredTotal),
-            u2(row.bolus),
-            u2(row.basalRate),
-            row.shouldDeliver,
+            u2(row.finalDose), u2(row.commandedDose), u2(row.deliveredTotal),
+            u2(row.bolus), u2(row.basalRate), row.shouldDeliver,
 
-            t2(row.slope),
-            a2(row.accel),
-            t2(row.recentSlope),
-            t2(row.recentDelta5m),
-            t2(row.consistency),
+            t2(row.slope), a2(row.accel), t2(row.recentSlope),
+            t2(row.recentDelta5m), t2(row.consistency),
 
-            bg2(row.effectiveISF),
-            u2(row.gain),
-            e2(row.energyBase),
-            e2(row.energyTotal),
-            u2(row.rawDose),
-            u2(row.iobFactor),
-            u2(row.normalDose),
+            bg2(row.effectiveISF), u2(row.gain),
+            e2(row.energyBase), e2(row.energyTotal),
+            u2(row.rawDose), u2(row.iobFactor), u2(row.normalDose),
             u2(row.desiredDosePreGuards),
 
-            row.stagnationActive,
-            e2(row.stagnationBoost),
+            row.stagnationActive, e2(row.stagnationBoost),
 
-            row.guardIobLimited,
-            row.guardPeakLimited,
-            row.guardMaxSmbLimited,
-            row.guardMinDeliverClipped,
-            row.guardZoneLimited,
+            row.guardIobLimited, row.guardPeakLimited, row.guardMaxSmbLimited,
+            row.guardMinDeliverClipped, row.guardZoneLimited,
 
-            row.mealEpisodeId,
-            row.minutesSinceMealStart,
+            row.mealEpisodeId, row.minutesSinceMealStart,
             bg1(row.riseSinceMealStart),
-            row.earlyStage,
-            t2(row.earlyConfidence),
-            u2(row.earlyTargetU),
-            sanitize(row.mealState),
-            t2(row.commitFraction),
-            row.minutesSinceCommit,
+            row.earlyStage, t2(row.earlyConfidence), u2(row.earlyTargetU),
+            row.earlyBoostActive, row.earlyBoostCount, t2(row.earlyBoostFactor),
+            sanitize(row.mealState), t2(row.commitFraction), row.minutesSinceCommit,
 
-            sanitize(row.peakState),
-            bg1(row.predictedPeak),
-            u2(row.peakIobBoost),
-            u2(row.effectiveIobRatio),
-            t2(row.peakMaxSlope),
-            t2(row.peakMomentum),
-            bg1(row.peakRiseSinceStart),
-            row.peakEpisodeActive,
-            row.suppressForPeak,
-            row.absorptionActive,
-            row.reentrySignal,
+            sanitize(row.peakState), bg1(row.predictedPeak),
+            u2(row.peakIobBoost), u2(row.effectiveIobRatio),
+            t2(row.peakMaxSlope), t2(row.peakMomentum),
+            bg1(row.peakRiseSinceStart), row.peakEpisodeActive,
+            row.suppressForPeak, row.absorptionActive, row.reentrySignal,
             sanitize(row.decisionReason),
 
-            row.watchingFrontloadTriggered,
-            u2(row.watchingFrontloadTargetU),
-            row.watchingSlopeOk,
-            row.watchingDeltaOk,
-            row.watchingPeakRiseOk,
-            row.watchingIobOk,
+            row.watchingFrontloadTriggered, u2(row.watchingFrontloadTargetU),
+            row.watchingSlopeOk, row.watchingDeltaOk,
+            row.watchingPeakRiseOk, row.watchingIobOk,
 
-            bg1(row.pred60),
-            sanitize(row.rescueState),
-            t2(row.rescueConfidence),
-            sanitize(row.rescueReason),
+            bg1(row.pred60), sanitize(row.rescueState),
+            t2(row.rescueConfidence), sanitize(row.rescueReason),
 
-            row.preBolusActive,
-            sanitize(row.preBolusType),
-            u2(row.preBolusTotalU),
-            u2(row.preBolusDeliveredU),
-            u2(row.preBolusRemainingU),
-            row.preBolusMinutesSinceArmed,
-            row.preBolusMinutesRemaining,
 
-            u2(row.reserveU),
-            sanitize(row.reserveAction),
-            u2(row.reserveDeltaU),
-            row.reserveAgeMin,
+            u2(row.reserveU), sanitize(row.reserveAction),
+            u2(row.reserveDeltaU), row.reserveAgeMin,
 
-            u2(row.trajectoryFactor),
-            row.trajectoryHardBlock,
-
-            row.commitAllowed,
-            row.effectiveCommitAllowed,
-            t2(row.baseCommitFraction),
-            t2(row.commitZoneFactor),
-            t2(row.commitIobFactor),
-            t2(row.commitPostPeakFactor),
-            t2(row.commitRawPlateauPenalty),
-            t2(row.commitAggressionMul),
-            u2(row.commitDoseRaw),
-            u2(row.commitDoseFinal),
+            u2(row.trajectoryFactor), row.trajectoryHardBlock,
+            row.commitAllowed, row.effectiveCommitAllowed,
+            t2(row.baseCommitFraction), t2(row.commitZoneFactor),
+            t2(row.commitIobFactor), t2(row.commitPostPeakFactor),
+            t2(row.commitRawPlateauPenalty), t2(row.commitAggressionMul),
+            u2(row.commitDoseRaw), u2(row.commitDoseFinal),
 
             t2(row.iobOvershootFactor),
+            u2(row.burstDelivered10m), u2(row.burstCap10m), u2(row.burstRemaining10m),
+            row.hypoActive, bg1(row.hypoProjectedBg),
+            row.topGuardActive, t2(row.topGuardCapFactor), row.topPlateauConfirmed,
+            t2(row.mealAggressionA), t2(row.mealAggressionMul),
+            row.peakIobBrakeActive, t2(row.peakApproachFactor),
 
-            u2(row.burstDelivered10m),
-            u2(row.burstCap10m),
-            u2(row.burstRemaining10m),
-
-            row.hypoActive,
-            bg1(row.hypoProjectedBg),
-
-            row.topGuardActive,
-            t2(row.topGuardCapFactor),
-            row.topPlateauConfirmed,
-
-            t2(row.mealAggressionA),
-            t2(row.mealAggressionMul),
-            row.peakIobBrakeActive,
-            t2(row.peakApproachFactor),
-
-            sanitize(row.suppressReason),
-            sanitize(row.lockoutReason),
+            sanitize(row.suppressReason), sanitize(row.lockoutReason),
             sanitize(row.commitBlockReason),
 
-            d2(row.iobMarginToBrake),
-            d2(row.iobMarginToLockout),
-            d2(row.predMarginToWatching),
-            d2(row.predMarginToTarget),
+            d2(row.iobMarginToBrake), d2(row.iobMarginToLockout),
+            d2(row.predMarginToWatching), d2(row.predMarginToTarget),
             d2(row.slopeMarginToBrake),
 
-            bg1(row.predictedPeakBallistic),
-            bg1(row.futureDrop60),
-            row.peakFloorActive,
-            bg1(row.peakFloorValue),
-            t2(row.hEff),
-            t2(row.iobScaleUsed),
-            t2(row.vUsed),
+            bg1(row.predictedPeakBallistic), bg1(row.futureDrop60),
+            row.peakFloorActive, bg1(row.peakFloorValue),
+            t2(row.hEff), t2(row.iobScaleUsed), t2(row.vUsed),
 
-            u2(row.iobHeadroom),
-            u2(row.doseSuppressedU),
-            row.peakApproachActive,
-            row.earlyResetThisCycle,
-            row.downtrendLocked,
-            row.sensorBlipActive,
-
-            sanitize(row.configSource),
-            sanitize(row.configVersion)
+            u2(row.iobHeadroom), u2(row.doseSuppressedU),
+            row.peakApproachActive, row.earlyResetThisCycle,
+            row.downtrendLocked, row.sensorBlipActive
 
         ).joinToString(SEP)
     }
 
     private fun verifySchemaIntegrity() {
-
-        // Count header columns
         val headerCount = header.split(SEP).size
-
-        // Count data columns by generating a dummy row
-        val dummy = FCLvNextCsvLogRow()
-        val dataCount = buildLine(dummy).split(SEP).size
-
-        if (headerCount != dataCount) {
+        val dataCount   = buildLine(FCLvNextCsvLogRow()).split(SEP).size
+        if (headerCount != dataCount)
             throw IllegalStateException(
-                "FCLvNext CSV SCHEMA MISMATCH: " +
-                    "header=$headerCount columns, data=$dataCount columns"
+                "FCLvNext CSV SCHEMA MISMATCH: header=$headerCount columns, data=$dataCount columns"
             )
-        }
     }
 
-    // formatting helpers
     private fun bg1(x: Double) = String.format(Locale.US, "%.1f", x)
     private fun bg2(x: Double) = String.format(Locale.US, "%.2f", x)
-    private fun d2(x: Double) = String.format(Locale.US, "%.2f", x)
-    private fun u2(x: Double) = String.format(Locale.US, "%.2f", x)
-    private fun a2(x: Double) = String.format(Locale.US, "%.2f", x)
-    private fun e2(x: Double) = String.format(Locale.US, "%.2f", x)
-    private fun t2(x: Double) = String.format(Locale.US, "%.2f", x)
+    private fun d2(x: Double)  = String.format(Locale.US, "%.2f", x)
+    private fun u2(x: Double)  = String.format(Locale.US, "%.2f", x)
+    private fun a2(x: Double)  = String.format(Locale.US, "%.2f", x)
+    private fun e2(x: Double)  = String.format(Locale.US, "%.2f", x)
+    private fun t2(x: Double)  = String.format(Locale.US, "%.2f", x)
 }

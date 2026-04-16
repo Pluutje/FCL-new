@@ -1,130 +1,116 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext
 
 import android.os.Environment
+import app.aaps.core.keys.IntKey
+import app.aaps.core.keys.interfaces.Preferences
 import java.io.File
-import java.util.Locale
+import java.time.Instant
 
 /**
- * Schrijft FCLvNext_active_params.json naar Documents/AAPS/ANALYSE/ na elke
- * loadFCLvNextConfig() aanroep.
+ * Schrijft FCLvNext_active_params.json naar Documents/AAPS/ANALYSE/ na elke cyclus.
+ * Alleen als een waarde veranderd is (cache-vergelijking).
  *
- * Dit bestand bevat de zes Groep A parameters zoals ze WERKELIJK actief zijn
- * in AAPS — dus NA de volledige as-keten én NA applyParamOverrides.
- * De FCL Analyzer leest dit bestand als bron van waarheid.
- *
- * Schrijfgedrag:
- * - Alleen herschrijven als minstens één waarde veranderd is t.o.v. de vorige cyclus.
- * - Altijd met Locale.US voor decimale punten (geen komma's).
- * - Nooit een crash veroorzaken: alle I/O is in try-catch gewikkeld.
- *
- * Aanroep in FCLvNextConfig.kt, direct na de apply-keten:
- *   val finalConfig = base
- *       .let { applyProfileDoseStrength(it) }
- *       ...
- *       .let { applyParamOverrides(it, override?.paramOverrides) }
- *   FCLvNextActiveParamsWriter.writeIfChanged(finalConfig)
- *   return finalConfig
+ * Schema 2 uitvoer:
+ * {
+ *   "schema": 2,
+ *   "written_at": "...",
+ *   "stv": { "sterkte": 95, "timing": 108, "volhoudendheid": 88, "nacht_factor": 82 },
+ *   "params": {
+ *     "peakPredictionThreshold":  { "active": 11.50, "default": 12.50, "delta": "-1.00", "src": "override" },
+ *     ...
+ *   }
+ * }
  */
 object FCLvNextActiveParamsWriter {
 
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val FILENAME       = "FCLvNext_active_params.json"
 
-    // Defaults zoals gedefinieerd in FCLvNextConfig base-blok.
-    // Worden meegeschreven zodat de analyzer de afwijking kan tonen.
     object Defaults {
+        // S/T/V/N
+        const val STERKTE        = 100
+        const val TIMING         = 100
+        const val VOLHOUDENDHEID = 100
+        const val NACHT_FACTOR   = 85
+        // Groep-A params
         const val PEAK_PREDICTION_THRESHOLD   = 12.5
         const val WATCHING_FRONTLOAD_FRAC     = 0.65
         const val WATCHING_MIN_DELTA_TARGET   = 2.0
         const val COMMIT_COOLDOWN_MINUTES     = 15
         const val PEAK_PREDICTION_HORIZON_H   = 1.2
         const val IOB_START                   = 0.40
+        const val PEAK_IOB_BRAKE_SUPPRESS     = 0.42
+        const val EARLY_BOOST_FACTOR          = 1.0
+        const val EARLY_BOOST_MIN_CONFIDENCE  = 0.60
+        const val EARLY_BOOST_MAX_COMMITS     = 2
+        const val EARLY_RISE_FRAC_MIN         = 0.35
+        const val PEAK_MAX_SLOPE_WEIGHT       = 0.0
+        const val LATE_COMMIT_DECAY_FACTOR    = 0.0
+        const val LATE_COMMIT_DECAY_THRESHOLD = 0.55
     }
 
-    // Cache van de vorige geschreven waarden — voorkomt onnodige I/O
-    @Volatile private var lastPeakThreshold:   Double? = null
-    @Volatile private var lastFrontloadFrac:   Double? = null
-    @Volatile private var lastDeltaToTarget:   Double? = null
-    @Volatile private var lastCooldown:        Int?    = null
-    @Volatile private var lastHorizonH:        Double? = null
-    @Volatile private var lastIobStart:        Double? = null
-    @Volatile private var lastMealHandling:    String? = null
-    @Volatile private var lastMealDetectSpeed: String? = null
+    // Cache — voorkomt I/O elke 5-minuten cyclus als niets veranderd is
+    @Volatile private var lastWrittenConfig: FCLvNextConfig? = null
+    @Volatile private var lastWrittenSTV: String = ""
 
-    /**
-     * Schrijf de actieve params als minstens één waarde veranderd is.
-     * Aanroepen met de final FCLvNextConfig na de volledige keten.
-     */
-    fun writeIfChanged(config: FCLvNextConfig) {
-        val changed =
-            config.peakPredictionThreshold  != lastPeakThreshold   ||
-                config.watchingFrontloadFrac     != lastFrontloadFrac   ||
-                config.watchingMinDeltaToTarget  != lastDeltaToTarget   ||
-                config.commitCooldownMinutes     != lastCooldown        ||
-                config.peakPredictionHorizonH    != lastHorizonH        ||
-                config.iobStart                  != lastIobStart        ||
-                config.mealHandlingStyle         != lastMealHandling    ||
-                config.mealDetectSpeed           != lastMealDetectSpeed
+    fun writeIfChanged(
+        config: FCLvNextConfig,
+        prefs: Preferences? = null,
+        sterkte: Int = Defaults.STERKTE,
+        timing: Int = Defaults.TIMING,
+        volhoudendheid: Int = Defaults.VOLHOUDENDHEID,
+        nachtFactor: Int = Defaults.NACHT_FACTOR
+    ) {
+        val stvKey = "$sterkte/$timing/$volhoudendheid/$nachtFactor"
+        if (config == lastWrittenConfig && stvKey == lastWrittenSTV) return
 
-        if (!changed) return
-
-        write(config)
-
-        lastPeakThreshold   = config.peakPredictionThreshold
-        lastFrontloadFrac   = config.watchingFrontloadFrac
-        lastDeltaToTarget   = config.watchingMinDeltaToTarget
-        lastCooldown        = config.commitCooldownMinutes
-        lastHorizonH        = config.peakPredictionHorizonH
-        lastIobStart        = config.iobStart
-        lastMealHandling    = config.mealHandlingStyle
-        lastMealDetectSpeed = config.mealDetectSpeed
-    }
-
-    private fun write(config: FCLvNextConfig) {
         try {
-            val dir = File(
+            val file = File(
                 Environment.getExternalStorageDirectory(),
-                RELATIVE_PATH
+                "$RELATIVE_PATH/$FILENAME"
             )
-            if (!dir.exists()) dir.mkdirs()
-
-            val file = File(dir, FILENAME)
-            file.writeText(buildJson(config), Charsets.UTF_8)
+            file.parentFile?.mkdirs()
+            file.writeText(buildJson(config, sterkte, timing, volhoudendheid, nachtFactor))
+            lastWrittenConfig = config
+            lastWrittenSTV    = stvKey
         } catch (_: Exception) {
-            // Nooit een crash veroorzaken in het algoritme-pad
+            // schrijven mag NOOIT FCL blokkeren
         }
     }
 
-    private fun fmt(d: Double): String =
-        String.format(Locale.US, "%.4f", d)
+    private fun buildJson(
+        config: FCLvNextConfig,
+        sterkte: Int,
+        timing: Int,
+        volhoudendheid: Int,
+        nachtFactor: Int
+    ): String {
+        val now = Instant.now().toString()
 
-    private fun fmtDisplay(d: Double, default: Double): String {
-        val diff = d - default
-        return when {
-            diff > 0.001  -> "+${String.format(Locale.US, "%.4f", diff)}"
-            diff < -0.001 -> String.format(Locale.US, "%.4f", diff)
-            else          -> "0"
+        fun fmt(v: Double)    = String.format(java.util.Locale.US, "%.4f", v)
+        fun fmtDisplay(active: Double, default: Double): String {
+            val d = active - default
+            return when {
+                kotlin.math.abs(d) < 0.001 -> "0"
+                d > 0 -> "+%.2f".format(d)
+                else  -> "%.2f".format(d)
+            }
         }
-    }
-
-    private fun buildJson(config: FCLvNextConfig): String {
-        val now = java.time.Instant.now().toString()
-
-        // Bepaal bron per parameter
-        fun src(active: Double, default: Double): String =
+        fun src(active: Double, default: Double) =
             if (kotlin.math.abs(active - default) < 0.001) "default" else "modified"
-        fun srcInt(active: Int, default: Int): String =
+        fun srcInt(active: Int, default: Int) =
             if (active == default) "default" else "modified"
 
         return buildString {
             appendLine("{")
-            appendLine("  \"schema\": 1,")
+            appendLine("  \"schema\": 2,")
             appendLine("  \"written_at\": \"$now\",")
-            appendLine("  \"as_context\": {")
-            appendLine("    \"mealHandlingStyle\": \"${config.mealHandlingStyle}\",")
-            appendLine("    \"mealDetectSpeed\": \"${config.mealDetectSpeed}\",")
-            appendLine("    \"correctionStyle\": \"${config.correctionStyle}\",")
-            appendLine("    \"hypoProtectionStyle\": \"${config.hypoProtectionStyle}\"")
+            // S/T/V/N blok
+            appendLine("  \"stv\": {")
+            appendLine("    \"sterkte\": $sterkte,")
+            appendLine("    \"timing\": $timing,")
+            appendLine("    \"volhoudendheid\": $volhoudendheid,")
+            appendLine("    \"nacht_factor\": $nachtFactor")
             appendLine("  },")
             appendLine("  \"params\": {")
             appendLine("    \"peakPredictionThreshold\":  { \"active\": ${fmt(config.peakPredictionThreshold)},  \"default\": ${fmt(Defaults.PEAK_PREDICTION_THRESHOLD)},  \"delta\": \"${fmtDisplay(config.peakPredictionThreshold,  Defaults.PEAK_PREDICTION_THRESHOLD)}\",  \"src\": \"${src(config.peakPredictionThreshold,  Defaults.PEAK_PREDICTION_THRESHOLD)}\" },")
@@ -132,7 +118,16 @@ object FCLvNextActiveParamsWriter {
             appendLine("    \"watchingMinDeltaToTarget\": { \"active\": ${fmt(config.watchingMinDeltaToTarget)}, \"default\": ${fmt(Defaults.WATCHING_MIN_DELTA_TARGET)}, \"delta\": \"${fmtDisplay(config.watchingMinDeltaToTarget, Defaults.WATCHING_MIN_DELTA_TARGET)}\", \"src\": \"${src(config.watchingMinDeltaToTarget, Defaults.WATCHING_MIN_DELTA_TARGET)}\" },")
             appendLine("    \"commitCooldownMinutes\":    { \"active\": ${config.commitCooldownMinutes},          \"default\": ${Defaults.COMMIT_COOLDOWN_MINUTES},          \"delta\": \"${fmtDisplay(config.commitCooldownMinutes.toDouble(), Defaults.COMMIT_COOLDOWN_MINUTES.toDouble())}\",  \"src\": \"${srcInt(config.commitCooldownMinutes, Defaults.COMMIT_COOLDOWN_MINUTES)}\" },")
             appendLine("    \"peakPredictionHorizonH\":   { \"active\": ${fmt(config.peakPredictionHorizonH)},   \"default\": ${fmt(Defaults.PEAK_PREDICTION_HORIZON_H)},   \"delta\": \"${fmtDisplay(config.peakPredictionHorizonH,   Defaults.PEAK_PREDICTION_HORIZON_H)}\",   \"src\": \"${src(config.peakPredictionHorizonH,   Defaults.PEAK_PREDICTION_HORIZON_H)}\" },")
-            append("    \"iobStart\":                 { \"active\": ${fmt(config.iobStart)},                 \"default\": ${fmt(Defaults.IOB_START)},                 \"delta\": \"${fmtDisplay(config.iobStart,                 Defaults.IOB_START)}\",                 \"src\": \"${src(config.iobStart,                 Defaults.IOB_START)}\" }")
+            appendLine("    \"iobStart\":                 { \"active\": ${fmt(config.iobStart)},                 \"default\": ${fmt(Defaults.IOB_START)},                 \"delta\": \"${fmtDisplay(config.iobStart,                 Defaults.IOB_START)}\",                 \"src\": \"${src(config.iobStart,                 Defaults.IOB_START)}\" },")
+            appendLine("    \"peakIobBrakeSuppressThreshold\": { \"active\": ${fmt(config.peakIobBrakeSuppressThreshold)}, \"default\": ${fmt(Defaults.PEAK_IOB_BRAKE_SUPPRESS)}, \"delta\": \"${fmtDisplay(config.peakIobBrakeSuppressThreshold, Defaults.PEAK_IOB_BRAKE_SUPPRESS)}\", \"src\": \"${src(config.peakIobBrakeSuppressThreshold, Defaults.PEAK_IOB_BRAKE_SUPPRESS)}\" },")
+            appendLine("    \"earlyBoostFactor\":         { \"active\": ${fmt(config.earlyBoostFactor)},         \"default\": ${fmt(Defaults.EARLY_BOOST_FACTOR)},         \"delta\": \"${fmtDisplay(config.earlyBoostFactor,         Defaults.EARLY_BOOST_FACTOR)}\",         \"src\": \"${src(config.earlyBoostFactor,         Defaults.EARLY_BOOST_FACTOR)}\" },")
+            appendLine("    \"earlyBoostMinConfidence\":  { \"active\": ${fmt(config.earlyBoostMinConfidence)},  \"default\": ${fmt(Defaults.EARLY_BOOST_MIN_CONFIDENCE)},  \"delta\": \"${fmtDisplay(config.earlyBoostMinConfidence,  Defaults.EARLY_BOOST_MIN_CONFIDENCE)}\",  \"src\": \"${src(config.earlyBoostMinConfidence,  Defaults.EARLY_BOOST_MIN_CONFIDENCE)}\" },")
+            appendLine("    \"earlyBoostMaxCommits\":     { \"active\": ${config.earlyBoostMaxCommits},          \"default\": ${Defaults.EARLY_BOOST_MAX_COMMITS},          \"delta\": \"${fmtDisplay(config.earlyBoostMaxCommits.toDouble(), Defaults.EARLY_BOOST_MAX_COMMITS.toDouble())}\", \"src\": \"${srcInt(config.earlyBoostMaxCommits, Defaults.EARLY_BOOST_MAX_COMMITS)}\" },")
+            appendLine("    \"earlyRiseFracMin\":         { \"active\": ${fmt(config.earlyRiseFracMin)},         \"default\": ${fmt(Defaults.EARLY_RISE_FRAC_MIN)},         \"delta\": \"${fmtDisplay(config.earlyRiseFracMin,         Defaults.EARLY_RISE_FRAC_MIN)}\",         \"src\": \"${src(config.earlyRiseFracMin,         Defaults.EARLY_RISE_FRAC_MIN)}\" },")
+            append(  "    \"peakMaxSlopeWeight\":       { \"active\": ${fmt(config.peakMaxSlopeWeight)},       \"default\": ${fmt(Defaults.PEAK_MAX_SLOPE_WEIGHT)},       \"delta\": \"${fmtDisplay(config.peakMaxSlopeWeight,       Defaults.PEAK_MAX_SLOPE_WEIGHT)}\",       \"src\": \"${src(config.peakMaxSlopeWeight,       Defaults.PEAK_MAX_SLOPE_WEIGHT)}\" }")
+            appendLine(",")
+            appendLine("    \"lateCommitDecayFactor\":   { \"active\": ${fmt(config.lateCommitDecayFactor)},   \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_FACTOR)},   \"delta\": \"${fmtDisplay(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\",   \"src\": \"${src(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\" },")
+            append(  "    \"lateCommitDecayThreshold\": { \"active\": ${fmt(config.lateCommitDecayThreshold)}, \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_THRESHOLD)}, \"delta\": \"${fmtDisplay(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\", \"src\": \"${src(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\" }")
             appendLine()
             appendLine("  }")
             append("}")

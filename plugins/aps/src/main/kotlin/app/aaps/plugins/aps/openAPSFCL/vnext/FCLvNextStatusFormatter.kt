@@ -3,10 +3,8 @@ package app.aaps.plugins.aps.openAPSFCL.vnext
 import org.joda.time.DateTime
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.IntKey
 
-import app.aaps.core.interfaces.meal.MealIntentRepository
-import app.aaps.core.interfaces.meal.MealIntentType
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.PreBolusController
 
 
 private const val UI_EPISODES_TO_SHOW = 5
@@ -22,8 +20,6 @@ data class FclUiSnapshot(
 
 class FCLvNextStatusFormatter(
     private val prefs: Preferences,
-    private val mealIntentRepository: MealIntentRepository,
-    private val preBolusController: PreBolusController
 ){
 
 
@@ -103,14 +99,6 @@ class FCLvNextStatusFormatter(
             else            -> value
         }
 
-    private fun mealIntentLabel(type: MealIntentType): String =
-        when (type) {
-            MealIntentType.SMALL  -> "Kleine maaltijd"
-            MealIntentType.NORMAL -> "Normale maaltijd"
-            MealIntentType.LARGE  -> "Grote maaltijd"
-            MealIntentType.SNACK  -> "Snack / Borrel"
-            else                  -> "—"
-        }
 
 
 
@@ -150,27 +138,6 @@ class FCLvNextStatusFormatter(
         return out
     }
 
-    private fun buildMealIntentBlock(): String? {
-        val now = DateTime.now()
-
-        val snapshot = preBolusController.uiSnapshot(now)
-            ?: return null
-
-        return """
-🍽️ MAALTIJD-INTENT
-─────────────────────
-• Type        : ${mealIntentLabel(snapshot.mealType)}
-• Status      : ${if (snapshot.remainingU > 0.0) "Bolus loopt nog" else "Bolus afgegeven"}
-• Pre-bolus   : ${"%.2f".format(snapshot.totalU)} U
-• Gegeven     : ${"%.2f".format(snapshot.deliveredU)} U
-• Resterend   : ${"%.2f".format(snapshot.remainingU)} U
-• Gestart     : ${snapshot.minutesSinceArmed} min geleden
-• Geldig tot  : ${DateTime(snapshot.validUntil).toString("HH:mm")}
-  (nog ${snapshot.minutesRemaining} min)
-• Verval      : ${"%.2f".format(snapshot.decayFactor)}
-
-""".trimIndent()
-    }
 
 
     private fun buildFclBlock(
@@ -430,7 +397,6 @@ ${formatDeliveryHistory(advice?.let { deliveryHistory.toList() })}
             shouldDeliver = shouldDeliver
         )
 
-        val mealIntentBlock = buildMealIntentBlock()
 
         val activityStatus = """
 🏃 ACTIVITEIT
@@ -458,21 +424,19 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL meal V4 v7.0.9
+ 🧠 FCL meal V4 v8.2.1a
  
 ════════════════════════
-• Height (sterkte)     : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}
-• Timing (reactietijd) : ${mealDetectLabel(prefs.get(StringKey.fcl_vnext_meal_detect_speed))}
-• Maaltijd behandeling : ${mealLabel(prefs.get(StringKey.fcl_vnext_meal_handling_style))}
-• Persistentie         : ${correctionStyleLabel(prefs.get(StringKey.fcl_vnext_correction_style))}
-• Hypoprotectie        : ${HypoProtectionLabel(prefs.get(StringKey.fcl_vnext_hypo_protection_style))}
+• Sterkte (S)          : ${prefs.get(IntKey.fcl_vnext_sterkte)}%
+• Timing (T)           : ${prefs.get(IntKey.fcl_vnext_timing)}%
+• Volhoudendheid (V)   : ${prefs.get(IntKey.fcl_vnext_volhoudendheid)}%
+• Nacht-factor (N)     : ${prefs.get(IntKey.fcl_vnext_nacht_factor)}%
 • Nacht respons        : ${NightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}
 • Insulineverdeling    : ${doseDistributionLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}
 
 
 $coreStatus
 
-${mealIntentBlock ?: ""}
 
 $fclCore
 

@@ -120,5 +120,5 @@ enum class BooleanKey(
     SiteRotationManagePump("site_rotation_manage_pump", defaultValue = false),
     SiteRotationManageCgm("site_rotation_manage_cgm", defaultValue = false),
 
-    ShowMealIntentButton("ShowMealIntentButton", true, defaultedBySM = true),
+
 }

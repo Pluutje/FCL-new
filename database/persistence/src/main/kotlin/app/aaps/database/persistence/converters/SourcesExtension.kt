@@ -7,7 +7,6 @@ fun UserEntry.Sources.fromDb(): Sources =
     when (this) {
         UserEntry.Sources.TreatmentDialog     -> Sources.TreatmentDialog
         UserEntry.Sources.InsulinDialog       -> Sources.InsulinDialog
-        UserEntry.Sources.MealIntentDialog    -> Sources.MealIntentDialog
         UserEntry.Sources.CarbDialog          -> Sources.CarbDialog
         UserEntry.Sources.WizardDialog        -> Sources.WizardDialog
         UserEntry.Sources.QuickWizard         -> Sources.QuickWizard
@@ -90,7 +89,6 @@ fun Sources.toDb(): UserEntry.Sources =
     when (this) {
         Sources.TreatmentDialog     -> UserEntry.Sources.TreatmentDialog
         Sources.InsulinDialog       -> UserEntry.Sources.InsulinDialog
-        Sources.MealIntentDialog    -> UserEntry.Sources.MealIntentDialog
         Sources.CarbDialog          -> UserEntry.Sources.CarbDialog
         Sources.WizardDialog        -> UserEntry.Sources.WizardDialog
         Sources.QuickWizard         -> UserEntry.Sources.QuickWizard

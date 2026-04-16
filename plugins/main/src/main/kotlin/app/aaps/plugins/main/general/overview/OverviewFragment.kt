@@ -42,8 +42,6 @@ import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
-import app.aaps.core.interfaces.meal.MealIntentRepository
-import app.aaps.core.interfaces.meal.MealIntentType
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.LastBgData
@@ -126,7 +124,6 @@ import javax.inject.Provider
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.PreBolusController
 import app.aaps.plugins.aps.openAPSFCL.FCLMetrics
 import app.aaps.plugins.aps.openAPSFCL.OpenAPSFCLPlugin
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextStatusFormatter
@@ -171,7 +168,6 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
     @Inject lateinit var graphDataProvider: Provider<GraphData>
     @Inject lateinit var commandQueue: CommandQueue
     @Inject lateinit var tirCalculator: TirCalculator
-    @Inject lateinit var preBolusController: PreBolusController
     @Inject lateinit var fclMetrics: FCLMetrics
 
     private val disposable = CompositeDisposable()
@@ -264,7 +260,6 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         binding.buttonsLayout.acceptTempButton.setOnClickListener(this)
         binding.buttonsLayout.treatmentButton.setOnClickListener(this)
         binding.buttonsLayout.wizardButton.setOnClickListener(this)
-        binding.buttonsLayout.mealIntentButton.setOnClickListener(this)
         binding.buttonsLayout.calibrationButton.setOnClickListener(this)
         binding.buttonsLayout.cgmButton.setOnClickListener(this)
         binding.buttonsLayout.insulinButton.setOnClickListener(this)
@@ -459,14 +454,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                     ProtectionCheck.Protection.BOLUS,
                     UIRunnable { if (isAdded) uiInteraction.runCarbsDialog(childFragmentManager) })
 
-                R.id.meal_intent_button -> protectionCheck.queryProtection(
-                    activity,
-                    ProtectionCheck.Protection.BOLUS,
-                    UIRunnable {
-                        if (isAdded)
-                            uiInteraction.runMealIntentDialog(childFragmentManager)
-                    }
-                )    //abstract fun contributeInsulinDialog(): InsulinDialog
+
 
                 R.id.analyzer_button -> {
                     openAnalyzerApp()
@@ -660,12 +648,6 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             binding.buttonsLayout.carbsButton.visibility =
                 (profile != null && preferences.get(BooleanKey.OverviewShowCarbsButton)).toVisibility()
 
-            val isFclVNext = activePlugin.activeAPS.javaClass.simpleName.contains("FCL")
-            binding.buttonsLayout.mealIntentButton.visibility =
-                (profile != null && preferences.get(BooleanKey.ShowMealIntentButton) && isFclVNext).toVisibility()
-
-           // binding.buttonsLayout.mealIntentButton.visibility =    insulin_button
-           //     (profile != null && preferences.get(BooleanKey.ShowMealIntentButton)).toVisibility()
 
             binding.buttonsLayout.treatmentButton.visibility = (loop.runningMode != RM.Mode.DISCONNECTED_PUMP && !pump.isSuspended() && pump.isInitialized() && profile != null
                 && preferences.get(BooleanKey.OverviewShowTreatmentButton)).toVisibility()
@@ -1158,46 +1140,6 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         graphData.setNumVerticalLabels()
         graphData.formatAxis(overviewData.fromTime, overviewData.endTime)
 
-
-
-
-      //  val snapshot = preBolusController.uiSnapshot(DateTime.now())
-        val snapshot = MealIntentRepository.getPreBolusSnapshot()
-
-        val decayFactor = snapshot?.decayFactor ?: 0.0
-        MealIntentRepository.get()?.let { mealIntent ->
-            val popupText =
-                if (snapshot != null) {
-                    buildString {
-
-                        append("Afgegeven: ${"%.2f".format(snapshot.deliveredU)} U\n")
-                        append("Resterend: ${"%.2f".format(snapshot.remainingU)} U\n")
-                        append("Looptijd: nog ${snapshot.minutesRemaining} min\n")
-                        append("Decay: ${"%.2f".format(snapshot.decayFactor)}")
-
-                    }
-                } else {
-                    "${mealIntent.type.uiDescription().trim()}\n" +
-                        "Geldig tot: ${DateTime(mealIntent.validUntil).toString("HH:mm")}"
-                }
-
-
-            graphData.addMealIntent(
-                requireContext(),
-                GraphData.MealIntentVisual(
-                    startTime = mealIntent.timestamp,
-                    endTime = mealIntent.validUntil,
-                    label = mealIntent.type.bandLabel(),
-                    popupText = popupText
-                ),
-                decayFactor = decayFactor,
-                type = mealIntent.type
-            )
-        }
-
-
-
-
         graphData.performUpdate()
 
         // 2nd graphs
@@ -1338,29 +1280,6 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
             binding.infoLayout.variableSensitivity.visibility = View.GONE
 
-            binding.infoLayout.asLayout.setOnClickListener {
-
-                activity?.let { activity ->
-
-                    val plugin = activePlugin.activeAPS as? OpenAPSFCLPlugin
-                 //   val snapshot = plugin?.getLearningSnapshot()
-
-                //    if (snapshot == null) {
-               //         OKDialog.show(activity, "🧠 FCL Learning", "Nog geen learning data beschikbaar.")
-                //        return@let
-                //    }
-
-                    val formatter = FCLvNextStatusFormatter(
-                        prefs = preferences,
-                        mealIntentRepository = MealIntentRepository,
-                        preBolusController = PreBolusController()
-                    )
-
-                //    val text = formatter.buildLearningSnapshotBlock(snapshot)
-
-                    OKDialog.show(activity, "🧠 FCL Learning", "Learning in externe app")
-                }
-            }
 
 
         }

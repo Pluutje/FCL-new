@@ -73,8 +73,32 @@ enum class IntKey(
 
     SiteRotationUserProfile("site_rotation_user_profile", 0, 0, 2),
 
+    // ── FCL vNext — S / T / V model ───────────────────────────────────────
+    // Drie continue parameters die het volledige algoritmegedrag aansturen.
+    // Vervangt de 5 enum-assen (profiel, timing, correctie, maaltijdstijl, hypo).
+    // Default 100% = gekalibreerde baseline. Worden ingesteld via FCL Analyzer advies.
 
+    /** Sterkte overdag (80–125%). Schaalt gain, doseStrengthMul en frontloadFrac samen. */
+    fcl_vnext_sterkte("fcl_vnext_sterkte", 100, 80, 125),
 
+    /** Timing (80–120%). Schaalt detectie-drempels, cooldown en frontload-gate. */
+    fcl_vnext_timing("fcl_vnext_timing", 100, 80, 120),
 
+    /** Volhoudendheid (70–130%). Schaalt persistentie en hypo-bescherming invers. */
+    fcl_vnext_volhoudendheid("fcl_vnext_volhoudendheid", 100, 70, 130),
+
+    /**
+     * Nacht-factor (60–110%, default 85%).
+     * Vermenigvuldiger bovenop dag-sterkte die 's nachts wordt toegepast.
+     * 85% = nacht is 15% rustiger dan dag. 100% = identiek aan dag.
+     * Vervangt de aparte fcl_vnext_gain_night slider.
+     */
+    fcl_vnext_nacht_factor("fcl_vnext_nacht_factor", 85, 60, 110),
+
+    // ── FCL vNext — Groep-A fijnafstelling (Analyzer-gestuurd) ───────────
+    fcl_vnext_commit_cooldown_minutes("fcl_vnext_commit_cooldown_minutes", 15, 5, 25),
+
+    // ── FCL vNext — Early Confidence Boost ──────────────────────────────
+    fcl_vnext_early_boost_max_commits("fcl_vnext_early_boost_max_commits", 2, 1, 3),
 
 }

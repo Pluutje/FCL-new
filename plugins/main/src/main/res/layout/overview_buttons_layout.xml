@@ -76,19 +76,6 @@
             android:textColor="?attr/icBolusCarbsColor"
             app:iconPadding="-4dp" />
 
-        <!-- Meal intent -->
-        <app.aaps.core.ui.elements.SingleClickButton
-            android:id="@+id/meal_intent_button"
-            style="@style/ButtonSmallFontStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.5"
-            android:minHeight="@dimen/overview_action_button_height"
-            android:drawableTop="@drawable/ic_meal"
-            android:text="@string/meal_intent"
-            android:textColor="#00897B"
-            android:visibility="gone"
-            app:iconPadding="-4dp" />
 
         <!-- Analyzer -->
         <app.aaps.core.ui.elements.SingleClickButton

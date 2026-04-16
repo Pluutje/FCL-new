@@ -253,13 +253,6 @@
     <string name="fcl_vnext_bg_smoothing_alpha_title">BG smoothing factor</string>
     <string name="fcl_vnext_bg_smoothing_alpha_summary">Mate van gladmaken van CGM-ruis vóór trendberekening.\nHoger = rustiger maar trager.\nLager = sneller maar gevoeliger.</string>
 
-    <string name="prebolus_small_title">Kleine maaltijd</string>
-    <string name="prebolus_small_summary">Vooraf toegediende bolus bij een kleine maaltijd.Wordt gebruikt zodra een stijging inzet na het indrukken van de maaltijdknop.</string>
-    <string name="prebolus_normal_title">Normale maaltijd</string>
-    <string name="prebolus_normal_summary">Vooraf toegediende bolus bij een normale maaltijd.Helpt snel IOB opbouwen zodra de glucose begint te stijgen.</string>
-    <string name="prebolus_large_title">Grote maaltijd</string>
-    <string name="prebolus_large_summary">Vooraf toegediende bolus bij een grote maaltijd.Alleen actief bij voldoende veiligheid (geen daling, geen hypo).</string>
-
 
     <!-- ===============================
      FCL vNext – Startpagina
@@ -287,9 +280,6 @@ De instellingen zijn bewust overzichtelijk gehouden en ingedeeld in drie groepen
     <string name="fcl_vnext_1_CONTEXT_summary">Klik hier voor een overzichtsdocument met uitleg over de context instellingen.</string>
     <string name="fcl_vnext_3_CONTEXT_url">https://docs.google.com/document/d/14i96WNNMVvGhCtEH-u_Tew3pPR4Y5v6b/edit</string>
 
-    <string name="fcl_vnext_4_MEAL_title">📄 Meer uitleg over de maaltijd instellingen</string>
-    <string name="fcl_vnext_4_MEAL_summary">Klik hier voor een overzichtsdocument met uitleg over de maaltijd instellingen.</string>
-    <string name="fcl_vnext_4_MEAL_url">https://docs.google.com/document/d/1qo9BumW5eVvhNSAlCLrSXqL1TLQVwZ1y/edit</string>
 
     <!-- ===============================
      Algemeen gedrag
@@ -620,5 +610,34 @@ Sterk: Insuline 50%, TT +2,5mmol max 35 minuten naijl\n
         <item>STRONG</item>
     </string-array>
 
-    <string name="meal_intent">Toon maaltijd knop</string>
+
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         TOEVOEGEN aan plugins/aps/src/main/res/values/strings.xml
+         Voeg deze strings toe bij de bestaande FCL vNext strings.
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Intro bovenaan het gedrag/limieten scherm -->
+<string name="fcl_vnext_stv_intro">Drie parameters sturen het volledige algoritmegedrag aan. Default is 100%. De FCL Analyzer berekent en adviseert aanpassingen op basis van je meetdata. Wijzig maximaal één stap per keer en wacht 8 episodes voor je opnieuw aanpast.</string>
+
+    <!-- ── STERKTE (S) ─────────────────────────────────────────────── -->
+<string name="fcl_vnext_sterkte_title">💪 Sterkte (S) — %</string>
+<string name="fcl_vnext_sterkte_summary">Hoeveel insuline per actie. 100% = default kalibratie. Bereik: 80–125%. Gain overdag = S/100. Nacht = S/100 × N/100.</string>
+<string name="fcl_vnext_sterkte_dialog">Bepaalt de dosis per commit en de frontload-fractie. Bij 100% is alles zoals gekalibreerd. Verhoog naar 110% als pieken structureel te hoog blijven. Verlaag naar 90% bij te veel hypo\'s kort na de maaltijd.\n\nLet op: S en gain werken samen. Bij S=95% is de dag-gain 0.95.</string>
+
+    <!-- ── TIMING (T) ─────────────────────────────────────────────── -->
+<string name="fcl_vnext_timing_title">⏱️ Timing (T) — %</string>
+<string name="fcl_vnext_timing_summary">Wanneer het systeem reageert. 100% = default. Hoger = eerder detecteren en sneller reageren. Bereik: 80–120%.</string>
+<string name="fcl_vnext_timing_dialog">Schaalt alle detectie-drempels en de commit-cooldown. Bij 108% begint het systeem ~8% eerder en is de cooldown 13 min i.p.v. 15. Verhoog bij structureel late pieken. Verlaag bij te veel valse reacties op korte CGM-spikes.</string>
+
+    <!-- ── VOLHOUDENDHEID (V) ─────────────────────────────────────── -->
+<string name="fcl_vnext_volhoudendheid_title">🔁 Volhoudendheid (V) — %</string>
+<string name="fcl_vnext_volhoudendheid_summary">Hoe lang het systeem doorgaat bij aanhoudend hoog BG. 100% = default. Lager = eerder stoppen + meer hypo-bescherming. Bereik: 70–130%.</string>
+<string name="fcl_vnext_volhoudendheid_dialog">Schaalt persistentie en hypo-bescherming samen — ze zijn immers twee kanten van dezelfde medaille. Bij 85% stopt het systeem eerder met bijsturen én beschermt het vroeger tegen een hypo. Verlaag bij late hypo\'s na maaltijden. Verhoog bij aanhoudend hoog BG zonder goede correctie.</string>
+
+    <!-- ── NACHT-FACTOR (N) ───────────────────────────────────────── -->
+<string name="fcl_vnext_nacht_factor_title">🌙 Nacht-factor (N) — %</string>
+<string name="fcl_vnext_nacht_factor_summary">Vermenigvuldiger bovenop dag-sterkte voor de nacht. 85% = nacht is 15% rustiger dan dag. 100% = nacht identiek aan dag. Bereik: 60–110%.</string>
+<string name="fcl_vnext_nacht_factor_dialog">Vervangt de aparte nacht-gevoeligheidsslider. De nacht-gain is S/100 × N/100. Bij S=95% en N=85% is de nacht-gain 0.81 — dat is 15% minder actief dan overdag. Verlaag bij nachtelijke hypo\'s. Verhoog (richting 100%) als je nachts structureel te hoog blijft.</string>
+
 </resources>

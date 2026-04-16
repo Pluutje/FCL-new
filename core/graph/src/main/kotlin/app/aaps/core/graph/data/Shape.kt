@@ -29,5 +29,5 @@ enum class Shape {
     BUCKETED_BG,
     HEART_RATE,
     STEPS,
-    MEAL_INTENT
+
 }

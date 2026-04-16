@@ -15,7 +15,6 @@ import app.aaps.core.graph.data.EffectiveProfileSwitchDataPoint
 import app.aaps.core.graph.data.FixedLineGraphSeries
 import app.aaps.core.graph.data.GlucoseValueDataPoint
 import app.aaps.core.graph.data.LineGraphSeries
-import app.aaps.core.graph.meal.MealIntentDataPoint
 import app.aaps.core.graph.data.PointsWithLabelGraphSeries
 import app.aaps.core.graph.data.ScaledDataPoint
 import app.aaps.core.graph.data.TimeAsXAxisLabelFormatter
@@ -33,9 +32,8 @@ import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.max
 
-import app.aaps.core.interfaces.meal.MealIntentType
-import app.aaps.core.graph.meal.styleFor
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.PreBolusController
+
+
 import androidx.appcompat.app.AlertDialog
 import android.content.DialogInterface
 
@@ -44,7 +42,7 @@ class GraphData @Inject constructor(
     private val profileFunction: ProfileFunction,
     private val preferences: Preferences,
     private val rh: ResourceHelper,
-    private val preBolusController: PreBolusController
+
 ) {
 
     private var maxY = Double.MIN_VALUE
@@ -314,70 +312,6 @@ class GraphData @Inject constructor(
         addSeries(overviewData.stepsCountGraphSeries as PointsWithLabelGraphSeries<DataPointWithLabelInterface>)
         overviewData.stepsForScale.multiplier = maxY * scale / maxSteps
     }
-
-    data class MealIntentVisual(
-        val startTime: Long,
-        val endTime: Long,
-        val label: String,
-        val popupText: String
-    )
-
-    fun addMealIntent(
-        context: Context,
-        intent: MealIntentVisual,
-        decayFactor: Double,
-        type: MealIntentType
-    ) {
-        val alpha = (255 * decayFactor).toInt().coerceIn(10, 255)
-        val style = styleFor(type, alpha)
-
-        val point = MealIntentDataPoint(
-            x = (intent.startTime + intent.endTime) / 2.0,
-            y = maxY,
-            startX = intent.startTime.toDouble(),
-            endX = intent.endTime.toDouble(),
-            label = intent.label,
-            style = style,
-            bandHeightPx = 64f,        // 👈 iets hoger, visueel fijner
-            popupText = intent.popupText
-        )
-
-        val series =
-            PointsWithLabelGraphSeries<DataPointWithLabelInterface>(
-                arrayOf(point)
-            )
-
-        // 🔔 TAP LISTENER
-        series.setOnDataPointTapListener { _, dataPoint ->
-
-            val mealPoint = dataPoint as? MealIntentDataPoint
-                ?: return@setOnDataPointTapListener
-
-            val dialog = AlertDialog.Builder(context)
-                .setTitle("🍽 ${type.popupTitle()}")
-                .setMessage(mealPoint.buildPopupText())
-                .setCancelable(false)   // 🔒 blijft staan tot actie
-                .setPositiveButton("Sluiten") { dialogInterface, _ ->
-                    dialogInterface.dismiss()
-                }
-                .setNegativeButton("🛑 Stop maaltijd") { dialogInterface, _ ->
-
-                    // 🔴 HIER gebeurt de echte reset
-                    preBolusController.stopMealIntent()
-
-                    dialogInterface.dismiss()
-                }
-                .create()
-
-            dialog.show()
-        }
-
-
-
-        addSeries(series)
-    }
-
-
 
 
 

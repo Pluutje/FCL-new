@@ -5,6 +5,7 @@ import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
 import kotlin.Double
+import kotlin.math.roundToInt
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 
 data class FCLvNextConfig(
@@ -175,108 +176,176 @@ data class FCLvNextConfig(
     val hypoBlockThreshold: Double,     // bv 4.4..4.9
     val hypoInsulinFrac30: Double,      // impact fractie binnen 30m
     val hypoInsulinFrac60: Double,
-    val hypoInsulinFrac90: Double
+    val hypoInsulinFrac90: Double,
 
+    // =================================================
+    // 🔧 FINETUNING KANDIDATEN — IOB-remming & piek-bewaking
+    // Hardcoded drempels die in de toekomst door de analyzer bijgesteld kunnen worden.
+    // =================================================
+
+    // ── peakIobBrake (evaluatePostPeak) ──────────────────────────────────
+    val peakIobBrakeSuppressThreshold: Double,  // 0.42 — suppress actief zodra IOB deze ratio overschrijdt (finetuning: eerder/later beginnen remmen voor piek)
+    val peakIobBrakeLockoutThreshold: Double,   // 0.55 — lockout (harde stop) drempel; altijd > suppressThreshold (finetuning: hoe agressief de harde stop is)
+
+    // ── preCommitTop (evaluatePostPeak) ──────────────────────────────────
+    val preCommitTopIobThreshold: Double,       // 0.45 — minimale IOB voor topvorming-detectie zonder dip (finetuning: gevoeligheid topherkenning)
+    val preCommitTopAccelMax: Double,           // 0.06 — maximale versnelling waarbij topvorming nog herkend wordt (finetuning: hoe "vlak" de curve moet zijn)
+
+    // ── tailSuppress (evaluatePostPeak) ──────────────────────────────────
+    val tailSuppressIobMin: Double,             // 0.30 — minimale IOB voor staart-suppressie na piek (finetuning: bij lage ISF eerder supprimeren)
+
+    // ── commitBlocked (evaluatePostPeak) ─────────────────────────────────
+    val commitBlockIobThreshold: Double,        // 0.45 — IOB waarbij commit na versnellingsomkeer geblokkeerd wordt (finetuning: bescherming tegen te late commit bij hoge IOB)
+
+    // ── shouldHardBlockTrajectory ─────────────────────────────────────────
+    val trajectoryAbsorptionAccelThreshold: Double,  // -0.10 — hoe sterk de vertraging bij absorption moet zijn voor hard block (finetuning: gevoeligheid voor "echte" omkeer)
+    val trajectoryAbsorptionIobMin: Double,          // 0.35  — minimale IOB voor absorption hard block (finetuning: alleen blokkeren als er echt risico is)
+    val trajectoryHighIobThreshold: Double,          // 0.70  — IOB drempel voor non-meal hard block (finetuning: meer/minder ruimte buiten maaltijdcontext)
+
+    // ── canCommitNow (vroege episode) ─────────────────────────────────────
+    val earlyEpisodeCooldownIobMax: Double,     // 0.65 — max IOB-ratio waarbij vroege cooldown-korting nog geldt (finetuning: hoger = langer korte cooldown toestaan)
+    val earlyEpisodeMinCooldownMinutes: Int,    // 5    — kortste toegestane cooldown in vroege episode (finetuning: sneller/trager ophopen in eerste 15 min)
+    val earlyEpisodeWindowMinutes: Int,         // 15   — hoe lang de vroege episode override actief is (finetuning: aanpassen aan eigen maaltijdtijdprofiel)
+
+    // ── computeLateBolusBlock ─────────────────────────────────────────────
+    val lateBolusBlockIobMin: Double,           // 0.35 — minimale IOB voor late-bolus blokkering bij topnadering (finetuning: bij hoge ISF lager, bij lage ISF hoger)
+
+    // ── computeTopGuard ───────────────────────────────────────────────────
+    val topGuardMinIobRatio: Double,            // 0.30 — minimale IOB voordat TopGuard kan activeren (finetuning: eerder/later cap toepassen)
+    val topGuardCapMin: Double,                 // 0.20 — onderste grens van TopGuard cap-factor (finetuning: hoe hard maximaal geknepen wordt)
+    val topGuardCapMax: Double,                 // 0.65 — bovenste grens van TopGuard cap-factor (finetuning: minimale doorvoer bij actieve TopGuard)
+
+    // ── heightEscalationFactor ────────────────────────────────────────────
+    val heightEscalationIobCeiling: Double,     // 0.35 — boven deze IOB geen verdere escalatie (finetuning: eerder uitschakelen bij gevoelige patronen)
+
+    // ── IOB-dempingscurve machtsvorm ─────────────────────────────────────
+    val iobPowerDay: Double,                    // 2.1  — machtsvorm van de IOB-curve overdag (finetuning: hogere waarde = scherper afknijpen bij hoge IOB)
+    val iobPowerNight: Double,                  // 2.3  — machtsvorm 's nachts iets conservatiever (finetuning: nacht-specifiek gedrag)
+
+    // ── piek-nadering taper (getAdvice) ──────────────────────────────────
+    val peakApproachIobThreshold: Double,       // 0.62 — IOB-drempel voor geleidelijke piek-nadering rem (finetuning: afstemmen op peakIobBrake drempel)
+    val peakApproachMaxReduction: Double,       // 0.20 — maximale verlaging (0..1) door piek-nadering rem (finetuning: hoe agressief de taper is)
+
+    // ── micro-ramp veiligheidsgrens ───────────────────────────────────────
+    val microRampIobMax: Double,                // 0.45 — maximale IOB-ratio waarbij micro-ramp nog mag activeren (finetuning: hoger = micro-ramp ook bij iets hogere IOB)
+
+    // =================================================
+    // 🚀 EARLY CONFIDENCE BOOST
+    // Vergroot de earlyTargetU met een instelbare factor voor de eerste
+    // N commits van een episode, mits confidence hoog genoeg is.
+    // Analyzer kan deze parameters bijsturen via config_override.json.
+    // =================================================
+    val earlyBoostFactor: Double,           // 1.0 = uit, 1.5 = 50% hogere vroege dosis. Bereik 1.0–2.0
+    val earlyBoostMinConfidence: Double,    // minimale early-confidence om boost te activeren. Bereik 0.40–0.85
+    val earlyBoostMaxCommits: Int,          // max aantal commits waarbij boost actief is (1–3)
+
+
+    // ── Peak Prediction Calibration ── Analyzer-optimaliseerbaar ────────
+    /** Ondergrens riseFrac aan het begin van episode. Was hardcoded 0.35.
+     *  Hoger = langere vroege horizon. Bereik 0.35–0.85. */
+    val earlyRiseFracMin: Double,
+    /** Gewicht maxSlope in v-berekening: v = vBlended*(1-w) + maxSlope*w.
+     *  0.0 = huidig gedrag. Bereik 0.0–0.60. */
+    val peakMaxSlopeWeight: Double,
+
+    // ── Frontload-shift: late commit demping na vroege boost ─────────
+    // Na earlyBoost (boostCommitCount > 0), dempt commits als iobRatio
+    // de drempel overschrijdt. Doel: insuline vroeg concentreren,
+    // minder laat — lagere IOB op en na de piek.
+    val lateCommitDecayFactor: Double,    // 0.0 = uit, bereik 0.0–1.0
+    val lateCommitDecayThreshold: Double  // iobRatio drempel. Bereik 0.30–0.70
 )
+
 
 fun loadFCLvNextConfig(
     prefs: Preferences,
     isNight: Boolean
 ): FCLvNextConfig {
 
-    // ── Config override (geschreven door FCL Analyzer na handmatige goedkeuring) ──
-    // Als er een geldig JSON-bestand staat in Documents/AAPS/ANALYSE/ worden de
-    // 5 as-waarden daaruit gelezen. Onbekende waarden vallen automatisch terug op prefs.
-    // De rest van de config (veiligheidslogica, hardcoded waarden) is NOOIT extern aanpasbaar.
+    // ── Override (geschreven door FCL Analyzer na goedkeuring) ────────────
     val override = FCLvNextConfigOverride.load()
 
-    val validProfiles    = setOf("VERY_STRICT","STRICT","BALANCED","AGGRESSIVE","VERY_AGGRESSIVE")
-    val validSpeeds      = setOf("VERY_SLOW","SLOW","MODERATE","FAST","VERY_FAST")
-    val validCorrection  = setOf("VERY_CAUTIOUS","CAUTIOUS","NORMAL","PERSISTENT","VERY_PERSISTENT")
-    val validMealH       = setOf("VERY_CONSERVATIVE","CONSERVATIVE","BALANCED","ANTICIPATORY","AGGRESSIVE")
-    val validHypo        = setOf("MINIMAL","RELAXED","BALANCED","SAFE","ULTRA_SAFE")
+    // ── S / T / V / N lezen ──────────────────────────────────────────────
+    // Prioriteit: override-bestand → prefs → hardcoded default
+    val sterkte        = (override?.sterkte        ?: prefs.get(IntKey.fcl_vnext_sterkte))
+        .coerceIn(80, 125)
+    val timing         = (override?.timing         ?: prefs.get(IntKey.fcl_vnext_timing))
+        .coerceIn(80, 120)
+    val volhoudendheid = (override?.volhoudendheid ?: prefs.get(IntKey.fcl_vnext_volhoudendheid))
+        .coerceIn(70, 130)
+    val nachtFactor    = (override?.nachtFactor    ?: prefs.get(IntKey.fcl_vnext_nacht_factor))
+        .coerceIn(60, 110)
 
-    val profileName       = override?.profile?.takeIf { it in validProfiles }
-        ?: prefs.get(StringKey.fcl_vnext_profile)
-    val mealDetectSpeed   = override?.mealDetectSpeed?.takeIf { it in validSpeeds }
-        ?: prefs.get(StringKey.fcl_vnext_meal_detect_speed)
-    val correctionStyle   = override?.correctionStyle?.takeIf { it in validCorrection }
-        ?: prefs.get(StringKey.fcl_vnext_correction_style)
-    val mealHandlingStyle = override?.mealHandlingStyle?.takeIf { it in validMealH }
-        ?: prefs.get(StringKey.fcl_vnext_meal_handling_style)
-    val hypoProtectionStyle = override?.hypoProtectionStyle?.takeIf { it in validHypo }
-        ?: prefs.get(StringKey.fcl_vnext_hypo_protection_style)
-    val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
-    val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
+    // ── Schrijf terug naar prefs (StatusFormatter en UI lezen hieruit) ────
+    if (override?.sterkte != null && sterkte != prefs.get(IntKey.fcl_vnext_sterkte))
+        prefs.put(IntKey.fcl_vnext_sterkte, sterkte)
+    if (override?.timing != null && timing != prefs.get(IntKey.fcl_vnext_timing))
+        prefs.put(IntKey.fcl_vnext_timing, timing)
+    if (override?.volhoudendheid != null && volhoudendheid != prefs.get(IntKey.fcl_vnext_volhoudendheid))
+        prefs.put(IntKey.fcl_vnext_volhoudendheid, volhoudendheid)
+    if (override?.nachtFactor != null && nachtFactor != prefs.get(IntKey.fcl_vnext_nacht_factor))
+        prefs.put(IntKey.fcl_vnext_nacht_factor, nachtFactor)
 
-    // ── Schrijf override-waarden terug naar prefs ──────────────────────
-    // Zodat StatusFormatter, OpenAPSFCLPlugin en andere prefs.get() aanroepen
-    // altijd de actuele waarden tonen — ook als ze via de JSON-override zijn gezet.
-    if (override != null) {
-        if (profileName       != prefs.get(StringKey.fcl_vnext_profile))
-            prefs.put(StringKey.fcl_vnext_profile, profileName)
-        if (mealDetectSpeed   != prefs.get(StringKey.fcl_vnext_meal_detect_speed))
-            prefs.put(StringKey.fcl_vnext_meal_detect_speed, mealDetectSpeed)
-        if (correctionStyle   != prefs.get(StringKey.fcl_vnext_correction_style))
-            prefs.put(StringKey.fcl_vnext_correction_style, correctionStyle)
-        if (mealHandlingStyle != prefs.get(StringKey.fcl_vnext_meal_handling_style))
-            prefs.put(StringKey.fcl_vnext_meal_handling_style, mealHandlingStyle)
-        if (hypoProtectionStyle != prefs.get(StringKey.fcl_vnext_hypo_protection_style))
-            prefs.put(StringKey.fcl_vnext_hypo_protection_style, hypoProtectionStyle)
+    // ── Analyzer param-overrides persistent terugschrijven naar prefs ────
+    // Zo blijven alle Analyzer-aanpassingen actief na het consumeren van
+    // de config_override.json (consume_after_use: true).
+    val po = override?.paramOverrides
+    if (po != null) {
+        po.peakPredictionThreshold?.let       { prefs.put(DoubleKey.fcl_vnext_peak_prediction_threshold, it) }
+        po.watchingFrontloadFrac?.let         { prefs.put(DoubleKey.fcl_vnext_watching_frontload_frac, it) }
+        po.watchingMinDeltaToTarget?.let      { prefs.put(DoubleKey.fcl_vnext_watching_min_delta, it) }
+        po.commitCooldownMinutes?.let         { prefs.put(IntKey.fcl_vnext_commit_cooldown_minutes, it) }
+        po.peakPredictionHorizonH?.let        { prefs.put(DoubleKey.fcl_vnext_peak_prediction_horizon_h, it) }
+        po.iobStart?.let                     { prefs.put(DoubleKey.fcl_vnext_iob_start, it) }
+        po.peakIobBrakeSuppressThreshold?.let { prefs.put(DoubleKey.fcl_vnext_peak_iob_brake_suppress, it) }
+        po.earlyBoostFactor?.let              { prefs.put(DoubleKey.fcl_vnext_early_boost_factor, it) }
+        po.earlyBoostMinConfidence?.let       { prefs.put(DoubleKey.fcl_vnext_early_boost_min_confidence, it) }
+        po.earlyBoostMaxCommits?.let          { prefs.put(IntKey.fcl_vnext_early_boost_max_commits, it) }
+        po.earlyRiseFracMin?.let              { prefs.put(DoubleKey.fcl_vnext_early_rise_frac_min, it) }
+        po.peakMaxSlopeWeight?.let            { prefs.put(DoubleKey.fcl_vnext_peak_max_slope_weight, it) }
+        po.lateCommitDecayFactor?.let         { prefs.put(DoubleKey.fcl_vnext_late_commit_decay_factor, it) }
+        po.lateCommitDecayThreshold?.let      { prefs.put(DoubleKey.fcl_vnext_late_commit_decay_threshold, it) }
     }
 
-
-    val gain =
-        if (isNight) prefs.get(DoubleKey.fcl_vnext_gain_night)
-        else prefs.get(DoubleKey.fcl_vnext_gain_day)
+    // ── Gain = S (dag) of S × N (nacht) ──────────────────────────────────
+    // Vervangt de afzonderlijke fcl_vnext_gain_day / fcl_vnext_gain_night prefs.
+    val s = sterkte.toDouble()     / 100.0
+    val n = nachtFactor.toDouble() / 100.0
+    val gain = if (isNight) (s * n) else s
 
     val maxSMB =
         if (isNight) prefs.get(DoubleKey.max_bolus_night)
-        else prefs.get(DoubleKey.max_bolus_day)
+        else         prefs.get(DoubleKey.max_bolus_day)
 
-
-    // ─────────────────────────────────────────────
-    // Meal detect speed mapping (TIMING ONLY)
-    // ─────────────────────────────────────────────
+    val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
+    val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
 
     val base = FCLvNextConfig(
-
-        // =================================================
-        // 🧭 UI PARAMETERS (ENKEL DEZE)
-        // =================================================
-        gain = gain,
-        maxSMB = maxSMB,
+        gain             = gain,
+        maxSMB           = maxSMB,
         hybridPercentage = 50,
-        minDeliverDose = 0.075,
+        minDeliverDose   = 0.075,
 
-        profielNaam = profileName,
-        mealDetectSpeed = mealDetectSpeed,
-        correctionStyle = correctionStyle,
-        mealHandlingStyle = mealHandlingStyle,
-        hypoProtectionStyle = hypoProtectionStyle,          // ✅ FIX: ontbrak
+        // Log-label toont actieve S/T/V/N
+        profielNaam           = "S${sterkte}/T${timing}/V${volhoudendheid}/N${nachtFactor}",
+        mealDetectSpeed       = "MODERATE",
+        correctionStyle       = "NORMAL",
+        mealHandlingStyle     = "BALANCED",
+        hypoProtectionStyle   = "BALANCED",
         doseDistributionStyle = doseDistributionStyle,
-        nightResponseStyle = nightResponseStyle,
+        nightResponseStyle    = nightResponseStyle,
 
-        // smoothing
         bgSmoothingAlpha = 0.40,
+        iobStart         = prefs.get(DoubleKey.fcl_vnext_iob_start),
+        iobMax           = 0.70,      // was 0.75
+        iobMinFactor     = 0.10,
+        commitIobPower   = 1.00,
 
-        // IOB safety
-        iobStart = 0.40,
-        iobMax = 0.75,
-        iobMinFactor = 0.10,
-
-        // commit IOB curve apart
-        commitIobPower = 1.00,
-
-        // =================================================
-        // 📊 PROFILE — DOSE STRENGTH (default = BALANCED)
-        // =================================================
-        doseStrengthMul = 1.00,
+        doseStrengthMul      = 1.00,
         maxCommitFractionMul = 1.00,
-        microDoseMul = 1.00,
+        microDoseMul         = 1.00,
 
-        // ✅ Distribution base (BALANCED)
-        smallDoseThresholdU = 0.30,
+        smallDoseThresholdU  = 0.30,
         microCapFracOfMaxSmb = 0.2,
         smallCapFracOfMaxSmb = 0.4,
 
@@ -286,371 +355,179 @@ fun loadFCLvNextConfig(
 
         uncertainMinFraction = 0.45,
         uncertainMaxFraction = 0.70,
-        confirmMinFraction = 0.70,
-        confirmMaxFraction = 1.00,
+        confirmMinFraction   = 0.70,
+        confirmMaxFraction   = 1.00,
 
-        // betrouwbaarheid
-        minConsistency = 0.18,
-        consistencyExp = 1.00,
+        minConsistency        = 0.18,
+        consistencyExp        = 1.00,
         episodeMinConsistency = 0.45,
 
-        // execution
         deliveryCycleMinutes = 5,
-        maxTempBasalRate = 15.0,
+        maxTempBasalRate     = 15.0,
 
-        // meal detect
-        mealSlopeMin = 0.35,
-        mealSlopeSpan = 0.8,
-        mealAccelMin = 0.08,
-        mealAccelSpan = 0.6,
-        mealDeltaMin = 0.40,
-        mealDeltaSpan = 1.0,
+        mealSlopeMin            = 0.35,
+        mealSlopeSpan           = 0.8,
+        mealAccelMin            = 0.08,
+        mealAccelSpan           = 0.6,
+        mealDeltaMin            = 0.40,
+        mealDeltaSpan           = 1.0,
         mealUncertainConfidence = 0.2,
-        mealConfirmConfidence = 0.45,
-        mealConfidenceSpeedMul = 1.4,
+        mealConfirmConfidence   = 0.45,
+        mealConfidenceSpeedMul  = 1.40,
+        mealDetectThresholdMul  = 0.90,
+        microRampThresholdMul   = 0.90,
 
-        mealDetectThresholdMul = 0.9,
-        microRampThresholdMul = 0.9,
+        commitCooldownMinutes = prefs.get(IntKey.fcl_vnext_commit_cooldown_minutes),
+        minCommitDose         = 0.30,
 
-        // commit logic
-        commitCooldownMinutes = 15,
-        minCommitDose = 0.30,
+        correctionHoldSlopeMax         = -0.28,
+        correctionHoldAccelMax         =  0.035,
+        correctionHoldDeltaMax         =  1.85,
+        smallCorrectionMaxU            =  0.28,
+        smallCorrectionCooldownMinutes =  10,
 
-        // micro-correction hold + anti-drip
-        correctionHoldSlopeMax = -0.28,
-        correctionHoldAccelMax = 0.035,
-        correctionHoldDeltaMax = 1.85,
-        smallCorrectionMaxU = 0.28,
-        smallCorrectionCooldownMinutes = 10,
-
-        // absorption / peak
         absorptionWindowMinutes = 60,
-        peakSlopeThreshold = 0.3,
-        peakAccelThreshold = -0.05,
-        absorptionDoseFactor = 0.15,
+        peakSlopeThreshold      = 0.3,
+        peakAccelThreshold      = -0.05,
+        absorptionDoseFactor    = 0.15,
 
-        // re-entry
         reentryMinMinutesSinceCommit = 25,
-        reentryCooldownMinutes = 20,
-        reentrySlopeMin = 1.0,
-        reentryAccelMin = 0.10,
-        reentryDeltaMin = 1.0,
+        reentryCooldownMinutes       = 20,
+        reentrySlopeMin              = 1.0,
+        reentryAccelMin              = 0.10,
+        reentryDeltaMin              = 1.0,
 
-        // stagnation
-        stagnationDeltaMin = 0.80,
-        stagnationSlopeMaxNeg = -0.25,
-        stagnationSlopeMaxPos = 0.25,
-        stagnationAccelMaxAbs = 0.06,
-        stagnationEnergyBoost = 0.12,
-        persistentAggressionMul = 1.08,
-        persistentSlopeAbs = 0.32,
-        persistentAccelAbs = 0.085,
+        stagnationDeltaMin      = 0.80,
+        stagnationSlopeMaxNeg   = -0.25,
+        stagnationSlopeMaxPos   =  0.25,
+        stagnationAccelMaxAbs   =  0.06,
+        stagnationEnergyBoost   =  0.12,
+        persistentAggressionMul =  1.08,
+        persistentSlopeAbs      =  0.32,
+        persistentAccelAbs      =  0.085,
 
-        // early-dose & fast-carb behavior
         earlyPeakEscalationBonus = 0.10,
-        earlyStage1ThresholdMul = 0.8,
-        enableFastCarbOverride = true,
+        earlyStage1ThresholdMul  = 0.80,
+        enableFastCarbOverride   = true,
 
-        // peak prediction
-        peakPredictionThreshold = 12.5,
-        peakConfirmCycles = 2,
-        peakMinConsistency = 0.55,
-        peakMinSlope = 0.5,
-        peakMinAccel = -0.1,
-        peakPredictionHorizonH = 1.2,
-        peakExitSlope = 0.45,
-        peakExitAccel = -0.08,
+        peakPredictionThreshold  = prefs.get(DoubleKey.fcl_vnext_peak_prediction_threshold),
+        peakConfirmCycles        = 2,
+        peakMinConsistency       = 0.55,
+        peakMinSlope             = 0.5,
+        peakMinAccel             = -0.1,
+        peakPredictionHorizonH   = prefs.get(DoubleKey.fcl_vnext_peak_prediction_horizon_h),
+        peakExitSlope            = 0.45,
+        peakExitAccel            = -0.08,
+        peakMomentumHalfLifeMin  = 25.0,
+        peakMinMomentum          = 0.35,
+        peakMomentumGain         = 2.8,
+        peakRiseGain             = 0.65,
+        peakUseMaxSlopeFrac      = 0.6,
+        peakUseMaxAccelFrac      = 0.5,
+        peakPredictionMaxMmol    = 25.0,
 
-        peakMomentumHalfLifeMin = 25.0,
-        peakMinMomentum = 0.35,
-        peakMomentumGain = 2.8,
-        peakRiseGain = 0.65,
-        peakUseMaxSlopeFrac = 0.6,
-        peakUseMaxAccelFrac = 0.5,
-        peakPredictionMaxMmol = 25.0,
-
-        // trend persistence
         trendConfirmCycles = 2,
 
-        // watching/frontload
-        watchingFrontloadFrac = 0.65,
-        watchingMinSlope = 0.30,
-        watchingMinDeltaToTarget = 2.0,
-        watchingMinPeakRise = 0.6,
-        watchingMaxIobRatio = 0.75,
+        watchingFrontloadFrac    = prefs.get(DoubleKey.fcl_vnext_watching_frontload_frac),
+        watchingMinSlope         = 0.30,
+        watchingMinDeltaToTarget = prefs.get(DoubleKey.fcl_vnext_watching_min_delta),
+        watchingMinPeakRise      = 0.6,
+        watchingMaxIobRatio      = 0.75,
 
-        // ✅ FIX: hypo protection defaults (BALANCED)
         hypoBlockThreshold = 4.70,
-        hypoInsulinFrac30 = 0.27,
-        hypoInsulinFrac60 = 0.60,
-        hypoInsulinFrac90 = 0.90
-    )
+        hypoInsulinFrac30  = 0.27,
+        hypoInsulinFrac60  = 0.60,
+        hypoInsulinFrac90  = 0.90,
+
+        // finetuning kandidaten — defaults gespiegeld aan huidige hardcoded waarden
+        peakIobBrakeSuppressThreshold   = prefs.get(DoubleKey.fcl_vnext_peak_iob_brake_suppress),
+        peakIobBrakeLockoutThreshold    = 0.55,
+        preCommitTopIobThreshold        = 0.45,
+        preCommitTopAccelMax            = 0.06,
+        tailSuppressIobMin              = 0.30,
+        commitBlockIobThreshold         = 0.45,
+        trajectoryAbsorptionAccelThreshold = -0.10,
+        trajectoryAbsorptionIobMin      = 0.35,
+        trajectoryHighIobThreshold      = 0.70,
+        earlyEpisodeCooldownIobMax      = 0.65,
+        earlyEpisodeMinCooldownMinutes  = 5,
+        earlyEpisodeWindowMinutes       = 15,
+        lateBolusBlockIobMin            = 0.35,
+        topGuardMinIobRatio             = 0.30,
+        topGuardCapMin                  = 0.20,
+        topGuardCapMax                  = 0.65,
+        heightEscalationIobCeiling      = 0.35,
+        iobPowerDay                     = 2.1,
+        iobPowerNight                   = 2.3,
+        peakApproachIobThreshold        = 0.62,
+        peakApproachMaxReduction        = 0.20,
+        microRampIobMax                 = 0.45,
+
+        // Early Confidence Boost — standaard uitgeschakeld (factor=1.0)
+        // Analyzer kan ophogen via config_override.json
+        earlyBoostFactor         = prefs.get(DoubleKey.fcl_vnext_early_boost_factor),
+        earlyBoostMinConfidence  = prefs.get(DoubleKey.fcl_vnext_early_boost_min_confidence),
+        earlyBoostMaxCommits     = prefs.get(IntKey.fcl_vnext_early_boost_max_commits),
+        earlyRiseFracMin         = prefs.get(DoubleKey.fcl_vnext_early_rise_frac_min),
+        peakMaxSlopeWeight       = prefs.get(DoubleKey.fcl_vnext_peak_max_slope_weight),
+        lateCommitDecayFactor    = prefs.get(DoubleKey.fcl_vnext_late_commit_decay_factor),
+        lateCommitDecayThreshold = prefs.get(DoubleKey.fcl_vnext_late_commit_decay_threshold),
+
+        )
 
     return base
-        .let { applyProfileDoseStrength(it) }
-        .let { applyMealDetectSpeed(it) }
-        .let { applyCorrectionStyle(it) }
+        .let { applySTVModel(it, sterkte, timing, volhoudendheid) }
         .let { applyDoseDistributionStyle(it) }
-        .let { applyMealHandlingStyle(it) }
-        .let { applyMealHandlingGainScaling(it) } // 👈 nieuw
-        .let { applyHypoProtectionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
-        .let { applyParamOverrides(it, override?.paramOverrides) }
-        .also { FCLvNextActiveParamsWriter.writeIfChanged(it) }   // ← NIEUW
+        .let {
+            // Geef de prefs-waarden mee zodat user-ingestelde waarden niet door applySTVModel
+            // worden overschreven na consumptie van het override-bestand.
+            applyParamOverrides(
+                cfg      = it,
+                overrides = override?.paramOverrides,
+                prefsWatchingMinDelta = prefs.get(DoubleKey.fcl_vnext_watching_min_delta),
+                prefsCommitCooldown   = prefs.get(IntKey.fcl_vnext_commit_cooldown_minutes),
+                prefsFrontloadFrac    = prefs.get(DoubleKey.fcl_vnext_watching_frontload_frac)
+            )
+        }
+        .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nachtFactor) }
 }
 
-private fun applyProfileDoseStrength(
-    cfg: FCLvNextConfig
+private fun applySTVModel(
+    cfg: FCLvNextConfig,
+    sterkte: Int,
+    timing: Int,
+    volhoudendheid: Int
 ): FCLvNextConfig {
 
-    return when (cfg.profielNaam) {
-
-        "VERY_STRICT" -> cfg.copy(
-            doseStrengthMul = cfg.doseStrengthMul - 0.25,
-            maxCommitFractionMul = cfg.maxCommitFractionMul - 0.35,
-            microDoseMul = cfg.microDoseMul - 0.30
-        )
-
-        "STRICT" -> cfg.copy(
-            doseStrengthMul = cfg.doseStrengthMul - 0.15,
-            maxCommitFractionMul = cfg.maxCommitFractionMul - 0.20,
-            microDoseMul = cfg.microDoseMul - 0.15
-        )
-
-        "AGGRESSIVE" -> cfg.copy(
-            doseStrengthMul = cfg.doseStrengthMul + 0.15,
-            maxCommitFractionMul = cfg.maxCommitFractionMul + 0.20,
-            microDoseMul = cfg.microDoseMul + 0.15
-        )
-
-        "VERY_AGGRESSIVE" -> cfg.copy(
-            doseStrengthMul = cfg.doseStrengthMul + 0.30,
-            maxCommitFractionMul = cfg.maxCommitFractionMul + 0.40,
-            microDoseMul = cfg.microDoseMul + 0.30
-        )
-
-        else -> cfg // BALANCED
-    }
-}
-
-
-
-private fun applyMealDetectSpeed(
-    cfg: FCLvNextConfig
-): FCLvNextConfig {
-
-
-    return when (cfg.mealDetectSpeed) {
-
-        "VERY_SLOW" -> cfg.copy(
-            mealSlopeMin = cfg.mealSlopeMin + 0.25,
-            mealAccelMin = cfg.mealAccelMin + 0.06,
-            mealDeltaMin = cfg.mealDeltaMin + 0.35,
-            mealUncertainConfidence = (cfg.mealUncertainConfidence + 0.15).coerceIn(0.0, 1.0),
-            mealConfirmConfidence = (cfg.mealConfirmConfidence + 0.10).coerceIn(0.0, 1.0),
-            mealDetectThresholdMul = cfg.mealDetectThresholdMul + 0.20,
-            microRampThresholdMul =  cfg.microRampThresholdMul + 0.15,
-            mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul - 0.15,
-            earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul + 0.10,
-            commitCooldownMinutes = 15
-        )
-
-        "SLOW" -> cfg.copy(
-            mealSlopeMin = cfg.mealSlopeMin + 0.15,
-            mealAccelMin = cfg.mealAccelMin + 0.03,
-            mealDeltaMin = cfg.mealDeltaMin + 0.20,
-            mealUncertainConfidence = (cfg.mealUncertainConfidence + 0.10).coerceIn(0.0, 1.0),
-            mealConfirmConfidence = (cfg.mealConfirmConfidence + 0.05).coerceIn(0.0, 1.0),
-            mealDetectThresholdMul = cfg.mealDetectThresholdMul + 0.10,
-            microRampThresholdMul = cfg.microRampThresholdMul + 0.08,
-            mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul - 0.08,
-            earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul + 0.05,
-            commitCooldownMinutes = 10
-        )
-
-        "FAST" -> cfg.copy(
-            mealSlopeMin = (cfg.mealSlopeMin - 0.15).coerceAtLeast(0.2),
-            mealAccelMin = (cfg.mealAccelMin - 0.05).coerceAtLeast(0.03),
-            mealDeltaMin = (cfg.mealDeltaMin - 0.20).coerceAtLeast(0.2),
-            mealUncertainConfidence = (cfg.mealUncertainConfidence - 0.05).coerceIn(0.0, 1.0),
-            mealConfirmConfidence = (cfg.mealConfirmConfidence - 0.10).coerceIn(0.0, 1.0),
-            mealDetectThresholdMul = cfg.mealDetectThresholdMul - 0.10,
-            microRampThresholdMul = cfg.microRampThresholdMul  - 0.08,
-            mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul + 0.10,
-            earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul - 0.10,
-            commitCooldownMinutes = 5
-        )
-
-        "VERY_FAST" -> cfg.copy(
-            mealSlopeMin = (cfg.mealSlopeMin - 0.30).coerceAtLeast(0.15),
-            mealAccelMin = (cfg.mealAccelMin - 0.10).coerceAtLeast(0.015),
-            mealDeltaMin = (cfg.mealDeltaMin - 0.35).coerceAtLeast(0.1),
-            mealUncertainConfidence = (cfg.mealUncertainConfidence - 0.15).coerceIn(0.0, 1.0),
-            mealConfirmConfidence = (cfg.mealConfirmConfidence - 0.20).coerceIn(0.0, 1.0),
-            mealDetectThresholdMul = cfg.mealDetectThresholdMul - 0.20,
-            microRampThresholdMul = cfg.microRampThresholdMul - 0.15,
-            mealConfidenceSpeedMul = cfg.mealConfidenceSpeedMul + 0.25,
-            earlyStage1ThresholdMul = cfg.earlyStage1ThresholdMul - 0.20,
-            commitCooldownMinutes = 5
-        )
-
-        else -> cfg // MODERATE
-    }
-}
-
-
-private fun applyCorrectionStyle(
-    cfg: FCLvNextConfig
-): FCLvNextConfig {
-
-    fun scaleCooldown(x: Int, mul: Double): Int =
-        (x * mul).toInt().coerceAtLeast(1)
-
-    return when (cfg.correctionStyle) {
-
-        "VERY_CAUTIOUS" -> cfg.copy(
-            smallCorrectionMaxU = (cfg.smallCorrectionMaxU * 0.55).coerceAtLeast(0.05),
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 2.2),
-            correctionHoldSlopeMax = cfg.correctionHoldSlopeMax + 0.15,
-            correctionHoldAccelMax = cfg.correctionHoldAccelMax + 0.05,
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.60,
-            persistentAggressionMul = cfg.persistentAggressionMul - 0.30,
-            persistentSlopeAbs = cfg.persistentSlopeAbs - 0.05,
-            persistentAccelAbs = cfg.persistentAccelAbs - 0.02
-        )
-
-        "CAUTIOUS" -> cfg.copy(
-            smallCorrectionMaxU = (cfg.smallCorrectionMaxU * 0.70).coerceAtLeast(0.05),
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 1.7),
-            correctionHoldSlopeMax = cfg.correctionHoldSlopeMax + 0.10,
-            correctionHoldAccelMax = cfg.correctionHoldAccelMax + 0.03,
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.70,
-            persistentAggressionMul = cfg.persistentAggressionMul - 0.15,
-            persistentSlopeAbs = cfg.persistentSlopeAbs - 0.02,
-            persistentAccelAbs = cfg.persistentAccelAbs - 0.01
-        )
-
-        "PERSISTENT" -> cfg.copy(
-            smallCorrectionMaxU = (cfg.smallCorrectionMaxU * 1.7).coerceAtMost(0.40),
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.6),
-            correctionHoldSlopeMax = cfg.correctionHoldSlopeMax - 0.10,
-            correctionHoldAccelMax = cfg.correctionHoldAccelMax - 0.03,
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.30,
-            persistentAggressionMul = cfg.persistentAggressionMul + 0.20,
-            persistentSlopeAbs = cfg.persistentSlopeAbs + 0.05,
-            persistentAccelAbs = cfg.persistentAccelAbs + 0.02
-        )
-
-        "VERY_PERSISTENT" -> cfg.copy(
-            smallCorrectionMaxU = (cfg.smallCorrectionMaxU * 2.2).coerceAtMost(0.60),
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.45),
-            correctionHoldSlopeMax = cfg.correctionHoldSlopeMax - 0.15,
-            correctionHoldAccelMax = cfg.correctionHoldAccelMax - 0.05,
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.50,
-            persistentAggressionMul = cfg.persistentAggressionMul + 0.40,
-            persistentSlopeAbs = cfg.persistentSlopeAbs + 0.10,
-            persistentAccelAbs = cfg.persistentAccelAbs + 0.04
-        )
-
-        else -> cfg
-    }
-}
-
-private fun applyMealHandlingStyle(
-    cfg: FCLvNextConfig
-): FCLvNextConfig {
-
-    return when (cfg.mealHandlingStyle) {
-
-        "VERY_CONSERVATIVE" -> cfg.copy(
-            watchingFrontloadFrac = (cfg.watchingFrontloadFrac - 0.30).coerceIn(0.20, 0.80),
-            watchingMinSlope = cfg.watchingMinSlope + 0.15,
-            watchingMinDeltaToTarget = cfg.watchingMinDeltaToTarget + 1.5,
-            watchingMinPeakRise = cfg.watchingMinPeakRise + 0.6,
-            watchingMaxIobRatio = (cfg.watchingMaxIobRatio - 0.15).coerceIn(0.40, 0.90)
-        )
-
-        "CONSERVATIVE" -> cfg.copy(
-            watchingFrontloadFrac = (cfg.watchingFrontloadFrac - 0.15).coerceIn(0.20, 0.80),
-            watchingMinSlope = cfg.watchingMinSlope + 0.08,
-            watchingMinDeltaToTarget = cfg.watchingMinDeltaToTarget + 0.8,
-            watchingMinPeakRise = cfg.watchingMinPeakRise + 0.3,
-            watchingMaxIobRatio = (cfg.watchingMaxIobRatio - 0.10).coerceIn(0.40, 0.90)
-        )
-
-        "ANTICIPATORY" -> cfg.copy(
-            watchingFrontloadFrac = (cfg.watchingFrontloadFrac + 0.10).coerceIn(0.20, 0.85),
-            watchingMinSlope = (cfg.watchingMinSlope - 0.05).coerceAtLeast(0.15),
-            watchingMinDeltaToTarget = (cfg.watchingMinDeltaToTarget - 0.5).coerceAtLeast(0.5),
-            watchingMinPeakRise = (cfg.watchingMinPeakRise - 0.2).coerceAtLeast(0.2),
-            watchingMaxIobRatio = (cfg.watchingMaxIobRatio + 0.05).coerceIn(0.40, 0.90)
-        )
-
-        "AGGRESSIVE" -> cfg.copy(
-            watchingFrontloadFrac = (cfg.watchingFrontloadFrac + 0.20).coerceIn(0.20, 0.90),
-            watchingMinSlope = (cfg.watchingMinSlope - 0.10).coerceAtLeast(0.10),
-            watchingMinDeltaToTarget = (cfg.watchingMinDeltaToTarget - 0.8).coerceAtLeast(0.3),
-            watchingMinPeakRise = (cfg.watchingMinPeakRise - 0.3).coerceAtLeast(0.1),
-            watchingMaxIobRatio = (cfg.watchingMaxIobRatio + 0.10).coerceIn(0.40, 0.95)
-        )
-
-        else -> cfg // BALANCED = baseline
-    }
-}
-
-private fun applyMealHandlingGainScaling(
-    cfg: FCLvNextConfig
-): FCLvNextConfig {
-
-    val scaledGain = when (cfg.mealHandlingStyle) {
-        "VERY_CONSERVATIVE" -> cfg.gain * 0.95
-        "CONSERVATIVE"      -> cfg.gain * 0.98
-        "ANTICIPATORY"      -> cfg.gain * 1.02
-        "AGGRESSIVE"        -> cfg.gain * 1.05
-        else                -> cfg.gain
-    }
+    val s = sterkte.toDouble()        / 100.0
+    val t = timing.toDouble()         / 100.0
+    val v = volhoudendheid.toDouble() / 100.0
 
     return cfg.copy(
-        gain = scaledGain.coerceIn(0.2, 2.0)
+        // STERKTE
+        doseStrengthMul       = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
+        maxCommitFractionMul  = (1.0 + (s - 1.0) * 2.00).coerceIn(0.50, 1.90),
+        microDoseMul          = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
+        watchingFrontloadFrac = (0.65 + (s - 1.0) * 0.25).coerceIn(0.40, 0.90),
+
+        // TIMING
+        mealDetectThresholdMul   = (0.90 / t).coerceIn(0.70, 1.20),
+        microRampThresholdMul    = (0.90 / t).coerceIn(0.65, 1.20),
+        earlyStage1ThresholdMul  = (0.80 / t).coerceIn(0.55, 1.10),
+        mealConfidenceSpeedMul   = (1.40 * t).coerceIn(1.05, 1.80),
+        watchingMinDeltaToTarget = (2.0 / t).coerceIn(1.20, 3.50),
+        commitCooldownMinutes    = (15.0 / t).roundToInt().coerceIn(8, 22),
+
+        // VOLHOUDENDHEID
+        persistentAggressionMul = (1.08 * v).coerceIn(0.60, 1.60),
+        correctionHoldDeltaMax  = (1.85 * v).coerceIn(1.10, 2.80),
+        smallCorrectionMaxU     = (0.28 * v).coerceIn(0.12, 0.50),
+        hypoBlockThreshold      = (4.70 - (v - 1.0) * 1.0).coerceIn(4.20, 5.20),
+        hypoInsulinFrac30       = (0.27 * (2.0 - v)).coerceIn(0.12, 0.42),
+        hypoInsulinFrac60       = (0.60 * (2.0 - v)).coerceIn(0.30, 0.80),
+        hypoInsulinFrac90       = (0.90 * (2.0 - v)).coerceIn(0.60, 0.99)
     )
-}
-
-private fun applyHypoProtectionStyle(
-    cfg: FCLvNextConfig
-): FCLvNextConfig {
-
-    return when (cfg.hypoProtectionStyle) {
-
-        "MINIMAL" -> cfg.copy(
-            hypoBlockThreshold = (cfg.hypoBlockThreshold - 0.25).coerceIn(4.2, 5.2),
-            hypoInsulinFrac30 = (cfg.hypoInsulinFrac30 * 0.80).coerceIn(0.10, 0.40),
-            hypoInsulinFrac60 = (cfg.hypoInsulinFrac60 * 0.85).coerceIn(0.30, 0.80),
-            hypoInsulinFrac90 = (cfg.hypoInsulinFrac90 * 0.88).coerceIn(0.50, 0.95)
-        )
-
-        "RELAXED" -> cfg.copy(
-            hypoBlockThreshold = (cfg.hypoBlockThreshold - 0.12).coerceIn(4.2, 5.2),
-            hypoInsulinFrac30 = (cfg.hypoInsulinFrac30 * 0.92).coerceIn(0.10, 0.40),
-            hypoInsulinFrac60 = (cfg.hypoInsulinFrac60 * 0.94).coerceIn(0.30, 0.80),
-            hypoInsulinFrac90 = (cfg.hypoInsulinFrac90 * 0.95).coerceIn(0.50, 0.95)
-        )
-
-        "SAFE" -> cfg.copy(
-            hypoBlockThreshold = (cfg.hypoBlockThreshold + 0.10).coerceIn(4.2, 5.2),
-            hypoInsulinFrac30 = (cfg.hypoInsulinFrac30 * 1.08).coerceIn(0.10, 0.40),
-            hypoInsulinFrac60 = (cfg.hypoInsulinFrac60 * 1.07).coerceIn(0.30, 0.90),
-            hypoInsulinFrac90 = (cfg.hypoInsulinFrac90 * 1.05).coerceIn(0.50, 0.98)
-        )
-
-        "ULTRA_SAFE" -> cfg.copy(
-            hypoBlockThreshold = (cfg.hypoBlockThreshold + 0.22).coerceIn(4.2, 5.2),
-            hypoInsulinFrac30 = (cfg.hypoInsulinFrac30 * 1.18).coerceIn(0.10, 0.45),
-            hypoInsulinFrac60 = (cfg.hypoInsulinFrac60 * 1.15).coerceIn(0.30, 0.95),
-            hypoInsulinFrac90 = (cfg.hypoInsulinFrac90 * 1.10).coerceIn(0.50, 0.99)
-        )
-
-        else -> cfg // BALANCED = baseline uit base()
-    }
 }
 
 private fun applyNightResponseStyle(
@@ -764,51 +641,84 @@ private fun applyDoseDistributionStyle(
  */
 private fun applyParamOverrides(
     cfg: FCLvNextConfig,
-    overrides: FCLvNextConfigOverride.ParamOverrides?
+    overrides: FCLvNextConfigOverride.ParamOverrides?,
+    // Prefs-waarden van user-instelbare STV-afhankelijke params, gelezen VOOR applySTVModel.
+    // Als de gebruiker een afwijkende waarde heeft ingesteld (via de Analyzer),
+    // dan gebruiken we die als persistente override — ook na consumptie van het override-bestand.
+    prefsWatchingMinDelta: Double? = null,
+    prefsCommitCooldown: Int? = null,
+    prefsFrontloadFrac: Double? = null
 ): FCLvNextConfig {
-    if (overrides == null) return cfg
+    if (overrides == null && prefsWatchingMinDelta == null &&
+        prefsCommitCooldown == null && prefsFrontloadFrac == null) return cfg
 
     return cfg.copy(
-        peakPredictionThreshold = overrides.peakPredictionThreshold
+        peakPredictionThreshold = overrides?.peakPredictionThreshold
             ?.coerceIn(9.5, 14.0)
             ?: cfg.peakPredictionThreshold,
 
-        watchingFrontloadFrac = overrides.watchingFrontloadFrac
+        watchingFrontloadFrac = overrides?.watchingFrontloadFrac
             ?.coerceIn(0.40, 0.90)
+            ?: prefsFrontloadFrac?.coerceIn(0.40, 0.90)
             ?: cfg.watchingFrontloadFrac,
 
-        watchingMinDeltaToTarget = overrides.watchingMinDeltaToTarget
+        // Gebruik de prefs-waarde als persistente fallback als er geen actieve override is.
+        // Zonder dit overschrijft applySTVModel elke cyclus de user-instelling.
+        watchingMinDeltaToTarget = overrides?.watchingMinDeltaToTarget
             ?.coerceIn(0.5, 3.5)
+            ?: prefsWatchingMinDelta?.coerceIn(0.5, 3.5)
             ?: cfg.watchingMinDeltaToTarget,
 
-        commitCooldownMinutes = overrides.commitCooldownMinutes
+        commitCooldownMinutes = overrides?.commitCooldownMinutes
             ?.coerceIn(5, 25)
+            ?: prefsCommitCooldown?.coerceIn(5, 25)
             ?: cfg.commitCooldownMinutes,
 
-        peakPredictionHorizonH = overrides.peakPredictionHorizonH
+        peakPredictionHorizonH = overrides?.peakPredictionHorizonH
             ?.coerceIn(0.8, 1.8)
             ?: cfg.peakPredictionHorizonH,
 
-        iobStart = overrides.iobStart
+        iobStart = overrides?.iobStart
             ?.coerceIn(0.25, 0.55)
-            ?: cfg.iobStart
+            ?: cfg.iobStart,
+
+        peakIobBrakeSuppressThreshold = overrides?.peakIobBrakeSuppressThreshold
+            ?.coerceIn(0.28, 0.60)
+            ?: cfg.peakIobBrakeSuppressThreshold,
+
+        // Lockout blijft altijd > suppress drempel
+        peakIobBrakeLockoutThreshold = overrides?.peakIobBrakeSuppressThreshold
+            ?.let { (it + 0.13).coerceIn(0.35, 0.75) }
+            ?: cfg.peakIobBrakeLockoutThreshold,
+
+        // Early Confidence Boost
+        earlyBoostFactor = overrides?.earlyBoostFactor
+            ?.coerceIn(1.0, 2.0)
+            ?: cfg.earlyBoostFactor,
+
+        earlyBoostMinConfidence = overrides?.earlyBoostMinConfidence
+            ?.coerceIn(0.40, 0.85)
+            ?: cfg.earlyBoostMinConfidence,
+
+        earlyBoostMaxCommits = overrides?.earlyBoostMaxCommits
+            ?.coerceIn(1, 3)
+            ?: cfg.earlyBoostMaxCommits,
+
+        earlyRiseFracMin = overrides?.earlyRiseFracMin
+            ?.coerceIn(0.35, 0.85)
+            ?: cfg.earlyRiseFracMin,
+
+        peakMaxSlopeWeight = overrides?.peakMaxSlopeWeight
+            ?.coerceIn(0.0, 0.60)
+            ?: cfg.peakMaxSlopeWeight,
+
+        lateCommitDecayFactor = overrides?.lateCommitDecayFactor
+            ?.coerceIn(0.0, 1.0)
+            ?: cfg.lateCommitDecayFactor,
+
+        lateCommitDecayThreshold = overrides?.lateCommitDecayThreshold
+            ?.coerceIn(0.30, 0.70)
+            ?: cfg.lateCommitDecayThreshold
     )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

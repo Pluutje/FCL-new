@@ -38,7 +38,6 @@ import app.aaps.ui.dialogs.SiteRotationDialog
 import app.aaps.ui.dialogs.TempBasalDialog
 import app.aaps.ui.dialogs.TempTargetDialog
 import app.aaps.ui.dialogs.TreatmentDialog
-import app.aaps.ui.dialogs.MealIntentDialog
 import app.aaps.ui.dialogs.WizardDialog
 import app.aaps.ui.services.AlarmSoundService
 import app.aaps.ui.services.AlarmSoundServiceHelper
@@ -118,12 +117,7 @@ class UiInteractionImpl @Inject constructor(
             .show(fragmentManager, "InsulinDialog")
     }
 
-    override fun runMealIntentDialog(fragmentManager: FragmentManager) {
-        MealIntentDialog().show(
-            fragmentManager,
-            MealIntentDialog::class.java.simpleName
-        )
-    }
+
 
 
     override fun runCalibrationDialog(fragmentManager: FragmentManager) {

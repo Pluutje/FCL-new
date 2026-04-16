@@ -71,7 +71,6 @@ class TranslatorImpl @Inject internal constructor(
         Action.TEMP_BASAL_REMOVED              -> rh.gs(R.string.uel_temp_basal_removed)
         Action.EXTENDED_BOLUS_REMOVED          -> rh.gs(R.string.uel_extended_bolus_removed)
         Action.FOOD                            -> rh.gs(R.string.uel_food)
-        Action.MEAL_INTENT                     -> rh.gs(R.string.uel_meal_intent)
         Action.FOOD_REMOVED                    -> rh.gs(R.string.uel_food_removed)
         Action.PROFILE_REMOVED                 -> rh.gs(R.string.uel_profile_removed)
         Action.PROFILE_SWITCH_REMOVED          -> rh.gs(R.string.uel_profile_switch_removed)

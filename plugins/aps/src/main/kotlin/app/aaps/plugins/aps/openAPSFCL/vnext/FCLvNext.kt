@@ -2,7 +2,6 @@ package app.aaps.plugins.aps.openAPSFCL.vnext
 
 
 import android.annotation.SuppressLint
-import app.aaps.core.interfaces.meal.MealIntentRepository
 import org.joda.time.DateTime
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.DoubleKey
@@ -10,14 +9,11 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextCsvLogger
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextParameterLogger
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextProfileParameterSnapshot
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextCsvLogRow
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.PreBolusController
-import app.aaps.core.interfaces.meal.MealIntentType
 import app.aaps.plugins.aps.openAPSFCL.vnext.model.computeIobOvershootFactor
 import app.aaps.plugins.aps.openAPSFCL.vnext.model.clampDoseByIob
-import app.aaps.plugins.aps.openAPSFCL.vnext.meal.MealIntentOverlay
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.profile.ProfileFunction
-
+import app.aaps.core.keys.IntKey
 
 import kotlin.math.roundToInt
 
@@ -381,6 +377,14 @@ private var lastSmallCorrectionAt: DateTime? = null
 
 private var earlyConfirmDone: Boolean = false
 
+// ── SensorBlip persistentie-teller ───────────────────────────────────────
+// Telt hoeveel opeenvolgende cycli de blip-conditie (slowFalling+fastRising)
+// aanhoudt. Een echte sensorblip is 1-2 cycli; EWMA-naloop na echte stijging
+// houdt tientallen cycli aan. Na 2 cycli beschouwen we het als echte stijging.
+private var sensorBlipStreakCount: Int = 0
+// Ringebuffer: de laatste 3 ruwe BG-waarden voor de consistenticheck
+private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
+
 
 private val persistCtrl = PersistentCorrectionController(
     cooldownCycles = 3,        // of 2, jij kiest
@@ -702,11 +706,13 @@ private fun canCommitNow(
     // Alleen actief in eerste 15 minuten van een CONFIRMED episode, en alleen als IOB
     // nog niet zo hoog is dat de peakIobBrake (Patch 1) al zou moeten ingrijpen.
     val earlyEpisodeCooldown =
-        if (minutesSinceEpisodeStart in 0..15 && ctx.iobRatio < 0.65) {
-            effectiveCooldown.coerceAtMost(5)   // maximaal 5 minuten wachten
+        if (minutesSinceEpisodeStart in 0..config.earlyEpisodeWindowMinutes &&
+            ctx.iobRatio < config.earlyEpisodeCooldownIobMax) {
+            effectiveCooldown.coerceAtMost(config.earlyEpisodeMinCooldownMinutes)
         } else {
             effectiveCooldown
         }
+
 
     return minutes >= earlyEpisodeCooldown
 }
@@ -1268,8 +1274,9 @@ private fun computeMicroRamp(ctx: FCLvNextContext, config: FCLvNextConfig, peak:
 
     val safe =
         ctx.consistency >= MICRO_MIN_CONS &&
-            ctx.iobRatio <= MICRO_IOB_MAX &&
+            ctx.iobRatio <= config.microRampIobMax &&
             ctx.recentDelta5m > 0.0
+
 
     if (!safe) {
         return MicroRampResult(false, 0.0, "NONE", "MICRO none (safe=false)")
@@ -1370,7 +1377,8 @@ private fun computeTopGuard(
         ctx.acceleration <= 0.10 || ctx.recentSlope <= 0.15
 
     // IOB al betekenisvol
-    val hasIob = ctx.iobRatio >= 0.30
+    val hasIob = ctx.iobRatio >= config.topGuardMinIobRatio
+
 
     val episodeLike =
         mealSignal.state != MealState.NONE || peakEstimator.active || peak.state != PeakPredictionState.IDLE
@@ -1384,7 +1392,7 @@ private fun computeTopGuard(
     val peakCloseness = 1.0 - smooth01(((peak.predictedPeak - ctx.input.bgNow) - 0.2) / (0.8 - 0.2))
     val severity = (0.55 * iobSeverity + 0.45 * peakCloseness).coerceIn(0.0, 1.0)
 
-    val cap = (1.0 - 0.70 * severity).coerceIn(0.20, 0.65)  // hard knijpen: 20–65% over
+    val cap = (1.0 - 0.70 * severity).coerceIn(config.topGuardCapMin, config.topGuardCapMax)
 
     return TopGuard(true, cap, "TOPGUARD: plateau+nearPeak (cap=${"%.2f".format(cap)})")
 }
@@ -1401,11 +1409,12 @@ private fun computeLateBolusBlock(
     mealSignal: MealSignal,
     postPeak: PostPeakSummary,
     topPlateauConfirmed: Boolean,
-    preBolusActive: Boolean
+
+    config: FCLvNextConfig
 ): LateBolusBlock {
 
-    // Prebolus chunks niet tegenwerken (user-intent)
-    if (preBolusActive) return LateBolusBlock(false, false, "LATEBOLUS off (prebolus)")
+
+
 
     // Alleen in episode/meal context
     val episodeLike =
@@ -1435,7 +1444,7 @@ private fun computeLateBolusBlock(
 
     // Genoeg IOB aanwezig dat extra bolus juist hypo-risico creëert
     val hasMeaningfulIob =
-        ctx.iobRatio >= 0.35
+        ctx.iobRatio >= config.lateBolusBlockIobMin
 
     val shouldBlock =
         hasMeaningfulIob &&
@@ -1720,8 +1729,10 @@ private fun evaluatePostPeak(
     peak: PeakEstimate,
     now: DateTime,
     config: FCLvNextConfig,
-    mealIntentOrPrebolusActive: Boolean,
-    minutesSinceEpisodeStart: Int = 999
+
+    minutesSinceEpisodeStart: Int = 999,
+    sensorBlipStreak: Int = 0,          // huidig aantal opeenvolgende blip-cycli
+    bgRising3Cycles: Boolean = false     // waren de laatste 3 BG-delta's alle positief?
 ): PostPeakSummary {
 
     val inAbsorption = isInAbsorptionWindow(now, config)
@@ -1759,24 +1770,44 @@ private fun evaluatePostPeak(
 // "Top forming" pre-commit: voldoende IOB + (bijna) vlak → dan geen extra insulin pushen
     val preCommitTop =
         episodeLike && reliable &&
-            ctx.iobRatio >= 0.45 &&
+            ctx.iobRatio >= config.preCommitTopIobThreshold &&
             ctx.deltaToTarget >= 1.0 &&
-            ctx.acceleration <= 0.06 &&      // jouw 13:47 accel=0.03 moet dit raken
+            ctx.acceleration <= config.preCommitTopAccelMax &&
             fastPlateau
 
-    // ✅ NIEUW: sensor-blip / trend conflict guard
-// Slow-lane (macro) daalt, maar fast-lane (laatste 5-10m) lijkt ineens te stijgen.
-// Dit is typisch CGM-spike gedrag → niet corrigeren.
+
+    // ── SensorBlip guard — 3-laags discriminator ─────────────────────────────────
+    //
+    // Laag 1 — Basisconditie (ongewijzigd):
+    //   slowFalling (EWMA ≤ -0.30) EN fastRising (recentSlope ≥ 1.50)
+    //   = twee tegenstrijdige signalen tegelijk → mogelijke blip.
+    //
+    // Laag 2 — Streak-limiet:
+    //   Echte sensorblip: 1-2 cycli (5-10 min max).
+    //   EWMA-naloop na echte stijging: tientallen cycli.
+    //   Na streak > 2 → blipconditie opgeheven, echte stijging aangenomen.
+    //   Maximale blokkade per event: 2 cycli = 10 minuten.
+    //
+    // Laag 3 — Stijgingsconsistentie:
+    //   3 opeenvolgend positieve BG-delta's = echte stijging, nooit een blip.
+    //   Een sensorblip geeft 1 hoge meting dan direct terugval.
     val slowFalling = ctx.slope <= -0.30
     val fastRising = (ctx.recentSlope >= 1.50) || (ctx.recentDelta5m >= 0.20)
 
-    val sensorBlip =
-        !mealIntentOrPrebolusActive &&      // ✅ CRUCIAAL: niet blokkeren als user “meal context” gaf
-            episodeLike && reliable &&
+    val blipBaseCondition =
+
+        episodeLike && reliable &&
             ctx.deltaToTarget >= 1.0 &&
             ctx.iobRatio >= 0.25 &&
             slowFalling && fastRising
 
+    // Laag 2: na 2 opeenvolgende blip-cycli beschouwen we het als echte stijging
+    val streakExceeded = sensorBlipStreak > 2
+
+    // Laag 3: 3 opeenvolgend stijgende BG-metingen = echte stijging
+    val consistentRise = bgRising3Cycles
+
+    val sensorBlip = blipBaseCondition && !streakExceeded && !consistentRise
 
     val risingAgainTail =
         ctx.recentSlope >= 0.35 ||
@@ -1786,7 +1817,7 @@ private fun evaluatePostPeak(
         episodeLike && reliable &&
             peak.riseSinceStart >= 1.0 &&
             ctx.deltaToTarget >= 1.0 &&
-            ctx.iobRatio >= 0.30 &&
+            ctx.iobRatio >= config.tailSuppressIobMin &&
             fastPlateau &&
             !risingAgainTail
 
@@ -1797,10 +1828,11 @@ private fun evaluatePostPeak(
         episodeLike &&
             reliable &&
             peak.state != PeakPredictionState.IDLE &&
-            ctx.iobRatio >= 0.62 &&
+            ctx.iobRatio >= config.peakIobBrakeSuppressThreshold &&
             ctx.slope <= 0.50 &&
             ctx.acceleration <= 0.08 &&
             ctx.deltaToTarget >= 0.8
+
 
     // Basale post-peak kenmerken
     val flattening = ctx.acceleration <= 0.05
@@ -1837,19 +1869,18 @@ private fun evaluatePostPeak(
                 // ✅ NIEUW: bij sensorBlip liever hard stoppen met pushen
                 || sensorBlip
                 // ✅ NIEUW: harde stop als IOB echt hoog is vlak voor piek
-                || (peakIobBrake && ctx.iobRatio >= 0.70)
+                || (peakIobBrake && ctx.iobRatio >= config.peakIobBrakeLockoutThreshold)
             )
 
 
     // COMMIT BLOCK: voorkomen van “commit na omkeer”
     val commitBlocked =
         reliable && (
-            (ctx.acceleration < -0.05 && ctx.iobRatio >= 0.45)
-                || (preCommitTop && ctx.iobRatio >= 0.45)
+            (ctx.acceleration < -0.05 && ctx.iobRatio >= config.commitBlockIobThreshold)
+                || (preCommitTop && ctx.iobRatio >= config.commitBlockIobThreshold)
                 // ✅ NIEUW
                 || sensorBlip
             )
-
 
 
     val commitFactor =
@@ -2066,6 +2097,8 @@ private fun maybeResetEarlyOnDecel(
     // reset state + voorkom follow-up “impulse” gedrag
     earlyDose = EarlyDoseContext()
     earlyConfirmDone = false
+    sensorBlipStreakCount = 0
+    recentBgHistory.clear()
 
     status.append(
         "EARLY RESET (deceleration): " +
@@ -2200,7 +2233,9 @@ private fun shouldHardBlockTrajectory(
 
     // ✅ Extra harde regel: duidelijke omkeer + al redelijk IOB -> meteen blokkeren
     if (isInAbsorptionWindow(now, config) &&
-        ctx.acceleration <= -0.10 && ctx.iobRatio >= 0.35 && ctx.consistency >= 0.45
+        ctx.acceleration <= config.trajectoryAbsorptionAccelThreshold &&
+        ctx.iobRatio >= config.trajectoryAbsorptionIobMin &&
+        ctx.consistency >= 0.45
     ) return true
     // early bescherming alleen zolang we nog niet afremmen / piek hebben
     if (isEarlyProtectionActive(earlyStage, ctx, peak)) return false
@@ -2210,7 +2245,7 @@ private fun shouldHardBlockTrajectory(
 
     if (earlyStage > 0) return false
 
-    val highIob = ctx.iobRatio >= 0.70
+    val highIob = ctx.iobRatio >= config.trajectoryHighIobThreshold
     val notReallyRising = ctx.slope < 0.6
     val decelerating = ctx.acceleration <= -0.05
     val reliable = ctx.consistency >= 0.5
@@ -2292,7 +2327,7 @@ private fun heightEscalationFactor(
     // heightEscalationFactor is bedoeld voor situaties met lage IOB en hoge piek.
     // Bij iobRatio > 0.35 bouwt de IOB snel op — extra escalatie verergert
     // het post-piek hypo-risico en wordt hier uitgeschakeld.
-    if (ctx.iobRatio > 0.35) return 1.0
+    if (ctx.iobRatio > config.heightEscalationIobCeiling) return 1.0
 
     // ── Normalisaties (alles 0..1) ──
     val slopeScore =
@@ -2331,8 +2366,6 @@ private fun heightEscalationFactor(
 
 class FCLvNext(
     private val preferences: Preferences,
-    private val preBolusController: PreBolusController,
-    private val mealIntentOverlay: MealIntentOverlay,
     private val iobCobCalculator: IobCobCalculator,      // ✅ NIEUW
     private val profileFunction: ProfileFunction         // ✅ NIEUW
 ) {
@@ -2342,7 +2375,7 @@ class FCLvNext(
     private var mealEpisodeStartTime: DateTime? = null
     private var mealEpisodeStartBg: Double? = null
     var lastActiveConfig: FCLvNextConfig? = null
-         private set
+        private set
 
 
 
@@ -2399,6 +2432,8 @@ class FCLvNext(
             lastSegmentAt = now
             earlyDose = EarlyDoseContext()
             earlyConfirmDone = false
+            sensorBlipStreakCount = 0
+            recentBgHistory.clear()
         }
 
         // ── episode exit (niet te snel!) ──
@@ -2412,6 +2447,8 @@ class FCLvNext(
                 peakEstimator.confirmCounter = 0
                 earlyDose = EarlyDoseContext()
                 earlyConfirmDone = false
+                sensorBlipStreakCount = 0
+                recentBgHistory.clear()
             }
         }
 
@@ -2709,74 +2746,8 @@ class FCLvNext(
         // 1️⃣ Config & context (trends, IOB, delta)
         var config = loadFCLvNextConfig(preferences, input.isNight)
         lastActiveConfig = config
-        // 🍽️ MealIntent overlay (timing only, TTL-based)
-
-
-        preBolusController.applyDecay(now)
-
-        val mealIntent = MealIntentRepository.get()
-
-        var preBolusUForAssist = 0.0
-
-        if (mealIntent != null) {
-            preBolusUForAssist =
-                when (mealIntent.type) {
-                    MealIntentType.SMALL  -> preferences.get(DoubleKey.prebolus_small)
-                    MealIntentType.NORMAL -> preferences.get(DoubleKey.prebolus_normal)
-                    MealIntentType.LARGE  -> preferences.get(DoubleKey.prebolus_large)
-                    MealIntentType.SNACK  -> mealIntent.preBolusU ?: 0.0
-                }
-        }
-
-        // decay wordt bijgehouden door PreBolusController
-        val pbAfterArm = preBolusController.snapshot(now)
-        val decay = pbAfterArm?.decayFactor ?: 1.0
-
-        val mealIntentEffect = mealIntentOverlay.computeEffect(
-            now = now,
-            maxSmb = config.maxSMB,
-            preBolusU = preBolusUForAssist,
-            decayFactor = decay
-        )
-
-        config = mealIntentOverlay.applyToConfig(
-            base = config,
-            effect = mealIntentEffect
-        )
 
         // ─────────────────────────────────────────────
-        // 🍽️ PRE-BOLUS ARM (via MealIntentRepository)
-        // ─────────────────────────────────────────────
-
-        val pbUi = preBolusController.uiSnapshot(now)
-
-        if (
-            mealIntent != null &&
-            (pbUi == null || pbUi.validUntil != mealIntent.validUntil)
-        ) {
-            val type = mealIntent.type
-
-            val preBolusU = when (type) {
-                MealIntentType.SMALL  -> preferences.get(DoubleKey.prebolus_small)
-                MealIntentType.NORMAL -> preferences.get(DoubleKey.prebolus_normal)
-                MealIntentType.LARGE  -> preferences.get(DoubleKey.prebolus_large)
-                MealIntentType.SNACK  -> mealIntent.preBolusU ?: 0.0
-            }
-
-            preBolusController.arm(
-                type = type,
-                totalU = preBolusU,
-                validUntil = DateTime(mealIntent.validUntil),
-                now = now,
-                bgAtArm = input.bgNow  // ✅ NIEUW: Geef huidige BG door voor grace berekening
-            )
-
-
-            status.append(
-                "PREBOLUS ARMED: ${type} ${"%.2f".format(preBolusU)}U " +
-                    "until=${DateTime(mealIntent.validUntil).toString("HH:mm")}\n"
-            )
-        }    // ic_meal
 
         val ctx = buildContext(input, config)
         var pred60 = predictBg60(ctx)
@@ -2790,13 +2761,13 @@ class FCLvNext(
         logRow.guardZoneLimited = false
 
 
-        logRow.profielNaam = config.profielNaam
-        logRow.mealDetectSpeed = config.mealDetectSpeed
-        logRow.correctionStyle = config.correctionStyle
-        logRow.mealhandlingStyle = config.mealHandlingStyle
-        logRow.hypoProtectionStyle = config.hypoProtectionStyle
+        // S/T/V/N percentages — actieve waarden uit prefs
+        logRow.sterktePct        = preferences.get(IntKey.fcl_vnext_sterkte)
+        logRow.timingPct         = preferences.get(IntKey.fcl_vnext_timing)
+        logRow.volhoudendheidPct = preferences.get(IntKey.fcl_vnext_volhoudendheid)
+        logRow.nachtFactorPct    = preferences.get(IntKey.fcl_vnext_nacht_factor)
         logRow.doseDistributionStyle = config.doseDistributionStyle
-        logRow.nightResponseStyle = config.nightResponseStyle
+        logRow.nightResponseStyle    = config.nightResponseStyle
 
         logRow.bgZone = zoneEnum.name
         logRow.iob = input.currentIOB
@@ -2816,10 +2787,8 @@ class FCLvNext(
         logRow.watchingIobOk = false
 
 
-        status.append("PROFILE=${config.profielNaam}\n")
-        status.append("MEAL_SPEED=${config.mealDetectSpeed}\n")
-        status.append("CORRECTION=${config.correctionStyle}\n")
-        status.append("NIGHT_RESPONSE=${config.nightResponseStyle}\n")
+        status.append("S=${preferences.get(IntKey.fcl_vnext_sterkte)} T=${preferences.get(IntKey.fcl_vnext_timing)} V=${preferences.get(IntKey.fcl_vnext_volhoudendheid)} N=${preferences.get(IntKey.fcl_vnext_nacht_factor)}\n")
+        status.append("DIST=${config.doseDistributionStyle} NIGHT=${config.nightResponseStyle}\n")
 
 
         // ─────────────────────────────────────────────
@@ -3067,7 +3036,7 @@ class FCLvNext(
         val boostedIobRatio =
             (ctx.iobRatio / peakIobBoost).coerceAtLeast(0.0)
 
-        val iobPower = if (input.isNight) 2.3 else 2.1
+        val iobPower = if (input.isNight) config.iobPowerNight else config.iobPowerDay
         val iobFactor = iobDampingFactor(
             iobRatio = boostedIobRatio,
             config = config,
@@ -3186,8 +3155,6 @@ class FCLvNext(
             )
             finalDose = 0.0
         }
-        val preBolusActive = preBolusController.isActive(now)
-        val mealContextActive = (mealIntent != null) || preBolusActive
 
 
         val episodeMinutesForPostPeak =
@@ -3195,7 +3162,28 @@ class FCLvNext(
                 org.joda.time.Minutes.minutesBetween(it, now).minutes
             } ?: 999
 
-        val postPeak = evaluatePostPeak(ctx, mealSignal, peak, now, config, mealContextActive, episodeMinutesForPostPeak)
+        // ── SensorBlip: BG-history bijhouden en streak tellen ────────────
+        // Ringebuffer: bewaar laatste 3 ruwe BG-waarden
+        if (recentBgHistory.size >= 3) recentBgHistory.removeFirst()
+        recentBgHistory.addLast(ctx.input.bgNow)
+
+        // bgRising3Cycles: alle 3 recentste delta's positief (elke meting hoger dan vorige)
+        val bgRising3Cycles = recentBgHistory.size >= 3 &&
+            recentBgHistory[1] > recentBgHistory[0] &&
+            recentBgHistory[2] > recentBgHistory[1]
+
+        // blipBaseCondition voorberekening (zelfde logica als in evaluatePostPeak)
+        val blipBaseNow = ctx.slope <= -0.30 &&
+            ((ctx.recentSlope >= 1.50) || (ctx.recentDelta5m >= 0.20))
+        if (blipBaseNow && !bgRising3Cycles) sensorBlipStreakCount++
+        else sensorBlipStreakCount = 0
+
+        val postPeak = evaluatePostPeak(
+            ctx, mealSignal, peak, now, config,
+            episodeMinutesForPostPeak,
+            sensorBlipStreak = sensorBlipStreakCount,
+            bgRising3Cycles  = bgRising3Cycles
+        )
         status.append(postPeak.reason + "\n")
 
         // ✅ NIEUW: early reset zodra afremmen/omkeer start
@@ -3203,13 +3191,20 @@ class FCLvNext(
 
         val suppressForPeak = postPeak.suppress
 
-        // ✅ NIEUW: Sensor-blip guard → GEEN insulin pushen op “valse opleving”
+        // Sensor-blip guard (3-laags discriminator)
         if (postPeak.sensorBlip) {
             status.append(
-                "SENSOR-BLIP GUARD: slowFalling(slope=${"%.2f".format(ctx.slope)}) " +
-                    "but fastRising(recentSlope=${"%.2f".format(ctx.recentSlope)} recentΔ5m=${"%.2f".format(ctx.recentDelta5m)}) → finalDose=0\n"
+                "SENSOR-BLIP GUARD: slope=${"%.2f".format(ctx.slope)} " +
+                    "recentSlope=${"%.2f".format(ctx.recentSlope)} " +
+                    "streak=$sensorBlipStreakCount/2 → finalDose=0\n"
             )
             finalDose = 0.0
+        } else if (blipBaseNow) {
+            // Blip-conditie aanwezig maar opgeheven door discriminator
+            status.append(
+                "SENSOR-BLIP LIFTED: streak=$sensorBlipStreakCount " +
+                    "bgRising3=$bgRising3Cycles → dosering toegestaan\n"
+            )
         }
 
 
@@ -3385,7 +3380,7 @@ class FCLvNext(
         )
 
 
-        if (persistResult.active && !preBolusActive) {
+        if (persistResult.active ) {
             status.append("PERSIST: ${persistResult.reason}\n")
 
             if (persistResult.fired) {
@@ -3397,13 +3392,11 @@ class FCLvNext(
                 finalDose = 0.0
                 status.append("PERSIST HOLD: finalDose=0\n")
             }
-        } else if (persistResult.active && preBolusActive) {
-            status.append("PERSIST SUPPRESSED (PRE-BOLUS ACTIVE)\n")
         }
 
 
         // 🔒 markeer dat persistent de leiding heeft
-        val persistentOverrideActive = persistResult.active && !preBolusActive
+        val persistentOverrideActive = persistResult.active
 
         if (persistentOverrideActive) {
             status.append(
@@ -3502,7 +3495,7 @@ class FCLvNext(
 
             if (finalDose < watchingFrontloadTargetU) {
                 status.append(
-                    "WATCHING FRONTLOAD (${config.mealHandlingStyle}): " +
+                    "WATCHING FRONTLOAD: " +
                         "${"%.2f".format(finalDose)}→${"%.2f".format(watchingFrontloadTargetU)}U\n"
                 )
                 finalDose = watchingFrontloadTargetU
@@ -3587,6 +3580,8 @@ class FCLvNext(
             lastSegmentAt = now
             earlyDose = EarlyDoseContext()
             earlyConfirmDone = false
+            sensorBlipStreakCount = 0
+            recentBgHistory.clear()
 
             status.append("SEGMENT: re-entry → new impulse window\n")
         }
@@ -4029,7 +4024,8 @@ class FCLvNext(
             mealSignal = mealSignal,
             postPeak = postPeak,
             topPlateauConfirmed = topPlateauConfirmed,
-            preBolusActive = preBolusActive
+
+            config = config
         )
 
         if (lateBolus.block && commandedDose > 0.0) {
@@ -4055,8 +4051,8 @@ class FCLvNext(
             logRow.guardPeakLimited = true
         }
 
-        // 10-min burst cap (exclude prebolus-active because that's user-intent chunking)
-        if (!preBolusActive && commandedDose > 0.0) {
+        // 10-min burst cap
+        if (commandedDose > 0.0) {
 
             val delivered10m = deliveredInLastMinutes(now, 10)
             logRow.burstDelivered10m = delivered10m
@@ -4112,12 +4108,12 @@ class FCLvNext(
 
 
         // ─────────────────────────────────────────────
-        // 🛡️ IOB HARD CAP + DYNAMIC OVERSHOOT (EXCL. PREBOLUS)
+        // 🛡️ IOB HARD CAP + DYNAMIC OVERSHOOT
         // ─────────────────────────────────────────────
 
 
 
-        if (!preBolusActive && commandedDose > 0.0) {
+        if (commandedDose > 0.0) {
 
             // Dynamische overshoot: 0..10% op basis van smoothed trend
             val iobOvershootFactor =
@@ -4147,10 +4143,11 @@ class FCLvNext(
                         peak.state != PeakPredictionState.IDLE &&
                         ctx.slope in -0.10..0.50 &&
                         ctx.acceleration <= 0.10 &&
-                        ctx.iobRatio >= 0.62
+                        ctx.iobRatio >= config.peakApproachIobThreshold
                     ) {
-                        val severity = ((ctx.iobRatio - 0.62) / (0.90 - 0.62)).coerceIn(0.0, 1.0)
-                        1.0 - severity * 0.20
+                        val severity = ((ctx.iobRatio - config.peakApproachIobThreshold) /
+                            (0.90 - config.peakApproachIobThreshold)).coerceIn(0.0, 1.0)
+                        1.0 - severity * config.peakApproachMaxReduction
                     } else {
                         1.0
                     }
@@ -4192,102 +4189,6 @@ class FCLvNext(
         }
 
         // ─────────────────────────────────────────────
-        // 🍽️ PRE-BOLUS OVERRIDE (chunked, vóór delivery)
-        // ─────────────────────────────────────────────
-        var effectiveHybridPercentage = config.hybridPercentage
-
-        val pbState = preBolusController.snapshot(now)
-
-        val trancheIndex =
-            if (pbState == null || pbState.totalU <= 0.0 || config.maxSMB <= 0.0) {
-                0
-            } else {
-                val chunkSize = config.maxSMB
-
-                val totalTranches =
-                    kotlin.math.ceil(pbState.totalU / chunkSize).toInt().coerceAtLeast(1)
-
-                val deliveredChunks =
-                    kotlin.math.floor((pbState.deliveredU + 1e-9) / chunkSize).toInt()
-
-                (deliveredChunks + 1).coerceIn(1, totalTranches)
-            }
-
-        val trancheTier =
-            when (trancheIndex) {
-                1 -> 1          // eerste chunk
-                2 -> 2          // tweede chunk
-                else -> 3       // derde en verder
-            }
-        val trancheDeltaThreshold =
-            when (trancheTier) {
-                1 -> 0.06      // eerste tranche: snel reageren
-                2 -> 0.08      // tweede tranche: duidelijker stijging nodig
-                else -> 0.10   // derde+: nog iets meer bevestiging
-            }
-
-        val trancheSlopeThreshold =
-            when (trancheTier) {
-                1 -> 0.20
-                2 -> 0.30
-                else -> 0.34
-            }
-
-
-        val preBolusFireAllowed = preBolusActive &&
-            mealIntent != null &&
-            zoneEnum != BgZone.LOW &&
-            ctx.input.bgNow >= 4.4 &&
-            (
-                ctx.recentDelta5m >= trancheDeltaThreshold ||
-                    ctx.recentSlope >= trancheSlopeThreshold
-                )
-
-        if (preBolusFireAllowed) {
-
-            val chunk = preBolusController.computeChunk(now, config.maxSMB)
-
-            if (chunk > 0.0) {
-                val before = commandedDose
-                val after = maxOf(commandedDose, chunk)
-
-                if (after > before + 1e-9) {
-                    commandedDose = after
-                    preBolusController.consumePlannedChunk(chunk)
-
-                    effectiveHybridPercentage =
-                        (config.hybridPercentage - 20).coerceAtLeast(0)
-
-                    val pb = preBolusController.snapshot(now)
-                    status.append(
-                        "PREBOLUS APPLY (tranche=$trancheIndex tier=$trancheTier): " +
-                            "${"%.2f".format(before)}→" +
-                            "${"%.2f".format(commandedDose)}U " +
-                            "Δthr=${"%.2f".format(trancheDeltaThreshold)} " +
-                            "Sthr=${"%.2f".format(trancheSlopeThreshold)} " +
-                            "hybrid=${effectiveHybridPercentage}% " +
-                            (pb?.let {
-                                "remaining=${"%.2f".format(it.remainingU)}U validFor=${it.minutesRemaining}m"
-                            } ?: "") +
-                            "\n"
-                    )
-
-
-                } else {
-                    status.append("PREBOLUS SKIP: commandedDose already >= chunk\n")
-                }
-            }
-
-        } else if (preBolusController.isActive(now)) {
-
-            // Alleen loggen als hij actief is maar NIET mag vuren
-            status.append(
-                "PREBOLUS HOLD: bg=${"%.2f".format(ctx.input.bgNow)} " +
-                    "zone=$zoneEnum pred60=${"%.2f".format(pred60)} " +
-                    "Δ5m=${"%.2f".format(ctx.recentDelta5m)} " +
-                    "slope=${"%.2f".format(ctx.recentSlope)}\n"
-            )
-        }
 
 
 
@@ -4296,7 +4197,7 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         val execution = executeDelivery(
             dose = commandedDose,
-            hybridPercentage = effectiveHybridPercentage,
+            hybridPercentage = config.hybridPercentage,
             cycleMinutes = config.deliveryCycleMinutes,
             maxTempBasalRate = config.maxTempBasalRate,
             smallDoseThreshold = config.smallDoseThresholdU
@@ -4437,7 +4338,7 @@ class FCLvNext(
 
         logRow.suppressForPeak = suppressForPeak
         logRow.absorptionActive = isInAbsorptionWindow(now, config)
-        logRow.peakIobBrakeActive = postPeak.suppress && peak.state != PeakPredictionState.IDLE && ctx.iobRatio >= 0.62
+        logRow.peakIobBrakeActive = postPeak.suppress && peak.state != PeakPredictionState.IDLE && ctx.iobRatio >= config.peakIobBrakeSuppressThreshold
         logRow.reentrySignal = reentry
         logRow.decisionReason = decision.reason
 
@@ -4480,19 +4381,6 @@ class FCLvNext(
         logRow.rescueConfidence = rescueSignal.confidence
         logRow.rescueReason = rescueSignal.reason
 
-        // ─────────────────────────────────────────────
-        // Pre-bolus logging fields
-        // ─────────────────────────────────────────────
-        val pbEnd = preBolusController.snapshot(now)
-
-        logRow.preBolusActive = preBolusActive   // of: (pbEnd != null) als snapshot null betekent “inactief”
-        logRow.preBolusType = pbEnd?.mealType?.name ?: "NONE"
-        logRow.preBolusTotalU = pbEnd?.totalU ?: 0.0
-        logRow.preBolusDeliveredU = pbEnd?.deliveredU ?: 0.0
-        logRow.preBolusRemainingU = pbEnd?.remainingU ?: 0.0
-        logRow.preBolusMinutesSinceArmed = pbEnd?.minutesSinceArmed ?: -1
-        logRow.preBolusMinutesRemaining = pbEnd?.minutesRemaining ?: -1
-
 
         logRow.finalDose = finalDose
         logRow.commandedDose = commandedDose
@@ -4531,8 +4419,4 @@ class FCLvNext(
             statusText = status.toString()
         )
     }
-
-
 }
-
-

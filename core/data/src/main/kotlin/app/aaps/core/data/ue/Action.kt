@@ -86,7 +86,6 @@ enum class Action(val colorGroup: ColorGroup) {
     OTP_RESET(ColorGroup.Aaps),
     STOP_SMS(ColorGroup.Aaps),
     FOOD(ColorGroup.CarbTreatment),
-    MEAL_INTENT(ColorGroup.Aaps),
     EXPORT_CSV(ColorGroup.Aaps),
     START_AAPS(ColorGroup.Aaps),
     EXIT_AAPS(ColorGroup.Aaps),

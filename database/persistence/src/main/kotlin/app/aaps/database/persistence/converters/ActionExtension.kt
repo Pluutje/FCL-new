@@ -90,7 +90,6 @@ fun UserEntry.Action.fromDb(): Action =
         UserEntry.Action.OTP_RESET                       -> Action.OTP_RESET
         UserEntry.Action.STOP_SMS                        -> Action.STOP_SMS
         UserEntry.Action.FOOD                            -> Action.FOOD
-        UserEntry.Action.MEAL_INTENT                     -> Action.MEAL_INTENT
         UserEntry.Action.EXPORT_CSV                      -> Action.EXPORT_CSV
         UserEntry.Action.START_AAPS                      -> Action.START_AAPS
         UserEntry.Action.EXIT_AAPS                       -> Action.EXIT_AAPS
@@ -189,7 +188,6 @@ fun Action.toDb(): UserEntry.Action =
         Action.OTP_RESET                       -> UserEntry.Action.OTP_RESET
         Action.STOP_SMS                        -> UserEntry.Action.STOP_SMS
         Action.FOOD                            -> UserEntry.Action.FOOD
-        Action.MEAL_INTENT                     -> UserEntry.Action.MEAL_INTENT
         Action.EXPORT_CSV                      -> UserEntry.Action.EXPORT_CSV
         Action.START_AAPS                      -> UserEntry.Action.START_AAPS
         Action.EXIT_AAPS                       -> UserEntry.Action.EXIT_AAPS
