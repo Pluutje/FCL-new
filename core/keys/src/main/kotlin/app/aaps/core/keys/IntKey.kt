@@ -73,10 +73,28 @@ enum class IntKey(
 
     SiteRotationUserProfile("site_rotation_user_profile", 0, 0, 2),
 
-    // ── FCL vNext — S / T / V model ───────────────────────────────────────
-    // Drie continue parameters die het volledige algoritmegedrag aansturen.
-    // Vervangt de 5 enum-assen (profiel, timing, correctie, maaltijdstijl, hypo).
-    // Default 100% = gekalibreerde baseline. Worden ingesteld via FCL Analyzer advies.
+    // ══════════════════════════════════════════════════════════════════════
+    // FCL vNext — Parameter-architectuur
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // Groep 1 — Pomp & veiligheid (handmatig, eénmalig, nooit bijgestuurd)
+    //   Zie DoubleKey: max_bolus_day, max_bolus_night, fcl_vnext_MaxIOB, stap_TT
+    //
+    // Groep 2 — Hoofdparameters (door FCL Analyzer bijgestuurd via STV-blok)
+    //   S / T / V worden berekend uit D en F via DFMapping.toStvMap().
+    //   N wordt apart bijgestuurd via de Nacht-N tab in de Analyzer.
+    //   Worden via JSON geschreven naar prefs en zijn leesbaar in de UI.
+    //
+    // Groep 3 — Analyzer-gestuurde fijnafstelling (engineeringModeOnly)
+    //   Volledig bepaald door DFMapping (D/F → param_overrides → prefs).
+    //   Niet zichtbaar in de normale AAPS preferences-UI.
+    //   Defaults = DFMapping-referentiewaarden bij D=1.0, F=0.50.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── FCL vNext — Groep 2: Hoofdparameters (STV + N) ───────────────────
+    // Worden bijgestuurd door FCL Analyzer via config_override.json.
+    // Zichtbaar in AAPS als read-only statusweergave (toekomstige Compose-UI).
+    // Default = gekalibreerde baseline (S=100, T=100, V=100, N=85).
 
     /** Sterkte overdag (80–125%). Schaalt gain, doseStrengthMul en frontloadFrac samen. */
     fcl_vnext_sterkte("fcl_vnext_sterkte", 100, 80, 125),
@@ -91,14 +109,17 @@ enum class IntKey(
      * Nacht-factor (60–110%, default 85%).
      * Vermenigvuldiger bovenop dag-sterkte die 's nachts wordt toegepast.
      * 85% = nacht is 15% rustiger dan dag. 100% = identiek aan dag.
-     * Vervangt de aparte fcl_vnext_gain_night slider.
+     * Wordt bijgestuurd via Nacht-N tab in FCL Analyzer (aparte sturingsdimensie,
+     * niet via D/F maar via NightWindowAnalyzer → ConfigOverrideWriter.writeWithNacht()).
      */
     fcl_vnext_nacht_factor("fcl_vnext_nacht_factor", 85, 60, 110),
 
-    // ── FCL vNext — Groep-A fijnafstelling (Analyzer-gestuurd) ───────────
-    fcl_vnext_commit_cooldown_minutes("fcl_vnext_commit_cooldown_minutes", 15, 5, 25),
+    // ── FCL vNext — Groep 3: Analyzer-gestuurde fijnafstelling ────────────
+    // Worden uitsluitend ingesteld via DFMapping.toParamOverrides(D, F).
+    // Defaults = DFMapping-referentiewaarden bij D=1.0, F=0.50.
 
-    // ── FCL vNext — Early Confidence Boost ──────────────────────────────
+    fcl_vnext_commit_cooldown_minutes("fcl_vnext_commit_cooldown_minutes", 13, 5, 25),
     fcl_vnext_early_boost_max_commits("fcl_vnext_early_boost_max_commits", 2, 1, 3),
-
+    // Default 12 = DFMapping-referentie bij F=0.50. (Was 10 = waarde bij F=0.60.)
+    fcl_vnext_sustained_rise_min_target("fcl_vnext_sustained_rise_min_target", 12, 5, 20),
 }

@@ -25,16 +25,21 @@ object FCLvNextConfigOverride {
     private const val FILENAME       = "FCLvNext_config_override.json"
 
     data class Override(
-        val sterkte:         Int? = null,   // 80–125, null = gebruik prefs
-        val timing:          Int? = null,   // 80–120
-        val volhoudendheid:  Int? = null,   // 70–130
-        val nachtFactor:     Int? = null,   // 60–110, null = gebruik prefs
+        val sterkte:         Int? = null,
+        val timing:          Int? = null,
+        val volhoudendheid:  Int? = null,
+        val nachtFactor:     Int? = null,
 
         val writtenAt:       String? = null,
         val basedOnEpisodes: Int?    = null,
         val reason:          String? = null,
 
-        val paramOverrides:  ParamOverrides? = null
+        val paramOverrides:  ParamOverrides? = null,
+
+        // MaxSmbLearner geleerde veiligheidsmarges.
+        // null = gebruik handmatige prefs (max_bolus_day / fcl_vnext_peak_iob_brake_suppress)
+        val maxSmbDayLearned: Double? = null,  // 0.75–2.00 U
+        val iobBrakeLearned:  Double? = null   // 0.35–0.55
     )
 
     /**
@@ -56,7 +61,9 @@ object FCLvNextConfigOverride {
         val earlyRiseFracMin:              Double? = null,  // 0.35–0.85
         val peakMaxSlopeWeight:            Double? = null,  // 0.0–0.60
         val lateCommitDecayFactor:         Double? = null,  // 0.0–1.0
-        val lateCommitDecayThreshold:      Double? = null   // 0.30–0.70
+        val lateCommitDecayThreshold:      Double? = null,  // 0.30–0.70
+        val sustainedRiseSlopeMin:         Double? = null,  // 0.15–0.80 mmol/min
+        val sustainedRiseMinTarget:        Int?    = null   // 5–20 minuten
     )
 
     fun load(): Override? {
@@ -102,7 +109,10 @@ object FCLvNextConfigOverride {
                 writtenAt       = extractString(json, "written_at"),
                 basedOnEpisodes = extractInt(json, "based_on_episodes"),
                 reason          = extractString(json, "reason"),
-                paramOverrides  = paramOverBlock?.let { parseParamOverrides(it) }
+                paramOverrides  = paramOverBlock?.let { parseParamOverrides(it) },
+
+                maxSmbDayLearned = stvBlock?.let { extractDouble(it, "max_smb_day_learned") },
+                iobBrakeLearned  = stvBlock?.let { extractDouble(it, "iob_brake_learned") }
             )
         } catch (_: Exception) {
             null
@@ -125,7 +135,9 @@ object FCLvNextConfigOverride {
                 earlyRiseFracMin              = extractDouble(block, "earlyRiseFracMin"),
                 peakMaxSlopeWeight            = extractDouble(block, "peakMaxSlopeWeight"),
                 lateCommitDecayFactor         = extractDouble(block, "lateCommitDecayFactor"),
-                lateCommitDecayThreshold      = extractDouble(block, "lateCommitDecayThreshold")
+                lateCommitDecayThreshold      = extractDouble(block, "lateCommitDecayThreshold"),
+                sustainedRiseSlopeMin         = extractDouble(block, "sustainedRiseSlopeMin"),
+                sustainedRiseMinTarget        = extractInt(block, "sustainedRiseMinTarget")
             )
         } catch (_: Exception) {
             null

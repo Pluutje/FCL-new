@@ -364,7 +364,8 @@ private const val EARLY_RESET_SLOPE = 0.00    // of zodra macro slope niet meer 
 private data class EarlyDoseContext(
     var stage: Int = 0,              // 0=none, 1=probe, 2=boost
     var lastFireAt: DateTime? = null,
-    var lastConfidence: Double = 0.0
+    var lastConfidence: Double = 0.0,
+    var boostCommitCount: Int = 0    // telt hoeveel boosted commits er al zijn geweest
 )
 
 private var earlyDose = EarlyDoseContext()
@@ -1538,10 +1539,14 @@ private fun computeMealAggression(
 
 private data class EarlyDoseDecision(
     val active: Boolean,
-    val stageToFire: Int,          // 0=none, 1=probe, 2=boost
-    val confidence: Double,        // 0..1
-    val targetU: Double,           // floor target for commandedDose
-    val reason: String
+    val stageToFire: Int,
+    val confidence: Double,
+    val targetU: Double,
+    val reason: String,
+    val remainingDebtU: Double = 0.0,
+    val boostActive: Boolean = false,
+    val effectiveBoostFactor: Double = 1.0,
+    val boostCommitNr: Int = 0
 )
 
 private fun computeEarlyDoseDecision(
@@ -1551,25 +1556,32 @@ private fun computeEarlyDoseDecision(
     trend: TrendDecision,
     bgZone : BgZone,
     now: DateTime,
-    config: FCLvNextConfig
+    config: FCLvNextConfig,
+    sustainedHighSlopeMinutes: Double = 0.0,
+    // Voor hypo-debt compensatie: projectie zónder insuline uit de meest recente
+    // hypo-bescherming check. Geeft zekerheid dat compensatie veilig is.
+    hypoProjectedMinNoInsulin: Double = Double.POSITIVE_INFINITY,
+    // Opgebouwde hypo-schuld in huidige episode (achtergehouden insuline door hypo-rem).
+    // Wordt als parameter meegegeven omdat deze functie buiten de klasse staat.
+    episodeHypoDebtU: Double = 0.0
 ): EarlyDoseDecision {
 
     if (ctx.consistency < config.episodeMinConsistency) {
-        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY: low consistency")
+        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY: low consistency", remainingDebtU = episodeHypoDebtU)
     }
 
     // Fastlane veto: CGM laat al dip zien → geen early push
     if (ctx.recentDelta5m <= -0.06 || ctx.recentSlope <= -0.20) {
-        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY blocked: fastlane dip")
+        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY blocked: fastlane dip", remainingDebtU = episodeHypoDebtU)
     }
 
     if ((bgZone == BgZone.LOW || bgZone == BgZone.IN_RANGE) && ctx.iobRatio >= 0.55) {
-        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY blocked: low BG zone")
+        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY blocked: low BG zone", remainingDebtU = episodeHypoDebtU)
     }
 
 
     if (peak.state == PeakPredictionState.CONFIRMED) {
-        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY: peak confirmed")
+        return EarlyDoseDecision(false, 0, 0.0, 0.0, "EARLY: peak confirmed", remainingDebtU = episodeHypoDebtU)
     }
 
     val slopeScore = smooth01((ctx.slope - 0.20) / (1.20 - 0.20))
@@ -1577,6 +1589,19 @@ private fun computeEarlyDoseDecision(
     val deltaScore = smooth01((ctx.deltaToTarget - 0.0) / 1.6)
     val consistScore = smooth01((ctx.consistency - 0.45) / 0.35)
     val iobRoom = 1.0 - smooth01((ctx.iobRatio - 0.20) / 0.50)
+
+    // ── Sustained Rise Score ──────────────────────────────────────────────
+    // Vult accelScore aan voor TYPE B stijgingen: slope is lang hoog maar
+    // versnelt nauwelijks (bijv. brood, rijst). Na config.sustainedRiseMinTarget
+    // minuten aanhoudend boven drempel bereikt sustainScore zijn maximum.
+    // Gewicht 0.12: bescheiden maar genoeg om de conf-drempel te halen bij
+    // gestage stijging zonder versnelling.
+    val sustainScore = smooth01(
+        sustainedHighSlopeMinutes / config.sustainedRiseMinTarget.toDouble()
+    )
+    // Alleen meetellen als mealState al CONFIRMED is (eerste zekerheidsdrempel)
+    val effectiveSustainScore = if (mealSignal.state == MealState.CONFIRMED)
+        sustainScore else 0.0
 
     val watchingBonus =
         if (peak.state == PeakPredictionState.WATCHING) 0.10 else 0.0
@@ -1593,12 +1618,17 @@ private fun computeEarlyDoseDecision(
         else -> 0.0
     }
 
+    // Gewichten: accel iets omlaag (0.30→0.22), sustain krijgt 0.08,
+    // iobRoom iets omlaag (0.10→0.08) zodat totaal gelijk blijft.
+    // Type A (snelle stijging): accelScore hoog → conf hoog → vroeg vuren
+    // Type B (gestage stijging): sustainScore hoog → conf hoog → ook vroeg vuren
     var conf =
         0.32 * slopeScore +
-            0.30 * accelScore +
+            0.22 * accelScore +
+            0.08 * effectiveSustainScore +
             0.18 * deltaScore +
-            0.10 * consistScore +
-            0.10 * iobRoom +
+            0.12 * consistScore +
+            0.08 * iobRoom +
             watchingBonus +
             mealBonus +
             fastRiseBonus
@@ -1658,11 +1688,11 @@ private fun computeEarlyDoseDecision(
         else -> 0
     }
     if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= 5 && !allowLarge) {
-        return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: stage2 blocked (trend=${trend.state})")
+        return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: stage2 blocked (trend=${trend.state})", remainingDebtU = episodeHypoDebtU)
     }
 
     if (stageToFire == 0) {
-        return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: no fire")
+        return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: no fire", remainingDebtU = episodeHypoDebtU)
     }
 
     val (minF, maxF) =
@@ -1694,19 +1724,84 @@ private fun computeEarlyDoseDecision(
             .coerceIn(0.20, config.maxSMB * 0.40)
 
 
+    // ── earlyBoostFactor: versterk vroege commits als config > 1.0 ──────────
+    // Alleen actief als:
+    //   1. conf >= earlyBoostMinConfidence (sterk signaal vereist)
+    //   2. boostCommitCount < effectiveMaxCommits (max aantal boosted commits)
+    //   3. earlyBoostFactor > 1.0 (anders is feature uit)
+    // Veiligheid: iobRoom-penalty beperkt al de dosis als IOB hoog is.
+    //
+    // Pre-meal dip extensie: als er een hypo-schuld is opgebouwd, worden
+    // extra commits toegestaan bovenop earlyBoostMaxCommits. Per 0.3U schuld
+    // één extra commit, maximaal 2 extra. Dit compenseert het patroon waarbij
+    // BG voor een maaltijd daalt naar een lage waarde en het systeem daarna
+    // meer commits nodig heeft om de stijging bij te houden.
+    val extraCommitsFromDebt = if (episodeHypoDebtU > 0.01)
+        (episodeHypoDebtU / 0.30).toInt().coerceIn(0, 2)
+    else 0
+    val effectiveMaxCommits = config.earlyBoostMaxCommits + extraCommitsFromDebt
+
+    val boostActive =
+        config.earlyBoostFactor > 1.0 + 1e-9 &&
+            conf >= config.earlyBoostMinConfidence &&
+            earlyDose.boostCommitCount < effectiveMaxCommits
+
+    val effectiveBoostFactor = if (boostActive) config.earlyBoostFactor else 1.0
+
+    // ── Hypo-debt compensatie ─────────────────────────────────────────────
+    // Als er eerder in deze episode insuline is achtergehouden door hypo-bescherming,
+    // dan wordt de eerste vrije dosis versterkt om de achterstand deels in te halen.
+    //
+    // Voorwaarden (alle drie vereist):
+    //   1. Er is een opgebouwde schuld (episodeHypoDebtU > 0)
+    //   2. De stijging is CONFIRMED — zwak signaal mag niet compenseren
+    //   3. Projectie zonder insuline blijft veilig (geen nieuwe hypo)
+    //
+    // De compensatie is proportioneel aan de schuld: grotere schuld = grotere bonus,
+    // maar nooit meer dan +50% van de basiskaart (voorzichtig ophalen, niet inhalen).
+    // Na toepassing daalt de schuld met de geleverde compensatie.
+    //
+    // Voorbeeld: schuld=0.40U, basis=0.80U → bonus = min(0.50*0.80, 0.40) = 0.40U
+    //            effectieve dosis = 0.80 + 0.40 = 1.20U (nog steeds ≤ 1.5×maxSMB cap)
+    val debtCompensationU = if (episodeHypoDebtU > 0.01 &&
+        mealSignal?.state == MealState.CONFIRMED &&
+        hypoProjectedMinNoInsulin >= 4.8) {
+        val baseTargetU = config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor
+        val maxBonus = baseTargetU * 0.50          // max 50% van de basiskaart als bonus
+        minOf(maxBonus, episodeHypoDebtU)           // nooit meer dan de schuld zelf
+    } else 0.0
+
     val targetU =
         maxOf(
-            config.maxSMB * factor * config.doseStrengthMul,
+            config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor + debtCompensationU,
             minEarlyU
-        )
+        ).coerceAtMost(config.maxSMB * 1.5)   // absolute cap: nooit meer dan 1.5× maxSMB
 
+    // Bereken resterende schuld na compensatie — de klasse schrijft dit terug
+    // naar episodeHypoDebtU na de aanroep (functie kan klasselid niet muteren).
+    val remainingDebtU = (episodeHypoDebtU - debtCompensationU).coerceAtLeast(0.0)
+
+    val debtReason = if (debtCompensationU > 0.01)
+        " DEBT+${"%.2f".format(debtCompensationU)}U(rest=${"%.2f".format(remainingDebtU)}U)"
+    else ""
+
+    val boostReason = if (boostActive)
+        " BOOST×${"%.2f".format(effectiveBoostFactor)}(${earlyDose.boostCommitCount+1}/${effectiveMaxCommits}${if (extraCommitsFromDebt > 0) "+${extraCommitsFromDebt}debt" else ""})"
+    else ""
+
+    val sustainReason = if (effectiveSustainScore > 0.05)
+        " SUST=${sustainedHighSlopeMinutes.toInt()}m(×${"%.2f".format(effectiveSustainScore)})" else ""
 
     return EarlyDoseDecision(
         active = true,
         stageToFire = stageToFire,
         confidence = conf,
         targetU = targetU,
-        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)}"
+        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)}$boostReason$debtReason$sustainReason",
+        remainingDebtU = remainingDebtU,
+        boostActive = boostActive,
+        effectiveBoostFactor = effectiveBoostFactor,
+        boostCommitNr = earlyDose.boostCommitCount + 1
     )
 }
 
@@ -2374,6 +2469,27 @@ class FCLvNext(
     private var activeMealEpisodeId: Long = -1
     private var mealEpisodeStartTime: DateTime? = null
     private var mealEpisodeStartBg: Double? = null
+    // Frontload-shift tracking: bijgehouden per episode
+    private var episodeCommitCount: Int = 0    // volgnummer commit (1=eerste)
+    private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
+
+    // ── Hypo-debt tracking ────────────────────────────────────────────────
+    // Bijhoudt hoeveel insuline in de vroege fase van deze episode is
+    // achtergehouden door hypo-bescherming. Dit wordt verrekend als een
+    // gecompenseerde early boost zodra de maaltijdstijging bevestigd is:
+    //   - De eerste vrije dosis na de hypo-rem krijgt een bonus proportioneel
+    //     aan de opgebouwde schuld
+    //   - Alleen actief als de stijging CONFIRMED is (sterk genoeg signaal)
+    //   - Veiligheidsgrens: maximale compensatie = 1× de normale dosis
+    //   - Reset bij episode-start en episode-einde
+    private var episodeHypoDebtU: Double = 0.0  // achtergehouden insuline door hypo-rem
+
+    // ── Sustained Rise tracking ───────────────────────────────────────────
+    // Telt hoeveel minuten de slope al aanhoudend boven de drempel is.
+    // Niet gereset bij episode-grenzen — meet puur de actuele BG-trend.
+    // Reset naar 0 zodra slope onder de drempel zakt.
+    private var sustainedHighSlopeMinutes: Double = 0.0
+    private var sustainedLastUpdateAt: DateTime? = null
     var lastActiveConfig: FCLvNextConfig? = null
         private set
 
@@ -2430,7 +2546,13 @@ class FCLvNext(
             // nieuw segment → nieuwe pre-peak impuls toegestaan
             prePeakImpulseDone = false
             lastSegmentAt = now
+            // Bewaar boostCommitCount over de reset heen — commits die voor de
+            // peak-estimator-start zijn gegeven (UNCERTAIN fase) tellen mee voor
+            // earlyBoostMaxCommits en het budget. Zonder dit wordt de eerste
+            // geboostte commit vergeten en telt die niet mee in de decay.
+            val savedBoostCount = earlyDose.boostCommitCount
             earlyDose = EarlyDoseContext()
+            earlyDose.boostCommitCount = savedBoostCount
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
@@ -2908,6 +3030,9 @@ class FCLvNext(
             activeMealEpisodeId = mealEpisodeCounter
             mealEpisodeStartTime = now
             mealEpisodeStartBg = ctx.input.bgNow
+            episodeCommitCount = 0
+            episodeBoostBudgetU = 0.0
+            episodeHypoDebtU = 0.0
 
             status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
         }
@@ -2920,6 +3045,9 @@ class FCLvNext(
             activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
+            episodeCommitCount = 0
+            episodeBoostBudgetU = 0.0
+            episodeHypoDebtU = 0.0
         }
 
         // ─────────────────────────────────────────────
@@ -2934,7 +3062,11 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 🔴 LONG-SLOPE SAFETY BLOCK (anti-hypo)
         // Blokkeer dosing bij sterke structurele daling,
-        // ook als short-term ruis het maskeert
+        // ook als short-term ruis het maskeert.
+        //
+        // KERING-DETECTIE: het blok wordt opgeheven als BG aantoonbaar keert.
+        // Vereist TWEE opeenvolgende stijgende metingen (niet één — sensorspike
+        // geeft maar één verhoogde meting, een echte kering geeft twee of meer).
         // ─────────────────────────────────────────────
 
         val watchingOrConfirmed =
@@ -2943,10 +3075,27 @@ class FCLvNext(
         val allowDespiteLongSlope =
             zoneEnum == BgZone.EXTREME && watchingOrConfirmed && ctx.recentSlope > 0.0
 
+        // Kering-detectie: minimaal 2 opeenvolgende stijgende BG-metingen
+        // vereist om het blok op te heffen. Dit filtert sensorspikes eruit
+        // (één afwijkende meting) maar herkent een echte BG-kering tijdig.
+        val bgHistory = ctx.input.bgHistory
+        val bgRisingCount = if (bgHistory.size >= 3) {
+            // Tel hoeveel van de laatste metingen aaneengesloten stijgend zijn
+            var count = 0
+            for (i in bgHistory.indices.reversed().drop(1)) {
+                if (i + 1 < bgHistory.size && bgHistory[i].second > bgHistory[i + 1].second) {
+                    count++
+                } else break
+            }
+            count
+        } else 0
+        val confirmedReversal = bgRisingCount >= 2
+
         val hardNoDelivery =
             downGate.pauseThisCycle ||
                 (
                     !allowDespiteLongSlope &&
+                        !confirmedReversal &&          // blok opgeheven bij bevestigde kering
                         ctx.slope <= -1.0 &&
                         ctx.recentSlope <= 0.0 &&
                         ctx.recentDelta5m <= 0.0 &&
@@ -2962,7 +3111,7 @@ class FCLvNext(
                         "recentΔ5m=${"%.2f".format(ctx.recentDelta5m)}"
                 } else {
                     "LONG-SLOPE BLOCK: slope=${"%.2f".format(ctx.slope)} " +
-                        "delta=${"%.2f".format(ctx.deltaToTarget)}"
+                        "delta=${"%.2f".format(ctx.deltaToTarget)} rising=${bgRisingCount}"
                 }
 
             status.append("$reason → handoff to AAPS\n")
@@ -3116,8 +3265,46 @@ class FCLvNext(
 
 
 // ─────────────────────────────────────────────
+// 📈 SUSTAINED RISE TRACKING
+// Bijhouden hoe lang slope al boven de drempel is.
+// Wordt doorgegeven aan computeEarlyDoseDecision als sustainScore-input.
+// ─────────────────────────────────────────────
+
+        val sustainSlopeMin = config.sustainedRiseSlopeMin  // drempel (bijv. 0.35)
+        val minutesSinceSustainUpdate = minutesSince(sustainedLastUpdateAt, now)
+            .coerceIn(0, 15).toDouble()  // max 15 min per stap (beschermt tegen lange pauzes)
+
+        if (ctx.slope >= sustainSlopeMin && ctx.slope > 0.0) {
+            // Slope boven drempel: tel op hoeveel tijd is verstreken
+            sustainedHighSlopeMinutes += minutesSinceSustainUpdate
+        } else {
+            // Slope gedaald onder drempel: reset teller
+            sustainedHighSlopeMinutes = 0.0
+        }
+        sustainedLastUpdateAt = now
+
+        // Veiligheidsreset: als IOB al hoog is, is de stijging vermoedelijk
+        // al gecompenseerd → sustained trigger niet meer zinvol
+        if (ctx.iobRatio >= 0.40) {
+            sustainedHighSlopeMinutes = 0.0
+        }
+
+        logRow.sustainedHighSlopeMinutes = sustainedHighSlopeMinutes
+
+// ─────────────────────────────────────────────
 // 🚀 EARLY DOSE CONTROLLER (move earlier in pipeline)
 // ─────────────────────────────────────────────
+
+        // Bereken alvast de no-insulin projectie voor de hypo-debt compensatie.
+        // De volledige hypoProtection check volgt later — dit is alleen de
+        // projectie zónder insuline, puur voor de veiligheidscheck in earlyBoost.
+        val hypoNoInsulinProjection = hypoProtection(
+            ctx = ctx,
+            plannedDoseU = 0.0,   // geen geplande dosis → pure trend-projectie
+            effectiveISF = input.effectiveISF,
+            config = config,
+            mealSignal = mealSignal
+        ).projectedMinNoInsulin
 
         val early = computeEarlyDoseDecision(
             ctx = ctx,
@@ -3126,8 +3313,13 @@ class FCLvNext(
             trend = trend,
             bgZone = zoneEnum,
             now = now,
-            config = config
+            config = config,
+            sustainedHighSlopeMinutes = sustainedHighSlopeMinutes,
+            hypoProjectedMinNoInsulin = hypoNoInsulinProjection,
+            episodeHypoDebtU = episodeHypoDebtU
         )
+        // Schrijf resterende schuld terug — de functie mag klasselid niet muteren
+        episodeHypoDebtU = early.remainingDebtU
         status.append(early.reason + "\n")
 
         // Forceer early stage bij zeer snelle stijging
@@ -3168,21 +3360,36 @@ class FCLvNext(
         recentBgHistory.addLast(ctx.input.bgNow)
 
         // bgRising3Cycles: alle 3 recentste delta's positief (elke meting hoger dan vorige)
-        val bgRising3Cycles = recentBgHistory.size >= 3 &&
-            recentBgHistory[1] > recentBgHistory[0] &&
-            recentBgHistory[2] > recentBgHistory[1]
+        // Fallback: als de deque nog niet vol is (bijv. na sensor-gap of episode-reset),
+        // gebruik dan recentSlope als proxy — een zeer snelle stijging is nooit een blip.
+        val bgRising3Cycles = when {
+            recentBgHistory.size >= 3 ->
+                recentBgHistory[1] > recentBgHistory[0] &&
+                    recentBgHistory[2] > recentBgHistory[1]
+            recentBgHistory.size == 2 ->
+                // Deque net opgebouwd na gap: twee stijgende metingen én snelle stijging
+                recentBgHistory[1] > recentBgHistory[0] && ctx.recentSlope >= 3.0
+            else ->
+                // Slechts één meting: vertrouw op recentSlope (>= 5 = zeker geen blip)
+                ctx.recentSlope >= 5.0
+        }
+
+        // Extra blip-guard: bij een zeer snelle stijging (> 0.8 mmol in 5 min) is het
+        // biologisch onmogelijk dat dit een sensorblip is — schepijs/snelle koolhydraten
+        // geven wel degelijk deze stijgsnelheid. Blip-detectie uitschakelen.
+        val explosiveRise = ctx.recentDelta5m >= 0.80
 
         // blipBaseCondition voorberekening (zelfde logica als in evaluatePostPeak)
         val blipBaseNow = ctx.slope <= -0.30 &&
             ((ctx.recentSlope >= 1.50) || (ctx.recentDelta5m >= 0.20))
-        if (blipBaseNow && !bgRising3Cycles) sensorBlipStreakCount++
+        if (blipBaseNow && !bgRising3Cycles && !explosiveRise) sensorBlipStreakCount++
         else sensorBlipStreakCount = 0
 
         val postPeak = evaluatePostPeak(
             ctx, mealSignal, peak, now, config,
             episodeMinutesForPostPeak,
             sensorBlipStreak = sensorBlipStreakCount,
-            bgRising3Cycles  = bgRising3Cycles
+            bgRising3Cycles  = bgRising3Cycles || explosiveRise
         )
         status.append(postPeak.reason + "\n")
 
@@ -3292,6 +3499,8 @@ class FCLvNext(
         }
         // ===============================================================================
 
+
+        var earlyFiredThisCycle = false  // wordt true als early floor deze cyclus vuurt
 // Apply early floor AFTER dampers (maar vóór cap/commit)
 // ✅ NIET toepassen als we al aan het afremmen zijn (accel < 0)
         if (
@@ -3318,6 +3527,32 @@ class FCLvNext(
             earlyDose.stage = maxOf(earlyDose.stage, early.stageToFire)
             earlyDose.lastFireAt = now
             earlyDose.lastConfidence = early.confidence
+            // Tel boosted commits mee zodat earlyBoostMaxCommits gerespecteerd wordt
+            if (config.earlyBoostFactor > 1.0 + 1e-9 &&
+                early.confidence >= config.earlyBoostMinConfidence) {
+                earlyDose.boostCommitCount++
+            }
+            // Budget bijhouden: extra units boven wat er zonder earlyBoost gegeven zou zijn.
+            // Gebruik finalDose (na alle caps) zodat het budget altijd de werkelijk
+            // afgegeven extra insuline reflecteert — ook na de earlyBoost cap-verruiming.
+            // baseTargetU = wat de commit zou zijn geweest zonder boost (factor=1.0)
+            val baseTargetU = (cappedEarly / config.earlyBoostFactor.coerceAtLeast(1.0))
+                .coerceAtMost(config.maxSMB)  // zonder boost nooit boven normale maxSMB
+            val boostExtraU = (finalDose - maxOf(before, baseTargetU)).coerceAtLeast(0.0)
+            if (boostExtraU > 0.01) {
+                episodeBoostBudgetU += boostExtraU
+                status.append(
+                    "BOOST BUDGET +${"%.2f".format(boostExtraU)}U " +
+                        "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
+                )
+            }
+
+            // Early floor telt als 'commit 1' voor de decay-teller:
+            // latere commit-path bolussen zijn dan commitNr ≥ 2 → decay actief
+            if (finalDose > before) {
+                episodeCommitCount++
+                earlyFiredThisCycle = true
+            }
 
             status.append(
                 "EARLY FLOOR: ${"%.2f".format(before)}→${"%.2f".format(finalDose)}U\n"
@@ -3443,12 +3678,30 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 8️⃣ Absolute max SMB cap
         // ─────────────────────────────────────────────
-        if (finalDose > config.maxSMB) {
+        // EarlyBoost cap: als earlyBoost actief was en gevuurd heeft in deze cyclus,
+        // mag finalDose oplopen tot maxSMB × earlyBoostFactor.
+        // Zonder deze uitzondering heeft earlyBoostFactor nul effect — de ongebooste
+        // target zit al dicht bij maxSMB en de cap pakt de verhoging er direct af.
+        // Veiligheidsgrens: nooit meer dan maxSMB × 1.8, en alleen als iobRatio < 0.35.
+        val effectiveMaxSmb = if (
+            early.boostActive &&
+            earlyFiredThisCycle &&
+            config.earlyBoostFactor > 1.01 &&
+            ctx.iobRatio < 0.35
+        ) {
+            minOf(config.maxSMB * config.earlyBoostFactor, config.maxSMB * 1.8)
+        } else {
+            config.maxSMB
+        }
+
+        if (finalDose > effectiveMaxSmb) {
+            val boosted = effectiveMaxSmb > config.maxSMB
             status.append(
-                "Cap maxSMB ${"%.2f".format(finalDose)} → ${"%.2f".format(config.maxSMB)}U\n"
+                "Cap maxSMB ${"%.2f".format(finalDose)} → ${"%.2f".format(effectiveMaxSmb)}U" +
+                    (if (boosted) " (earlyBoost verhoogd)" else "") + "\n"
             )
-            finalDose = config.maxSMB
-            logRow.guardMaxSmbLimited = true
+            finalDose = effectiveMaxSmb
+            logRow.guardMaxSmbLimited = !boosted  // alleen markeren als normale cap
         }
 
         // ─────────────────────────────────────────────
@@ -3470,8 +3723,19 @@ class FCLvNext(
                 (zoneEnum != BgZone.LOW)
 
 // 2) Bepaal target (ook als het niet triggert -> handig voor analyse)
+        // WFF-target schalen op basis van earlyBoost budget:
+        // Als earlyBoost substantieel heeft gegeven in de vroege fase, dan
+        // geeft WFF minder — insuline is al naar voren gehaald, de late fase
+        // hoeft minder bij te dragen. Dit geeft het gewenste afnemende patroon:
+        //   zonder budget: WFF = maxSMB × wff_frac (bijv. 1.25 × 0.74 = 0.93U)
+        //   budget = 0.5U: schaling = max(0.50, 1.0 - 0.5/2.50) = 0.80 → 0.74U
+        //   budget = 1.0U: schaling = max(0.50, 1.0 - 1.0/2.50) = 0.60 → 0.56U
+        //   budget = 2.0U: schaling = max(0.50, 1.0 - 2.0/2.50) = 0.50 → 0.47U (minimum 50%)
+        val wffBudgetScaling = if (episodeBoostBudgetU > 0.1) {
+            (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(0.50, 1.0)
+        } else 1.0
         val watchingFrontloadTargetU =
-            (config.maxSMB * config.watchingFrontloadFrac)
+            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling)
                 .coerceAtMost(config.maxSMB)
 
 // 3) Echte triggerconditie
@@ -3547,6 +3811,8 @@ class FCLvNext(
 
         var commandedDose = finalDose
 
+        var lateDecayMul = 1.0  // bijgehouden voor logging; wordt in commit-blok ingesteld
+
         // ── Anti-drip: kleine correcties niet elke cyclus ──
         if (commandedDose > 0.0 &&
             commandedDose <= config.smallCorrectionMaxU &&
@@ -3576,9 +3842,13 @@ class FCLvNext(
         val reentry = isReentrySignal(ctx, now, config)
         if (reentry) {
             // nieuw segment binnen episode
+            // Bewaar boostCommitCount — re-entry is een nieuw segment binnen
+            // dezelfde maaltijdepisode, eerdere boosts tellen nog steeds mee.
             prePeakImpulseDone = false
             lastSegmentAt = now
+            val savedBoostCountReentry = earlyDose.boostCommitCount
             earlyDose = EarlyDoseContext()
+            earlyDose.boostCommitCount = savedBoostCountReentry
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
@@ -3686,9 +3956,42 @@ class FCLvNext(
                 logRow.commitAggressionMul = commitAggressionMul
 
                 logRow.commitPostPeakFactor = postPeak.commitFactor
+
+                // ── Episode-commit decay met boost-budget compensatie ────────────
+                //
+                // Twee componenten schalen de decay samen:
+                //   1. lateCommitDecayFactor (basis, configureerbaar)
+                //   2. episodeBoostBudgetU   (extra, proportioneel aan earlyBoost)
+                //
+                // effectiveDecay = lateCommitDecayFactor + budget/(maxSMB×2)
+                // → Hoe meer earlyBoost gaf, hoe harder latere commits krimpen
+                // → Totaal insuline blijft hierdoor bij benadering gelijk
+                //
+                // Voorbeeld (earlyBoost=1.25, budget=0.23U, maxSMB=1.25, lcd=0.20):
+                //   effectiveDecay = 0.20 + 0.23/2.50 = 0.29
+                //   commit 2: ×0.71  commit 3: ×0.42
+
+                val commitNr = episodeCommitCount + 1
+                val budgetDecay = (episodeBoostBudgetU / (config.maxSMB * 2.0))
+                    .coerceIn(0.0, 0.50)
+                val effectiveDecay = (config.lateCommitDecayFactor + budgetDecay)
+                    .coerceIn(0.0, 0.70)
+                val lateDecayActive = effectiveDecay > 0.01 && commitNr > 1
+
+                lateDecayMul = if (lateDecayActive) {
+                    (1.0 - effectiveDecay * (commitNr - 1).toDouble())
+                        .coerceIn(0.25, 1.0)
+                } else 1.0
+
+                if (lateDecayActive) {
+                    status.append(
+                        "COMMIT DECAY ×${"%.2f".format(lateDecayMul)} (#$commitNr decay=${"%.2f".format(effectiveDecay)} budget=${"%.2f".format(episodeBoostBudgetU)}U)\n"
+                    )
+                }
+                logRow.commitPostPeakFactor = postPeak.commitFactor
                 val commitDose =
                     if (allowCommitBoost && commitAccessOk)
-                        (config.maxSMB * fraction * commitIobFactor * prePeakMul * postPeak.commitFactor * rawPlateauPenalty * commitAggressionMul)
+                        (config.maxSMB * fraction * commitIobFactor * prePeakMul * postPeak.commitFactor * rawPlateauPenalty * commitAggressionMul * lateDecayMul)
                             .coerceAtMost(config.maxSMB)
                     else 0.0
                 logRow.commitDoseRaw = commitDose
@@ -3726,6 +4029,8 @@ class FCLvNext(
                     lastCommitReason = "${mealSignal.state} frac=${"%.2f".format(fraction)}"
 
                     didCommitThisCycle = true
+                    // Alleen tellen als early floor deze cyclus niet al telde
+                    if (!earlyFiredThisCycle) episodeCommitCount++
 
                     if (reentry) {
                         lastReentryCommitAt = now
@@ -3769,11 +4074,27 @@ class FCLvNext(
         )
         logRow.hypoActive = hypoProj.active
         logRow.hypoProjectedBg = hypoProj.projectedMin
+        logRow.hypoDebtU = episodeHypoDebtU  // schuld na eventuele opbouw deze cyclus
 
         val reserveReleaseBlocked = hypoProj.active
 
         if (hypoProj.active) {
             status.append("${hypoProj.reason} → commandedDose=0\n")
+
+            // Bouw hypo-debt op: we houden bij hoeveel insuline is achtergehouden
+            // door hypo-bescherming terwijl er een maaltijdepisode actief was.
+            // Alleen tellen tijdens een actieve episode (startBg bekend) zodat
+            // nacht-hypo's of correctie-blokkades niet worden meegeteld.
+            if (activeMealEpisodeId != -1L && commandedDose > 0.0) {
+                val debtIncrement = commandedDose.coerceIn(0.0, config.maxSMB)
+                episodeHypoDebtU = (episodeHypoDebtU + debtIncrement)
+                    .coerceAtMost(config.maxSMB * 2.0)  // absolute cap: nooit > 2× maxSMB
+                status.append(
+                    "HYPO DEBT: +${"%.2f".format(debtIncrement)}U " +
+                        "totaal=${"%.2f".format(episodeHypoDebtU)}U\n"
+                )
+            }
+
             commandedDose = 0.0
         }
 
@@ -4320,6 +4641,15 @@ class FCLvNext(
         logRow.earlyStage = earlyDose.stage
         logRow.earlyConfidence = earlyDose.lastConfidence
         logRow.earlyTargetU = early.targetU
+        // earlyBoost velden — waren altijd default (1.0/false/0) omdat ze niet werden gezet
+        logRow.earlyBoostActive  = early.boostActive
+        logRow.earlyBoostFactor  = early.effectiveBoostFactor
+        logRow.earlyBoostCount   = early.boostCommitNr
+
+        // Basisvelden die ook ontbraken
+        logRow.isNight  = input.isNight
+        logRow.bg       = ctx.input.bgNow
+        logRow.target   = ctx.input.targetBG
 
         logRow.mealState = mealSignal.state.name
         logRow.commitFraction = commitFraction
@@ -4336,6 +4666,8 @@ class FCLvNext(
         logRow.peakRiseSinceStart = peak.riseSinceStart
         logRow.peakEpisodeActive = peakEstimator.active
 
+        logRow.lateDecayMul = lateDecayMul
+        logRow.episodeCommitNr = episodeCommitCount
         logRow.suppressForPeak = suppressForPeak
         logRow.absorptionActive = isInAbsorptionWindow(now, config)
         logRow.peakIobBrakeActive = postPeak.suppress && peak.state != PeakPredictionState.IDLE && ctx.iobRatio >= config.peakIobBrakeSuppressThreshold

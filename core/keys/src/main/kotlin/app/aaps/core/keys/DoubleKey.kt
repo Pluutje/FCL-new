@@ -52,37 +52,31 @@ enum class DoubleKey(
     ApsAutoIsfSmbDeliveryRatioMax("openapsama_smb_delivery_ratio_max", 0.5, 0.5, 1.0, defaultedBySM = true),
     ApsAutoIsfSmbMaxRangeExtension("openapsama_smb_max_range_extension", 1.0, 1.0, 5.0, defaultedBySM = true),
 
-    // ── FCL vNext ─────────────────────────────────────────────────────────
-    // Verwijderd: fcl_vnext_gain_day, fcl_vnext_gain_night
-    //   → vervangen door IntKey.fcl_vnext_sterkte + IntKey.fcl_vnext_nacht_factor (percentages)
-    // Verwijderd: fcl_vnext_meal_strength_*
-    //   → IntKey.fcl_vnext_sterkte schaalt dit globaal
-
+    // ── FCL vNext — Groep 1: Pomp & veiligheid ───────────────────────────
     stap_TT("stap_TT", 2.0, 0.5, 4.0),
-
     max_bolus_day("max_bolus_day", 1.25, 0.1, 8.0),
     max_bolus_night("max_bolus_night", 0.5, 0.1, 8.0),
-
-
-
     fcl_vnext_MaxIOB("fcl_vnext_MaxIOB", 4.0, 1.0, 25.0),
 
-    // ── FCL vNext — Groep-A fijnafstelling (Analyzer-gestuurd) ───────────
+    // ── FCL vNext — Groep 2: MaxSmbLearner (geleerde veiligheidsmarges) ──
+    // Default 0.0 = geen geleerde waarde aanwezig → gebruik handmatige max_bolus_day.
+    // Worden geschreven door MaxSmbLearner via config_override.json.
+    // Persisteren de geleerde waarde zodat ze actief blijven na JSON-consumptie.
+    fcl_vnext_max_smb_day_learned("fcl_vnext_max_smb_day_learned", 0.0, 0.0, 2.00),
+    fcl_vnext_iob_brake_learned("fcl_vnext_iob_brake_learned", 0.0, 0.0, 0.55),
+
+    // ── FCL vNext — Groep 3: Analyzer-gestuurde fijnafstelling ────────────
     fcl_vnext_peak_prediction_threshold("fcl_vnext_peak_prediction_threshold", 12.5, 9.5, 14.0),
-    fcl_vnext_watching_frontload_frac("fcl_vnext_watching_frontload_frac", 0.65, 0.40, 0.90),
-    fcl_vnext_watching_min_delta("fcl_vnext_watching_min_delta", 2.0, 0.5, 3.5),
+    fcl_vnext_watching_frontload_frac("fcl_vnext_watching_frontload_frac", 0.64, 0.40, 0.90),
+    fcl_vnext_watching_min_delta("fcl_vnext_watching_min_delta", 1.50, 0.5, 3.5),
     fcl_vnext_peak_prediction_horizon_h("fcl_vnext_peak_prediction_horizon_h", 1.2, 0.8, 2.5),
     fcl_vnext_iob_start("fcl_vnext_iob_start", 0.40, 0.25, 0.55),
     fcl_vnext_peak_iob_brake_suppress("fcl_vnext_peak_iob_brake_suppress", 0.42, 0.28, 0.60),
-
-    // ── FCL vNext — Early Confidence Boost ──────────────────────────────
     fcl_vnext_early_boost_factor("fcl_vnext_early_boost_factor", 1.0, 1.0, 2.0),
-    fcl_vnext_early_boost_min_confidence("fcl_vnext_early_boost_min_confidence", 0.60, 0.40, 0.85),
-
-    // ── FCL vNext — Peak Prediction Calibration (Optimizer) ─────────────
+    fcl_vnext_early_boost_min_confidence("fcl_vnext_early_boost_min_confidence", 0.50, 0.40, 0.85),
     fcl_vnext_early_rise_frac_min("fcl_vnext_early_rise_frac_min", 0.35, 0.35, 0.85),
     fcl_vnext_peak_max_slope_weight("fcl_vnext_peak_max_slope_weight", 0.0, 0.0, 0.60),
     fcl_vnext_late_commit_decay_factor("fcl_vnext_late_commit_decay_factor", 0.0, 0.0, 1.0),
     fcl_vnext_late_commit_decay_threshold("fcl_vnext_late_commit_decay_threshold", 0.55, 0.30, 0.70),
-
+    fcl_vnext_sustained_rise_slope_min("fcl_vnext_sustained_rise_slope_min", 0.40, 0.15, 0.80),
 }

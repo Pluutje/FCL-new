@@ -69,6 +69,7 @@ data class FCLvNextCsvLogRow(
     var earlyStage: Int = 0,
     var earlyConfidence: Double = 0.0,
     var earlyTargetU: Double = 0.0,
+    var sustainedHighSlopeMinutes: Double = 0.0,
     var earlyBoostActive: Boolean = false,   // was boost actief in deze cyclus?
     var earlyBoostCount: Int = 0,            // aantal boost-commits tot nu toe in episode
     var earlyBoostFactor: Double = 1.0,      // effectieve boost-factor die gebruikt is
@@ -137,6 +138,8 @@ data class FCLvNextCsvLogRow(
     var commitAggressionMul: Double = 0.0,
     var commitDoseRaw: Double = 0.0,
     var commitDoseFinal: Double = 0.0,
+    var lateDecayMul: Double = 1.0,
+    var episodeCommitNr: Int = 0,
 
     // ── IOB overshoot ──
     var iobOvershootFactor: Double = 1.0,
@@ -149,6 +152,7 @@ data class FCLvNextCsvLogRow(
     // ── Hypo ──
     var hypoActive: Boolean = false,
     var hypoProjectedBg: Double = 0.0,
+    var hypoDebtU: Double = 0.0,          // opgebouwde schuld door hypo-rem in huidige episode
 
     // ── Top guard ──
     var topGuardActive: Boolean = false,
@@ -291,6 +295,7 @@ object FCLvNextCsvLogger {
         "early_stage",
         "early_confidence",
         "early_target_u",
+        "sustained_high_slope_min",
         "early_boost_active",
         "early_boost_count",
         "early_boost_factor",
@@ -346,13 +351,14 @@ object FCLvNextCsvLogger {
         "commit_raw_plateau_penalty",
         "commit_aggression_mul",
         "commit_dose_raw",
-        "commit_dose_final",
+        "commit_dose_final", "late_decay_mul", "episode_commit_nr",
         "iob_overshoot_factor",
         "burst_delivered_10m",
         "burst_cap_10m",
         "burst_remaining_10m",
         "hypo_active",
         "hypo_projected_bg",
+        "hypo_debt_u",
         "topguard_active",
         "topguard_cap_factor",
         "top_plateau_confirmed",
@@ -471,7 +477,7 @@ object FCLvNextCsvLogger {
 
             row.mealEpisodeId, row.minutesSinceMealStart,
             bg1(row.riseSinceMealStart),
-            row.earlyStage, t2(row.earlyConfidence), u2(row.earlyTargetU),
+            row.earlyStage, t2(row.earlyConfidence), u2(row.earlyTargetU), t2(row.sustainedHighSlopeMinutes),
             row.earlyBoostActive, row.earlyBoostCount, t2(row.earlyBoostFactor),
             sanitize(row.mealState), t2(row.commitFraction), row.minutesSinceCommit,
 
@@ -498,11 +504,11 @@ object FCLvNextCsvLogger {
             t2(row.baseCommitFraction), t2(row.commitZoneFactor),
             t2(row.commitIobFactor), t2(row.commitPostPeakFactor),
             t2(row.commitRawPlateauPenalty), t2(row.commitAggressionMul),
-            u2(row.commitDoseRaw), u2(row.commitDoseFinal),
+            u2(row.commitDoseRaw), u2(row.commitDoseFinal), t2(row.lateDecayMul), row.episodeCommitNr,
 
             t2(row.iobOvershootFactor),
             u2(row.burstDelivered10m), u2(row.burstCap10m), u2(row.burstRemaining10m),
-            row.hypoActive, bg1(row.hypoProjectedBg),
+            row.hypoActive, bg1(row.hypoProjectedBg), u2(row.hypoDebtU),
             row.topGuardActive, t2(row.topGuardCapFactor), row.topPlateauConfirmed,
             t2(row.mealAggressionA), t2(row.mealAggressionMul),
             row.peakIobBrakeActive, t2(row.peakApproachFactor),

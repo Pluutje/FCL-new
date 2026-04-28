@@ -5,8 +5,6 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.IntKey
 
-
-
 private const val UI_EPISODES_TO_SHOW = 5
 
 data class FclUiSnapshot(
@@ -17,128 +15,122 @@ data class FclUiSnapshot(
     val predictedPeak: Double?
 )
 
-
 class FCLvNextStatusFormatter(
     private val prefs: Preferences,
-){
-
+) {
 
     private fun formatDeliveryHistory(
         history: List<Pair<DateTime, Double>>?
     ): String {
         if (history.isNullOrEmpty()) return "Geen recente afleveringen"
-
         return history.joinToString("\n") { (ts, dose) ->
             "${ts.toString("HH:mm")}  ${"%.2f".format(dose)}U"
         }
     }
-    private fun profileLabel(value: String): String =
-        when (value) {
-            "VERY_STRICT" -> "\uD83D\uDEE1\uFE0F Zeer voorzichtig"
-            "STRICT"      -> "\uD83E\uDDEF Voorzichtig"
-            "BALANCED"    -> "⚖\uFE0F Gebalanceerd"
-            "AGGRESSIVE"   -> "\uD83D\uDE80 Actief"
-            "VERY_AGGRESSIVE"  -> "\uD83D\uDD25 Zeer actief"
-            else          -> value
-        }
-    private fun HypoProtectionLabel(value: String): String =
-        when (value) {
-            "MINIMAL" -> "\uD83D\uDFE2 Minimaal"
-            "RELAXED"      -> "\uD83D\uDD35 Licht"
-            "BALANCED"    -> "⚖\uFE0F Gebalanceerd"
-            "SAFE"   -> "\uD83D\uDFE1 Verhoogd"
-            "ULTRA_SAFE"  -> "\uD83D\uDD34 Maximaal"
-            else          -> value
-        }
-    private fun NightResponsLabel(value: String): String =
-        when (value) {
-            "VERY_GUARDED" -> "\uD83D\uDED1 Zeer terughoudend"
-            "GUARDED"      -> "\uD83E\uDDEF Terughoudend"
-            "BALANCED"    -> "⚖\uFE0F Gebalanceerd"
-            "RESPONSIVE"   -> "\uD83C\uDF19 Reageert eerder"
-            "PROACTIVE"  -> "\uD83D\uDE80 Proactief"
-            else          -> value
-        }
 
-    private fun mealDetectLabel(value: String): String =
-        when (value) {
-            "VERY_SLOW"  -> "\uD83D\uDC22 Zeer laat"
-            "SLOW"       -> "\uD83D\uDC0C Laat"
-            "MODERATE"   -> "⚖\uFE0F Normaal"
-            "FAST"       -> "⚡ Snel"
-            "VERY_FAST" -> "\uD83D\uDEA8 Zeer snel"
-            else         -> value
-        }
-    private fun mealLabel(value: String): String =
-        when (value) {
-            "VERY_CONSERVATIVE"  -> "\uD83D\uDED1 Zeer voorzichtig"
-            "CONSERVATIVE"       -> "\uD83D\uDC22 Voorzichtig"
-            "BALANCED"   -> "⚖\uFE0F Gebalanceerd"
-            "ANTICIPATORYT"       -> "⚡ Anticiperend"
-            "AGGRESSIVE" -> "\uD83D\uDE80 Agressief"
-            else         -> value
-        }
+    // ── Label-helpers (ongewijzigd — worden nog gebruikt voor nightResponse en doseDistribution) ──
 
-    private fun correctionStyleLabel(value: String): String =
+    private fun nightResponsLabel(value: String): String =
         when (value) {
-            "VERY_CAUTIOUS" -> "\uD83D\uDED1 Zeer terughoudend"
-            "CAUTIOUS"      -> "\uD83E\uDDEF Voorzichtig"
-            "NORMAL"        -> "⚖\uFE0F Normaal"
-            "PERSISTENT"    -> "\uD83D\uDD01 Vasthoudend"
-            "VERY_PERSISTENT" -> "\uD83D\uDD02 Zeer vasthoudend"
-            else            -> value
+            "VERY_GUARDED" -> "🛑 Zeer terughoudend"
+            "GUARDED"      -> "🧤 Terughoudend"
+            "BALANCED"     -> "⚖️ Gebalanceerd"
+            "RESPONSIVE"   -> "🌙 Reageert eerder"
+            "PROACTIVE"    -> "🚀 Proactief"
+            else           -> value
         }
 
     private fun doseDistributionLabel(value: String): String =
         when (value) {
-            "VERY_SMOOTH"        -> "\uD83C\uDF0A Ultra smooth"
-            "SMOOTH"      -> "\uD83E\uDEE7 Smooth"
-            "BALANCED"        -> "⚖\uFE0F Balanced"
-            "PULSED" -> "\uD83D\uDD28 Pulsed"
+            "VERY_SMOOTH" -> "🌊 Ultra smooth"
+            "SMOOTH"      -> "🫧 Smooth"
+            "BALANCED"    -> "⚖️ Balanced"
+            "PULSED"      -> "🔨 Pulsed"
             "VERY_PULSED" -> "⚡ Ultra pulsed"
-            else            -> value
+            else          -> value
         }
 
+    // ── Algoritmestatus — leesbare samenvatting van actieve config ────────
+    //
+    // Toont de vier ingestelde waarden (S/T/V/N) plus twee vaste gebruikers-
+    // keuzes (nacht-respons, insulineverdeling). Geen losse Groep-3 params —
+    // die worden uitsluitend bijgehouden in FCLvNext_active_params.json.
+    //
+    // Interpretatiehulp per waarde:
+    //   S <  95: minder insuline dan standaard
+    //   S = 100: standaard basislijn
+    //   S > 105: meer insuline dan standaard
+    //   T <  95: later doseren (meer gespreid)
+    //   T = 100: neutraal timing
+    //   T > 105: eerder en geconcentreerder doseren
+    //   V <  95: minder vasthoudend, hypo-bescherming hoger
+    //   V = 100: standaard
+    //   V > 105: meer vasthoudend, agressiever bijsturen
+    //   N <  85: 's nachts beduidend rustiger dan overdag
+    //   N =  85: standaard nacht-instelling
+    //   N = 100: nacht identiek aan dag
+    //
+    private fun buildAlgoritmeSectie(): String {
+        val s = prefs.get(IntKey.fcl_vnext_sterkte)
+        val t = prefs.get(IntKey.fcl_vnext_timing)
+        val v = prefs.get(IntKey.fcl_vnext_volhoudendheid)
+        val n = prefs.get(IntKey.fcl_vnext_nacht_factor)
 
-
-
-
-    private fun extractProfileAdviceLine(statusText: String?): String? {
-        if (statusText.isNullOrBlank()) return null
-        for (line in statusText.split("\n")) {
-            val t = line.trim()
-            if (t.length >= 14 && t.substring(0, 14) == "PROFILE ADVICE:") {
-                return t
-            }
+        fun indicator(waarde: Int, neutraal: Int = 100) = when {
+            waarde > neutraal + 4 -> "↑"
+            waarde < neutraal - 4 -> "↓"
+            else                  -> "="
         }
-        return null
+
+        fun frontloadLabel(t: Int): String = when {
+            t >= 115 -> "Sterk vroeg"
+            t >= 107 -> "Vroeg"
+            t >= 93  -> "Neutraal"
+            t >= 85  -> "Laat"
+            else     -> "Sterk laat"
+        }
+
+        fun sterkteLabel(s: Int): String = when {
+            s >= 110 -> "Hoog"
+            s >= 102 -> "Iets boven standaard"
+            s >= 98  -> "Standaard"
+            s >= 90  -> "Iets onder standaard"
+            else     -> "Laag"
+        }
+
+        fun volhLabel(v: Int): String = when {
+            v >= 110 -> "Vasthoudend"
+            v >= 102 -> "Iets vasthoudender"
+            v >= 98  -> "Standaard"
+            v >= 90  -> "Iets voorzichtiger"
+            else     -> "Voorzichtig"
+        }
+
+        val nachtTov = when {
+            n >= 98  -> "Gelijk aan dag"
+            n >= 90  -> "${100 - n}% rustiger dan dag"
+            n >= 78  -> "${100 - n}% rustiger dan dag"
+            else     -> "${100 - n}% rustiger dan dag"
+        }
+
+        return buildString {
+            appendLine("════════════════════════")
+            appendLine(" 🧠 FCL V5 v2.0.2")
+            appendLine("════════════════════════")
+            appendLine()
+            appendLine("📊 ALGORITMEPARAMETERS")
+            appendLine("─────────────────────")
+            appendLine("• Sterkte   (S): ${s}%  ${indicator(s)}  ${sterkteLabel(s)}")
+            appendLine("• Timing    (T): ${t}%  ${indicator(t)}  ${frontloadLabel(t)}")
+            appendLine("• Volhoud.  (V): ${v}%  ${indicator(v)}  ${volhLabel(v)}")
+            appendLine("• Nacht-N      : ${n}%  ($nachtTov)")
+            appendLine()
+            appendLine("⚙️  LEVERINGSINSTELLINGEN")
+            appendLine("─────────────────────")
+            appendLine("• Nacht respons     : ${nightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}")
+            append(    "• Insulineverdeling : ${doseDistributionLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}")
+        }
     }
-
-    private fun extractProfileReasonLine(statusText: String?): String? {
-        if (statusText.isNullOrBlank()) return null
-        for (line in statusText.split("\n")) {
-            val t = line.trim()
-            if (t.length >= 15 && t.substring(0, 15) == "PROFILE REASON:") {
-                return t
-            }
-        }
-        return null
-    }
-
-    private fun extractPersistLines(statusText: String?): List<String> {
-        if (statusText.isNullOrBlank()) return emptyList()
-
-        val out = ArrayList<String>(3)
-        for (line in statusText.split("\n")) {
-            val t = line.trim()
-            if (t.length >= 7 && t.substring(0, 7) == "PERSIST") {
-                out.add(t)
-            }
-        }
-        return out
-    }
-
-
 
     private fun buildFclBlock(
         advice: FCLvNextAdvice?,
@@ -147,13 +139,11 @@ class FCLvNextStatusFormatter(
         basalRate: Double,
         shouldDeliver: Boolean
     ): String {
-
         if (advice == null) return "Geen FCL advies"
 
         val sb = StringBuilder()
         sb.append("🧠 FCL vNext\n")
         sb.append("─────────────────────\n")
-
         sb.append("📈 Situatie\n")
         sb.append("─────────────────────\n")
         sb.append("• Glucose: ${"%.1f".format(ui.bgNow)} mmol/L\n")
@@ -179,7 +169,6 @@ class FCLvNextStatusFormatter(
         }
 
         sb.append("\n")
-
         sb.append("💉 Advies\n")
         sb.append("─────────────────────\n")
         if (!shouldDeliver || (bolusAmount == 0.0 && basalRate == 0.0)) {
@@ -196,172 +185,8 @@ class FCLvNextStatusFormatter(
         return sb.toString().trimEnd()
     }
 
-
     private fun minutesBetween(a: DateTime, b: DateTime): Long =
         (b.millis - a.millis) / 60000
-
-
-    // ── Fijnafstelling status-sectie ─────────────────────────────────────
-
-    /**
-     * Bouwt een compacte sectie met de zes Groep A parameters zoals ze
-     * werkelijk actief zijn in AAPS, plus default en afwijking.
-     *
-     * Wordt aangeroepen vanuit buildStatus() met de final FCLvNextConfig.
-     *
-     * Opmaak per regel:
-     *   • Naam  : actief  (default / Δ afwijking  [bron])
-     *
-     * Bron-labels:
-     *   "default"  → waarde gelijk aan hardcoded default
-     *   "as-keten" → gewijzigd door een as-functie (applyMealHandling etc.)
-     *   "override" → expliciet overschreven via param_overrides JSON
-     *
-     * Voor de bron gebruiken we FCLvNextActiveParamsWriter.Defaults om te
-     * vergelijken — die is de enige bron van default-kennis.
-     */
-    private fun buildFijnafstellingBlock(config: FCLvNextConfig): String {
-        val D = FCLvNextActiveParamsWriter.Defaults
-
-        fun fmtDouble(v: Double) = String.format(java.util.Locale.US, "%.2f", v)
-        fun fmtDelta(active: Double, default: Double): String {
-            val d = active - default
-            return when {
-                kotlin.math.abs(d) < 0.001 -> "= default"
-                d > 0  -> "Δ +${String.format(java.util.Locale.US, "%.2f", d)}"
-                else   -> "Δ ${String.format(java.util.Locale.US, "%.2f", d)}"
-            }
-        }
-        fun srcLabel(active: Double, default: Double, hasOverride: Boolean): String = when {
-            kotlin.math.abs(active - default) < 0.001 -> "default"
-            hasOverride                                -> "override"
-            else                                       -> "as-keten"
-        }
-        fun srcLabelInt(active: Int, default: Int, hasOverride: Boolean): String = when {
-            active == default -> "default"
-            hasOverride       -> "override"
-            else              -> "as-keten"
-        }
-
-        // Lees het override-bestand om te weten welke params een override hebben
-        val ovr = FCLvNextConfigOverride.load()?.paramOverrides
-
-        // Hulpfunctie: schrijft elke parameter op twee regels
-        //   Regel 1: "• Naam  : actief eenheid"
-        //   Regel 2: "  ↳ def XX, Δ YY  [bron]"
-        val sb = StringBuilder()
-        sb.appendLine("⚙️ FIJNAFSTELLING - ACTIEF")
-        sb.appendLine("─────────────────────")
-
-        fun paramRegel(
-            naam: String,
-            actief: String,
-            eenheid: String,
-            defVal: String,
-            delta: String,
-            bron: String,
-            isLast: Boolean = false
-        ) {
-            sb.appendLine("• $naam: $actief $eenheid".trimEnd())
-            val regel2 = "  ↳ def $defVal, $delta  [$bron]"
-            if (isLast) sb.append(regel2) else sb.appendLine(regel2)
-        }
-
-
-        // peakPredictionThreshold
-        val ptActive  = config.peakPredictionThreshold
-        val ptDefault = D.PEAK_PREDICTION_THRESHOLD
-        val ptHasOvr  = ovr?.peakPredictionThreshold != null
-        paramRegel("Piekdrempel",    "${fmtDouble(ptActive)} mmol", "",
-                   "${fmtDouble(ptDefault)} mmol", fmtDelta(ptActive, ptDefault), srcLabel(ptActive, ptDefault, ptHasOvr))
-
-        // watchingFrontloadFrac
-        val ffActive  = config.watchingFrontloadFrac
-        val ffDefault = D.WATCHING_FRONTLOAD_FRAC
-        val ffHasOvr  = ovr?.watchingFrontloadFrac != null
-        paramRegel("Frontload frac", fmtDouble(ffActive), "",
-                   fmtDouble(ffDefault), fmtDelta(ffActive, ffDefault), srcLabel(ffActive, ffDefault, ffHasOvr))
-
-        // watchingMinDeltaToTarget
-        val dtActive  = config.watchingMinDeltaToTarget
-        val dtDefault = D.WATCHING_MIN_DELTA_TARGET
-        val dtHasOvr  = ovr?.watchingMinDeltaToTarget != null
-        paramRegel("Delta-drempel",  "${fmtDouble(dtActive)} mmol", "",
-                   "${fmtDouble(dtDefault)} mmol", fmtDelta(dtActive, dtDefault), srcLabel(dtActive, dtDefault, dtHasOvr))
-
-        // commitCooldownMinutes
-        val ccActive  = config.commitCooldownMinutes
-        val ccDefault = D.COMMIT_COOLDOWN_MINUTES
-        val ccHasOvr  = ovr?.commitCooldownMinutes != null
-        paramRegel("Commit cooldown", "$ccActive min", "",
-                   "$ccDefault min", fmtDelta(ccActive.toDouble(), ccDefault.toDouble()), srcLabelInt(ccActive, ccDefault, ccHasOvr))
-
-        // peakPredictionHorizonH
-        val phActive  = config.peakPredictionHorizonH
-        val phDefault = D.PEAK_PREDICTION_HORIZON_H
-        val phHasOvr  = ovr?.peakPredictionHorizonH != null
-        paramRegel("Piek horizon",   "${fmtDouble(phActive)} uur", "",
-                   "${fmtDouble(phDefault)} uur", fmtDelta(phActive, phDefault), srcLabel(phActive, phDefault, phHasOvr))
-
-        // iobStart
-        val isActive  = config.iobStart
-        val isDefault = D.IOB_START
-        val isHasOvr  = ovr?.iobStart != null
-        paramRegel("IOB remdrempel", fmtDouble(isActive), "",
-                   fmtDouble(isDefault), fmtDelta(isActive, isDefault), srcLabel(isActive, isDefault, isHasOvr), isLast = true)
-
-        return sb.toString().trimEnd()
-    }
-
-
-    private fun nextFaster(current: String) = when (current) {
-        "VERY_SLOW" -> "SLOW"
-        "SLOW" -> "MODERATE"
-        "MODERATE" -> "FAST"
-        "FAST" -> "VERY_FAST"
-        else -> null
-    }
-
-    private fun nextSlower(current: String) = when (current) {
-        "VERY_FAST" -> "FAST"
-        "FAST" -> "MODERATE"
-        "MODERATE" -> "SLOW"
-        "SLOW" -> "VERY_SLOW"
-        else -> null
-    }
-
-    private fun nextMoreConservative(current: String) = when (current) {
-        "VERY_AGGRESSIVE" -> "AGGRESSIVE"
-        "AGGRESSIVE" -> "BALANCED"
-        "BALANCED" -> "STRICT"
-        "STRICT" -> "VERY_STRICT"
-        else -> null
-    }
-
-    private fun nextMoreAggressive(current: String) = when (current) {
-        "VERY_STRICT" -> "STRICT"
-        "STRICT" -> "BALANCED"
-        "BALANCED" -> "AGGRESSIVE"
-        "AGGRESSIVE" -> "VERY_AGGRESSIVE"
-        else -> null
-    }
-
-    private fun nextMorePersistent(current: String) = when (current) {
-        "VERY_CAUTIOUS" -> "CAUTIOUS"
-        "CAUTIOUS" -> "NORMAL"
-        "NORMAL" -> "PERSISTENT"
-        "PERSISTENT" -> "VERY_PERSISTENT"
-        else -> null
-    }
-
-    private fun nextMoreCautious(current: String) = when (current) {
-        "VERY_PERSISTENT" -> "PERSISTENT"
-        "PERSISTENT" -> "NORMAL"
-        "NORMAL" -> "CAUTIOUS"
-        "CAUTIOUS" -> "VERY_CAUTIOUS"
-        else -> null
-    }
-
 
     fun buildStatus(
         isNight: Boolean,
@@ -373,7 +198,7 @@ class FCLvNextStatusFormatter(
         activityLog: String?,
         resistanceLog: String?,
         metricsText: String?,
-        activeConfig: FCLvNextConfig? = null       // ← nieuw, optioneel voor backward compat
+        activeConfig: FCLvNextConfig? = null
     ): String {
 
         val coreStatus = """
@@ -397,7 +222,6 @@ ${formatDeliveryHistory(advice?.let { deliveryHistory.toList() })}
             shouldDeliver = shouldDeliver
         )
 
-
         val activityStatus = """
 🏃 ACTIVITEIT
 ─────────────────────
@@ -417,22 +241,8 @@ ${resistanceLog ?: "Geen resistentie-log"}
 ${metricsText ?: "Nog geen data"}
 """.trimIndent()
 
-        // Fijnafstelling sectie — alleen als activeConfig meegegeven is
-        val fijnafstellingStatus = activeConfig?.let { cfg ->
-            buildFijnafstellingBlock(cfg)
-        } ?: ""
-
         return """
-════════════════════════
- 🧠 FCL V5 v1.0.0
- 
-════════════════════════
-• Sterkte (S)          : ${prefs.get(IntKey.fcl_vnext_sterkte)}%
-• Timing (T)           : ${prefs.get(IntKey.fcl_vnext_timing)}%
-• Volhoudendheid (V)   : ${prefs.get(IntKey.fcl_vnext_volhoudendheid)}%
-• Nacht-factor (N)     : ${prefs.get(IntKey.fcl_vnext_nacht_factor)}%
-• Nacht respons        : ${NightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}
-• Insulineverdeling    : ${doseDistributionLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}
+${buildAlgoritmeSectie()}
 
 
 $coreStatus
@@ -445,8 +255,6 @@ $activityStatus
 $resistanceStatus
 
 $metricsStatus
-
-$fijnafstellingStatus
 """.trimIndent()
     }
 }

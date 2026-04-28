@@ -495,85 +495,10 @@ open class OpenAPSFCLPlugin @Inject constructor(
                 )
             )
 
-            // Intro tekst
-            addPreference(
-                Preference(context).apply {
-                    isSelectable = false
-                    summary = context.getString(R.string.fcl_vnext_stv_intro)
-                }
-            )
-
-            // ── STERKTE (S) ──────────────────────────────────────────────
-            // Vervangt fcl_vnext_gain_day. Dag-gain = S/100.
-            addPreference(
-                AdaptiveInfoPreference(
-                    context,
-                    R.string.fcl_vnext_sterkte_title,
-                    R.string.fcl_vnext_sterkte_summary
-                )
-            )
-            addPreference(
-                AdaptiveIntPreference(
-                    ctx = context,
-                    intKey = IntKey.fcl_vnext_sterkte,
-                    dialogMessage = R.string.fcl_vnext_sterkte_dialog,
-                    title = R.string.fcl_vnext_sterkte_title
-                )
-            )
-
-            // ── TIMING (T) ───────────────────────────────────────────────
-            addPreference(
-                AdaptiveInfoPreference(
-                    context,
-                    R.string.fcl_vnext_timing_title,
-                    R.string.fcl_vnext_timing_summary
-                )
-            )
-            addPreference(
-                AdaptiveIntPreference(
-                    ctx = context,
-                    intKey = IntKey.fcl_vnext_timing,
-                    dialogMessage = R.string.fcl_vnext_timing_dialog,
-                    title = R.string.fcl_vnext_timing_title
-                )
-            )
-
-            // ── VOLHOUDENDHEID (V) ────────────────────────────────────────
-            addPreference(
-                AdaptiveInfoPreference(
-                    context,
-                    R.string.fcl_vnext_volhoudendheid_title,
-                    R.string.fcl_vnext_volhoudendheid_summary
-                )
-            )
-            addPreference(
-                AdaptiveIntPreference(
-                    ctx = context,
-                    intKey = IntKey.fcl_vnext_volhoudendheid,
-                    dialogMessage = R.string.fcl_vnext_volhoudendheid_dialog,
-                    title = R.string.fcl_vnext_volhoudendheid_title
-                )
-            )
-
-            // ── NACHT-FACTOR (N) ──────────────────────────────────────────
-            // Vervangt fcl_vnext_gain_night. Nacht-gain = S/100 × N/100.
-            addPreference(
-                AdaptiveInfoPreference(
-                    context,
-                    R.string.fcl_vnext_nacht_factor_title,
-                    R.string.fcl_vnext_nacht_factor_summary
-                )
-            )
-            addPreference(
-                AdaptiveIntPreference(
-                    ctx = context,
-                    intKey = IntKey.fcl_vnext_nacht_factor,
-                    dialogMessage = R.string.fcl_vnext_nacht_factor_dialog,
-                    title = R.string.fcl_vnext_nacht_factor_title
-                )
-            )
-
             // ── MAXIMALE BOLUS DAG ────────────────────────────────────────
+            // S/T/V/N worden uitsluitend ingesteld door FCL Analyzer via
+            // FCLvNext_config_override.json. Ze zijn zichtbaar in de FCL-status
+            // (FCLvNextStatusFormatter) maar niet meer als handmatige sliders.
             addPreference(
                 AdaptiveDoublePreference(
                     ctx = context,

@@ -6,6 +6,7 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
 import kotlin.Double
 import kotlin.math.roundToInt
+import kotlin.math.abs
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 
 data class FCLvNextConfig(
@@ -253,7 +254,17 @@ data class FCLvNextConfig(
     // de drempel overschrijdt. Doel: insuline vroeg concentreren,
     // minder laat — lagere IOB op en na de piek.
     val lateCommitDecayFactor: Double,    // 0.0 = uit, bereik 0.0–1.0
-    val lateCommitDecayThreshold: Double  // iobRatio drempel. Bereik 0.30–0.70
+    val lateCommitDecayThreshold: Double, // iobRatio drempel. Bereik 0.30–0.70
+
+    // ── Sustained Rise Response ───────────────────────────────────────────
+    // sustainedRiseSlopeMin: slopedrempel (mmol/min) voor de aanhoudende-stijging teller.
+    //   Teller tikt op zolang slope > drempel. Lager = gevoeliger voor gestage stijgingen.
+    //   DFLearner/Analyser stuurt dit bij via het JSON-override bestand.
+    val sustainedRiseSlopeMin: Double,    // drempel, bijv. 0.35 mmol/min
+
+    // sustainedRiseMinTarget: na hoeveel minuten aanhoudend stijgen bereikt
+    //   sustainScore zijn maximum (1.0). Lager = eerder reageren.
+    val sustainedRiseMinTarget: Int       // minuten, bijv. 10
 )
 
 
@@ -305,6 +316,21 @@ fun loadFCLvNextConfig(
         po.peakMaxSlopeWeight?.let            { prefs.put(DoubleKey.fcl_vnext_peak_max_slope_weight, it) }
         po.lateCommitDecayFactor?.let         { prefs.put(DoubleKey.fcl_vnext_late_commit_decay_factor, it) }
         po.lateCommitDecayThreshold?.let      { prefs.put(DoubleKey.fcl_vnext_late_commit_decay_threshold, it) }
+        po.sustainedRiseSlopeMin?.let         { prefs.put(DoubleKey.fcl_vnext_sustained_rise_slope_min, it) }
+        po.sustainedRiseMinTarget?.let        { prefs.put(IntKey.fcl_vnext_sustained_rise_min_target, it) }
+    }
+
+    // ── MaxSmbLearner waarden persistent opslaan ──────────────────────────
+    // Zodat ze actief blijven na consume_after_use (zelfde patroon als S/T/V)
+    if (override?.maxSmbDayLearned != null) {
+        val v = override.maxSmbDayLearned.coerceIn(0.75, 2.00)
+        if (abs(v - prefs.get(DoubleKey.fcl_vnext_max_smb_day_learned)) > 0.001)
+            prefs.put(DoubleKey.fcl_vnext_max_smb_day_learned, v)
+    }
+    if (override?.iobBrakeLearned != null) {
+        val v = override.iobBrakeLearned.coerceIn(0.35, 0.55)
+        if (abs(v - prefs.get(DoubleKey.fcl_vnext_iob_brake_learned)) > 0.001)
+            prefs.put(DoubleKey.fcl_vnext_iob_brake_learned, v)
     }
 
     // ── Gain = S (dag) of S × N (nacht) ──────────────────────────────────
@@ -315,7 +341,23 @@ fun loadFCLvNextConfig(
 
     val maxSMB =
         if (isNight) prefs.get(DoubleKey.max_bolus_night)
-        else         prefs.get(DoubleKey.max_bolus_day)
+        else {
+            // MaxSmbLearner: gebruik geleerde waarde als aanwezig in override,
+            // anders de prefs-waarde (geleerde persistent opgeslagen),
+            // anders de handmatige instelling.
+            override?.maxSmbDayLearned?.coerceIn(0.75, 2.00)
+                ?: prefs.get(DoubleKey.fcl_vnext_max_smb_day_learned).let {
+                    if (it > 0.001) it else prefs.get(DoubleKey.max_bolus_day)
+                }
+        }
+
+    // IobBrake override van MaxSmbLearner — overschrijft de DFMapping-waarde
+    // die via param_overrides in po.peakIobBrakeSuppressThreshold zit.
+    // Prioriteit: maxSmbLearner override > DFMapping param_override > prefs default
+    val iobBrakeOverride: Double? = override?.iobBrakeLearned?.coerceIn(0.35, 0.55)
+        ?: prefs.get(DoubleKey.fcl_vnext_iob_brake_learned).let {
+            if (it > 0.001) it else null
+        }
 
     val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
     val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
@@ -336,7 +378,7 @@ fun loadFCLvNextConfig(
         nightResponseStyle    = nightResponseStyle,
 
         bgSmoothingAlpha = 0.40,
-        iobStart         = prefs.get(DoubleKey.fcl_vnext_iob_start),
+        iobStart         = po?.iobStart ?: prefs.get(DoubleKey.fcl_vnext_iob_start),
         iobMax           = 0.70,      // was 0.75
         iobMinFactor     = 0.10,
         commitIobPower   = 1.00,
@@ -377,7 +419,7 @@ fun loadFCLvNextConfig(
         mealDetectThresholdMul  = 0.90,
         microRampThresholdMul   = 0.90,
 
-        commitCooldownMinutes = prefs.get(IntKey.fcl_vnext_commit_cooldown_minutes),
+        commitCooldownMinutes = po?.commitCooldownMinutes ?: prefs.get(IntKey.fcl_vnext_commit_cooldown_minutes),
         minCommitDose         = 0.30,
 
         correctionHoldSlopeMax         = -0.28,
@@ -410,12 +452,12 @@ fun loadFCLvNextConfig(
         earlyStage1ThresholdMul  = 0.80,
         enableFastCarbOverride   = true,
 
-        peakPredictionThreshold  = prefs.get(DoubleKey.fcl_vnext_peak_prediction_threshold),
+        peakPredictionThreshold  = po?.peakPredictionThreshold ?: prefs.get(DoubleKey.fcl_vnext_peak_prediction_threshold),
         peakConfirmCycles        = 2,
         peakMinConsistency       = 0.55,
         peakMinSlope             = 0.5,
         peakMinAccel             = -0.1,
-        peakPredictionHorizonH   = prefs.get(DoubleKey.fcl_vnext_peak_prediction_horizon_h),
+        peakPredictionHorizonH   = po?.peakPredictionHorizonH ?: prefs.get(DoubleKey.fcl_vnext_peak_prediction_horizon_h),
         peakExitSlope            = 0.45,
         peakExitAccel            = -0.08,
         peakMomentumHalfLifeMin  = 25.0,
@@ -428,9 +470,9 @@ fun loadFCLvNextConfig(
 
         trendConfirmCycles = 2,
 
-        watchingFrontloadFrac    = prefs.get(DoubleKey.fcl_vnext_watching_frontload_frac),
+        watchingFrontloadFrac    = po?.watchingFrontloadFrac    ?: prefs.get(DoubleKey.fcl_vnext_watching_frontload_frac),
         watchingMinSlope         = 0.30,
-        watchingMinDeltaToTarget = prefs.get(DoubleKey.fcl_vnext_watching_min_delta),
+        watchingMinDeltaToTarget = po?.watchingMinDeltaToTarget ?: prefs.get(DoubleKey.fcl_vnext_watching_min_delta),
         watchingMinPeakRise      = 0.6,
         watchingMaxIobRatio      = 0.75,
 
@@ -440,7 +482,8 @@ fun loadFCLvNextConfig(
         hypoInsulinFrac90  = 0.90,
 
         // finetuning kandidaten — defaults gespiegeld aan huidige hardcoded waarden
-        peakIobBrakeSuppressThreshold   = prefs.get(DoubleKey.fcl_vnext_peak_iob_brake_suppress),
+        peakIobBrakeSuppressThreshold   = iobBrakeOverride
+            ?: (po?.peakIobBrakeSuppressThreshold ?: prefs.get(DoubleKey.fcl_vnext_peak_iob_brake_suppress)),
         peakIobBrakeLockoutThreshold    = 0.55,
         preCommitTopIobThreshold        = 0.45,
         preCommitTopAccelMax            = 0.06,
@@ -464,32 +507,28 @@ fun loadFCLvNextConfig(
         microRampIobMax                 = 0.45,
 
         // Early Confidence Boost — standaard uitgeschakeld (factor=1.0)
-        // Analyzer kan ophogen via config_override.json
-        earlyBoostFactor         = prefs.get(DoubleKey.fcl_vnext_early_boost_factor),
-        earlyBoostMinConfidence  = prefs.get(DoubleKey.fcl_vnext_early_boost_min_confidence),
-        earlyBoostMaxCommits     = prefs.get(IntKey.fcl_vnext_early_boost_max_commits),
-        earlyRiseFracMin         = prefs.get(DoubleKey.fcl_vnext_early_rise_frac_min),
-        peakMaxSlopeWeight       = prefs.get(DoubleKey.fcl_vnext_peak_max_slope_weight),
-        lateCommitDecayFactor    = prefs.get(DoubleKey.fcl_vnext_late_commit_decay_factor),
-        lateCommitDecayThreshold = prefs.get(DoubleKey.fcl_vnext_late_commit_decay_threshold),
+        // Analyzer kan ophogen via config_override.json.
+        // BELANGRIJK: lees direct uit po (override) als beschikbaar, anders uit prefs.
+        // Reden: prefs.put() gevolgd door prefs.get() in dezelfde aanroep kan de
+        // gecachte prefs-waarde teruggeven i.p.v. de zojuist geschreven waarde.
+        earlyBoostFactor         = po?.earlyBoostFactor        ?: prefs.get(DoubleKey.fcl_vnext_early_boost_factor),
+        earlyBoostMinConfidence  = po?.earlyBoostMinConfidence ?: prefs.get(DoubleKey.fcl_vnext_early_boost_min_confidence),
+        earlyBoostMaxCommits     = po?.earlyBoostMaxCommits    ?: prefs.get(IntKey.fcl_vnext_early_boost_max_commits),
+        earlyRiseFracMin         = po?.earlyRiseFracMin        ?: prefs.get(DoubleKey.fcl_vnext_early_rise_frac_min),
+        peakMaxSlopeWeight       = po?.peakMaxSlopeWeight      ?: prefs.get(DoubleKey.fcl_vnext_peak_max_slope_weight),
+        lateCommitDecayFactor    = po?.lateCommitDecayFactor   ?: prefs.get(DoubleKey.fcl_vnext_late_commit_decay_factor),
+        lateCommitDecayThreshold = po?.lateCommitDecayThreshold ?: prefs.get(DoubleKey.fcl_vnext_late_commit_decay_threshold),
 
-        )
+        sustainedRiseSlopeMin    = po?.sustainedRiseSlopeMin   ?: prefs.get(DoubleKey.fcl_vnext_sustained_rise_slope_min),
+        sustainedRiseMinTarget   = po?.sustainedRiseMinTarget  ?: prefs.get(IntKey.fcl_vnext_sustained_rise_min_target)
+
+    )
 
     return base
         .let { applySTVModel(it, sterkte, timing, volhoudendheid) }
         .let { applyDoseDistributionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
-        .let {
-            // Geef de prefs-waarden mee zodat user-ingestelde waarden niet door applySTVModel
-            // worden overschreven na consumptie van het override-bestand.
-            applyParamOverrides(
-                cfg      = it,
-                overrides = override?.paramOverrides,
-                prefsWatchingMinDelta = prefs.get(DoubleKey.fcl_vnext_watching_min_delta),
-                prefsCommitCooldown   = prefs.get(IntKey.fcl_vnext_commit_cooldown_minutes),
-                prefsFrontloadFrac    = prefs.get(DoubleKey.fcl_vnext_watching_frontload_frac)
-            )
-        }
+        .let { applyParamOverrides(it, override?.paramOverrides) }
         .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nachtFactor) }
 }
 
@@ -505,21 +544,22 @@ private fun applySTVModel(
     val v = volhoudendheid.toDouble() / 100.0
 
     return cfg.copy(
-        // STERKTE
-        doseStrengthMul       = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
-        maxCommitFractionMul  = (1.0 + (s - 1.0) * 2.00).coerceIn(0.50, 1.90),
-        microDoseMul          = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
-        watchingFrontloadFrac = (0.65 + (s - 1.0) * 0.25).coerceIn(0.40, 0.90),
+        // STERKTE (S/D) — dosis-hoogte en commit-fractie schaling
+        // watchingFrontloadFrac is verwijderd: wordt uitsluitend bepaald door
+        // DFMapping(F) → param_overrides → prefs → applyParamOverrides.
+        doseStrengthMul      = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
+        maxCommitFractionMul = (1.0 + (s - 1.0) * 2.00).coerceIn(0.50, 1.90),
+        microDoseMul         = (1.0 + (s - 1.0) * 1.50).coerceIn(0.60, 1.90),
 
-        // TIMING
-        mealDetectThresholdMul   = (0.90 / t).coerceIn(0.70, 1.20),
-        microRampThresholdMul    = (0.90 / t).coerceIn(0.65, 1.20),
-        earlyStage1ThresholdMul  = (0.80 / t).coerceIn(0.55, 1.10),
-        mealConfidenceSpeedMul   = (1.40 * t).coerceIn(1.05, 1.80),
-        watchingMinDeltaToTarget = (2.0 / t).coerceIn(1.20, 3.50),
-        commitCooldownMinutes    = (15.0 / t).roundToInt().coerceIn(8, 22),
+        // TIMING (T/F) — detectiesnelheid en commitment-drempels
+        // watchingMinDeltaToTarget en commitCooldownMinutes zijn verwijderd:
+        // worden uitsluitend bepaald door DFMapping(F) → param_overrides.
+        mealDetectThresholdMul  = (0.90 / t).coerceIn(0.70, 1.20),
+        microRampThresholdMul   = (0.90 / t).coerceIn(0.65, 1.20),
+        earlyStage1ThresholdMul = (0.80 / t).coerceIn(0.55, 1.10),
+        mealConfidenceSpeedMul  = (1.40 * t).coerceIn(1.05, 1.80),
 
-        // VOLHOUDENDHEID
+        // VOLHOUDENDHEID (V/D) — persistentie en hypo-bescherming
         persistentAggressionMul = (1.08 * v).coerceIn(0.60, 1.60),
         correctionHoldDeltaMax  = (1.85 * v).coerceIn(1.10, 2.80),
         smallCorrectionMaxU     = (0.28 * v).coerceIn(0.12, 0.50),
@@ -642,83 +682,83 @@ private fun applyDoseDistributionStyle(
 private fun applyParamOverrides(
     cfg: FCLvNextConfig,
     overrides: FCLvNextConfigOverride.ParamOverrides?,
-    // Prefs-waarden van user-instelbare STV-afhankelijke params, gelezen VOOR applySTVModel.
-    // Als de gebruiker een afwijkende waarde heeft ingesteld (via de Analyzer),
-    // dan gebruiken we die als persistente override — ook na consumptie van het override-bestand.
-    prefsWatchingMinDelta: Double? = null,
-    prefsCommitCooldown: Int? = null,
-    prefsFrontloadFrac: Double? = null
 ): FCLvNextConfig {
-    if (overrides == null && prefsWatchingMinDelta == null &&
-        prefsCommitCooldown == null && prefsFrontloadFrac == null) return cfg
+    // Alle 16 params komen uitsluitend van DFMapping → JSON → prefs.
+    // applySTVModel raakt deze params niet meer — geen conflict, geen fallback nodig.
+    // Prefs bevatten altijd de meest recent door de analyser geschreven waarden.
+    // Bij overrides==null (geen JSON geconsumeerd deze cyclus): prefs-waarden zijn
+    // al in de base config geladen via loadFCLvNextConfig → geen actie nodig.
+    if (overrides == null) return cfg
 
     return cfg.copy(
-        peakPredictionThreshold = overrides?.peakPredictionThreshold
+        peakPredictionThreshold = overrides.peakPredictionThreshold
             ?.coerceIn(9.5, 14.0)
             ?: cfg.peakPredictionThreshold,
 
-        watchingFrontloadFrac = overrides?.watchingFrontloadFrac
+        watchingFrontloadFrac = overrides.watchingFrontloadFrac
             ?.coerceIn(0.40, 0.90)
-            ?: prefsFrontloadFrac?.coerceIn(0.40, 0.90)
             ?: cfg.watchingFrontloadFrac,
 
-        // Gebruik de prefs-waarde als persistente fallback als er geen actieve override is.
-        // Zonder dit overschrijft applySTVModel elke cyclus de user-instelling.
-        watchingMinDeltaToTarget = overrides?.watchingMinDeltaToTarget
+        watchingMinDeltaToTarget = overrides.watchingMinDeltaToTarget
             ?.coerceIn(0.5, 3.5)
-            ?: prefsWatchingMinDelta?.coerceIn(0.5, 3.5)
             ?: cfg.watchingMinDeltaToTarget,
 
-        commitCooldownMinutes = overrides?.commitCooldownMinutes
+        commitCooldownMinutes = overrides.commitCooldownMinutes
             ?.coerceIn(5, 25)
-            ?: prefsCommitCooldown?.coerceIn(5, 25)
             ?: cfg.commitCooldownMinutes,
 
-        peakPredictionHorizonH = overrides?.peakPredictionHorizonH
+        peakPredictionHorizonH = overrides.peakPredictionHorizonH
             ?.coerceIn(0.8, 1.8)
             ?: cfg.peakPredictionHorizonH,
 
-        iobStart = overrides?.iobStart
+        iobStart = overrides.iobStart
             ?.coerceIn(0.25, 0.55)
             ?: cfg.iobStart,
 
-        peakIobBrakeSuppressThreshold = overrides?.peakIobBrakeSuppressThreshold
+        peakIobBrakeSuppressThreshold = overrides.peakIobBrakeSuppressThreshold
             ?.coerceIn(0.28, 0.60)
             ?: cfg.peakIobBrakeSuppressThreshold,
 
         // Lockout blijft altijd > suppress drempel
-        peakIobBrakeLockoutThreshold = overrides?.peakIobBrakeSuppressThreshold
+        peakIobBrakeLockoutThreshold = overrides.peakIobBrakeSuppressThreshold
             ?.let { (it + 0.13).coerceIn(0.35, 0.75) }
             ?: cfg.peakIobBrakeLockoutThreshold,
 
-        // Early Confidence Boost
-        earlyBoostFactor = overrides?.earlyBoostFactor
+        earlyBoostFactor = overrides.earlyBoostFactor
             ?.coerceIn(1.0, 2.0)
             ?: cfg.earlyBoostFactor,
 
-        earlyBoostMinConfidence = overrides?.earlyBoostMinConfidence
+        earlyBoostMinConfidence = overrides.earlyBoostMinConfidence
             ?.coerceIn(0.40, 0.85)
             ?: cfg.earlyBoostMinConfidence,
 
-        earlyBoostMaxCommits = overrides?.earlyBoostMaxCommits
+        earlyBoostMaxCommits = overrides.earlyBoostMaxCommits
             ?.coerceIn(1, 3)
             ?: cfg.earlyBoostMaxCommits,
 
-        earlyRiseFracMin = overrides?.earlyRiseFracMin
+        earlyRiseFracMin = overrides.earlyRiseFracMin
             ?.coerceIn(0.35, 0.85)
             ?: cfg.earlyRiseFracMin,
 
-        peakMaxSlopeWeight = overrides?.peakMaxSlopeWeight
+        peakMaxSlopeWeight = overrides.peakMaxSlopeWeight
             ?.coerceIn(0.0, 0.60)
             ?: cfg.peakMaxSlopeWeight,
 
-        lateCommitDecayFactor = overrides?.lateCommitDecayFactor
+        lateCommitDecayFactor = overrides.lateCommitDecayFactor
             ?.coerceIn(0.0, 1.0)
             ?: cfg.lateCommitDecayFactor,
 
-        lateCommitDecayThreshold = overrides?.lateCommitDecayThreshold
+        lateCommitDecayThreshold = overrides.lateCommitDecayThreshold
             ?.coerceIn(0.30, 0.70)
-            ?: cfg.lateCommitDecayThreshold
+            ?: cfg.lateCommitDecayThreshold,
+
+        sustainedRiseSlopeMin = overrides.sustainedRiseSlopeMin
+            ?.coerceIn(0.15, 0.80)
+            ?: cfg.sustainedRiseSlopeMin,
+
+        sustainedRiseMinTarget = overrides.sustainedRiseMinTarget
+            ?.coerceIn(5, 20)
+            ?: cfg.sustainedRiseMinTarget
     )
 }
 

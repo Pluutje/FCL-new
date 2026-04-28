@@ -32,21 +32,26 @@ object FCLvNextActiveParamsWriter {
         const val TIMING         = 100
         const val VOLHOUDENDHEID = 100
         const val NACHT_FACTOR   = 85
-        // Groep-A params
+        // Groep-A params — gelijk aan DFMapping-referentie bij D=1.0, F=0.50.
+        // Dit is de enige bron van default-kennis binnen AAPS voor active_params.json.
+        // ConfigOverrideWriter.Defaults (Analyzer) en DoubleKey/IntKey defaultValues
+        // moeten hieraan identiek zijn.
         const val PEAK_PREDICTION_THRESHOLD   = 12.5
-        const val WATCHING_FRONTLOAD_FRAC     = 0.65
-        const val WATCHING_MIN_DELTA_TARGET   = 2.0
-        const val COMMIT_COOLDOWN_MINUTES     = 15
+        const val WATCHING_FRONTLOAD_FRAC     = 0.64  // was 0.65 (= REF_WFF in DFMapping)
+        const val WATCHING_MIN_DELTA_TARGET   = 1.50  // was 2.0  (= REF_WMD in DFMapping)
+        const val COMMIT_COOLDOWN_MINUTES     = 13    // was 15   (= REF_CC  in DFMapping)
         const val PEAK_PREDICTION_HORIZON_H   = 1.2
         const val IOB_START                   = 0.40
         const val PEAK_IOB_BRAKE_SUPPRESS     = 0.42
         const val EARLY_BOOST_FACTOR          = 1.0
-        const val EARLY_BOOST_MIN_CONFIDENCE  = 0.60
+        const val EARLY_BOOST_MIN_CONFIDENCE  = 0.50  // was 0.60 (formule: 0.50-(0.5-0.5)*0.20)
         const val EARLY_BOOST_MAX_COMMITS     = 2
         const val EARLY_RISE_FRAC_MIN         = 0.35
         const val PEAK_MAX_SLOPE_WEIGHT       = 0.0
         const val LATE_COMMIT_DECAY_FACTOR    = 0.0
         const val LATE_COMMIT_DECAY_THRESHOLD = 0.55
+        const val SUSTAINED_RISE_SLOPE_MIN    = 0.40  // was ontbrekend; 0.35 = F=0.60-waarde
+        const val SUSTAINED_RISE_MIN_TARGET   = 12    // was ontbrekend; 10  = F=0.60-waarde
     }
 
     // Cache — voorkomt I/O elke 5-minuten cyclus als niets veranderd is
@@ -127,7 +132,9 @@ object FCLvNextActiveParamsWriter {
             append(  "    \"peakMaxSlopeWeight\":       { \"active\": ${fmt(config.peakMaxSlopeWeight)},       \"default\": ${fmt(Defaults.PEAK_MAX_SLOPE_WEIGHT)},       \"delta\": \"${fmtDisplay(config.peakMaxSlopeWeight,       Defaults.PEAK_MAX_SLOPE_WEIGHT)}\",       \"src\": \"${src(config.peakMaxSlopeWeight,       Defaults.PEAK_MAX_SLOPE_WEIGHT)}\" }")
             appendLine(",")
             appendLine("    \"lateCommitDecayFactor\":   { \"active\": ${fmt(config.lateCommitDecayFactor)},   \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_FACTOR)},   \"delta\": \"${fmtDisplay(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\",   \"src\": \"${src(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\" },")
-            append(  "    \"lateCommitDecayThreshold\": { \"active\": ${fmt(config.lateCommitDecayThreshold)}, \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_THRESHOLD)}, \"delta\": \"${fmtDisplay(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\", \"src\": \"${src(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\" }")
+            appendLine("    \"lateCommitDecayThreshold\": { \"active\": ${fmt(config.lateCommitDecayThreshold)}, \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_THRESHOLD)}, \"delta\": \"${fmtDisplay(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\", \"src\": \"${src(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\" },")
+            appendLine("    \"sustainedRiseSlopeMin\":   { \"active\": ${fmt(config.sustainedRiseSlopeMin)},   \"default\": ${fmt(Defaults.SUSTAINED_RISE_SLOPE_MIN)},   \"delta\": \"${fmtDisplay(config.sustainedRiseSlopeMin,   Defaults.SUSTAINED_RISE_SLOPE_MIN)}\",   \"src\": \"${src(config.sustainedRiseSlopeMin,   Defaults.SUSTAINED_RISE_SLOPE_MIN)}\" },")
+            append(  "    \"sustainedRiseMinTarget\":   { \"active\": ${config.sustainedRiseMinTarget},          \"default\": ${Defaults.SUSTAINED_RISE_MIN_TARGET},          \"delta\": \"${fmtDisplay(config.sustainedRiseMinTarget.toDouble(), Defaults.SUSTAINED_RISE_MIN_TARGET.toDouble())}\", \"src\": \"${srcInt(config.sustainedRiseMinTarget, Defaults.SUSTAINED_RISE_MIN_TARGET)}\" }")
             appendLine()
             appendLine("  }")
             append("}")
