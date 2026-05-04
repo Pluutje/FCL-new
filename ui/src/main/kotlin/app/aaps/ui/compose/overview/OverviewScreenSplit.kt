@@ -67,6 +67,7 @@ fun OverviewScreenSplit(
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
+    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val config = LocalConfig.current
@@ -144,6 +145,7 @@ fun OverviewScreenSplit(
                         tempTargetSceneManaged = tempTargetSceneManaged,
                         tbrState = tbrState,
                         iobUiState = iobUiState,
+                        showCob = showCob,
                         cobUiState = cobUiState,
                         onNavigate = onNavigate,
                         onTbrChipClick = onTbrChipClick,

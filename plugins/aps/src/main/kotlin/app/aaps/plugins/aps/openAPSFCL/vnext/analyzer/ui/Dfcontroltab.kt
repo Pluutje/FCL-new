@@ -1,0 +1,731 @@
+package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
+
+/**
+ * DFControlTab — primaire interface voor het zelflerend systeem.
+ *
+ * Toont drie parameters in FCLvNext-eenheden (S/T/V):
+ *   💊 Insulinesterkte (S) — 80–125%, stap 5
+ *   ⏱  Timing         (T) — 80–120%, stap 4
+ *   🔁 Volhoudendheid  (V) — 70–130%, stap 5
+ *
+ * Alle drie worden intern vertaald via DFMapping(D, F):
+ *   S = round(95 * D)
+ *   T = round(106 + (F − 0.5) * 40)
+ *   V = round(95 + (D − 1.0) * 50)
+ *
+ * De gebruiker past S, T of V aan → D en F worden terug berekend →
+ * DFMapping genereert een volledige param_overrides set → één JSON naar AAPS.
+ *
+ * Garantie: elke "Toepassen in AAPS" schrijft altijd BEIDE blokken:
+ *   stv { sterkte, timing, volhoudendheid, nacht_factor }
+ *   param_overrides { alle 16 DFMapping-params }
+ */
+@Composable
+fun DFControlTab(
+    episodes: List<Episode> = emptyList(),
+    metrics: List<EpisodeMetrics> = emptyList(),
+    allRows: List<LogRow> = emptyList(),
+    onApplyToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
+    nachtFactor: Int = 85
+) {
+    val context = LocalContext.current
+
+    var d by remember { mutableStateOf(DFLearner.getD(context)) }
+    var f by remember { mutableStateOf(DFLearner.getF(context)) }
+    var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
+    var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
+    var history by remember { mutableStateOf(DFLearner.getHistory(context)) }
+    var showExpert by remember { mutableStateOf(false) }
+    var applyResult by remember { mutableStateOf<String?>(null) }
+    var applyTs by remember { mutableStateOf(0L) }
+
+    // S/T/V in FCLvNext-eenheden — enige zichtbare schaal
+    val stv = DFMapping.toStvMap(d, f, nachtFactor)
+    val sNu = stv["sterkte"]        ?: 95
+    val tNu = stv["timing"]         ?: 100
+    val vNu = stv["volhoudendheid"] ?: 95
+
+    // Stapsgroottes in S/T/V-eenheden
+    // S-stap 5: D-stap = 5/95 ≈ 0.053
+    // T-stap 4: F-stap = 4/40 = 0.10
+    // V-stap 5: D-stap = 5/50 = 0.10 (maar V deelt D met S → stap via D)
+    val sStap = 5
+    val tStap = 4
+    val vStap = 5
+
+    // Grenzen in S/T/V-eenheden (afgeleid van D/F grenzen)
+    val sMin = DFMapping.toStvMap(DFMapping.D_MIN, f, nachtFactor)["sterkte"] ?: 80
+    val sMax = DFMapping.toStvMap(DFMapping.D_MAX, f, nachtFactor)["sterkte"] ?: 128
+    val tMin = 80   // F=0.20 → T = 106 + (0.20-0.5)*40 = 94 afgerond naar UI-min
+    val tMax = 120  // F=0.80 → T = 106 + (0.30)*40    = 118 afgerond naar UI-max
+    val vMin = 70
+    val vMax = 130
+
+    // Conversiefuncties: S/T/V terug naar D/F
+    fun sNaarD(s: Int): Double = (s.toDouble() / 95.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
+    fun tNaarF(t: Int): Double = (0.5 + (t.toDouble() - 106.0) / 40.0).coerceIn(DFMapping.F_MIN, DFMapping.F_MAX)
+    // V deelt D met S: als V verandert bij gelijkblijvende F, past D aan
+    fun vNaarD(v: Int): Double = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+
+        // ── Verloopgrafiek ────────────────────────────────────────────────
+        if (history.size >= 2) {
+            STVVerloopGrafiek(history = history, nachtFactor = nachtFactor)
+        }
+
+        // ── Uitleg ────────────────────────────────────────────────────────
+        Text(
+            "Pas aan hoeveel insuline gegeven wordt (S), hoe vroeg dat " +
+                "gebeurt (T) en hoe vasthoudend het systeem is (V). " +
+                "Het systeem vertaalt dit automatisch naar alle FCLvNext-instellingen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // ── 💊 Insulinesterkte (S) ────────────────────────────────────────
+        StvKaart(
+            emoji = "💊",
+            titel = "Insulinesterkte (S)",
+            omschrijving = "Totale dosis per maaltijd  •  100% = standaard",
+            waarde = sNu,
+            waardeSuffix = "%",
+            eenheid100Label = "standaard",
+            stapMinus = sStap,
+            stapPlus = sStap,
+            min = sMin,
+            max = sMax,
+            onMinus = {
+                val nieuwS = (sNu - sStap).coerceIn(sMin, sMax)
+                val nieuwD = sNaarD(nieuwS)
+                d = nieuwD; DFLearner.setD(context, nieuwD)
+            },
+            onPlus = {
+                val nieuwS = (sNu + sStap).coerceIn(sMin, sMax)
+                val nieuwD = sNaarD(nieuwS)
+                d = nieuwD; DFLearner.setD(context, nieuwD)
+            }
+        )
+
+        // ── ⏱ Timing (T) ─────────────────────────────────────────────────
+        StvKaart(
+            emoji = "⏱",
+            titel = "Timing (T)",
+            omschrijving = "Hoe vroeg de insuline vrijkomt  •  100% = neutraal",
+            waarde = tNu,
+            waardeSuffix = "%",
+            eenheid100Label = "neutraal",
+            stapMinus = tStap,
+            stapPlus = tStap,
+            min = tMin,
+            max = tMax,
+            onMinus = {
+                val nieuwT = (tNu - tStap).coerceIn(tMin, tMax)
+                val nieuwF = tNaarF(nieuwT)
+                f = nieuwF; DFLearner.setF(context, nieuwF)
+            },
+            onPlus = {
+                val nieuwT = (tNu + tStap).coerceIn(tMin, tMax)
+                val nieuwF = tNaarF(nieuwT)
+                f = nieuwF; DFLearner.setF(context, nieuwF)
+            },
+            // Extra toelichting: earlyBoost en lateDecay activatiestatus
+            extraToelichting = run {
+                val po = DFMapping.toParamOverrides(d, f)
+                val eb = po.earlyBoostFactor ?: 1.0
+                val lcd = po.lateCommitDecayFactor ?: 0.0
+                buildList {
+                    if (eb > 1.01) add("vroeg ×${"%.2f".format(eb)}")
+                    if (lcd > 0.01) add("laat −${(lcd * 100).toInt()}%")
+                    if (eb <= 1.01 && lcd <= 0.01) add("lineaire verdeling")
+                }.joinToString("  ")
+            }
+        )
+
+        // ── 🔁 Volhoudendheid (V) ─────────────────────────────────────────
+        StvKaart(
+            emoji = "🔁",
+            titel = "Volhoudendheid (V)",
+            omschrijving = "Hoe vasthoudend bijgestuurd wordt  •  100% = standaard",
+            waarde = vNu,
+            waardeSuffix = "%",
+            eenheid100Label = "standaard",
+            stapMinus = vStap,
+            stapPlus = vStap,
+            min = vMin,
+            max = vMax,
+            onMinus = {
+                val nieuwV = (vNu - vStap).coerceIn(vMin, vMax)
+                val nieuwD = vNaarD(nieuwV)
+                // V aanpassen via D — herbereken S zodat S consistent blijft
+                // V = 95 + (D-1)*50, maar S = 95*D → als D verandert voor V,
+                // verandert S mee. Dat is gewenst: V en S zijn beide D-afhankelijk.
+                d = nieuwD; DFLearner.setD(context, nieuwD)
+            },
+            onPlus = {
+                val nieuwV = (vNu + vStap).coerceIn(vMin, vMax)
+                val nieuwD = vNaarD(nieuwV)
+                d = nieuwD; DFLearner.setD(context, nieuwD)
+            },
+            // Toon ook de bijbehorende S-waarde als toelichting
+            extraToelichting = "S wordt ook: ${DFMapping.toStvMap(vNaarD(vNu), f, nachtFactor)["sterkte"] ?: sNu}%"
+        )
+
+        // ── Toepassen in AAPS ─────────────────────────────────────────────
+        if (onApplyToAaps != null) {
+            Button(
+                onClick = {
+                    // Schrijft ALTIJD beide blokken: stv + volledige param_overrides
+                    val po  = DFMapping.toParamOverrides(d, f)
+                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
+                    val ok  = onApplyToAaps(po, stvMap)
+                    applyResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
+                    applyTs = System.currentTimeMillis()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text(
+                    "Toepassen in AAPS",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        applyResult?.let { msg ->
+            if (System.currentTimeMillis() - applyTs < 20_000L) {
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // ── Automaat + tempo ──────────────────────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "🤖  Automaat leert",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (autoEnabled) "Past S, T en V automatisch aan na elke episode"
+                            else "Handmatig — automaat berekent maar past niet aan",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoEnabled,
+                        onCheckedChange = {
+                            autoEnabled = it
+                            DFLearner.setAutoEnabled(context, it)
+                        }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    DFLearner.Tempo.entries.forEach { t ->
+                        FilterChip(
+                            selected = t == tempo,
+                            onClick  = { tempo = t; DFLearner.setTempo(context, t) },
+                            label    = {
+                                Text(
+                                    when (t) {
+                                        DFLearner.Tempo.LANGZAAM -> "Langzaam"
+                                        DFLearner.Tempo.NORMAAL  -> "Normaal"
+                                        DFLearner.Tempo.SNEL     -> "Snel"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Laatste aanpassingen door automaat ────────────────────────────
+        if (history.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Laatste aanpassingen door automaat",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Divider()
+                    history.takeLast(5).reversed().forEach { step ->
+                        // Toon alles in S/T/V-eenheden
+                        val oldStv = DFMapping.toStvMap(step.oldD, step.oldF, 85)
+                        val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
+                        val oldS = oldStv["sterkte"] ?: 0
+                        val newS = newStv["sterkte"] ?: 0
+                        val oldT = oldStv["timing"] ?: 0
+                        val newT = newStv["timing"] ?: 0
+                        val oldV = oldStv["volhoudendheid"] ?: 0
+                        val newV = newStv["volhoudendheid"] ?: 0
+
+                        val sStr = if (newS != oldS) "S: ${oldS}→${newS}%  " else ""
+                        val tStr = if (newT != oldT) "T: ${oldT}→${newT}%  " else ""
+                        val vStr = if (newV != oldV) "V: ${oldV}→${newV}%" else ""
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                val diagnoseKleur = when {
+                                    step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
+                                    step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") ->
+                                        MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Text(
+                                    step.reason.take(60),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = diagnoseKleur
+                                )
+                            }
+                            Text(
+                                fmtTs(step.tsUtc),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (step != history.takeLast(5).reversed().last())
+                            Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    }
+                }
+            }
+        }
+
+        // ── Expert-view: alle 17 afgeleide params ─────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showExpert = !showExpert }
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Technische parameters (expert)",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        if (showExpert) "▲" else "▼",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (showExpert) {
+                    Divider(modifier = Modifier.padding(horizontal = 14.dp))
+                    val po  = DFMapping.toParamOverrides(d, f)
+                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ExpertRij("sterkte (S)",        "${stvMap["sterkte"] ?: "—"}%")
+                        ExpertRij("timing (T)",          "${stvMap["timing"] ?: "—"}%")
+                        ExpertRij("volhoudendheid (V)",  "${stvMap["volhoudendheid"] ?: "—"}%")
+                        ExpertRij("D (intern)",          "${"%.3f".format(d)}")
+                        ExpertRij("F (intern)",          "${"%.3f".format(f)}")
+                        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                        ExpertRij("earlyBoostFactor",    fmtD2(po.earlyBoostFactor))
+                        ExpertRij("earlyBoostMinConf",   fmtD2(po.earlyBoostMinConfidence))
+                        ExpertRij("earlyBoostMaxCom",    fmtInt(po.earlyBoostMaxCommits))
+                        ExpertRij("lateDecayFactor",     fmtD2(po.lateCommitDecayFactor))
+                        ExpertRij("lateDecayThresh",     fmtD2(po.lateCommitDecayThreshold))
+                        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                        ExpertRij("commitCooldown",      fmtInt(po.commitCooldownMinutes) + "m")
+                        ExpertRij("watchingFrontload",   fmtD2(po.watchingFrontloadFrac))
+                        ExpertRij("watchingMinDelta",    fmtD2(po.watchingMinDeltaToTarget) + " mmol")
+                        ExpertRij("peakThreshold",       fmtD1(po.peakPredictionThreshold) + " mmol")
+                        ExpertRij("peakHorizon",         fmtD2(po.peakPredictionHorizonH) + " uur")
+                        ExpertRij("iobStart",            fmtD2(po.iobStart))
+                        ExpertRij("peakIobBrake",        fmtD2(po.peakIobBrakeSuppressThreshold))
+                        ExpertRij("earlyRiseFracMin",    fmtD2(po.earlyRiseFracMin))
+                        ExpertRij("peakMaxSlope",        fmtD2(po.peakMaxSlopeWeight))
+                        ExpertRij("sustainedSlope",      fmtD2(po.sustainedRiseSlopeMin))
+                        ExpertRij("sustainedTarget",     fmtInt(po.sustainedRiseMinTarget) + "m")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── StvKaart ──────────────────────────────────────────────────────────────
+// Generieke kaart voor S, T of V met uniforme opmaak.
+
+@Composable
+private fun StvKaart(
+    emoji: String,
+    titel: String,
+    omschrijving: String,
+    waarde: Int,
+    waardeSuffix: String,
+    eenheid100Label: String,
+    stapMinus: Int,
+    stapPlus: Int,
+    min: Int,
+    max: Int,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    extraToelichting: String? = null
+) {
+    val afwijking = waarde - 100
+    val kleur = when {
+        afwijking > 4  -> MaterialTheme.colorScheme.primary
+        afwijking < -4 -> MaterialTheme.colorScheme.tertiary
+        else           -> MaterialTheme.colorScheme.onSurface
+    }
+    val indicator = when {
+        afwijking > 4  -> "↑"
+        afwijking < -4 -> "↓"
+        else           -> "="
+    }
+
+    val waardeNaMinus = (waarde - stapMinus).coerceIn(min, max)
+    val waardeNaPlus  = (waarde + stapPlus).coerceIn(min, max)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "$emoji  $titel",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        omschrijving,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            indicator, color = kleur,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "$waarde$waardeSuffix",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = kleur
+                        )
+                    }
+                    if (extraToelichting != null) {
+                        Text(
+                            extraToelichting,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onMinus,
+                    enabled = waarde > min,
+                    modifier = Modifier.weight(1f)
+                ) { Text("−  ${waardeNaMinus}$waardeSuffix", fontSize = 13.sp) }
+                OutlinedButton(
+                    onClick = onPlus,
+                    enabled = waarde < max,
+                    modifier = Modifier.weight(1f)
+                ) { Text("+  ${waardeNaPlus}$waardeSuffix", fontSize = 13.sp) }
+            }
+        }
+    }
+}
+
+// ── STVVerloopGrafiek ─────────────────────────────────────────────────────
+// Toont het verloop van S (groen), T (roze) en V (blauw) over de tijd.
+// Alle drie in FCLvNext-eenheden (%) op dezelfde Y-schaal (80–130%).
+
+@Composable
+private fun STVVerloopGrafiek(
+    history: List<DFLearner.LearningStep>,
+    nachtFactor: Int
+) {
+    if (history.size < 2) return
+
+    val kleurS   = MaterialTheme.colorScheme.primary
+    val kleurT   = MaterialTheme.colorScheme.tertiary
+    val kleurV   = MaterialTheme.colorScheme.secondary
+    val kleurGrid = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+
+    data class Punt(val tsMs: Long, val s: Int, val t: Int, val v: Int)
+
+    val punten: List<Punt> = buildList {
+        val eersteTs = runCatching {
+            Instant.parse(history.first().tsUtc).toEpochMilli()
+        }.getOrDefault(0L)
+        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor)
+        add(Punt(
+            eersteTs - 1,
+            oudeStv["sterkte"] ?: 95,
+            oudeStv["timing"] ?: 100,
+            oudeStv["volhoudendheid"] ?: 95
+        ))
+        history.forEach { step ->
+            val ms  = runCatching { Instant.parse(step.tsUtc).toEpochMilli() }.getOrDefault(0L)
+            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor)
+            add(Punt(
+                ms,
+                stv["sterkte"] ?: 95,
+                stv["timing"] ?: 100,
+                stv["volhoudendheid"] ?: 95
+            ))
+        }
+    }.sortedBy { it.tsMs }
+
+    val msNu     = System.currentTimeMillis()
+    val ms7Dagen = 7L * 24 * 3_600_000
+    val tijdMin  = minOf(punten.first().tsMs, msNu - ms7Dagen)
+    val tijdMax  = maxOf(punten.last().tsMs, msNu)
+    val tijdSpan = (tijdMax - tijdMin).coerceAtLeast(1L).toDouble()
+
+    // Gemeenschappelijke Y-schaal voor S, T en V (80–130%)
+    val alleWaarden = punten.flatMap { listOf(it.s, it.t, it.v) }
+    val yMin = (alleWaarden.min() - 4).coerceAtLeast(75)
+    val yMax = (alleWaarden.max() + 4).coerceAtMost(135)
+    val ySpan = (yMax - yMin).coerceAtLeast(10).toDouble()
+
+    val datumFmt = DateTimeFormatter.ofPattern("dd/MM").withZone(ZoneId.systemDefault())
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            Text(
+                "Verloop S / T / V",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                // Y-as labels (links)
+                Column(
+                    modifier = Modifier.width(34.dp).height(130.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Text("${yMax}%", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                    Text("${((yMin + yMax) / 2)}%", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                    Text("${yMin}%", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                }
+
+                Canvas(modifier = Modifier.weight(1f).height(130.dp)) {
+                    val w = size.width
+                    val h = size.height
+
+                    fun xOf(ms: Long) = ((ms - tijdMin) / tijdSpan * w).toFloat().coerceIn(0f, w)
+                    fun yOf(pct: Int) = (h * (1.0 - (pct - yMin) / ySpan)).toFloat().coerceIn(0f, h)
+
+                    // Gridlijnen
+                    for (i in 0..2) {
+                        drawLine(kleurGrid, Offset(0f, h * i / 2f), Offset(w, h * i / 2f), strokeWidth = 1f)
+                    }
+
+                    // 100%-referentielijn (stippel)
+                    val y100 = yOf(100)
+                    if (y100 in 0f..h) {
+                        drawLine(
+                            kleurGrid.copy(alpha = 0.4f),
+                            Offset(0f, y100), Offset(w, y100),
+                            strokeWidth = 1.5f,
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 4f))
+                        )
+                    }
+
+                    // S lijn
+                    val pathS = Path()
+                    punten.forEachIndexed { i, pt ->
+                        if (i == 0) pathS.moveTo(xOf(pt.tsMs), yOf(pt.s))
+                        else pathS.lineTo(xOf(pt.tsMs), yOf(pt.s))
+                    }
+                    drawPath(pathS, kleurS, style = Stroke(width = 2.5f))
+                    punten.forEach { drawCircle(kleurS, radius = 3.5f, center = Offset(xOf(it.tsMs), yOf(it.s))) }
+
+                    // T lijn
+                    val pathT = Path()
+                    punten.forEachIndexed { i, pt ->
+                        if (i == 0) pathT.moveTo(xOf(pt.tsMs), yOf(pt.t))
+                        else pathT.lineTo(xOf(pt.tsMs), yOf(pt.t))
+                    }
+                    drawPath(pathT, kleurT, style = Stroke(width = 2.5f))
+                    punten.forEach { drawCircle(kleurT, radius = 3.5f, center = Offset(xOf(it.tsMs), yOf(it.t))) }
+
+                    // V lijn
+                    val pathV = Path()
+                    punten.forEachIndexed { i, pt ->
+                        if (i == 0) pathV.moveTo(xOf(pt.tsMs), yOf(pt.v))
+                        else pathV.lineTo(xOf(pt.tsMs), yOf(pt.v))
+                    }
+                    drawPath(pathV, kleurV, style = Stroke(width = 2.0f))
+                    punten.forEach { drawCircle(kleurV, radius = 3.0f, center = Offset(xOf(it.tsMs), yOf(it.v))) }
+
+                    // Nu-lijn
+                    if (msNu > punten.last().tsMs + 300_000L) {
+                        val xNu = xOf(msNu)
+                        drawLine(
+                            kleurGrid.copy(alpha = 0.3f),
+                            Offset(xNu, 0f), Offset(xNu, h),
+                            strokeWidth = 1f,
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 4f))
+                        )
+                    }
+                }
+            }
+
+            // X-as datums
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Spacer(Modifier.width(34.dp))
+                Text(
+                    datumFmt.format(Instant.ofEpochMilli(tijdMin)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    datumFmt.format(Instant.ofEpochMilli(punten.last().tsMs)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp
+                )
+            }
+
+            // Legenda
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LegendaPunt(kleurS, "Sterkte (S)")
+                LegendaPunt(kleurT, "Timing (T)")
+                LegendaPunt(kleurV, "Volhoudenheid (V)")
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${history.size} aanpassing${if (history.size != 1) "en" else ""}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendaPunt(kleur: androidx.compose.ui.graphics.Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Canvas(Modifier.size(8.dp)) { drawCircle(kleur) }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = kleur, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun ExpertRij(naam: String, waarde: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(naam, style = MaterialTheme.typography.labelSmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(waarde, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun fmtD1(v: Double?) = if (v == null) "—" else String.format("%.1f", v)
+private fun fmtD2(v: Double?) = if (v == null) "—" else String.format("%.2f", v)
+private fun fmtInt(v: Int?) = v?.toString() ?: "—"
+
+private fun fmtTs(tsUtc: String): String = try {
+    val instant = Instant.parse(tsUtc)
+    DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault()).format(instant)
+} catch (_: Exception) { tsUtc.take(10) }

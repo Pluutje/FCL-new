@@ -619,5 +619,5 @@ open class OpenAPSSMBPlugin @Inject constructor(
         ),
         icon = pluginDescription.icon
     )
-
+// script debug
 }

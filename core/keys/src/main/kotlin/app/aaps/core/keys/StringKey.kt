@@ -195,4 +195,72 @@ enum class StringKey(
         validator = StringValidator.minLength(17)
     ),
 
+    // ── FCL vNext StringKeys ──────────────────────────────────────────────
+    fcl_vnext_dose_distribution_style(
+        key = "fcl_vnext_dose_distribution_style",
+        defaultValue = "SMOOTH",
+        titleResId = R.string.fcl_vnext_dose_distribution_style,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            "VERY_SMOOTH" to R.string.fcl_dist_very_smooth,
+            "SMOOTH"      to R.string.fcl_dist_smooth,
+            "BALANCED"    to R.string.fcl_dist_balanced,
+            "PULSED"      to R.string.fcl_dist_pulsed,
+            "VERY_PULSED" to R.string.fcl_dist_very_pulsed
+        )
+    ),
+    fcl_vnext_night_response_style(
+        key = "fcl_vnext_night_response_style",
+        defaultValue = "NORMAL",
+        titleResId = R.string.fcl_vnext_night_response_style,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            "VERY_GUARDED" to R.string.fcl_night_very_guarded,
+            "GUARDED"      to R.string.fcl_night_guarded,
+            "BALANCED"     to R.string.fcl_night_balanced,
+            "RESPONSIVE"   to R.string.fcl_night_responsive,
+            "PROACTIVE"    to R.string.fcl_night_proactive
+        )
+    ),
+    fcl_vnext_resistance_behavior(
+        key = "fcl_vnext_resistance_behavior",
+        defaultValue = "MODERATE",
+        titleResId = R.string.fcl_vnext_resistance_behavior,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            "OFF"        to R.string.fcl_res_off,
+            "LIGHT"      to R.string.fcl_res_light,
+            "NORMAL"     to R.string.fcl_res_normal,
+            "STRONG"     to R.string.fcl_res_strong,
+            "AGGRESSIVE" to R.string.fcl_res_aggressive
+        )
+    ),
+    fcl_vnext_resistance_stability(
+        key = "fcl_vnext_resistance_stability",
+        defaultValue = "MODERATE",
+        titleResId = R.string.fcl_vnext_resistance_stability,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            "VERY_STABLE" to R.string.fcl_stab_very_stable,
+            "STANDARD"    to R.string.fcl_stab_standard,
+            "RESPONSIVE"  to R.string.fcl_stab_responsive
+        )
+    ),
+    fcl_vnext_activity_behavior(
+        key = "fcl_vnext_activity_behavior",
+        defaultValue = "NONE",
+        titleResId = R.string.fcl_vnext_activity_behavior,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            "OFF"    to R.string.fcl_act_off,
+            "LIGHT"  to R.string.fcl_act_light,
+            "NORMAL" to R.string.fcl_act_normal,
+            "STRONG" to R.string.fcl_act_strong
+        )
+    ),
+    OchtendStart(key = "fcl_ochtend_start", defaultValue = "07:00", titleResId = R.string.OchtendStart),
+    OchtendStartWeekend(key = "fcl_ochtend_start_weekend", defaultValue = "08:00", titleResId = R.string.OchtendStartWeekend),
+    NachtStart(key = "fcl_nacht_start", defaultValue = "23:00", titleResId = R.string.NachtStart),
+    WeekendDagen(key = "fcl_weekend_dagen", defaultValue = "6,7", titleResId = R.string.WeekendDagen),
+
 }

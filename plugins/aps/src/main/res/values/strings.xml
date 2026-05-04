@@ -114,4 +114,28 @@
     <string name="autoISF_settings_title">AutoISF settings</string>
     <string name="smb_delivery_settings_title">SMB delivery settings</string>
 
+    <string name="openaps_fcl">FCL vNext</string>
+    <string name="description_fcl">FCL vNext closed loop algorithm</string>
+
+
+
+    <!-- FCL vNext — scherm- en veldtitels -->
+    <string name="fcl_vnext_general_title">⚡ Gedrag &amp; limieten</string>
+    <string name="fcl_vnext_context_title">🌙 🛡️ 🚶 Context</string>
+    <string name="max_bolus_day_title">Max bolus dag</string>
+    <string name="max_bolus_day_summary">Referentiewaarde voor de Analyzer. De Analyzer stuurt de actieve maxSMB bij tussen 50% en 125% van deze waarde.</string>
+    <string name="max_bolus_night_title">Max bolus nacht</string>
+    <string name="max_bolus_night_summary">Maximale SMB-bolus \'s nachts (eenheden)</string>
+    <string name="fcl_vnext_MaxIOB_title">Max IOB</string>
+    <string name="fcl_vnext_MaxIOB_summary">Maximaal toegestaan actief insuline (IOB)</string>
+    <string name="fcl_vnext_dose_distribution_style">💉 Insulineverdeling</string>
+    <string name="fcl_vnext_night_response_style">🌙 Nachtrespons</string>
+    <string name="fcl_vnext_resistance_behavior">🛡️ AutoSens – Gedrag</string>
+    <string name="fcl_vnext_resistance_stability">🧱 AutoSens – Stabiliteit</string>
+    <string name="fcl_vnext_activity_behavior">🚶 Activiteit</string>
+    <string name="WeekendDagen">Weekenddagen</string>
+    <string name="OchtendStart">Ochtendstart (doordeweeks)</string>
+    <string name="OchtendStartWeekend">Ochtendstart (weekend)</string>
+    <string name="NachtStart">Nachtstart</string>
+
 </resources>

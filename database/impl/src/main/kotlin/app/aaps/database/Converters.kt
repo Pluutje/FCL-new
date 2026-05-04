@@ -22,17 +22,31 @@ import org.json.JSONObject
 
 class Converters {
 
+    /**
+     * Veilige enum-conversie via entries.firstOrNull().
+     * Geeft null terug als input null is.
+     * Geeft null terug bij onbekende waarde (i.p.v. crash via IllegalArgumentException).
+     * Dit beschermt tegen database enum mismatches na versie-upgrades.
+     */
+    private inline fun <reified T : Enum<T>> safeEnum(value: String?): T? =
+        value?.let { v -> enumValues<T>().firstOrNull { it.name == v } }
+
+    // ── UserEntry ─────────────────────────────────────────────────────────
+
     @TypeConverter
     fun fromAction(action: Action?) = action?.name
 
     @TypeConverter
-    fun toAction(action: String?) = action?.let { Action.valueOf(it) }
+    fun toAction(action: String?): Action =
+        safeEnum<Action>(action) ?: Action.UNKNOWN
 
     @TypeConverter
     fun fromSource(source: Sources?) = source?.name
 
     @TypeConverter
     fun toSource(source: String?) = source?.let { Sources.fromString(it) }
+
+    // ── ValueWithUnit ─────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromListOfValueWithUnit(values: List<ValueWithUnit>): String = values.map(Converters::ValueWithUnitWrapper)
@@ -44,69 +58,85 @@ class Converters {
 
     private class ValueWithUnitWrapper(val wrapped: ValueWithUnit)
 
+    // ── Bolus ─────────────────────────────────────────────────────────────
+
     @TypeConverter
     fun fromBolusType(bolusType: Bolus.Type?) = bolusType?.name
 
     @TypeConverter
-    fun toBolusType(bolusType: String?) = bolusType?.let { Bolus.Type.valueOf(it) }
+    fun toBolusType(bolusType: String?): Bolus.Type? = safeEnum<Bolus.Type>(bolusType)
+
+    // ── GlucoseValue ──────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromTrendArrow(trendArrow: GlucoseValue.TrendArrow?) = trendArrow?.name
 
     @TypeConverter
-    fun toTrendArrow(trendArrow: String?) = trendArrow?.let { GlucoseValue.TrendArrow.valueOf(it) }
+    fun toTrendArrow(trendArrow: String?): GlucoseValue.TrendArrow? = safeEnum<GlucoseValue.TrendArrow>(trendArrow)
 
     @TypeConverter
     fun fromSourceSensor(sourceSensor: GlucoseValue.SourceSensor?) = sourceSensor?.name
 
     @TypeConverter
-    fun toSourceSensor(sourceSensor: String?): GlucoseValue.SourceSensor? {
-        return sourceSensor?.let {
-            GlucoseValue.SourceSensor.entries.firstOrNull { enumValue -> enumValue.name == it } ?: GlucoseValue.SourceSensor.UNKNOWN
-        }
-    }
+    fun toSourceSensor(sourceSensor: String?): GlucoseValue.SourceSensor? =
+        safeEnum<GlucoseValue.SourceSensor>(sourceSensor) ?: GlucoseValue.SourceSensor.UNKNOWN
+
+    // ── TemporaryBasal ────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromTBRType(tbrType: TemporaryBasal.Type?) = tbrType?.name
 
     @TypeConverter
-    fun toTBRType(tbrType: String?) = tbrType?.let { TemporaryBasal.Type.valueOf(it) }
+    fun toTBRType(tbrType: String?): TemporaryBasal.Type? = safeEnum<TemporaryBasal.Type>(tbrType)
+
+    // ── TemporaryTarget ───────────────────────────────────────────────────
 
     @TypeConverter
     fun fromTempTargetReason(tempTargetReason: TemporaryTarget.Reason?) = tempTargetReason?.name
 
     @TypeConverter
-    fun toTempTargetReason(tempTargetReason: String?) = tempTargetReason?.let { TemporaryTarget.Reason.valueOf(it) }
+    fun toTempTargetReason(tempTargetReason: String?): TemporaryTarget.Reason? =
+        safeEnum<TemporaryTarget.Reason>(tempTargetReason)
+
+    // ── TherapyEvent ──────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromTherapyEventType(therapyEventType: TherapyEvent.Type?) = therapyEventType?.name
 
     @TypeConverter
-    fun toTherapyEventType(therapyEventType: String?) = therapyEventType?.let { TherapyEvent.Type.valueOf(it) }
+    fun toTherapyEventType(therapyEventType: String?): TherapyEvent.Type? =
+        safeEnum<TherapyEvent.Type>(therapyEventType)
 
     @TypeConverter
     fun fromTherapyEventLocation(therapyEventLocation: TherapyEvent.Location?) = therapyEventLocation?.name
 
     @TypeConverter
-    fun toTherapyEventLocation(therapyEventLocation: String?): TherapyEvent.Location? = therapyEventLocation?.let { TherapyEvent.Location.valueOf(it) }
+    fun toTherapyEventLocation(therapyEventLocation: String?): TherapyEvent.Location? =
+        safeEnum<TherapyEvent.Location>(therapyEventLocation)
 
     @TypeConverter
     fun fromTherapyEventArrow(therapyEventArrow: TherapyEvent.Arrow?) = therapyEventArrow?.name
 
     @TypeConverter
-    fun toTherapyEventArrow(therapyEventArrow: String?): TherapyEvent.Arrow? = therapyEventArrow?.let { TherapyEvent.Arrow.valueOf(it) }
+    fun toTherapyEventArrow(therapyEventArrow: String?): TherapyEvent.Arrow? =
+        safeEnum<TherapyEvent.Arrow>(therapyEventArrow)
 
     @TypeConverter
     fun fromGlucoseType(meterType: TherapyEvent.MeterType?) = meterType?.name
 
     @TypeConverter
-    fun toGlucoseType(meterType: String?) = meterType?.let { TherapyEvent.MeterType.valueOf(it) }
+    fun toGlucoseType(meterType: String?): TherapyEvent.MeterType? =
+        safeEnum<TherapyEvent.MeterType>(meterType)
+
+    // ── GlucoseUnit ───────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromGlucoseUnit(glucoseUnit: GlucoseUnit?) = glucoseUnit?.name
 
     @TypeConverter
-    fun toGlucoseUnit(glucoseUnit: String?) = glucoseUnit?.let { GlucoseUnit.valueOf(it) }
+    fun toGlucoseUnit(glucoseUnit: String?): GlucoseUnit? = safeEnum<GlucoseUnit>(glucoseUnit)
+
+    // ── InterfaceIDs ──────────────────────────────────────────────────────
 
     @TypeConverter
     fun fromPumpType(pumpType: InterfaceIDs.PumpType?) = pumpType?.name
@@ -114,11 +144,15 @@ class Converters {
     @TypeConverter
     fun toPumpType(pumpType: String?) = pumpType?.let { InterfaceIDs.PumpType.fromString(it) }
 
+    // ── APSResult ─────────────────────────────────────────────────────────
+
     @TypeConverter
     fun fromAlgorithm(algorithm: APSResult.Algorithm?) = algorithm?.name
 
     @TypeConverter
-    fun toAlgorithm(algorithm: String?) = algorithm?.let { APSResult.Algorithm.valueOf(it) }
+    fun toAlgorithm(algorithm: String?): APSResult.Algorithm? = safeEnum<APSResult.Algorithm>(algorithm)
+
+    // ── Block / TargetBlock ───────────────────────────────────────────────
 
     @TypeConverter
     fun fromListOfBlocks(blocks: List<Block>?): String? {
@@ -177,9 +211,11 @@ class Converters {
         return list
     }
 
+    // ── RunningMode ───────────────────────────────────────────────────────
+
     @TypeConverter
     fun fromRunningModeMode(mode: RunningMode.Mode?) = mode?.name
 
     @TypeConverter
-    fun toRunningModeMode(mode: String?) = mode?.let { RunningMode.Mode.valueOf(it) }
+    fun toRunningModeMode(mode: String?): RunningMode.Mode? = safeEnum<RunningMode.Mode>(mode)
 }

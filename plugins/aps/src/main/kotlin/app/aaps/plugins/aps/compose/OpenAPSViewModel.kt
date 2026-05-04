@@ -87,84 +87,6 @@ class OpenAPSViewModel(
         }
 
         val sections = buildList {
-            // --- Input parameters group ---
-            add(OpenAPSSection(titleResId = R.string.openapsma_input_parameters_label, isGroupHeader = true))
-
-            // Constraints
-            lastAPSResult.inputConstraints?.let { constraints ->
-                val reasons = constraints.getReasons()
-                if (reasons.isNotEmpty()) {
-                    add(
-                        OpenAPSSection(
-                            titleResId = R.string.constraints,
-                            rows = reasons.split("\n").filter { it.isNotBlank() }.map { KeyValueRow("", it) }
-                        )
-                    )
-                }
-            }
-
-            // Glucose Status
-            lastAPSResult.glucoseStatus?.let { gs ->
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_glucose_status_label,
-                        rows = gs.toRows()
-                    )
-                )
-            }
-
-            // Current Temp
-            lastAPSResult.currentTemp?.let { ct ->
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_current_temp_label,
-                        rows = ct.toRows()
-                    )
-                )
-            }
-
-            // IOB Data
-            lastAPSResult.iob?.let { iob ->
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_iob_data_label,
-                        rows = iob.toRows(lastAPSResult.iobData?.size ?: 0)
-                    )
-                )
-            }
-
-            // Profile (OapsProfile or OapsProfileAutoIsf)
-            val profileRows = lastAPSResult.oapsProfileAutoIsf?.toRows()
-                ?: lastAPSResult.oapsProfile?.toRows()
-            if (profileRows != null) {
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_profile_label,
-                        rows = profileRows,
-                        collapsedByDefault = true
-                    )
-                )
-            }
-
-            // Meal Data
-            lastAPSResult.mealData?.let { md ->
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_meal_data_label,
-                        rows = md.toRows()
-                    )
-                )
-            }
-
-            // Autosens Data
-            lastAPSResult.autosensResult?.let { asr ->
-                add(
-                    OpenAPSSection(
-                        titleResId = R.string.openapsma_autosensdata_label,
-                        rows = asr.toRows()
-                    )
-                )
-            }
 
             // --- Result group ---
             add(OpenAPSSection(titleResId = app.aaps.core.ui.R.string.result, isGroupHeader = true))
@@ -176,7 +98,7 @@ class OpenAPSViewModel(
                         OpenAPSSection(
                             titleResId = R.string.openapsma_script_debug_data_label,
                             rows = debug.map { KeyValueRow("", it) },
-                            collapsedByDefault = true
+                            collapsedByDefault = false
                         )
                     )
                 }
@@ -200,10 +122,99 @@ class OpenAPSViewModel(
                 add(
                     OpenAPSSection(
                         titleResId = R.string.openapsma_request_label,
-                        rows = requestText.lines().filter { it.isNotBlank() }.map { KeyValueRow("", it) }
+                        rows = requestText.lines().filter { it.isNotBlank() }.map { KeyValueRow("", it) },
+                        collapsedByDefault = true
                     )
                 )
             }
+
+
+
+            // --- Input parameters group ---
+            add(OpenAPSSection(titleResId = R.string.openapsma_input_parameters_label, isGroupHeader = true))
+
+            // Constraints
+            lastAPSResult.inputConstraints?.let { constraints ->
+                val reasons = constraints.getReasons()
+                if (reasons.isNotEmpty()) {
+                    add(
+                        OpenAPSSection(
+                            titleResId = R.string.constraints,
+                            rows = reasons.split("\n").filter { it.isNotBlank() }.map { KeyValueRow("", it) }
+                        )
+                    )
+                }
+            }
+
+            // Glucose Status
+            lastAPSResult.glucoseStatus?.let { gs ->
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_glucose_status_label,
+                        rows = gs.toRows(),
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+            // Current Temp
+            lastAPSResult.currentTemp?.let { ct ->
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_current_temp_label,
+                        rows = ct.toRows(),
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+            // IOB Data
+            lastAPSResult.iob?.let { iob ->
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_iob_data_label,
+                        rows = iob.toRows(lastAPSResult.iobData?.size ?: 0),
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+            // Profile (OapsProfile or OapsProfileAutoIsf)
+            val profileRows = lastAPSResult.oapsProfileAutoIsf?.toRows()
+                ?: lastAPSResult.oapsProfile?.toRows()
+            if (profileRows != null) {
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_profile_label,
+                        rows = profileRows,
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+            // Meal Data
+            lastAPSResult.mealData?.let { md ->
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_meal_data_label,
+                        rows = md.toRows(),
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+            // Autosens Data
+            lastAPSResult.autosensResult?.let { asr ->
+                add(
+                    OpenAPSSection(
+                        titleResId = R.string.openapsma_autosensdata_label,
+                        rows = asr.toRows(),
+                        collapsedByDefault = true
+                    )
+                )
+            }
+
+
         }
 
         _uiState.value = OpenAPSUiState(

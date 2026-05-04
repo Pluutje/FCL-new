@@ -1,6 +1,5 @@
 package app.aaps.ui.compose.overview.chips
 
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -14,11 +13,12 @@ import app.aaps.ui.compose.overview.graphs.IobUiState
 fun IobCobChipsRow(
     iobUiState: IobUiState,
     cobUiState: CobUiState,
+    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val spacingDp = AapsSpacing.small
     SubcomposeLayout(
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
     ) { constraints ->
         val spacingPx = spacingDp.roundToPx()
         val isWidthBounded = constraints.hasBoundedWidth
@@ -27,7 +27,7 @@ fun IobCobChipsRow(
         // First pass: measure intrinsic widths with icons
         val withIcons = subcompose("withIcons") {
             IobChip(state = iobUiState, showIcon = true)
-            CobChip(state = cobUiState, showIcon = true)
+            if (showCob) CobChip(state = cobUiState, showIcon = true)
         }
         val intrinsicsWithIcons = withIcons.map { it.minIntrinsicWidth(constraints.maxHeight) }
         val totalWithIcons = intrinsicsWithIcons.sum()
@@ -40,16 +40,17 @@ fun IobCobChipsRow(
         } else {
             subcompose("withoutIcons") {
                 IobChip(state = iobUiState, showIcon = false)
-                CobChip(state = cobUiState, showIcon = false)
+                if (showCob) CobChip(state = cobUiState, showIcon = false)
             }
         }
 
         val intrinsics = measurables.map { it.minIntrinsicWidth(constraints.maxHeight) }
         val totalIntrinsic = intrinsics.sum()
 
-        // Scale each chip proportionally so they fill 100% of available space
+        // Meerdere chips: proportioneel schalen over beschikbare breedte.
+        // Één chip (COB verborgen bij FCL): gebruik intrinsieke breedte.
         val placeables = measurables.mapIndexed { i, measurable ->
-            val w = if (isWidthBounded) {
+            val w = if (isWidthBounded && measurables.size > 1) {
                 if (totalIntrinsic > 0)
                     (intrinsics[i].toLong() * availableWidth / totalIntrinsic).toInt()
                 else
@@ -61,7 +62,8 @@ fun IobCobChipsRow(
         }
 
         val height = if (placeables.isEmpty()) 0 else placeables.maxOf { it.height }
-        val layoutWidth = if (isWidthBounded) constraints.maxWidth else placeables.sumOf { it.width } + (if (placeables.size > 1) (placeables.size - 1) * spacingPx else 0)
+        val layoutWidth = if (isWidthBounded && measurables.size > 1) constraints.maxWidth
+        else placeables.sumOf { it.width } + (if (placeables.size > 1) (placeables.size - 1) * spacingPx else 0)
         layout(layoutWidth, height) {
             var x = 0
             placeables.forEachIndexed { i, placeable ->

@@ -308,11 +308,16 @@ class GraphViewModel @AssistedInject constructor(
         val dialogText = ArrayList<String>()
 
         if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
-            // Variable ISF branch — hide "AS: 100%" from overview when ratio is exactly 100%
+            // Variable ISF branch — bereken percentage direct uit profiel ISF / variabele ISF
+            // Dit werkt voor FCL (en andere variable ISF algoritmen) zonder autosens plugin
+            val fclSensPct = (isfMgdl / variableSens) * 100.0
+            if (fclSensPct != 100.0)
+                asText = rh.gs(R.string.autosens_short, fclSensPct)
+            dialogText.add(rh.gs(R.string.autosens_long, fclSensPct))
+            // Voeg ook de AAPS autosens toe aan dialoog als die beschikbaar is
             lastAutosensPercent?.let {
-                if (it != 100.0)
-                    asText = rh.gs(R.string.autosens_short, it)
-                dialogText.add(rh.gs(R.string.autosens_long, it))
+                if (it != fclSensPct)
+                    dialogText.add(rh.gs(R.string.autosens_long, it))
             }
             isfFrom = String.format(Locale.getDefault(), "%1$.1f", profileUtil.fromMgdlToUnits(isfMgdl, units))
             isfTo = String.format(Locale.getDefault(), "%1$.1f", profileUtil.fromMgdlToUnits(variableSens, units))

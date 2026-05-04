@@ -166,6 +166,7 @@ import io.reactivex.rxjava3.disposables.CompositeDisposable
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclAnalyzerScreen
 
 @AndroidEntryPoint
 class ComposeMainActivity : AppCompatActivity() {
@@ -694,7 +695,10 @@ class ComposeMainActivity : AppCompatActivity() {
                     isPumpCommunicating = pumpCommunicationStatus.statusBanner() != null,
                     onStopBolus = {
                         commandQueue.cancelAllBoluses(null)
-                    }
+                    },
+                        fclAnalyzerContent = { onDismiss ->
+                        FclAnalyzerScreen(onDismiss = onDismiss)
+                    },
                 )
             }
 

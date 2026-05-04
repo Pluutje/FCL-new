@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--Core strings-->
     <!-- General preferences -->
     <string name="pref_title_simple_mode">Simple mode</string>
     <string name="pref_title_insulin_concentration">Insulin concentration support</string>
@@ -457,5 +458,82 @@
 
     <!--    Appearance preferences-->
     <string name="prefs_range_title">Range for visualization</string>
+
+    <!-- FCL vNext internal keys (managed by FCL Analyzer, not shown in UI) -->
+    <string name="fcl_vnext_internal">FCL vNext</string>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+             FCL vNext — strings voor preferences scherm
+             ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- Gedrag & limieten -->
+    <string name="fcl_vnext_general_title">⚡ Gedrag &amp; limieten</string>
+    <string name="max_bolus_day_title">Max bolus dag</string>
+    <string name="max_bolus_day_summary">Referentiewaarde voor de Analyzer. De Analyzer stuurt de actieve maxSMB bij tussen 50% en 125% van deze waarde.</string>
+    <string name="max_bolus_night_title">Max bolus nacht</string>
+    <string name="max_bolus_night_summary">Maximale SMB-bolus \'s nachts (eenheden)</string>
+    <string name="fcl_vnext_MaxIOB_title">Max IOB</string>
+    <string name="fcl_vnext_MaxIOB_summary">Maximaal toegestaan actief insuline (IOB)</string>
+    <string name="fcl_vnext_dose_distribution_style">Insulineverdeling stijl</string>
+    <string name="fcl_vnext_dose_distribution_title">Insulineverdeling</string>
+    <string name="fcl_vnext_dose_distribution_summary">Hoe FCL de bolus verdeelt over de cyclus</string>
+    <string name="fcl_vnext_night_response_style">Nachtrespons stijl</string>
+    <string name="fcl_vnext_night_response_style_title">Nachtrespons</string>
+    <string name="fcl_vnext_night_response_style_summary">Hoe FCL \'s nachts reageert op glucose-stijging</string>
+    <string name="fcl_vnext_generic_choice_title">Keuze</string>
+
+    <!-- Context -->
+    <string name="fcl_vnext_context_title">🌙 🛡️ 🚶 Context</string>
+    <string name="WeekendDagen">Weekend dagen</string>
+    <string name="WeekendDagen_title">Weekend dagen</string>
+    <string name="WeekendDagen_summary">Welke dagen tellen als weekend (later ochtend)</string>
+    <string name="OchtendStart">Ochtend start</string>
+    <string name="OchtendStart_title">Ochtend start (doordeweeks)</string>
+    <string name="OchtendStart_summary">Tijdstip waarop de dag begint op werkdagen</string>
+    <string name="OchtendStartWeekend">Ochtend start weekend</string>
+    <string name="OchtendStartWeekend_title">Ochtend start (weekend)</string>
+    <string name="OchtendStartWeekend_summary">Tijdstip waarop de dag begint in het weekend</string>
+    <string name="NachtStart">Nacht start</string>
+    <string name="NachtStart_title">Nacht start</string>
+    <string name="NachtStart_summary">Tijdstip waarop de nacht begint</string>
+    <string name="fcl_vnext_resistance_behavior">Resistentie gedrag</string>
+    <string name="fcl_vnext_resistance_behavior_title">Resistentie gedrag</string>
+    <string name="fcl_vnext_resistance_behavior_summary">Hoe FCL reageert op gemeten insulineresistentie</string>
+    <string name="fcl_vnext_resistance_stability">Resistentie stabiliteit</string>
+    <string name="fcl_vnext_resistance_stability_title">Resistentie stabiliteit</string>
+    <string name="fcl_vnext_resistance_stability_summary">Hoe snel FCL resistentie-aanpassingen doorvoert</string>
+    <string name="fcl_vnext_activity_behavior">Activiteit gedrag</string>
+    <string name="fcl_vnext_activity_behavior_title">Activiteit gedrag</string>
+    <string name="fcl_vnext_activity_behavior_summary">Hoe FCL reageert op beweging en activiteit</string>
+
+    <!-- FCL vNext — lijst-waarden -->
+    <string name="fcl_dist_very_smooth">🌊 Ultra smooth (bijna alleen basaal)</string>
+    <string name="fcl_dist_smooth">🫧 Smooth</string>
+    <string name="fcl_dist_balanced">⚖️ Balanced (standaard)</string>
+    <string name="fcl_dist_pulsed">🔨 Pulsed</string>
+    <string name="fcl_dist_very_pulsed">⚡ Ultra pulsed (korte, sterke SMB\'s)</string>
+
+    <string name="fcl_night_very_guarded">🛑 Zeer terughoudend</string>
+    <string name="fcl_night_guarded">🧯 Terughoudend</string>
+    <string name="fcl_night_balanced">⚖️ Gebalanceerd (standaard)</string>
+    <string name="fcl_night_responsive">🌙 Reageert eerder</string>
+    <string name="fcl_night_proactive">🚀 Proactief</string>
+
+    <string name="fcl_res_off">Uitgeschakeld</string>
+    <string name="fcl_res_light">Licht</string>
+    <string name="fcl_res_normal">Normaal (aanbevolen)</string>
+    <string name="fcl_res_strong">Sterk</string>
+    <string name="fcl_res_aggressive">Agressief</string>
+
+    <string name="fcl_stab_very_stable">Zeer stabiel</string>
+    <string name="fcl_stab_standard">Standaard</string>
+    <string name="fcl_stab_responsive">Responsief</string>
+
+    <string name="fcl_act_off">Uit</string>
+    <string name="fcl_act_light">Licht</string>
+    <string name="fcl_act_normal">Normaal</string>
+    <string name="fcl_act_strong">Sterk</string>
+
+
 
 </resources>

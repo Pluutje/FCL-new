@@ -75,6 +75,7 @@ fun OverviewScreen(
     queueStatusText: String? = null,
     isPumpCommunicating: Boolean = false,
     onStopBolus: () -> Unit = {},
+    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var showNotificationSheet by remember { mutableStateOf(false) }
@@ -117,6 +118,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
+                    showCob = showCob,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,
                     graphViewModel = graphViewModel,
@@ -148,6 +150,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
+                    showCob = showCob,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,
                     graphViewModel = graphViewModel,

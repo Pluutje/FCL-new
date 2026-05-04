@@ -132,7 +132,9 @@ fun MainScreen(
     queueStatusText: String? = null,
     isPumpCommunicating: Boolean = false,
     onStopBolus: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+
+    fclAnalyzerContent: ((@Composable (onDismiss: () -> Unit) -> Unit))? = null,
 ) {
     LocalDateUtil.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -140,6 +142,7 @@ fun MainScreen(
     var showTreatmentSheet by remember { mutableStateOf(false) }
     var showAutomationSheet by remember { mutableStateOf(false) }
     var showLoopActionSheet by remember { mutableStateOf(false) }
+    var showFclAnalyzer by remember { mutableStateOf(false) }
     val automationState by scenesViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
 
@@ -238,6 +241,7 @@ fun MainScreen(
                         runningModeProgress = uiState.runningModeProgress,
                         runningModeRecordId = uiState.runningModeRecordId,
                         tbrState = uiState.tbrState,
+                        showCob = !uiState.isFclActive,
                         isSimpleMode = uiState.isSimpleMode,
                         calcProgress = calcProgress,
                         graphViewModel = graphViewModel,
@@ -365,6 +369,8 @@ fun MainScreen(
                             onPermissionsClick = onPermissionsClick,
                             loopActionAvailable = loopActionState.actionAvailable,
                             onLoopActionClick = { showLoopActionSheet = true },
+                            isFclActive = uiState.isFclActive,
+                            onFclAnalyzerClick = { showFclAnalyzer = true },
                             modifier = Modifier.onSizeChanged { bottomBarHeightPx = it.height }
                         )
                     }
@@ -441,6 +447,10 @@ fun MainScreen(
             onPerform = { mainViewModel.performLoopAccept() },
             onDismiss = { showLoopActionSheet = false }
         )
+    }
+
+    if (showFclAnalyzer) {
+        fclAnalyzerContent?.invoke { showFclAnalyzer = false }
     }
 
     // Shared confirmation dialog (automation actions, TT presets — from toolbar or bottom sheets)

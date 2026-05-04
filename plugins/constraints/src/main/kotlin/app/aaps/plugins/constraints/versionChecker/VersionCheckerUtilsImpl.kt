@@ -152,9 +152,9 @@ class VersionCheckerUtilsImpl @Inject constructor(
 
     private fun warnEvery(expiration: Long): Long =
         when {
-            expiration - dateUtil.now() > T.days(28).msecs() -> T.days(7).msecs()
-            expiration - dateUtil.now() > T.days(14).msecs() -> T.days(3).msecs()
-            else                                             -> T.days(1).msecs()
+            expiration - dateUtil.now() > T.days(28).msecs() -> T.days(14).msecs()
+            expiration - dateUtil.now() > T.days(14).msecs() -> T.days(7).msecs()
+            else                                             -> T.days(5).msecs()
         }
 }
 

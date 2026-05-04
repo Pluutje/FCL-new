@@ -48,7 +48,7 @@ val LocalAapsTypography = compositionLocalOf {
     AapsTypography(
         bgValue = TextStyle(fontSize = 50.sp, fontWeight = FontWeight.Bold, lineHeight = 52.sp),
         bgSecondary = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp),
-        bgTimeAgo = TextStyle(fontSize = 17.sp, lineHeight = 19.sp),
+        bgTimeAgo = TextStyle(fontSize = 12.sp, lineHeight = 14.sp),
         treatmentValue = TextStyle(fontSize = 14.sp),
         treatmentDetail = TextStyle(fontSize = 12.sp),
         chipLabel = TextStyle(fontSize = 12.sp),
@@ -66,7 +66,7 @@ fun aapsTypography(): AapsTypography {
     return AapsTypography(
         bgValue = mt.displayMedium.copy(fontSize = 50.sp, fontWeight = FontWeight.Bold, lineHeight = 52.sp),
         bgSecondary = mt.bodySmall.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp),
-        bgTimeAgo = mt.bodySmall.copy(fontSize = 17.sp, lineHeight = 19.sp),
+        bgTimeAgo = mt.bodySmall.copy(fontSize = 12.sp, lineHeight = 14.sp),
         treatmentValue = mt.bodyMedium.copy(fontSize = 14.sp),
         treatmentDetail = mt.bodySmall.copy(fontSize = 12.sp),
         chipLabel = mt.bodySmall.copy(fontSize = 12.sp),

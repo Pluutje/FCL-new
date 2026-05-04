@@ -54,6 +54,20 @@ fun app.aaps.database.entities.APSResult.fromDb(apsResultProvider: Provider<APSR
                 result.autosensResult = this.autosensDataJson?.let { Json.decodeFromString(it) }
             }
 
+        app.aaps.database.entities.APSResult.Algorithm.FCL ->
+            apsResultProvider.get().with(rtJson.decodeFromString(this.resultJson)).also { result ->
+                result.date = this.timestamp
+                result.glucoseStatus = try {
+                    this.glucoseStatusJson?.let { Json.decodeFromString<GlucoseStatusAutoIsf>(it) }
+                } catch (_: Exception) {
+                    null
+                }
+                result.currentTemp = this.currentTempJson?.let { Json.decodeFromString(it) }
+                result.iobData = this.iobDataJson?.let { Json.decodeFromString(it) }
+                result.mealData = this.mealDataJson?.let { Json.decodeFromString(it) }
+                result.autosensResult = this.autosensDataJson?.let { Json.decodeFromString(it) }
+            }
+
         else                                                    -> error("Unsupported")
     }
 
@@ -87,6 +101,19 @@ fun APSResult.toDb(): app.aaps.database.entities.APSResult =
                 resultJson = rtJson.encodeToString(RT.serializer(), this.rawData() as RT)
             )
 
+        APSResult.Algorithm.FCL ->
+            app.aaps.database.entities.APSResult(
+                timestamp = this.date,
+                algorithm = app.aaps.database.entities.APSResult.Algorithm.FCL,
+                glucoseStatusJson = this.glucoseStatus?.let { Json.encodeToString(GlucoseStatusAutoIsf.serializer(), it as GlucoseStatusAutoIsf) },
+                currentTempJson = this.currentTemp?.let { Json.encodeToString(CurrentTemp.serializer(), it) },
+                iobDataJson = this.iobData?.let { Json.encodeToString(ArraySerializer(IobTotal.serializer()), it) },
+                profileJson = null,
+                mealDataJson = this.mealData?.let { Json.encodeToString(MealData.serializer(), it) },
+                autosensDataJson = this.autosensResult?.let { Json.encodeToString(AutosensResult.serializer(), it) },
+                resultJson = rtJson.encodeToString(RT.serializer(), this.rawData() as RT)
+            )
+
         else                         -> error("Unsupported")
     }
 
@@ -95,6 +122,7 @@ fun app.aaps.database.entities.APSResult.Algorithm.fromDb(): APSResult.Algorithm
         app.aaps.database.entities.APSResult.Algorithm.AMA      -> APSResult.Algorithm.AMA
         app.aaps.database.entities.APSResult.Algorithm.SMB      -> APSResult.Algorithm.SMB
         app.aaps.database.entities.APSResult.Algorithm.AUTO_ISF -> APSResult.Algorithm.AUTO_ISF
+        app.aaps.database.entities.APSResult.Algorithm.FCL      -> APSResult.Algorithm.FCL
         else                                                    -> error("Unsupported")
     }
 
@@ -103,5 +131,6 @@ fun APSResult.Algorithm.toDb(): app.aaps.database.entities.APSResult.Algorithm =
         APSResult.Algorithm.AMA      -> app.aaps.database.entities.APSResult.Algorithm.AMA
         APSResult.Algorithm.SMB      -> app.aaps.database.entities.APSResult.Algorithm.SMB
         APSResult.Algorithm.AUTO_ISF -> app.aaps.database.entities.APSResult.Algorithm.AUTO_ISF
+        APSResult.Algorithm.FCL      -> app.aaps.database.entities.APSResult.Algorithm.FCL
         else                         -> error("Unsupported")
     }

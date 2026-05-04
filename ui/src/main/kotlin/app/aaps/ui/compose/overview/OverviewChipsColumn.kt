@@ -31,6 +31,7 @@ import app.aaps.ui.compose.overview.chips.TbrChip
 import app.aaps.ui.compose.overview.chips.TempTargetChip
 import app.aaps.ui.compose.overview.graphs.CobUiState
 import app.aaps.ui.compose.overview.graphs.IobUiState
+import androidx.compose.foundation.layout.wrapContentWidth
 
 @Composable
 fun OverviewChipsColumn(
@@ -51,6 +52,7 @@ fun OverviewChipsColumn(
     tbrState: TbrState,
     iobUiState: IobUiState,
     cobUiState: CobUiState,
+    showCob: Boolean = true,
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -120,7 +122,9 @@ fun OverviewChipsColumn(
         }
         IobCobChipsRow(
             iobUiState = iobUiState,
-            cobUiState = cobUiState
+            cobUiState = cobUiState,
+            showCob = showCob,
+            modifier = Modifier.wrapContentWidth(Alignment.Start)
         )
     }
 }

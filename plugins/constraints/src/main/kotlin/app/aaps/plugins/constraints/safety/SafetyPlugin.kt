@@ -71,12 +71,13 @@ class SafetyPlugin @Inject constructor(
     }
 
     override suspend fun isClosedLoopAllowed(value: Constraint<Boolean>): Constraint<Boolean> {
-        if (!config.isEngineeringModeOrRelease()) {
+     /*   if (!config.isEngineeringModeOrRelease()) {
             if (value.value()) {
                 notificationManager.post(NotificationId.TOAST_ALARM, R.string.closed_loop_disabled_on_dev_branch, level = NotificationLevel.NORMAL)
             }
             value.set(false, rh.gs(R.string.closed_loop_disabled_on_dev_branch), this)
-        }
+        }   */
+        // FCL vNext: dev branch check uitgeschakeld — closed loop altijd toegestaan
         val pump = activePlugin.activePump
         if (!pump.isFakingTempsByExtendedBoluses && persistenceLayer.getExtendedBolusActiveAt(dateUtil.now()) != null) {
             value.set(false, rh.gs(R.string.closed_loop_disabled_with_eb), this)

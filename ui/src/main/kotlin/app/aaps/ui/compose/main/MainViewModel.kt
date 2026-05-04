@@ -178,7 +178,8 @@ class MainViewModel @Inject constructor(
             runningModeProgress = chip.runningModeProgress,
             runningModeRecordId = chip.runningModeRecordId,
             tbrState = chip.tbrState,
-            quickWizardItems = chip.quickWizardItems
+            quickWizardItems = chip.quickWizardItems,
+            isFclActive = activePlugin.activeAPS?.algorithm == app.aaps.core.interfaces.aps.APSResult.Algorithm.FCL
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 

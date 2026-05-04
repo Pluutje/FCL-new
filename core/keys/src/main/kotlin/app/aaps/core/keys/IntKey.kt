@@ -285,4 +285,17 @@ enum class IntKey(
     NsClientUrgentAlarmStaleData(key = "ns_alarm_urgent_stale_data_value", defaultValue = 31, min = 30, max = 180, titleResId = R.string.pref_title_urgent_alarm_stale_data, unitType = UnitType.MIN),
 
     SiteRotationUserProfile(key = "site_rotation_user_profile", defaultValue = 0, min = 0, max = 2, titleResId = R.string.pref_title_site_rotation_profile),
+    // ── FCL vNext — Groep 2: Hoofdparameters (STV + N) ───────────────────
+    // Worden bijgestuurd door FCL Analyzer via config_override.json.
+    fcl_vnext_sterkte(key = "fcl_vnext_sterkte", defaultValue = 100, min = 80, max = 125, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
+    fcl_vnext_timing(key = "fcl_vnext_timing", defaultValue = 100, min = 80, max = 120, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
+    fcl_vnext_volhoudendheid(key = "fcl_vnext_volhoudendheid", defaultValue = 100, min = 70, max = 130, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
+    fcl_vnext_nacht_factor(key = "fcl_vnext_nacht_factor", defaultValue = 85, min = 60, max = 110, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
+
+    // ── FCL vNext — Groep 3: Analyzer-gestuurde fijnafstelling ────────────
+    fcl_vnext_commit_cooldown_minutes(key = "fcl_vnext_commit_cooldown_minutes", defaultValue = 13, min = 5, max = 25, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.MIN),
+    fcl_vnext_early_boost_max_commits(key = "fcl_vnext_early_boost_max_commits", defaultValue = 2, min = 1, max = 3, titleResId = R.string.fcl_vnext_internal),
+    fcl_vnext_sustained_rise_min_target(key = "fcl_vnext_sustained_rise_min_target", defaultValue = 12, min = 5, max = 20, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.MIN),
+
+
 }

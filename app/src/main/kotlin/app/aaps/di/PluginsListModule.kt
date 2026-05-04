@@ -58,6 +58,8 @@ import dagger.multibindings.IntoMap
 import dagger.multibindings.Multibinds
 import javax.inject.Qualifier
 
+import app.aaps.plugins.aps.openAPSFCL.OpenAPSFCLPlugin
+
 @Suppress("unused")
 @Module
 @InstallIn(SingletonComponent::class)
@@ -128,6 +130,12 @@ abstract class PluginsListModule {
     @IntoMap
     @IntKey(225)
     abstract fun bindOpenAPSAutoISFPlugin(plugin: OpenAPSAutoISFPlugin): PluginBase
+
+    @Binds
+    @AllConfigs
+    @IntoMap
+    @IntKey(226)
+    abstract fun bindOpenAPSFCLPlugin(plugin: OpenAPSFCLPlugin): PluginBase
 
     @Binds
     @AllConfigs
