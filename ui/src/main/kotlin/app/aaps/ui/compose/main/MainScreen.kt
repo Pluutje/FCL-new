@@ -45,6 +45,9 @@ import app.aaps.core.interfaces.pump.BolusProgressState
 import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.LocalSnackbarHostState
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
+import app.aaps.core.ui.R
+import androidx.compose.ui.res.stringResource
 import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -134,7 +137,9 @@ fun MainScreen(
     onStopBolus: () -> Unit = {},
     modifier: Modifier = Modifier,
 
-    fclAnalyzerContent: ((@Composable (onDismiss: () -> Unit) -> Unit))? = null,
+    // FCL Analyzer — geïnjecteerd vanuit ComposeMainActivity (app module)
+    // zodat de ui module geen dependency op plugins/aps hoeft te hebben
+    fclAnalyzerContent: (@Composable (onDismiss: () -> Unit) -> Unit)? = null,
 ) {
     LocalDateUtil.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -453,15 +458,31 @@ fun MainScreen(
         fclAnalyzerContent?.invoke { showFclAnalyzer = false }
     }
 
-    // Shared confirmation dialog (automation actions, TT presets — from toolbar or bottom sheets)
+    // Shared confirmation dialog (automation actions, TT presets, scene end — from toolbar or
+    // bottom sheets). When the confirmation carries a secondary action (e.g., scene chain skip),
+    // render a 3-button dialog; otherwise the standard 2-button OK/Cancel.
     val actionConfirmation by mainViewModel.actionConfirmation.collectAsStateWithLifecycle()
     actionConfirmation?.let { confirmation ->
-        OkCancelDialog(
-            title = confirmation.title,
-            message = confirmation.message,
-            onConfirm = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
-            onDismiss = { mainViewModel.dismissActionConfirmation() }
-        )
+        val secondaryAction = confirmation.secondaryAction
+        val secondaryLabel = confirmation.secondaryLabel
+        if (secondaryAction != null && secondaryLabel != null) {
+            ThreeButtonDialog(
+                title = confirmation.title,
+                message = confirmation.message,
+                primaryLabel = confirmation.confirmLabel ?: stringResource(R.string.ok),
+                onPrimary = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
+                secondaryLabel = secondaryLabel,
+                onSecondary = { mainViewModel.executeConfirmableAction(secondaryAction) },
+                onDismiss = { mainViewModel.dismissActionConfirmation() }
+            )
+        } else {
+            OkCancelDialog(
+                title = confirmation.title,
+                message = confirmation.message,
+                onConfirm = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
+                onDismiss = { mainViewModel.dismissActionConfirmation() }
+            )
+        }
     }
 
     // Maintenance dialogs (sheets, confirmations, export chain)
