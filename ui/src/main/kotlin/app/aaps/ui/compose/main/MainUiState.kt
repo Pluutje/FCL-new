@@ -45,6 +45,7 @@ data class MainUiState(
     val runningModeRecordId: Long = 0, // DB record ID (for scene override detection)
     // Running TBR state for chip (HIGH / LOW / NONE)
     val tbrState: TbrState = TbrState.NONE,
+    val tbrBasalText: String = "",
     // QuickWizard entries for treatment bottom sheet
     val quickWizardItems: List<QuickWizardItem> = emptyList(),
     // Navigation-triggered dialogs

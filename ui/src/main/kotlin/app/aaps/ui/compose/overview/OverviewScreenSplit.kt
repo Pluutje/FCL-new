@@ -53,6 +53,7 @@ fun OverviewScreenSplit(
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
     tbrState: TbrState,
+    tbrBasalText: String = "",              // ← nieuw
     isSimpleMode: Boolean,
     calcProgress: Int,
     graphViewModel: GraphViewModel,
@@ -144,6 +145,7 @@ fun OverviewScreenSplit(
                         tempTargetReason = tempTargetReason,
                         tempTargetSceneManaged = tempTargetSceneManaged,
                         tbrState = tbrState,
+                        tbrBasalText = tbrBasalText,            // ← nieuw
                         iobUiState = iobUiState,
                         showCob = showCob,
                         cobUiState = cobUiState,

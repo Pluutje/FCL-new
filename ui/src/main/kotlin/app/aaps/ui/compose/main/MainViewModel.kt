@@ -182,6 +182,7 @@ class MainViewModel @Inject constructor(
             runningModeProgress = chip.runningModeProgress,
             runningModeRecordId = chip.runningModeRecordId,
             tbrState = chip.tbrState,
+            tbrBasalText = chip.tbrBasalText,       // ← nieuw
             quickWizardItems = chip.quickWizardItems,
             isFclActive = activePlugin.activeAPS?.algorithm == app.aaps.core.interfaces.aps.APSResult.Algorithm.FCL
         )
@@ -286,6 +287,7 @@ class MainViewModel @Inject constructor(
             runningModeProgress = rmProgress,
             runningModeRecordId = if (rmExpired) 0 else rmData?.recordId ?: 0,
             tbrState = if (tbrExpired) TbrState.NONE else tbrData?.state ?: TbrState.NONE,
+            tbrBasalText = if (tbrExpired || tbrData == null) "" else tbrData.basalText,
             quickWizardItems = computeQuickWizardItems(rmData?.mode)
         )
     }
@@ -874,5 +876,6 @@ private data class ChipState(
     val runningModeProgress: Float = 0f,
     val runningModeRecordId: Long = 0,
     val tbrState: TbrState = TbrState.NONE,
+    val tbrBasalText: String = "",          // ← nieuw
     val quickWizardItems: List<QuickWizardItem> = emptyList()
 )

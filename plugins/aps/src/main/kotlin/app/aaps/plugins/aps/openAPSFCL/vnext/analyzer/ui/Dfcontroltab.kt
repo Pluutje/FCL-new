@@ -60,10 +60,15 @@ fun DFControlTab(
     var applyResult by remember { mutableStateOf<String?>(null) }
     var applyTs by remember { mutableStateOf(0L) }
 
+    // ── Kalibratie-state ─────────────────────────────────────────────────
+    var refWmd by remember { mutableStateOf(DFLearner.getRefWmd(context)) }
+    var refWff by remember { mutableStateOf(DFLearner.getRefWff(context)) }
+    var refEb by remember { mutableStateOf(DFLearner.getRefEb(context)) }
+
     // S/T/V in FCLvNext-eenheden — enige zichtbare schaal
     val stv = DFMapping.toStvMap(d, f, nachtFactor)
-    val sNu = stv["sterkte"]        ?: 95
-    val tNu = stv["timing"]         ?: 100
+    val sNu = stv["sterkte"] ?: 95
+    val tNu = stv["timing"] ?: 100
     val vNu = stv["volhoudendheid"] ?: 95
 
     // Stapsgroottes in S/T/V-eenheden
@@ -85,6 +90,7 @@ fun DFControlTab(
     // Conversiefuncties: S/T/V terug naar D/F
     fun sNaarD(s: Int): Double = (s.toDouble() / 95.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
     fun tNaarF(t: Int): Double = (0.5 + (t.toDouble() - 106.0) / 40.0).coerceIn(DFMapping.F_MIN, DFMapping.F_MAX)
+
     // V deelt D met S: als V verandert bij gelijkblijvende F, past D aan
     fun vNaarD(v: Int): Double = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
 
@@ -200,9 +206,9 @@ fun DFControlTab(
             Button(
                 onClick = {
                     // Schrijft ALTIJD beide blokken: stv + volledige param_overrides
-                    val po  = DFMapping.toParamOverrides(d, f)
+                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
                     val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
-                    val ok  = onApplyToAaps(po, stvMap)
+                    val ok = onApplyToAaps(po, stvMap)
                     applyResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
                     applyTs = System.currentTimeMillis()
                 },
@@ -272,8 +278,8 @@ fun DFControlTab(
                     DFLearner.Tempo.entries.forEach { t ->
                         FilterChip(
                             selected = t == tempo,
-                            onClick  = { tempo = t; DFLearner.setTempo(context, t) },
-                            label    = {
+                            onClick = { tempo = t; DFLearner.setTempo(context, t) },
+                            label = {
                                 Text(
                                     when (t) {
                                         DFLearner.Tempo.LANGZAAM -> "Langzaam"
@@ -290,7 +296,17 @@ fun DFControlTab(
             }
         }
 
-        // ── Laatste aanpassingen door automaat ────────────────────────────
+        // ── Kalibratie ────────────────────────────────────────────────────
+        KalibratieSectie(
+            refWmd = refWmd,
+            refWff = refWff,
+            refEb = refEb,
+            onWmdChange = { refWmd = it; DFLearner.setRefWmd(context, it) },
+            onWffChange = { refWff = it; DFLearner.setRefWff(context, it) },
+            onEbChange = { refEb = it; DFLearner.setRefEb(context, it) }
+        )
+
+        // ── Laatste aanpassingen door automaat ────────────────────────────        if (history.isNotEmpty()) {
         if (history.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -332,6 +348,7 @@ fun DFControlTab(
                                     step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
                                     step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") ->
                                         MaterialTheme.colorScheme.primary
+
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 }
                                 Text(
@@ -381,35 +398,35 @@ fun DFControlTab(
                 }
                 if (showExpert) {
                     Divider(modifier = Modifier.padding(horizontal = 14.dp))
-                    val po  = DFMapping.toParamOverrides(d, f)
+                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
                     val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
                     Column(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        ExpertRij("sterkte (S)",        "${stvMap["sterkte"] ?: "—"}%")
-                        ExpertRij("timing (T)",          "${stvMap["timing"] ?: "—"}%")
-                        ExpertRij("volhoudendheid (V)",  "${stvMap["volhoudendheid"] ?: "—"}%")
-                        ExpertRij("D (intern)",          "${"%.3f".format(d)}")
-                        ExpertRij("F (intern)",          "${"%.3f".format(f)}")
+                        ExpertRij("sterkte (S)", "${stvMap["sterkte"] ?: "—"}%")
+                        ExpertRij("timing (T)", "${stvMap["timing"] ?: "—"}%")
+                        ExpertRij("volhoudendheid (V)", "${stvMap["volhoudendheid"] ?: "—"}%")
+                        ExpertRij("D (intern)", "${"%.3f".format(d)}")
+                        ExpertRij("F (intern)", "${"%.3f".format(f)}")
                         Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                        ExpertRij("earlyBoostFactor",    fmtD2(po.earlyBoostFactor))
-                        ExpertRij("earlyBoostMinConf",   fmtD2(po.earlyBoostMinConfidence))
-                        ExpertRij("earlyBoostMaxCom",    fmtInt(po.earlyBoostMaxCommits))
-                        ExpertRij("lateDecayFactor",     fmtD2(po.lateCommitDecayFactor))
-                        ExpertRij("lateDecayThresh",     fmtD2(po.lateCommitDecayThreshold))
+                        ExpertRij("earlyBoostFactor", fmtD2(po.earlyBoostFactor))
+                        ExpertRij("earlyBoostMinConf", fmtD2(po.earlyBoostMinConfidence))
+                        ExpertRij("earlyBoostMaxCom", fmtInt(po.earlyBoostMaxCommits))
+                        ExpertRij("lateDecayFactor", fmtD2(po.lateCommitDecayFactor))
+                        ExpertRij("lateDecayThresh", fmtD2(po.lateCommitDecayThreshold))
                         Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                        ExpertRij("commitCooldown",      fmtInt(po.commitCooldownMinutes) + "m")
-                        ExpertRij("watchingFrontload",   fmtD2(po.watchingFrontloadFrac))
-                        ExpertRij("watchingMinDelta",    fmtD2(po.watchingMinDeltaToTarget) + " mmol")
-                        ExpertRij("peakThreshold",       fmtD1(po.peakPredictionThreshold) + " mmol")
-                        ExpertRij("peakHorizon",         fmtD2(po.peakPredictionHorizonH) + " uur")
-                        ExpertRij("iobStart",            fmtD2(po.iobStart))
-                        ExpertRij("peakIobBrake",        fmtD2(po.peakIobBrakeSuppressThreshold))
-                        ExpertRij("earlyRiseFracMin",    fmtD2(po.earlyRiseFracMin))
-                        ExpertRij("peakMaxSlope",        fmtD2(po.peakMaxSlopeWeight))
-                        ExpertRij("sustainedSlope",      fmtD2(po.sustainedRiseSlopeMin))
-                        ExpertRij("sustainedTarget",     fmtInt(po.sustainedRiseMinTarget) + "m")
+                        ExpertRij("commitCooldown", fmtInt(po.commitCooldownMinutes) + "m")
+                        ExpertRij("watchingFrontload", fmtD2(po.watchingFrontloadFrac))
+                        ExpertRij("watchingMinDelta", fmtD2(po.watchingMinDeltaToTarget) + " mmol")
+                        ExpertRij("peakThreshold", fmtD1(po.peakPredictionThreshold) + " mmol")
+                        ExpertRij("peakHorizon", fmtD2(po.peakPredictionHorizonH) + " uur")
+                        ExpertRij("iobStart", fmtD2(po.iobStart))
+                        ExpertRij("peakIobBrake", fmtD2(po.peakIobBrakeSuppressThreshold))
+                        ExpertRij("earlyRiseFracMin", fmtD2(po.earlyRiseFracMin))
+                        ExpertRij("peakMaxSlope", fmtD2(po.peakMaxSlopeWeight))
+                        ExpertRij("sustainedSlope", fmtD2(po.sustainedRiseSlopeMin))
+                        ExpertRij("sustainedTarget", fmtInt(po.sustainedRiseMinTarget) + "m")
                     }
                 }
             }
@@ -709,6 +726,196 @@ private fun LegendaPunt(kleur: androidx.compose.ui.graphics.Color, label: String
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Canvas(Modifier.size(8.dp)) { drawCircle(kleur) }
         Text(label, style = MaterialTheme.typography.labelSmall, color = kleur, fontSize = 9.sp)
+    }
+}
+
+// ── KalibratieSectie ──────────────────────────────────────────────────────
+// Drie gebruikersstuurbare basisinstellingen die de DFMapping-berekeningen
+// verschuiven zonder de coherentie te breken.
+
+@Composable
+private fun KalibratieSectie(
+    refWmd: Double,
+    refWff: Double,
+    refEb:  Double,
+    onWmdChange: (Double) -> Unit,
+    onWffChange: (Double) -> Unit,
+    onEbChange:  (Double) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { open = !open }
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "🎛  Kalibratie",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Pas het basisgedrag aan op jouw maaltijdpatroon",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    if (open) "▲" else "▼",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (open) {
+                Divider(modifier = Modifier.padding(horizontal = 14.dp))
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // ── Stijgingsdrempel frontload (REF_WMD) ────────────────
+                    KalibratieParm(
+                        emoji = "📏",
+                        naam = "Stijgingsdrempel frontload",
+                        uitleg = "Hoe ver BG boven target moet stijgen voordat het systeem een frontload-puls geeft. " +
+                            "Lager = eerder reageren bij maaltijden die laag starten. " +
+                            "Hoger = alleen reageren bij duidelijkere stijgingen.",
+                        waarde = refWmd,
+                        eenheid = "mmol",
+                        stap = 0.10,
+                        min = DFMapping.REF_WMD_MIN,
+                        max = DFMapping.REF_WMD_MAX,
+                        defaultWaarde = DFMapping.REF_WMD_DEFAULT,
+                        formatFn = { "%.2f".format(it) },
+                        onMinus = { onWmdChange((refWmd - 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)) },
+                        onPlus  = { onWmdChange((refWmd + 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)) },
+                        onReset = { onWmdChange(DFMapping.REF_WMD_DEFAULT) }
+                    )
+
+                    // ── Frontload grootte (REF_WFF) ─────────────────────────
+                    KalibratieParm(
+                        emoji = "💉",
+                        naam = "Frontload grootte",
+                        uitleg = "Hoe groot de frontload-puls is als hij triggert, als percentage van de maximale SMB. " +
+                            "Hoger = grotere puls bij stijgingsdetectie. " +
+                            "Lager = voorzichtiger eerste reactie.",
+                        waarde = refWff * 100,
+                        eenheid = "%",
+                        stap = 5.0,
+                        min = DFMapping.REF_WFF_MIN * 100,
+                        max = DFMapping.REF_WFF_MAX * 100,
+                        defaultWaarde = DFMapping.REF_WFF_DEFAULT * 100,
+                        formatFn = { "%.0f".format(it) },
+                        onMinus = { onWffChange(((refWff * 100 - 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)) },
+                        onPlus  = { onWffChange(((refWff * 100 + 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)) },
+                        onReset = { onWffChange(DFMapping.REF_WFF_DEFAULT) }
+                    )
+
+                    // ── Vroege boost (REF_EB) ───────────────────────────────
+                    KalibratieParm(
+                        emoji = "🚀",
+                        naam = "Vroege boost",
+                        uitleg = "Versterking van de eerste 1-2 commits bij een duidelijk stijgingssignaal. " +
+                            "1.0 = uit (standaard). " +
+                            "Hoger = meer insuline vroeg in de maaltijd, lagere piek, maar hogere kans op late dip.",
+                        waarde = refEb,
+                        eenheid = "×",
+                        stap = 0.10,
+                        min = DFMapping.REF_EB_MIN,
+                        max = DFMapping.REF_EB_MAX,
+                        defaultWaarde = DFMapping.REF_EB_DEFAULT,
+                        formatFn = { "%.1f".format(it) },
+                        onMinus = { onEbChange((refEb - 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX)) },
+                        onPlus  = { onEbChange((refEb + 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX)) },
+                        onReset = { onEbChange(DFMapping.REF_EB_DEFAULT) }
+                    )
+
+                    Text(
+                        "⚠ Kalibratie-wijzigingen zijn pas actief na 'Toepassen in AAPS' hierboven.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KalibratieParm(
+    emoji: String,
+    naam: String,
+    uitleg: String,
+    waarde: Double,
+    eenheid: String,
+    stap: Double,
+    min: Double,
+    max: Double,
+    defaultWaarde: Double,
+    formatFn: (Double) -> String,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    onReset: () -> Unit
+) {
+    val isDefault = kotlin.math.abs(waarde - defaultWaarde) < 0.001
+    val kleur = when {
+        waarde > defaultWaarde + stap * 0.5 -> MaterialTheme.colorScheme.primary
+        waarde < defaultWaarde - stap * 0.5 -> MaterialTheme.colorScheme.tertiary
+        else                                -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "$emoji  $naam",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "${formatFn(waarde)} $eenheid",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = kleur
+            )
+        }
+        Text(
+            uitleg,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedButton(
+                onClick = onMinus,
+                enabled = waarde > min + 0.001,
+                modifier = Modifier.weight(1f)
+            ) { Text("−  ${formatFn((waarde - stap).coerceIn(min, max))} $eenheid", fontSize = 12.sp) }
+            OutlinedButton(
+                onClick = onReset,
+                enabled = !isDefault,
+                modifier = Modifier.weight(1f)
+            ) { Text("↺  ${formatFn(defaultWaarde)}", fontSize = 12.sp) }
+            OutlinedButton(
+                onClick = onPlus,
+                enabled = waarde < max - 0.001,
+                modifier = Modifier.weight(1f)
+            ) { Text("+  ${formatFn((waarde + stap).coerceIn(min, max))} $eenheid", fontSize = 12.sp) }
+        }
     }
 }
 

@@ -616,10 +616,18 @@ class OverviewDataCacheImpl @AssistedInject constructor(
         // converted to TBR (EB-as-TB) won't have a TB row; state is still correct but the
         // ViewModel won't auto-refresh on expiry — the next TB/EB DB event catches it.
         val activeTb = if (state != TbrState.NONE) persistenceLayer.getTemporaryBasalActiveAt(now) else null
+        val basalText = when (state) {
+            TbrState.NONE -> ""
+            else -> {
+                val pct = (basalData.tempBasalAbsolute / basalData.basal * 100).toInt()
+                "${pct}%"
+            }
+        }
         _tbrFlow.value = TbrDisplayData(
             state = state,
             timestamp = activeTb?.timestamp ?: 0L,
-            duration = activeTb?.duration ?: 0L
+            duration = activeTb?.duration ?: 0L,
+            basalText = basalText
         )
     }
 

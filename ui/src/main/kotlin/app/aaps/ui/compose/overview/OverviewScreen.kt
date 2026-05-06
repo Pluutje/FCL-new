@@ -52,6 +52,7 @@ fun OverviewScreen(
     runningModeProgress: Float,
     runningModeRecordId: Long = 0,
     tbrState: TbrState,
+    tbrBasalText: String = "",              // ← nieuw
     isSimpleMode: Boolean,
     calcProgress: Int,
     graphViewModel: GraphViewModel,
@@ -121,6 +122,7 @@ fun OverviewScreen(
                 runningModeProgress = runningModeProgress,
                 runningModeSceneManaged = runningModeSceneManaged,
                 tbrState = tbrState,
+                tbrBasalText = tbrBasalText,            // ← nieuw
                 isSimpleMode = isSimpleMode,
                 calcProgress = calcProgress,
                 graphViewModel = graphViewModel,
@@ -153,6 +155,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
+                    tbrBasalText = tbrBasalText,            // ← nieuw
                     showCob = showCob,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,
@@ -185,6 +188,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
+                    tbrBasalText = tbrBasalText,            // ← nieuw
                     showCob = showCob,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,

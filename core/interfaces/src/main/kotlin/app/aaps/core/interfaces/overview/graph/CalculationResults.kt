@@ -395,7 +395,8 @@ enum class TbrState {
 data class TbrDisplayData(
     val state: TbrState,
     val timestamp: Long,                 // When TBR started (0 if none)
-    val duration: Long                   // TBR duration in ms (0 if none)
+    val duration: Long,                   // TBR duration in ms (0 if none)
+    val basalText: String = ""
 )
 
 // ============================================================================

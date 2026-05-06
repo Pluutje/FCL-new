@@ -48,6 +48,8 @@ internal fun IobChip(
             Text(
                 text = state.text,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,          // ← nieuw
+                softWrap = false,      // ← nieuw
                 modifier = Modifier.padding(start = if (showIcon) AapsSpacing.medium else 0.dp)
             )
         }

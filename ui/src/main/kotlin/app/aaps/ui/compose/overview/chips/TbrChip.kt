@@ -1,6 +1,7 @@
 package app.aaps.ui.compose.overview.chips
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -15,6 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
@@ -26,6 +29,7 @@ import app.aaps.core.ui.compose.icons.IcTbrLow
 fun TbrChip(
     state: TbrState,
     onClick: () -> Unit,
+    basalText: String = "",
     modifier: Modifier = Modifier
 ) {
     val iconColor = AapsTheme.elementColors.tempBasal
@@ -38,8 +42,9 @@ fun TbrChip(
         color = containerColor,
         modifier = modifier.height(AapsSpacing.chipHeight)
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(horizontal = AapsSpacing.medium)
         ) {
             Icon(
@@ -48,6 +53,15 @@ fun TbrChip(
                 tint = iconColor,
                 modifier = Modifier.size(AapsSpacing.chipIconSize)
             )
+            if (basalText.isNotEmpty()) {
+                Text(
+                    text = basalText,
+                    color = iconColor,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
         }
     }
 }
@@ -61,13 +75,13 @@ private fun TbrState.toIcon(): ImageVector = when (this) {
 @Preview(showBackground = true)
 @Composable
 private fun TbrChipHighPreview() {
-    MaterialTheme { TbrChip(state = TbrState.HIGH, onClick = {}) }
+    MaterialTheme { TbrChip(state = TbrState.HIGH, onClick = {}, basalText = "120%") }
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun TbrChipLowPreview() {
-    MaterialTheme { TbrChip(state = TbrState.LOW, onClick = {}) }
+    MaterialTheme { TbrChip(state = TbrState.LOW, onClick = {}, basalText = "0,4E/u") }
 }
 
 @Preview(showBackground = true)

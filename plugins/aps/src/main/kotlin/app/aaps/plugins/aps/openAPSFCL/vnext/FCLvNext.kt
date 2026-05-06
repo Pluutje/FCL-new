@@ -409,10 +409,11 @@ private data class RescueDetectionContext(
 
 private var rescue = RescueDetectionContext()
 
-private const val MAX_DELIVERY_HISTORY = 6
+const val MAX_DELIVERY_HISTORY = 7
 
-val deliveryHistory: ArrayDeque<Pair<DateTime, Double>> =
+val deliveryHistory: ArrayDeque<Triple<DateTime, Double, Boolean>> =
     ArrayDeque()
+var lastCycleFclDelivered: Boolean = false
 
 private data class EnergyResult(
     val total: Double,
@@ -766,13 +767,13 @@ private fun accelFirstCommitTrigger(
     )
 }
 
-private fun commitFractionZoneFactor(bgZone: BgZone): Double {
+private fun commitFractionZoneFactor(bgZone: BgZone, mealActive: Boolean = false): Double {
     return when (bgZone) {
-        BgZone.LOW -> 0.0
-        BgZone.IN_RANGE -> 0.55
-        BgZone.MID -> 0.75
-        BgZone.HIGH -> 1.00
-        BgZone.EXTREME -> 1.10
+        BgZone.LOW      -> 0.0
+        BgZone.IN_RANGE -> if (mealActive) 0.75 else 0.55
+        BgZone.MID      -> 0.75
+        BgZone.HIGH     -> 1.00
+        BgZone.EXTREME  -> 1.10
     }
 }
 
@@ -1138,7 +1139,7 @@ private fun updateRescueDetection(
     fun deliveredSince(t0: DateTime?): Double {
         if (t0 == null) return 0.0
         var sum = 0.0
-        for ((t, u) in deliveryHistory) {
+        for ((t, u, _) in deliveryHistory) {
             if (t.isAfter(t0) || t.isEqual(t0)) sum += u
         }
         return sum
@@ -1469,7 +1470,7 @@ private fun computeLateBolusBlock(
 private fun deliveredInLastMinutes(now: DateTime, minutes: Int): Double {
     val cutoff = now.minusMinutes(minutes)
     var sum = 0.0
-    for ((t, u) in deliveryHistory) {
+    for ((t, u, _) in deliveryHistory) {
         if (t.isAfter(cutoff) || t.isEqual(cutoff)) sum += u
     }
     return sum
@@ -3916,7 +3917,7 @@ class FCLvNext(
             if (effectiveCommitAllowed) {
 
 
-                val zoneFactor = commitFractionZoneFactor(zoneEnum)
+                val zoneFactor = commitFractionZoneFactor(zoneEnum, mealActive = mealForCommit)
                 logRow.commitZoneFactor = zoneFactor
                 val fraction =
                     (commitFraction * zoneFactor * config.maxCommitFractionMul)
@@ -4548,7 +4549,7 @@ class FCLvNext(
 
         // ✅ Alleen echte, zichtbare afleveringen loggen
         if (effectiveDeliveredNow >= minDeliveryU) {
-            deliveryHistory.addFirst(now to effectiveDeliveredNow)
+            deliveryHistory.addFirst(Triple(now, effectiveDeliveredNow, true))
             while (deliveryHistory.size > MAX_DELIVERY_HISTORY) {
                 deliveryHistory.removeLast()
             }

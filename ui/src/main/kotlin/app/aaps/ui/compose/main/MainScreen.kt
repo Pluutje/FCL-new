@@ -246,6 +246,7 @@ fun MainScreen(
                         runningModeProgress = uiState.runningModeProgress,
                         runningModeRecordId = uiState.runningModeRecordId,
                         tbrState = uiState.tbrState,
+                        tbrBasalText = uiState.tbrBasalText,
                         showCob = !uiState.isFclActive,
                         isSimpleMode = uiState.isSimpleMode,
                         calcProgress = calcProgress,

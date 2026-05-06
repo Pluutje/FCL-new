@@ -29,6 +29,11 @@ object DFLearner {
     private const val KEY_ACCUM_F         = "df_accum_f"   // geaccumuleerde rawΔF over wachtepisodes
     private const val KEY_HISTORY         = "df_history"   // laatste 20 aanpassingen
 
+    // ── Kalibratie-waarden ────────────────────────────────────────────────
+    private const val KEY_REF_WMD = "df_ref_wmd"   // Stijgingsdrempel frontload
+    private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
+    private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
+
     // ── Doelzone ──────────────────────────────────────────────────────────
     private const val TARGET_PEAK_BG    = 9.0    // mmol ideale piek
     private const val TARGET_IOBR_PEAK  = 0.45   // ideale IOBratio op piek
@@ -111,6 +116,26 @@ object DFLearner {
 
     fun setAutoEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
+
+    // ── Kalibratie get/set ────────────────────────────────────────────────
+
+    fun getRefWmd(context: Context): Double =
+        prefs(context).getFloat(KEY_REF_WMD, DFMapping.REF_WMD_DEFAULT.toFloat()).toDouble()
+
+    fun setRefWmd(context: Context, v: Double) =
+        prefs(context).edit().putFloat(KEY_REF_WMD, v.coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX).toFloat()).apply()
+
+    fun getRefWff(context: Context): Double =
+        prefs(context).getFloat(KEY_REF_WFF, DFMapping.REF_WFF_DEFAULT.toFloat()).toDouble()
+
+    fun setRefWff(context: Context, v: Double) =
+        prefs(context).edit().putFloat(KEY_REF_WFF, v.coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX).toFloat()).apply()
+
+    fun getRefEb(context: Context): Double =
+        prefs(context).getFloat(KEY_REF_EB, DFMapping.REF_EB_DEFAULT.toFloat()).toDouble()
+
+    fun setRefEb(context: Context, v: Double) =
+        prefs(context).edit().putFloat(KEY_REF_EB, v.coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX).toFloat()).apply()
 
     fun getHistory(context: Context): List<LearningStep> {
         val raw = prefs(context).getString(KEY_HISTORY, "") ?: ""

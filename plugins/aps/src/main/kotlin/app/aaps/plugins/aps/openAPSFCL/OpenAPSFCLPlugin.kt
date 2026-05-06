@@ -65,6 +65,11 @@ import app.aaps.core.ui.compose.icons.IcPluginOpenAPS
 import app.aaps.core.interfaces.aps.oapsProfileFCL
 import app.aaps.core.interfaces.sharedPreferences.SP
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.deliveryHistory
+import app.aaps.plugins.aps.openAPSFCL.vnext.MAX_DELIVERY_HISTORY
+import app.aaps.plugins.aps.openAPSFCL.vnext.lastCycleFclDelivered
+import org.joda.time.DateTime
+
 @Singleton
 open class OpenAPSFCLPlugin @Inject constructor(
     aapsLogger: AAPSLogger,
@@ -277,14 +282,24 @@ open class OpenAPSFCLPlugin @Inject constructor(
             )
 
 
-
-
-
             lastAPSResult = determineBasalResult
             lastAPSRun = now
 
             aapsLogger.debug(LTag.APS, "FCL variableSens mg/dl: $usedIsfMgdl | profile sens mg/dl: ${oapsProfile.sens}")
             rxBus.send(EventAPSCalculationFinished())
+
+            if (!lastCycleFclDelivered) {
+                val aapsRate = (rt.rate ?: 0.0) * (5.0 / 60.0)
+                val aapsBolus = rt.units ?: 0.0
+                val aapsDose = aapsRate + aapsBolus
+                if (aapsDose > 0.001) {
+                    deliveryHistory.addFirst(Triple(DateTime.now(), aapsDose, false))
+                    while (deliveryHistory.size > MAX_DELIVERY_HISTORY) {
+                        deliveryHistory.removeLast()
+                    }
+                }
+            }
+
         }
 
         rxBus.send(EventOpenAPSUpdateGui())

@@ -45,6 +45,7 @@ data class RT(
     var isfMgdlForCarbs: Double? = null, // used to pass to AAPS client
 
 
+
     var consoleLog: MutableList<String>? = null,
     var consoleError: MutableList<String>? = null
 ) {

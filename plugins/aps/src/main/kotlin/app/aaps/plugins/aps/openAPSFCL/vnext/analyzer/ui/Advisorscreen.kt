@@ -827,418 +827,99 @@ private fun NachtVenstersCompact(nightWindows: List<NightWindowEntity>) {
 }
 
 // ── HandmatigParametersTab ────────────────────────────────────────────────
-// Alle instelbare FCLvNext-parameters met ± knoppen per categorie.
-// Toont default-waarden en een indicator (↑ / = / ↓) met kleur.
-// State blijft stabiel na write — reset alleen bij nieuwe activeParams.
+// Toont de actuele FCLvNext-parameters als leesweergave.
+// Parameters worden beheerd via DFMapping (Automaat-tab, Kalibratie-sectie).
 
 @Composable
 private fun HandmatigParametersTab(
     activeParams: ConfigOverrideWriter.ActiveParams,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)?
 ) {
-    // Lokale edit-state: startwaarden = actuele AAPS-waarden
-    var peakThreshold   by remember(activeParams) { mutableStateOf(activeParams.peakPredictionThreshold) }
-    var frontloadFrac   by remember(activeParams) { mutableStateOf(activeParams.watchingFrontloadFrac) }
-    var minDelta        by remember(activeParams) { mutableStateOf(activeParams.watchingMinDeltaToTarget) }
-    var cooldown        by remember(activeParams) { mutableStateOf(activeParams.commitCooldownMinutes.toDouble()) }
-    var horizonH        by remember(activeParams) { mutableStateOf(activeParams.peakPredictionHorizonH) }
-    var iobStart        by remember(activeParams) { mutableStateOf(activeParams.iobStart) }
-    var iobBrake        by remember(activeParams) { mutableStateOf(activeParams.peakIobBrakeSuppressThreshold) }
-    var boostFactor     by remember(activeParams) { mutableStateOf(activeParams.earlyBoostFactor) }
-    var boostMinConf    by remember(activeParams) { mutableStateOf(activeParams.earlyBoostMinConfidence) }
-    var boostMaxCommits by remember(activeParams) { mutableStateOf(activeParams.earlyBoostMaxCommits.toDouble()) }
-    var riseFracMin     by remember(activeParams) { mutableStateOf(activeParams.earlyRiseFracMin) }
-    var maxSlopeWeight  by remember(activeParams) { mutableStateOf(activeParams.peakMaxSlopeWeight) }
-    var decayFactor     by remember(activeParams) { mutableStateOf(activeParams.lateCommitDecayFactor) }
-    var decayThreshold  by remember(activeParams) { mutableStateOf(activeParams.lateCommitDecayThreshold) }
-
-    // showResult: stable eigen state, niet gereset door activeParams-wijziging
-    var showResult by remember { mutableStateOf<String?>(null) }
-    var showResultTs by remember { mutableStateOf(0L) }
-
-    fun buildOverrides() = ConfigOverrideWriter.ParamOverrides(
-        peakPredictionThreshold       = peakThreshold,
-        watchingFrontloadFrac         = frontloadFrac,
-        watchingMinDeltaToTarget      = minDelta,
-        commitCooldownMinutes         = cooldown.toInt(),
-        peakPredictionHorizonH        = horizonH,
-        iobStart                      = iobStart,
-        peakIobBrakeSuppressThreshold = iobBrake,
-        earlyBoostFactor              = boostFactor,
-        earlyBoostMinConfidence       = boostMinConf,
-        earlyBoostMaxCommits          = boostMaxCommits.toInt(),
-        earlyRiseFracMin              = riseFracMin,
-        peakMaxSlopeWeight            = maxSlopeWeight,
-        lateCommitDecayFactor         = decayFactor,
-        lateCommitDecayThreshold      = decayThreshold
-    )
+    val D = ConfigOverrideWriter.Defaults
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Handmatige parameters",
-             style = MaterialTheme.typography.titleMedium,
-             fontWeight = FontWeight.SemiBold)
         Text(
-            "Pas FCLvNext-parameters aan via ± stappen. " +
-                "Groen = hoger dan default, oranje = lager, wit = gelijk aan default.",
+            "Actuele parameters",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "Deze waarden worden automatisch berekend door het systeem op basis van " +
+                "S/T/V en de Kalibratie-instellingen in de Automaat-tab. " +
+                "Aanpassen kan via die knoppen.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        val D = ConfigOverrideWriter.Defaults  // shorthand
-
-        // ── Categorie 1: Commit & timing ──────────────────────────────────
-        ParamCategorie(
-            titel = "⏱ Commit & timing",
-            uitleg = "Wanneer en hoe snel actie bij stijgende BG. Kortere pauze en lagere drempel = eerder en actiever, maar ook hoger risico op teveel insuline als stijging stokt."
-        ) {
-            ParamRij("Commit pauze",         "commitCooldownMinutes",   cooldown,       D.COMMIT_COOLDOWN_MINUTES.toDouble(), "min",  1.0,  5.0, 30.0, isInt = true,
-                     hogerBetekent = "meer pauze tussen commits — minder agressief, minder kans op ophoping",
-                     lagerBetekent = "sneller opeenvolgende commits — eerder en meer insuline vroeg in episode") { cooldown = it }
-            ParamRij("Min. delta naar doel", "watchingMinDeltaToTarget", minDelta,      D.WATCHING_MIN_DELTA_TARGET,          "mmol", 0.25, 0.5, 5.0,
-                     hogerBetekent = "hogere drempel — systeem wacht op grotere stijging boven target",
-                     lagerBetekent = "lagere drempel — systeem reageert al bij kleine stijgingen") { minDelta = it }
-            ParamRij("Frontload fractie",    "watchingFrontloadFrac",   frontloadFrac,  D.WATCHING_FRONTLOAD_FRAC,            "",    0.05, 0.20, 1.0,
-                     hogerBetekent = "grotere frontload dosis bij stijgingsdetectie",
-                     lagerBetekent = "voorzichtiger bij eerste stijgingssignaal") { frontloadFrac = it }
+        ParameterLeesCategorie("⏱ Commit & timing") {
+            ParameterLeesRij("Stijgingsdrempel frontload",  "%.2f mmol".format(activeParams.watchingMinDeltaToTarget), D.WATCHING_MIN_DELTA_TARGET)
+            ParameterLeesRij("Frontload grootte",           "%.0f%%".format(activeParams.watchingFrontloadFrac * 100),  D.WATCHING_FRONTLOAD_FRAC * 100)
+            ParameterLeesRij("Commit pauze",                "${activeParams.commitCooldownMinutes} min",                D.COMMIT_COOLDOWN_MINUTES.toDouble(), activeParams.commitCooldownMinutes.toDouble())
         }
 
-        // ── Categorie 2: Piekdrempels ─────────────────────────────────────
-        ParamCategorie(
-            titel = "📈 Piekdrempels",
-            uitleg = "Hoe hoog het systeem de BG-piek inschat en waar het remt. Lagere piekdrempel = eerder remmen. Lagere IOB-drempel = eerder stoppen met doseren."
-        ) {
-            ParamRij("Piekdrempel",          "peakPredictionThreshold",  peakThreshold, D.PEAK_PREDICTION_THRESHOLD,          "mmol", 0.5,  8.0, 16.0,
-                     hogerBetekent = "systeem verwacht hogere piek — gaat vroeger en meer remmen",
-                     lagerBetekent = "systeem verwacht lagere piek — minder vroeg remmen, kans op hogere BG") { peakThreshold = it }
-            ParamRij("Piekhoriz.",           "peakPredictionHorizonH",   horizonH,      D.PEAK_PREDICTION_HORIZON_H,          "uur",  0.1,  0.5,  3.0,
-                     hogerBetekent = "verder vooruit kijken bij piekschatting — conservatiever, eerder remmen",
-                     lagerBetekent = "korter vooruit kijken — agressiever doorcommitteren tot later in episode") { horizonH = it }
-            ParamRij("IOB startfractie",     "iobStart",                 iobStart,      D.IOB_START,                          "",    0.02, 0.10, 0.60,
-                     hogerBetekent = "hogere IOB-fractie nodig voor WATCHING-activering — systeem start later",
-                     lagerBetekent = "lagere drempel — WATCHING activeert al bij minder actief insuline") { iobStart = it }
-            ParamRij("IOB-remdrempel piek",  "peakIobBrakeSuppressThreshold", iobBrake, D.PEAK_IOB_BRAKE_SUPPRESS,            "",    0.02, 0.20, 0.80,
-                     hogerBetekent = "rem activeert pas bij hogere IOB — meer commits toegestaan voor rem ingrijpt",
-                     lagerBetekent = "rem activeert eerder — minder commits na vroeg hoge IOB-opbouw") { iobBrake = it }
+        ParameterLeesCategorie("📈 Piekdrempels") {
+            ParameterLeesRij("Piekdrempel",        "%.1f mmol".format(activeParams.peakPredictionThreshold),       D.PEAK_PREDICTION_THRESHOLD)
+            ParameterLeesRij("Piekhorizon",         "%.1f uur".format(activeParams.peakPredictionHorizonH),        D.PEAK_PREDICTION_HORIZON_H)
+            ParameterLeesRij("IOB startfractie",    "%.2f".format(activeParams.iobStart),                          D.IOB_START)
+            ParameterLeesRij("IOB-remdrempel piek", "%.2f".format(activeParams.peakIobBrakeSuppressThreshold),     D.PEAK_IOB_BRAKE_SUPPRESS)
         }
 
-        // ── Categorie 3: Early Boost ──────────────────────────────────────
-        ParamCategorie(
-            titel = "🚀 Early Boost",
-            uitleg = "Versterkt de eerste 1-2 commits bij een duidelijke stijging. Factor 1.0 = uit. Hoger = meer vroege insuline en lagere piek, maar hogere kans op post-maaltijd hypo als de stijging tegenvalt."
-        ) {
-            ParamRij("Boostfactor",          "earlyBoostFactor",         boostFactor,   D.EARLY_BOOST_FACTOR,                 "×",   0.05, 1.0,  2.0,
-                     hogerBetekent = "sterkere vroege boost — meer insuline in eerste commits, lagere piek, hogere hypo-kans na piek",
-                     lagerBetekent = "zwakkere boost — minder verschil met normale commit, veiliger maar hogere piek") { boostFactor = it }
-            ParamRij("Min. betrouwbaarheid", "earlyBoostMinConfidence",  boostMinConf,  D.EARLY_BOOST_MIN_CONFIDENCE,         "",    0.05, 0.30, 0.90,
-                     hogerBetekent = "hogere zekerheidsdrempel — boost alleen bij sterkere maaltijdsignalen",
-                     lagerBetekent = "lagere drempel — boost ook bij zwakkere stijgingssignalen") { boostMinConf = it }
-            ParamRij("Max. boost-commits",   "earlyBoostMaxCommits",     boostMaxCommits, D.EARLY_BOOST_MAX_COMMITS.toDouble(), "", 1.0,  1.0,  5.0, isInt = true,
-                     hogerBetekent = "boost actief voor meer commits — langere periode van versterkte dosering",
-                     lagerBetekent = "boost stopt eerder — minder totale insuline versterking vroeg in episode") { boostMaxCommits = it }
+        ParameterLeesCategorie("🚀 Early Boost") {
+            ParameterLeesRij("Boostfactor",          "%.2f ×".format(activeParams.earlyBoostFactor),            D.EARLY_BOOST_FACTOR)
+            ParameterLeesRij("Min. betrouwbaarheid", "%.2f".format(activeParams.earlyBoostMinConfidence),       D.EARLY_BOOST_MIN_CONFIDENCE)
+            ParameterLeesRij("Max. boost-commits",   "${activeParams.earlyBoostMaxCommits}",                    D.EARLY_BOOST_MAX_COMMITS.toDouble(), activeParams.earlyBoostMaxCommits.toDouble())
         }
 
-        // ── Categorie 4: Piekkalibr. ──────────────────────────────────────
-        ParamCategorie(
-            titel = "🔬 Piekkalibr.",
-            uitleg = "Fijnregeling piekvoorspelling. Alleen aanpassen als de piek structureel eerder of later wordt voorspeld dan hij werkelijk optreedt."
-        ) {
-            ParamRij("Vroeg stijgfractie",   "earlyRiseFracMin",         riseFracMin,   D.EARLY_RISE_FRAC_MIN,                "",    0.05, 0.20, 1.0,
-                     hogerBetekent = "hogere stijgfractie — piek wordt steiler ingeschat, eerder hoge piekschatting",
-                     lagerBetekent = "lagere fractie — piek wordt vlakker ingeschat") { riseFracMin = it }
-            ParamRij("Max helling gewicht",  "peakMaxSlopeWeight",       maxSlopeWeight, D.PEAK_MAX_SLOPE_WEIGHT,             "",    0.05, 0.0,  0.80,
-                     hogerBetekent = "steilere stijging weegt zwaarder in piekschatting — hogere pieken voorspeld",
-                     lagerBetekent = "minder gewicht op stijlheid — vlakkere piekschatting") { maxSlopeWeight = it }
-        }
-
-        // ── Categorie 5: Frontload-shift ─────────────────────────────────
-        ParamCategorie(
-            titel = "🔀 Frontload-shift",
-            uitleg = "Koppelt de vroege boost aan een late rem. Als earlyBoost actief was (budget verbruikt) en IOBratio een drempel overschrijdt, worden volgende commits gereduceerd. Doel: insuline meer naar voren halen, lagere IOB na de piek, minder hypo-risico. Decay factor 0.0 = uit (veilige default)."
-        ) {
-            ParamRij("Late decay factor",    "lateCommitDecayFactor",   decayFactor,    D.LATE_COMMIT_DECAY_FACTOR,    "",    0.05, 0.0, 1.0,
-                     hogerBetekent = "sterkere afremming van late commits na vroege boost",
-                     lagerBetekent = "zwakkere rem — meer late commits toegestaan ook na boost") { decayFactor = it }
-            ParamRij("Decay drempel",        "lateCommitDecayThreshold", decayThreshold, D.LATE_COMMIT_DECAY_THRESHOLD, "",    0.05, 0.30, 0.70,
-                     hogerBetekent = "rem start pas bij hogere IOB — meer ruimte voor commits",
-                     lagerBetekent = "rem start eerder — minder commits al bij lagere IOB") { decayThreshold = it }
-        }
-
-        // ── Toepassen / Reset ─────────────────────────────────────────────
-        if (onApplyParams != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        val ok = onApplyParams(buildOverrides())
-                        showResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
-                        showResultTs = System.currentTimeMillis()
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Toepassen in AAPS") }
-                OutlinedButton(
-                    onClick = {
-                        peakThreshold   = D.PEAK_PREDICTION_THRESHOLD
-                        frontloadFrac   = D.WATCHING_FRONTLOAD_FRAC
-                        minDelta        = D.WATCHING_MIN_DELTA_TARGET
-                        cooldown        = D.COMMIT_COOLDOWN_MINUTES.toDouble()
-                        horizonH        = D.PEAK_PREDICTION_HORIZON_H
-                        iobStart        = D.IOB_START
-                        iobBrake        = D.PEAK_IOB_BRAKE_SUPPRESS
-                        boostFactor     = D.EARLY_BOOST_FACTOR
-                        boostMinConf    = D.EARLY_BOOST_MIN_CONFIDENCE
-                        boostMaxCommits = D.EARLY_BOOST_MAX_COMMITS.toDouble()
-                        riseFracMin     = D.EARLY_RISE_FRAC_MIN
-                        maxSlopeWeight  = D.PEAK_MAX_SLOPE_WEIGHT
-                        decayFactor     = D.LATE_COMMIT_DECAY_FACTOR
-                        decayThreshold  = D.LATE_COMMIT_DECAY_THRESHOLD
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Reset defaults") }
-            }
-        }
-
-        // Bevestiging — toont de timestamp zodat recomposities het niet wissen
-        showResult?.let { msg ->
-            val age = System.currentTimeMillis() - showResultTs
-            if (age < 30_000L) {  // verdwijnt na 30 seconden
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (msg.startsWith("✓"))
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                        else
-                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-                    )
-                ) {
-                    Text(
-                        msg,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (msg.startsWith("✓"))
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        else
-                            MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
+        ParameterLeesCategorie("🔀 Frontload-shift") {
+            ParameterLeesRij("Late decay factor",  "%.2f".format(activeParams.lateCommitDecayFactor),    D.LATE_COMMIT_DECAY_FACTOR)
+            ParameterLeesRij("Decay drempel",      "%.2f".format(activeParams.lateCommitDecayThreshold), D.LATE_COMMIT_DECAY_THRESHOLD)
         }
     }
 }
 
-// ── ParamCategorie: uitklapbare categorie met uitleg ─────────────────────
-
 @Composable
-private fun ParamCategorie(
+private fun ParameterLeesCategorie(
     titel: String,
-    uitleg: String,                       // categorietoelichting
     content: @Composable () -> Unit
 ) {
-    var open by remember { mutableStateOf(true) }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Header: klikbaar om uit/in te klappen
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { open = !open }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    titel,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    if (open) "▲" else "▼",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (open) {
-                Divider(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                )
-                // Categorietoelichting
-                Text(
-                    uitleg,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Divider(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
-                )
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    content()
-                }
-            }
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(titel, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Divider()
+            content()
         }
     }
 }
 
-// ── ParamRij: parameter met ±knoppen, default, indicator en uitleg ────────
-
 @Composable
-private fun ParamRij(
+private fun ParameterLeesRij(
     naam: String,
-    technisch: String,
-    waarde: Double,
-    default: Double,
-    eenheid: String,
-    stap: Double,
-    min: Double,
-    max: Double,
-    isInt: Boolean = false,
-    hogerBetekent: String = "",           // "meer effect / eerder actief / ..."
-    lagerBetekent: String = "",           // "minder effect / later actief / ..."
-    onChange: (Double) -> Unit
+    waarde: String,
+    defaultVal: Double,
+    huidigeDouble: Double? = null
 ) {
-    val verschil = waarde - default
-    val eps = stap * 0.49
-    val indicator = when {
-        verschil > eps  -> "↑"
-        verschil < -eps -> "↓"
-        else            -> "="
+    // Vergelijk huidige waarde met default voor kleurcodering
+    val huidig = huidigeDouble ?: waarde.filter { it.isDigit() || it == '.' || it == ',' }
+        .replace(',', '.').toDoubleOrNull()
+    val kleur = when {
+        huidig == null                       -> MaterialTheme.colorScheme.onSurface
+        huidig > defaultVal + 0.001          -> MaterialTheme.colorScheme.primary
+        huidig < defaultVal - 0.001          -> MaterialTheme.colorScheme.tertiary
+        else                                 -> MaterialTheme.colorScheme.onSurface
     }
-    val indicatorColor = when {
-        verschil > eps  -> MaterialTheme.colorScheme.primary
-        verschil < -eps -> MaterialTheme.colorScheme.tertiary
-        else            -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val waardeColor = when {
-        verschil > eps  -> MaterialTheme.colorScheme.primary
-        verschil < -eps -> MaterialTheme.colorScheme.tertiary
-        else            -> MaterialTheme.colorScheme.onSurface
-    }
-
-    val defaultTekst = if (isInt) "${default.toInt()}$eenheid"
-    else "${String.format("%.2f", default)}$eenheid"
-
-    var showInfo by remember { mutableStateOf(false) }
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Links: naam, technisch, default — klikbaar voor uitleg
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(
-                        enabled = hogerBetekent.isNotBlank() || lagerBetekent.isNotBlank()
-                    ) { showInfo = !showInfo }
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(naam,
-                         style = MaterialTheme.typography.bodySmall,
-                         fontWeight = FontWeight.Medium)
-                    if (hogerBetekent.isNotBlank() || lagerBetekent.isNotBlank()) {
-                        Spacer(Modifier.width(4.dp))
-                        Text("ℹ",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
-                    }
-                }
-                Text(technisch,
-                     style = MaterialTheme.typography.labelSmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("default: $defaultTekst",
-                     style = MaterialTheme.typography.labelSmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-            }
-
-            // Rechts: − [indicator waarde] +
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = { if (waarde - stap >= min - eps) onChange(
-                        if (isInt) kotlin.math.round(waarde - stap).toDouble()
-                        else kotlin.math.round((waarde - stap) / stap) * stap
-                    )},
-                    modifier = Modifier.size(36.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                    enabled = waarde > min + eps
-                ) { Text("−", style = MaterialTheme.typography.bodyMedium) }
-
-                Row(
-                    modifier = Modifier.width(80.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(indicator,
-                         style = MaterialTheme.typography.labelMedium,
-                         fontWeight = FontWeight.Bold,
-                         color = indicatorColor)
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        if (isInt) "${waarde.toInt()}$eenheid"
-                        else "${String.format("%.2f", waarde)}$eenheid",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = waardeColor,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Start
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = { if (waarde + stap <= max + eps) onChange(
-                        if (isInt) kotlin.math.round(waarde + stap).toDouble()
-                        else kotlin.math.round((waarde + stap) / stap) * stap
-                    )},
-                    modifier = Modifier.size(36.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                    enabled = waarde < max - eps
-                ) { Text("+", style = MaterialTheme.typography.bodyMedium) }
-            }
-        }
-
-        // Uitleg popup (inline, verschijnt onder de rij bij klik op ℹ)
-        if (showInfo && (hogerBetekent.isNotBlank() || lagerBetekent.isNotBlank())) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
-                ),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
-            ) {
-                Column(modifier = Modifier.padding(8.dp),
-                       verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (hogerBetekent.isNotBlank())
-                        Text("↑ hoger: $hogerBetekent",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                    if (lagerBetekent.isNotBlank())
-                        Text("↓ lager: $lagerBetekent",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = MaterialTheme.colorScheme.onSecondaryContainer)
-                }
-            }
-        }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(naam, style = MaterialTheme.typography.bodySmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(waarde, style = MaterialTheme.typography.bodySmall,
+             fontWeight = FontWeight.Medium, color = kleur)
     }
 }

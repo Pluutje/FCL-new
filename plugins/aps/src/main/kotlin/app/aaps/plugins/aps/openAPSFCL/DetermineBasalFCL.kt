@@ -57,6 +57,9 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextTrends
 
 import com.google.gson.Gson
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclUiSnapshot
+import app.aaps.plugins.aps.openAPSFCL.vnext.deliveryHistory
+import app.aaps.plugins.aps.openAPSFCL.vnext.MAX_DELIVERY_HISTORY
+import app.aaps.plugins.aps.openAPSFCL.vnext.lastCycleFclDelivered
 
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclBasalProfileNightLogger
 
@@ -374,6 +377,8 @@ class DetermineBasalFCL @Inject constructor(
             bolusAmount = advice.bolusAmount
             basalRate = advice.basalRate
             shouldDeliver = advice.shouldDeliver
+            lastCycleFclDelivered = shouldDeliver
+           
 
             val cycleMin = 5.0
             val commandedU =
@@ -418,16 +423,19 @@ class DetermineBasalFCL @Inject constructor(
                 bolusAmount = bolusAmount,
                 basalRate = basalRate,
                 shouldDeliver = shouldDeliver,
-                ui = uiSnapshot,   // <-- TOEVOEGEN
+                ui = uiSnapshot,
                 activityLog = activity.log,
                 resistanceLog = resistanceLog,
                 metricsText = fclMetrics.getUserStatsString(isNight),
-                activeConfig = fclvNext.lastActiveConfig,    // ← NIEUW
-
+                activeConfig = fclvNext.lastActiveConfig,
+                history = deliveryHistory,
             )
+
+
 
             // naar console / UI
             uiText.split("\n").forEach { consoleError.add(it) }
+
             consoleError.add("\n")
 
 

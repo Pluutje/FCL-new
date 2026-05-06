@@ -34,18 +34,34 @@ object DFMapping {
     private const val REF_S   = 95
     private const val REF_T   = 106
     private const val REF_V   = 95
-    private const val REF_EB  = 1.35
-    private const val REF_WFF = 0.64
     private const val REF_CC  = 13
     private const val REF_PIB = 0.42
-    private const val REF_WMD = 1.50
+
+    // ── Kalibreerbare referentiewaarden ───────────────────────────────────
+    // Deze drie bepalen het basisgedrag bij D=1.0, F=0.5 en kunnen via de
+    // Kalibratie-sectie in de Automaat-tab worden aangepast door de gebruiker.
+    // Standaardwaarden zijn de gevalideerde baselines.
+    const val REF_WMD_DEFAULT = 1.30   // Stijgingsdrempel frontload (mmol boven target)
+    const val REF_WFF_DEFAULT = 0.64   // Frontload grootte (fractie van max SMB)
+    const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
+
+    // Bereiken voor de kalibratie-knoppen
+    const val REF_WMD_MIN = 0.80;  const val REF_WMD_MAX = 2.00
+    const val REF_WFF_MIN = 0.40;  const val REF_WFF_MAX = 0.90
+    const val REF_EB_MIN  = 1.0;   const val REF_EB_MAX  = 2.0
 
     /**
      * Bereken alle 17 parameters als ConfigOverrideWriter.ParamOverrides
-     * op basis van D en F. Kan direct worden geschreven naar AAPS via
-     * ConfigOverrideWriter.writeParamsOnly().
+     * op basis van D, F en de drie kalibreerbare referentiewaarden.
+     * Kan direct worden geschreven naar AAPS via ConfigOverrideWriter.
      */
-    fun toParamOverrides(d: Double, f: Double): ConfigOverrideWriter.ParamOverrides {
+    fun toParamOverrides(
+        d: Double,
+        f: Double,
+        refWmd: Double = REF_WMD_DEFAULT,
+        refWff: Double = REF_WFF_DEFAULT,
+        refEb:  Double = REF_EB_DEFAULT
+    ): ConfigOverrideWriter.ParamOverrides {
         val dC = d.coerceIn(D_MIN, D_MAX)
         val fC = f.coerceIn(F_MIN, F_MAX)
 
@@ -63,12 +79,12 @@ object DFMapping {
             // Actiedrempel: D hoog = systeem activeert bij kleinere stijging
             // F hoog = eerder frontload gewenst = ook lagere activatiedrempel
             // Gecombineerd: D verlaagt (meer insuline nodig), F verlaagt (eerder actief)
-            watchingMinDeltaToTarget      = max(0.5, REF_WMD - (dC - 1.0) * 0.5 - (fC - 0.5) * 0.8),
+            watchingMinDeltaToTarget      = max(0.5, refWmd - (dC - 1.0) * 0.5 - (fC - 0.5) * 0.8),
 
             // ── F-afhankelijk ───────────────────────────────────────────
 
             // Frontload dosis bij stijgingsdetectie
-            watchingFrontloadFrac         = min(0.90, REF_WFF + (fC - 0.5) * 0.40),
+            watchingFrontloadFrac         = min(0.90, refWff + (fC - 0.5) * 0.40),
 
             // Commit pauze: F hoog = frequenter committen
             commitCooldownMinutes         = max(5, (REF_CC - (fC - 0.5) * 10).roundToInt()),
@@ -83,10 +99,10 @@ object DFMapping {
             iobStart                      = max(0.25, 0.40 - (fC - 0.5) * 0.20),
 
             // Early boost: F hoog = sterkere vroege commits
-            // earlyBoost: uit bij F≤0.5, 1.25× bij F=0.6, 1.75× bij F=0.8
-            // Bewust gestart bij F=0.5 zodat de feature pas actief wordt als
-            // DFLearner expliciet meer frontload signaleert.
-            earlyBoostFactor              = max(1.0, 1.0 + (fC - 0.5) * 2.5),
+            // refEb bepaalt het maximum bij F=0.8. Bij F=0.5 is boost altijd refEb.
+            // Bij F>0.5 schaalt de boost op tot max(refEb, refEb + (fC-0.5)*2.5).
+            // refEb=1.0 (default/uit): boost pas actief bij hogere F-waarden.
+            earlyBoostFactor              = max(1.0, refEb + (fC - 0.5) * 2.5),
             earlyBoostMinConfidence       = max(0.40, 0.50 - (fC - 0.5) * 0.20),
             earlyBoostMaxCommits          = if (fC >= 0.65) 3 else 2,
 
