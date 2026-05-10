@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
 import androidx.compose.ui.graphics.Color
 import java.time.Instant
@@ -53,118 +54,109 @@ fun DFControlTab(
 ) {
     val context = LocalContext.current
 
-    var d by remember { mutableStateOf(DFLearner.getD(context)) }
-    var f by remember { mutableStateOf(DFLearner.getF(context)) }
+    // ── Maaltijdtype selector ─────────────────────────────────────────────
+    var geselecteerdType by remember { mutableStateOf(MealTypeBridge.MealType.GEMENGD) }
+
+    // ── D/F state per type ────────────────────────────────────────────────
+    fun dVoorType() = DFLearner.getDForType(context, geselecteerdType)
+    fun fVoorType() = DFLearner.getFForType(context, geselecteerdType)
+
+    var d by remember(geselecteerdType) { mutableStateOf(dVoorType()) }
+    var f by remember(geselecteerdType) { mutableStateOf(fVoorType()) }
+
+    // Algemene state
     var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
     var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
     var history by remember { mutableStateOf(DFLearner.getHistory(context)) }
-    var showExpert by remember { mutableStateOf(false) }
+    var showGeavanceerd by remember { mutableStateOf(false) }
     var applyResult by remember { mutableStateOf<String?>(null) }
     var applyTs by remember { mutableStateOf(0L) }
 
-    // ── Kalibratie-state ─────────────────────────────────────────────────
+    // Frontload timing (REF_WMD) — zichtbaar als "hoe vroeg reageert het systeem"
     var refWmd by remember { mutableStateOf(DFLearner.getRefWmd(context)) }
     var refWff by remember { mutableStateOf(DFLearner.getRefWff(context)) }
-    var refEb by remember { mutableStateOf(DFLearner.getRefEb(context)) }
+    var refEb  by remember { mutableStateOf(DFLearner.getRefEb(context)) }
 
-    // S/T/V in FCLvNext-eenheden — enige zichtbare schaal
-    val stv = DFMapping.toStvMap(d, f, nachtFactor)
-    val sNu = stv["sterkte"] ?: 95
-    val tNu = stv["timing"] ?: 100
-    val vNu = stv["volhoudendheid"] ?: 95
+    // S/T/V voor geselecteerd type
+    val stv  = DFMapping.toStvMap(d, f, nachtFactor)
+    val sNu  = stv["sterkte"]       ?: 95
+    val tNu  = stv["timing"]        ?: 100
+    val vNu  = stv["volhoudendheid"] ?: 95
 
-    // Stapsgroottes in S/T/V-eenheden
-    // S-stap 5: D-stap = 5/95 ≈ 0.053
-    // T-stap 4: F-stap = 4/40 = 0.10
-    // V-stap 5: D-stap = 5/50 = 0.10 (maar V deelt D met S → stap via D)
-    val sStap = 5
-    val tStap = 4
-    val vStap = 5
-
-    // Grenzen in S/T/V-eenheden (afgeleid van D/F grenzen)
+    val sStap = 5; val tStap = 4; val vStap = 5
     val sMin = DFMapping.toStvMap(DFMapping.D_MIN, f, nachtFactor)["sterkte"] ?: 80
     val sMax = DFMapping.toStvMap(DFMapping.D_MAX, f, nachtFactor)["sterkte"] ?: 128
-    val tMin = 80   // F=0.20 → T = 106 + (0.20-0.5)*40 = 94 afgerond naar UI-min
-    val tMax = 120  // F=0.80 → T = 106 + (0.30)*40    = 118 afgerond naar UI-max
-    val vMin = 70
-    val vMax = 130
+    val tMin = 80; val tMax = 120; val vMin = 70; val vMax = 130
 
-    // Conversiefuncties: S/T/V terug naar D/F
-    fun sNaarD(s: Int): Double = (s.toDouble() / 95.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
-    fun tNaarF(t: Int): Double = (0.5 + (t.toDouble() - 106.0) / 40.0).coerceIn(DFMapping.F_MIN, DFMapping.F_MAX)
+    fun sNaarD(s: Int) = (s.toDouble() / 95.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
+    fun tNaarF(t: Int) = (0.5 + (t.toDouble() - 106.0) / 40.0).coerceIn(DFMapping.F_MIN, DFMapping.F_MAX)
+    fun vNaarD(v: Int) = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
 
-    // V deelt D met S: als V verandert bij gelijkblijvende F, past D aan
-    fun vNaarD(v: Int): Double = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
+    fun slaTypeOp(nieuweD: Double, nieuweF: Double = f) {
+        when (geselecteerdType) {
+            MealTypeBridge.MealType.GEMENGD -> {
+                DFLearner.setD(context, nieuweD)
+                if (nieuweF != f) DFLearner.setF(context, nieuweF)
+            }
+            else -> {
+                DFLearner.setDForType(context, geselecteerdType, nieuweD)
+                if (nieuweF != f) DFLearner.setFForType(context, geselecteerdType, nieuweF)
+            }
+        }
+    }
+
+    // Frontload timing omrekening: REF_WMD → begrijpelijk label
+    fun frontloadLabel(wmd: Double): String = when {
+        wmd <= 0.90 -> "Zeer vroeg"
+        wmd <= 1.10 -> "Vroeg"
+        wmd <= 1.30 -> "Normaal"
+        wmd <= 1.60 -> "Laat"
+        else        -> "Zeer laat"
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // ── Verloopgrafiek ────────────────────────────────────────────────
-        if (history.size >= 2) {
-            STVVerloopGrafiek(history = history, nachtFactor = nachtFactor)
-        }
-
-        // ── Per maaltijdtype tabel + grafieken ───────────────────────────
-        MaaltijdTypeOverzicht(nachtFactor = nachtFactor)
-
-        // ── Uitleg ────────────────────────────────────────────────────────
-        Text(
-            "Pas aan hoeveel insuline gegeven wordt (S), hoe vroeg dat " +
-                "gebeurt (T) en hoe vasthoudend het systeem is (V). " +
-                "Het systeem vertaalt dit automatisch naar alle FCLvNext-instellingen.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        // ── 1. Maaltijdtype selector ──────────────────────────────────────
+        MaaltijdTypeSelector(
+            geselecteerd = geselecteerdType,
+            onSelect = { geselecteerdType = it; d = dVoorType(); f = fVoorType() }
         )
 
-        // ── 💊 Insulinesterkte (S) ────────────────────────────────────────
+        // ── 2. Insulinesterkte ────────────────────────────────────────────
         StvKaart(
             emoji = "💊",
-            titel = "Insulinesterkte (S)",
-            omschrijving = "Totale dosis per maaltijd  •  100% = standaard",
-            waarde = sNu,
-            waardeSuffix = "%",
-            eenheid100Label = "standaard",
-            stapMinus = sStap,
-            stapPlus = sStap,
-            min = sMin,
-            max = sMax,
+            titel = "Hoeveel insuline",
+            omschrijving = "Totale hoeveelheid per maaltijd  •  100% = standaard",
+            waarde = sNu, waardeSuffix = "%", eenheid100Label = "standaard",
+            stapMinus = sStap, stapPlus = sStap, min = sMin, max = sMax,
             onMinus = {
-                val nieuwS = (sNu - sStap).coerceIn(sMin, sMax)
-                val nieuwD = sNaarD(nieuwS)
-                d = nieuwD; DFLearner.setD(context, nieuwD)
+                val nieuwD = sNaarD((sNu - sStap).coerceIn(sMin, sMax))
+                d = nieuwD; slaTypeOp(nieuwD)
             },
             onPlus = {
-                val nieuwS = (sNu + sStap).coerceIn(sMin, sMax)
-                val nieuwD = sNaarD(nieuwS)
-                d = nieuwD; DFLearner.setD(context, nieuwD)
+                val nieuwD = sNaarD((sNu + sStap).coerceIn(sMin, sMax))
+                d = nieuwD; slaTypeOp(nieuwD)
             }
         )
 
-        // ── ⏱ Timing (T) ─────────────────────────────────────────────────
+        // ── 3. Hoe vroeg ──────────────────────────────────────────────────
         StvKaart(
             emoji = "⏱",
-            titel = "Timing (T)",
-            omschrijving = "Hoe vroeg de insuline vrijkomt  •  100% = neutraal",
-            waarde = tNu,
-            waardeSuffix = "%",
-            eenheid100Label = "neutraal",
-            stapMinus = tStap,
-            stapPlus = tStap,
-            min = tMin,
-            max = tMax,
+            titel = "Hoe vroeg insuline gegeven wordt",
+            omschrijving = "Concentratie aan het begin van de maaltijd  •  100% = neutraal",
+            waarde = tNu, waardeSuffix = "%", eenheid100Label = "neutraal",
+            stapMinus = tStap, stapPlus = tStap, min = tMin, max = tMax,
             onMinus = {
-                val nieuwT = (tNu - tStap).coerceIn(tMin, tMax)
-                val nieuwF = tNaarF(nieuwT)
-                f = nieuwF; DFLearner.setF(context, nieuwF)
+                val nieuwF = tNaarF((tNu - tStap).coerceIn(tMin, tMax))
+                f = nieuwF; slaTypeOp(d, nieuwF)
             },
             onPlus = {
-                val nieuwT = (tNu + tStap).coerceIn(tMin, tMax)
-                val nieuwF = tNaarF(nieuwT)
-                f = nieuwF; DFLearner.setF(context, nieuwF)
+                val nieuwF = tNaarF((tNu + tStap).coerceIn(tMin, tMax))
+                f = nieuwF; slaTypeOp(d, nieuwF)
             },
-            // Extra toelichting: earlyBoost en lateDecay activatiestatus
             extraToelichting = run {
                 val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
                 val eb = po.earlyBoostFactor ?: 1.0
@@ -177,74 +169,67 @@ fun DFControlTab(
             }
         )
 
-        // ── 🔁 Volhoudendheid (V) ─────────────────────────────────────────
+        // ── 4. Vasthoudendheid ────────────────────────────────────────────
         StvKaart(
             emoji = "🔁",
-            titel = "Volhoudendheid (V)",
-            omschrijving = "Hoe vasthoudend bijgestuurd wordt  •  100% = standaard",
-            waarde = vNu,
-            waardeSuffix = "%",
-            eenheid100Label = "standaard",
-            stapMinus = vStap,
-            stapPlus = vStap,
-            min = vMin,
-            max = vMax,
+            titel = "Hoe vasthoudend bijgestuurd wordt",
+            omschrijving = "Persistentie na de maaltijdpiek  •  100% = standaard",
+            waarde = vNu, waardeSuffix = "%", eenheid100Label = "standaard",
+            stapMinus = vStap, stapPlus = vStap, min = vMin, max = vMax,
             onMinus = {
-                val nieuwV = (vNu - vStap).coerceIn(vMin, vMax)
-                val nieuwD = vNaarD(nieuwV)
-                // V aanpassen via D — herbereken S zodat S consistent blijft
-                // V = 95 + (D-1)*50, maar S = 95*D → als D verandert voor V,
-                // verandert S mee. Dat is gewenst: V en S zijn beide D-afhankelijk.
-                d = nieuwD; DFLearner.setD(context, nieuwD)
+                val nieuwD = vNaarD((vNu - vStap).coerceIn(vMin, vMax))
+                d = nieuwD; slaTypeOp(nieuwD)
             },
             onPlus = {
-                val nieuwV = (vNu + vStap).coerceIn(vMin, vMax)
-                val nieuwD = vNaarD(nieuwV)
-                d = nieuwD; DFLearner.setD(context, nieuwD)
+                val nieuwD = vNaarD((vNu + vStap).coerceIn(vMin, vMax))
+                d = nieuwD; slaTypeOp(nieuwD)
             },
-            // Toon ook de bijbehorende S-waarde als toelichting
-            extraToelichting = "S wordt ook: ${DFMapping.toStvMap(vNaarD(vNu), f, nachtFactor)["sterkte"] ?: sNu}%"
+            extraToelichting = "Insulinesterkte wordt ook: ${
+                DFMapping.toStvMap(vNaarD(vNu), f, nachtFactor)["sterkte"] ?: sNu
+            }%"
         )
 
-        // ── Toepassen in AAPS ─────────────────────────────────────────────
+        // ── 5. Frontload timing ───────────────────────────────────────────
+        FrontloadKaart(
+            refWmd = refWmd,
+            label = frontloadLabel(refWmd),
+            onEerder = {
+                val nieuw = (refWmd - 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)
+                refWmd = nieuw; DFLearner.setRefWmd(context, nieuw)
+            },
+            onLater = {
+                val nieuw = (refWmd + 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)
+                refWmd = nieuw; DFLearner.setRefWmd(context, nieuw)
+            }
+        )
+
+        // ── 6. Toepassen ──────────────────────────────────────────────────
         if (onApplyToAaps != null) {
             Button(
                 onClick = {
-                    // Schrijft ALTIJD beide blokken: stv + volledige param_overrides
                     val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
                     val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
                     val ok = onApplyToAaps(po, stvMap)
                     applyResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
                     applyTs = System.currentTimeMillis()
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text(
-                    "Toepassen in AAPS",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("Toepassen in AAPS", style = MaterialTheme.typography.titleSmall,
+                     fontWeight = FontWeight.SemiBold)
+            }
+            applyResult?.let { msg ->
+                if (System.currentTimeMillis() - applyTs < 20_000L) {
+                    Text(msg, style = MaterialTheme.typography.bodySmall,
+                         color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
+                         else MaterialTheme.colorScheme.error,
+                         modifier = Modifier.fillMaxWidth())
+                }
             }
         }
 
-        applyResult?.let { msg ->
-            if (System.currentTimeMillis() - applyTs < 20_000L) {
-                Text(
-                    msg,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
-        // ── Automaat + tempo ──────────────────────────────────────────────
+        // ── 7. Automaat ───────────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -256,43 +241,30 @@ fun DFControlTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        Text("🤖  Automaat leert", style = MaterialTheme.typography.bodyMedium,
+                             fontWeight = FontWeight.SemiBold)
                         Text(
-                            "🤖  Automaat leert",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            if (autoEnabled) "Past S, T en V automatisch aan na elke episode"
+                            if (autoEnabled) "Past instellingen automatisch aan na elke maaltijd"
                             else "Handmatig — automaat berekent maar past niet aan",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(
-                        checked = autoEnabled,
-                        onCheckedChange = {
-                            autoEnabled = it
-                            DFLearner.setAutoEnabled(context, it)
-                        }
-                    )
+                    Switch(checked = autoEnabled, onCheckedChange = {
+                        autoEnabled = it; DFLearner.setAutoEnabled(context, it)
+                    })
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     DFLearner.Tempo.entries.forEach { t ->
                         FilterChip(
                             selected = t == tempo,
                             onClick = { tempo = t; DFLearner.setTempo(context, t) },
                             label = {
-                                Text(
-                                    when (t) {
-                                        DFLearner.Tempo.LANGZAAM -> "Langzaam"
-                                        DFLearner.Tempo.NORMAAL  -> "Normaal"
-                                        DFLearner.Tempo.SNEL     -> "Snel"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall
-                                )
+                                Text(when (t) {
+                                         DFLearner.Tempo.LANGZAAM -> "Langzaam"
+                                         DFLearner.Tempo.NORMAAL  -> "Normaal"
+                                         DFLearner.Tempo.SNEL     -> "Snel"
+                                     }, style = MaterialTheme.typography.labelSmall)
                             },
                             modifier = Modifier.weight(1f)
                         )
@@ -301,72 +273,38 @@ fun DFControlTab(
             }
         }
 
-        // ── Kalibratie ────────────────────────────────────────────────────
-        KalibratieSectie(
-            refWmd = refWmd,
-            refWff = refWff,
-            refEb = refEb,
-            onWmdChange = { refWmd = it; DFLearner.setRefWmd(context, it) },
-            onWffChange = { refWff = it; DFLearner.setRefWff(context, it) },
-            onEbChange = { refEb = it; DFLearner.setRefEb(context, it) }
-        )
+        // ── 8. Verloop per maaltijdtype ───────────────────────────────────
+        MaaltijdTypeOverzicht(nachtFactor = nachtFactor)
 
-        // ── Laatste aanpassingen door automaat ────────────────────────────        if (history.isNotEmpty()) {
+        // ── 9. Laatste aanpassingen ───────────────────────────────────────
         if (history.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "Laatste aanpassingen door automaat",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Text("Laatste aanpassingen door automaat",
+                         style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Divider()
                     history.takeLast(5).reversed().forEach { step ->
-                        // Toon alles in S/T/V-eenheden
                         val oldStv = DFMapping.toStvMap(step.oldD, step.oldF, 85)
                         val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
-                        val oldS = oldStv["sterkte"] ?: 0
-                        val newS = newStv["sterkte"] ?: 0
-                        val oldT = oldStv["timing"] ?: 0
-                        val newT = newStv["timing"] ?: 0
-                        val oldV = oldStv["volhoudendheid"] ?: 0
-                        val newV = newStv["volhoudendheid"] ?: 0
-
-                        val sStr = if (newS != oldS) "S: ${oldS}→${newS}%  " else ""
-                        val tStr = if (newT != oldT) "T: ${oldT}→${newT}%  " else ""
-                        val vStr = if (newV != oldV) "V: ${oldV}→${newV}%" else ""
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                        val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
+                        val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
+                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                val diagnoseKleur = when {
-                                    step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
-                                    step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") ->
-                                        MaterialTheme.colorScheme.primary
-
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                                Text(
-                                    step.reason.take(60),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = diagnoseKleur
-                                )
+                                Text("$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
+                                     style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Text(step.reason.take(60), style = MaterialTheme.typography.labelSmall,
+                                     color = when {
+                                         step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
+                                         step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") -> MaterialTheme.colorScheme.primary
+                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                     })
                             }
-                            Text(
-                                fmtTs(step.tsUtc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(fmtTs(step.tsUtc), style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (step != history.takeLast(5).reversed().last())
                             Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
@@ -375,63 +313,75 @@ fun DFControlTab(
             }
         }
 
-        // ── Expert-view: alle 17 afgeleide params ─────────────────────────
+        // ── 10. Geavanceerd (inklapbaar) ──────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showExpert = !showExpert }
+                    modifier = Modifier.fillMaxWidth().clickable { showGeavanceerd = !showGeavanceerd }
                         .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "Technische parameters (expert)",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        if (showExpert) "▲" else "▼",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("Geavanceerd", style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (showGeavanceerd) "▲" else "▼", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (showExpert) {
+                if (showGeavanceerd) {
                     Divider(modifier = Modifier.padding(horizontal = 14.dp))
-                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
-                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        ExpertRij("sterkte (S)", "${stvMap["sterkte"] ?: "—"}%")
-                        ExpertRij("timing (T)", "${stvMap["timing"] ?: "—"}%")
-                        ExpertRij("volhoudendheid (V)", "${stvMap["volhoudendheid"] ?: "—"}%")
-                        ExpertRij("D (intern)", "${"%.3f".format(d)}")
-                        ExpertRij("F (intern)", "${"%.3f".format(f)}")
-                        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                        ExpertRij("earlyBoostFactor", fmtD2(po.earlyBoostFactor))
-                        ExpertRij("earlyBoostMinConf", fmtD2(po.earlyBoostMinConfidence))
-                        ExpertRij("earlyBoostMaxCom", fmtInt(po.earlyBoostMaxCommits))
-                        ExpertRij("lateDecayFactor", fmtD2(po.lateCommitDecayFactor))
-                        ExpertRij("lateDecayThresh", fmtD2(po.lateCommitDecayThreshold))
-                        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                        ExpertRij("commitCooldown", fmtInt(po.commitCooldownMinutes) + "m")
-                        ExpertRij("watchingFrontload", fmtD2(po.watchingFrontloadFrac))
-                        ExpertRij("watchingMinDelta", fmtD2(po.watchingMinDeltaToTarget) + " mmol")
-                        ExpertRij("peakThreshold", fmtD1(po.peakPredictionThreshold) + " mmol")
-                        ExpertRij("peakHorizon", fmtD2(po.peakPredictionHorizonH) + " uur")
-                        ExpertRij("iobStart", fmtD2(po.iobStart))
-                        ExpertRij("peakIobBrake", fmtD2(po.peakIobBrakeSuppressThreshold))
-                        ExpertRij("earlyRiseFracMin", fmtD2(po.earlyRiseFracMin))
-                        ExpertRij("peakMaxSlope", fmtD2(po.peakMaxSlopeWeight))
-                        ExpertRij("sustainedSlope", fmtD2(po.sustainedRiseSlopeMin))
-                        ExpertRij("sustainedTarget", fmtInt(po.sustainedRiseMinTarget) + "m")
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        // Kalibratie sub-items (refWff, refEb)
+                        KalibratieParm(
+                            emoji = "💉", naam = "Grootte eerste reactie",
+                            uitleg = "Hoe groot de eerste insulinepuls is als het systeem een stijging detecteert. Hoger = grotere puls.",
+                            waarde = refWff * 100, eenheid = "%", stap = 5.0,
+                            min = DFMapping.REF_WFF_MIN * 100, max = DFMapping.REF_WFF_MAX * 100,
+                            defaultWaarde = DFMapping.REF_WFF_DEFAULT * 100,
+                            formatFn = { "%.0f".format(it) },
+                            onMinus = { refWff = ((refWff * 100 - 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX); DFLearner.setRefWff(context, refWff) },
+                            onPlus  = { refWff = ((refWff * 100 + 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX); DFLearner.setRefWff(context, refWff) },
+                            onReset = { refWff = DFMapping.REF_WFF_DEFAULT; DFLearner.setRefWff(context, refWff) }
+                        )
+                        KalibratieParm(
+                            emoji = "🚀", naam = "Versterking vroege commits",
+                            uitleg = "Versterkt de eerste 1-2 insulinepulsen extra. 1.0 = geen versterking. Hoger = meer insuline vroeg in de maaltijd.",
+                            waarde = refEb, eenheid = "×", stap = 0.10,
+                            min = DFMapping.REF_EB_MIN, max = DFMapping.REF_EB_MAX,
+                            defaultWaarde = DFMapping.REF_EB_DEFAULT,
+                            formatFn = { "%.1f".format(it) },
+                            onMinus = { refEb = (refEb - 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX); DFLearner.setRefEb(context, refEb) },
+                            onPlus  = { refEb = (refEb + 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX); DFLearner.setRefEb(context, refEb) },
+                            onReset = { refEb = DFMapping.REF_EB_DEFAULT; DFLearner.setRefEb(context, refEb) }
+                        )
+                        // Technische params
+                        var showExpert by remember { mutableStateOf(false) }
+                        Row(modifier = Modifier.fillMaxWidth().clickable { showExpert = !showExpert },
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Technische parameters", style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (showExpert) "▲" else "▼", style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (showExpert) {
+                            val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
+                            val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                ExpertRij("D (intern)", "%.3f".format(d))
+                                ExpertRij("F (intern)", "%.3f".format(f))
+                                ExpertRij("REF_WMD", "%.2f".format(refWmd))
+                                ExpertRij("earlyBoostFactor", fmtD2(po.earlyBoostFactor))
+                                ExpertRij("watchingFrontload", fmtD2(po.watchingFrontloadFrac))
+                                ExpertRij("watchingMinDelta", fmtD2(po.watchingMinDeltaToTarget) + " mmol")
+                                ExpertRij("commitCooldown", fmtInt(po.commitCooldownMinutes) + "m")
+                                ExpertRij("peakThreshold", fmtD1(po.peakPredictionThreshold) + " mmol")
+                                ExpertRij("peakHorizon", fmtD2(po.peakPredictionHorizonH) + " uur")
+                                ExpertRij("iobStart", fmtD2(po.iobStart))
+                                ExpertRij("peakIobBrake", fmtD2(po.peakIobBrakeSuppressThreshold))
+                            }
+                        }
                     }
                 }
             }
@@ -439,6 +389,187 @@ fun DFControlTab(
     }
 }
 
+// ── MaaltijdTypeSelector ──────────────────────────────────────────────────────
+
+@Composable
+private fun MaaltijdTypeSelector(
+    geselecteerd: MealTypeBridge.MealType,
+    onSelect: (MealTypeBridge.MealType) -> Unit
+) {
+    val types = listOf(
+        Triple(MealTypeBridge.MealType.GEMENGD, "🔀", "Gemengd"),
+        Triple(MealTypeBridge.MealType.SNEL,    "⚡", "Snel"),
+        Triple(MealTypeBridge.MealType.TRAAG,   "🐢", "Traag")
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Maaltijdtype", style = MaterialTheme.typography.titleSmall,
+                 fontWeight = FontWeight.SemiBold)
+            Text("Stel per maaltijdtype aparte waarden in — het systeem herkent het type automatisch.",
+                 style = MaterialTheme.typography.bodySmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                types.forEach { (type, emoji, label) ->
+                    val geselecteerdKleur = when (type) {
+                        MealTypeBridge.MealType.SNEL  -> Color(0xFFFF9800)
+                        MealTypeBridge.MealType.TRAAG -> Color(0xFF4CAF50)
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+                    val isGeselecteerd = geselecteerd == type
+                    Surface(
+                        onClick = { onSelect(type) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isGeselecteerd) geselecteerdKleur.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = if (isGeselecteerd)
+                            androidx.compose.foundation.BorderStroke(1.5.dp, geselecteerdKleur)
+                        else null
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(emoji, fontSize = 16.sp)
+                            Text(label, style = MaterialTheme.typography.labelSmall,
+                                 color = if (isGeselecteerd) geselecteerdKleur
+                                 else MaterialTheme.colorScheme.onSurfaceVariant,
+                                 fontWeight = if (isGeselecteerd) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── FrontloadKaart ────────────────────────────────────────────────────────────
+
+@Composable
+private fun FrontloadKaart(
+    refWmd: Double,
+    label: String,
+    onEerder: () -> Unit,
+    onLater: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val gemiddeldeMarge = remember { FrontloadLearner.getGemiddeldeMarge(context) }
+    val evalCount       = remember { FrontloadLearner.getEvalCount(context) }
+    val flHistory       = remember { FrontloadLearner.getHistory(context) }
+
+    val kleur = when (label) {
+        "Zeer vroeg", "Vroeg" -> MaterialTheme.colorScheme.primary
+        "Laat", "Zeer laat"  -> MaterialTheme.colorScheme.tertiary
+        else                  -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            // Header
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("🚀  Wanneer reageert het systeem",
+                         style = MaterialTheme.typography.titleSmall,
+                         fontWeight = FontWeight.SemiBold)
+                    Text("Hoe snel na het begin van een stijging de eerste insulinepuls gegeven wordt",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(label, style = MaterialTheme.typography.titleMedium,
+                     fontWeight = FontWeight.Bold, color = kleur)
+            }
+
+            // Marge indicator (alleen als we data hebben)
+            if (gemiddeldeMarge >= 0 && evalCount >= 3) {
+                val margeKleur = when {
+                    gemiddeldeMarge < 20 -> MaterialTheme.colorScheme.error
+                    gemiddeldeMarge > 50 -> MaterialTheme.colorScheme.tertiary
+                    else                 -> MaterialTheme.colorScheme.primary
+                }
+                val margeOmschrijving = when {
+                    gemiddeldeMarge < 20 -> "Te laat — systeem reageert te lang na de stijging"
+                    gemiddeldeMarge > 50 -> "Erg vroeg — systeem reageert eerder dan nodig"
+                    else                 -> "Goed — systeem reageert op het juiste moment"
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Gemiddeld $gemiddeldeMarge min voor de piek",
+                             style = MaterialTheme.typography.bodySmall,
+                             fontWeight = FontWeight.SemiBold,
+                             color = margeKleur)
+                        Text(margeOmschrijving,
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text("$evalCount ep.", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                         fontSize = 9.sp)
+                }
+            } else if (evalCount in 1 until 3) {
+                Text("Nog ${ 3 - evalCount} episodes nodig voor automatisch advies ($evalCount/3 bruikbaar)",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("Nog geen data — wordt automatisch geleerd na 3 maaltijden met frontload",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            // Knoppen
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onEerder, enabled = refWmd > DFMapping.REF_WMD_MIN,
+                               modifier = Modifier.weight(1f)) {
+                    Text("← Eerder", fontSize = 13.sp)
+                }
+                OutlinedButton(onClick = onLater, enabled = refWmd < DFMapping.REF_WMD_MAX,
+                               modifier = Modifier.weight(1f)) {
+                    Text("Later →", fontSize = 13.sp)
+                }
+            }
+
+            // Leergeschiedenis (laatste 3)
+            if (flHistory.isNotEmpty()) {
+                Divider()
+                Text("Automatische aanpassingen:",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                flHistory.takeLast(3).reversed().forEach { step ->
+                    val richting = when (step.richting) {
+                        "EERDER" -> "← eerder (marge was ${step.gemiddeldeMarge} min)"
+                        "LATER"  -> "→ later (marge was ${step.gemiddeldeMarge} min)"
+                        else     -> "geen wijziging"
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(richting, style = MaterialTheme.typography.labelSmall,
+                             color = if (step.richting == "EERDER") MaterialTheme.colorScheme.primary
+                             else MaterialTheme.colorScheme.tertiary)
+                        Text(fmtTs(step.tsUtc), style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                             fontSize = 9.sp)
+                    }
+                }
+            }
+        }
+    }
+}
 // ── StvKaart ──────────────────────────────────────────────────────────────
 // Generieke kaart voor S, T of V met uniforme opmaak.
 
@@ -951,7 +1082,7 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
             Text(
-                "📊 D/F per maaltijdtype",
+                "📊 S/T/V per maaltijdtype",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
@@ -960,10 +1091,10 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 // Header
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    Text("Type", modifier = Modifier.weight(1.8f),
+                    Text("Type", modifier = Modifier.weight(2.5f),
                          style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    for (h in listOf("D", "F", "S", "T", "V")) {
+                    for (h in listOf("S", "T", "V")) {
                         Text(h, modifier = Modifier.weight(1f),
                              style = MaterialTheme.typography.labelSmall,
                              color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -992,7 +1123,7 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.weight(1.8f),
+                            modifier = Modifier.weight(2.5f),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1006,8 +1137,6 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
                             }
                         }
                         for (w in listOf(
-                            "%.3f".format(d),
-                            "%.3f".format(f),
                             "${stv["sterkte"]}%",
                             "${stv["timing"]}%",
                             "${stv["volhoudendheid"]}%"

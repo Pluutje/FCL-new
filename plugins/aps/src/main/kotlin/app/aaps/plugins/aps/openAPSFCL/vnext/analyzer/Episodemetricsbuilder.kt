@@ -64,6 +64,12 @@ object EpisodeMetricsBuilder {
             // currentSterkte: meest recente S-waarde in de episode
             val currentSterkte = rows.lastOrNull { it.sterktePct > 0 }?.sterktePct ?: 100
 
+            // firstFrontloadMinutes: minuten na episodestart van eerste frontload-trigger
+            val firstFrontloadMinutes = rows
+                .filter { it.watchingFrontloadTriggered && it.minutesSinceMealStart != null }
+                .minByOrNull { it.minutesSinceMealStart!! }
+                ?.minutesSinceMealStart ?: -1
+
             // FIX 3: advisorWeight straft episodes met hoge IOB op de piek af.
             // Een episode met iobRatioAtPeak >= 0.70 is het resultaat van te-laat-burst
             // gedrag en is daarmee minder representatief voor de "echte" profielkwaliteit.
@@ -105,7 +111,8 @@ object EpisodeMetricsBuilder {
                 brakeActiveCycles = brakeActiveCycles,
                 earlyBoostWasActive = earlyBoostWasActive,
                 capReachedCycles = capReachedCycles,
-                currentSterkte = currentSterkte
+                currentSterkte = currentSterkte,
+                firstFrontloadMinutes = firstFrontloadMinutes
             )
         }
     }

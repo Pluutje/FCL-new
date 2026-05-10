@@ -155,7 +155,7 @@ object DFLearner {
         }
     }
 
-    private fun setDForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, d: Double) {
+    fun setDForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, d: Double) {
         val key = when (type) {
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_D_SNEL
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_D_TRAAG
@@ -164,7 +164,7 @@ object DFLearner {
         prefs(context).edit().putFloat(key, d.coerceIn(DFMapping.D_MIN, DFMapping.D_MAX).toFloat()).apply()
     }
 
-    private fun setFForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, f: Double) {
+    fun setFForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, f: Double) {
         val key = when (type) {
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_F_SNEL
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_F_TRAAG

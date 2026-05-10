@@ -123,7 +123,8 @@ fun OverviewChipsColumn(
         }
         IobCobChipsRow(
             iobUiState = iobUiState,
-            cobUiState = cobUiState
+            cobUiState = cobUiState,
+            showCob = false // FCL: COB verborgen
         )
     }
 }

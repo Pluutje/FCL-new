@@ -1,0 +1,179 @@
+package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
+
+import android.content.Context
+import android.content.SharedPreferences
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.REF_WMD_DEFAULT
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.REF_WMD_MAX
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.REF_WMD_MIN
+import kotlin.math.abs
+
+/**
+ * FrontloadLearner — leert automatisch wanneer de frontload-trigger optimaal is.
+ *
+ * KERNGEDACHTE:
+ * Het frontload-mechanisme triggert als BG met voldoende snelheid stijgt.
+ * De drempel (REF_WMD) bepaalt hoe vroeg dat gebeurt.
+ *
+ * Een goede frontload triggert ruim VOOR de piek (≥ 25 min ervoor).
+ * Te laat triggeren = piek wordt niet afgevlakt.
+ * Te vroeg triggeren = onnodige insuline als BG toch niet stijgt.
+ *
+ * LEERLOGICA:
+ * - Bereken per episode: (piek-tijdstip) − (eerste frontload-tijdstip)
+ *   = "marge voor de piek"
+ * - Te laat (< 20 min marge) → REF_WMD verlagen (eerder reageren)
+ * - Te vroeg (> 50 min marge) + piek laag → REF_WMD verhogen (later reageren)
+ * - Goed (20-50 min marge) → niets doen
+ * - Minimaal 5 bruikbare episodes voor aanpassing
+ * - Max stap: 0.05 mmol per evaluatie
+ * - Cooldown: 48 uur tussen aanpassingen
+ */
+object FrontloadLearner {
+
+    private const val PREFS = "frontload_learner_prefs"
+    private const val KEY_LAST_TS       = "fl_last_ts"
+    private const val KEY_HISTORY       = "fl_history"
+    private const val KEY_AVG_MARGE     = "fl_avg_marge"
+    private const val KEY_EVAL_COUNT    = "fl_eval_count"
+
+    private const val MIN_EPISODES      = 5
+    private const val COOLDOWN_HOURS    = 48L
+    private const val STAP              = 0.05
+
+    // Doelbereik: frontload triggert 20-50 min voor de piek
+    private const val MARGE_MIN         = 20
+    private const val MARGE_IDEAAL      = 35
+    private const val MARGE_MAX         = 50
+
+    data class FrontloadLearningStep(
+        val tsUtc: String,
+        val oudeWmd: Double,
+        val nieuweWmd: Double,
+        val gemiddeldeMarge: Int,    // minuten voor piek
+        val aantalEpisodes: Int,
+        val richting: String         // "EERDER" | "LATER" | "GOED"
+    )
+
+    private fun prefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    // ── Publieke API ──────────────────────────────────────────────────────
+
+    fun getHistory(context: Context): List<FrontloadLearningStep> {
+        val raw = prefs(context).getString(KEY_HISTORY, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { parseStep(it) }
+    }
+
+    fun getGemiddeldeMarge(context: Context): Int =
+        prefs(context).getInt(KEY_AVG_MARGE, -1)
+
+    fun getEvalCount(context: Context): Int =
+        prefs(context).getInt(KEY_EVAL_COUNT, 0)
+
+    /**
+     * Evalueer alle episodes en pas REF_WMD aan als nodig.
+     * Retourneert een LearningStep als er een aanpassing is gedaan, anders null.
+     */
+    fun evaluate(
+        context: Context,
+        metrics: List<EpisodeMetrics>
+    ): FrontloadLearningStep? {
+        // Cooldown check
+        val lastTs = prefs(context).getLong(KEY_LAST_TS, 0L)
+        val hoursSinceLast = (System.currentTimeMillis() - lastTs) / 3_600_000L
+        if (lastTs > 0 && hoursSinceLast < COOLDOWN_HOURS) return null
+
+        // Selecteer bruikbare episodes:
+        // - Frontload is getriggerd (firstFrontloadMinutes >= 0)
+        // - Piek-tijdstip bekend
+        // - Geen rescue carbs (dat verstoort het signaal)
+        val bruikbaar = metrics.filter { m ->
+            m.firstFrontloadMinutes >= 0 &&
+                m.timeToPeakMinutes != null &&
+                m.timeToPeakMinutes > 0 &&
+                !m.rescueConfirmed &&
+                m.firstFrontloadMinutes < m.timeToPeakMinutes  // FL voor de piek
+        }
+
+        if (bruikbaar.size < MIN_EPISODES) return null
+
+        // Bereken marge per episode: hoe ver voor de piek triggerde de frontload
+        val marges = bruikbaar.map { m ->
+            (m.timeToPeakMinutes!! - m.firstFrontloadMinutes).toInt()
+        }
+        val gemiddeldeMarge = marges.average().toInt()
+
+        // Sla gemiddelde op voor weergave in UI
+        prefs(context).edit()
+            .putInt(KEY_AVG_MARGE, gemiddeldeMarge)
+            .putInt(KEY_EVAL_COUNT, bruikbaar.size)
+            .apply()
+
+        val huidigWmd = DFLearner.getRefWmd(context)
+
+        // Bepaal richting
+        val richting = when {
+            gemiddeldeMarge < MARGE_MIN -> "EERDER"   // Te laat → drempel verlagen
+            gemiddeldeMarge > MARGE_MAX -> "LATER"    // Te vroeg → drempel verhogen
+            else                        -> "GOED"
+        }
+
+        if (richting == "GOED") return null
+
+        // Bereken stapgrootte: proportioneel aan afwijking, max STAP
+        val afwijking = abs(gemiddeldeMarge - MARGE_IDEAAL).toDouble()
+        val stapFractie = (afwijking / 30.0).coerceIn(0.5, 1.0)  // 30 min = max afwijking
+        val stap = STAP * stapFractie
+
+        val nieuwWmd = when (richting) {
+            "EERDER" -> (huidigWmd - stap).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
+            "LATER"  -> (huidigWmd + stap).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
+            else     -> return null
+        }
+
+        if (abs(nieuwWmd - huidigWmd) < 0.001) return null  // Al op grens
+
+        // Sla op
+        DFLearner.setRefWmd(context, nieuwWmd)
+        prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
+
+        val step = FrontloadLearningStep(
+            tsUtc            = java.time.Instant.now().toString(),
+            oudeWmd          = huidigWmd,
+            nieuweWmd        = nieuwWmd,
+            gemiddeldeMarge  = gemiddeldeMarge,
+            aantalEpisodes   = bruikbaar.size,
+            richting         = richting
+        )
+
+        appendHistory(context, step)
+        return step
+    }
+
+    // ── Serialisatie ──────────────────────────────────────────────────────
+
+    private fun appendHistory(context: Context, step: FrontloadLearningStep) {
+        val existing = getHistory(context).takeLast(9)
+        val line = "${step.tsUtc}|${step.oudeWmd}|${step.nieuweWmd}|" +
+            "${step.gemiddeldeMarge}|${step.aantalEpisodes}|${step.richting}"
+        val all = (existing.map { serialize(it) } + line).joinToString("\n")
+        prefs(context).edit().putString(KEY_HISTORY, all).apply()
+    }
+
+    private fun serialize(s: FrontloadLearningStep) =
+        "${s.tsUtc}|${s.oudeWmd}|${s.nieuweWmd}|${s.gemiddeldeMarge}|${s.aantalEpisodes}|${s.richting}"
+
+    private fun parseStep(line: String): FrontloadLearningStep? = try {
+        val p = line.split("|")
+        if (p.size < 6) null
+        else FrontloadLearningStep(
+            tsUtc           = p[0],
+            oudeWmd         = p[1].toDouble(),
+            nieuweWmd       = p[2].toDouble(),
+            gemiddeldeMarge = p[3].toInt(),
+            aantalEpisodes  = p[4].toInt(),
+            richting        = p[5]
+        )
+    } catch (_: Exception) { null }
+}

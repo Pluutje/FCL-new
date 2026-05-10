@@ -73,5 +73,10 @@ data class EpisodeMetrics(
 
     // currentSterkte: S-waarde (%) actief tijdens deze episode.
     // Nodig om te detecteren of S al op zijn minimum staat.
-    val currentSterkte: Int = 100
+    val currentSterkte: Int = 100,
+
+    // ── Frontload timing ─────────────────────────────────────────────────
+    // firstFrontloadMinutes: minuten na episodestart van de EERSTE frontload-trigger.
+    // -1 = geen frontload getriggerd in deze episode.
+    val firstFrontloadMinutes: Int = -1
 )

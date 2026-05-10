@@ -684,6 +684,9 @@ private suspend fun runAdvisorFlow(
                 manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay
                     ?: MaxSmbLearner.MAX_SMB_DEFAULT
             )
+
+            // Frontload timing leren — alle bruikbare episodes meegeven
+            val frontloadResult = FrontloadLearner.evaluate(context, episodeMetrics)
             val dfChanged = step != null && step.hasChange
             val smbChanged = smbResult != null && smbResult.hasChange
 
