@@ -53,7 +53,7 @@ fun OverviewScreenSplit(
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
     tbrState: TbrState,
-    tbrBasalText: String = "",              // ← nieuw
+    smbEnabled: Boolean,
     isSimpleMode: Boolean,
     calcProgress: Int,
     graphViewModel: GraphViewModel,
@@ -68,7 +68,6 @@ fun OverviewScreenSplit(
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
-    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val config = LocalConfig.current
@@ -134,6 +133,7 @@ fun OverviewScreenSplit(
                         runningModeText = runningModeText,
                         runningModeProgress = runningModeProgress,
                         runningModeSceneManaged = runningModeSceneManaged,
+                        smbEnabled = smbEnabled,
                         isSimpleMode = isSimpleMode,
                         profileName = profileName,
                         isProfileModified = isProfileModified,
@@ -145,9 +145,7 @@ fun OverviewScreenSplit(
                         tempTargetReason = tempTargetReason,
                         tempTargetSceneManaged = tempTargetSceneManaged,
                         tbrState = tbrState,
-                        tbrBasalText = tbrBasalText,            // ← nieuw
                         iobUiState = iobUiState,
-                        showCob = showCob,
                         cobUiState = cobUiState,
                         onNavigate = onNavigate,
                         onTbrChipClick = onTbrChipClick,

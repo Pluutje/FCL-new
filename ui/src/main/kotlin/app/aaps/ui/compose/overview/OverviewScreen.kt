@@ -52,7 +52,7 @@ fun OverviewScreen(
     runningModeProgress: Float,
     runningModeRecordId: Long = 0,
     tbrState: TbrState,
-    tbrBasalText: String = "",              // ← nieuw
+    smbEnabled: Boolean,
     isSimpleMode: Boolean,
     calcProgress: Int,
     graphViewModel: GraphViewModel,
@@ -78,7 +78,6 @@ fun OverviewScreen(
     queueStatusText: String? = null,
     isPumpCommunicating: Boolean = false,
     onStopBolus: () -> Unit = {},
-    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var showNotificationSheet by remember { mutableStateOf(false) }
@@ -122,7 +121,7 @@ fun OverviewScreen(
                 runningModeProgress = runningModeProgress,
                 runningModeSceneManaged = runningModeSceneManaged,
                 tbrState = tbrState,
-                tbrBasalText = tbrBasalText,            // ← nieuw
+                smbEnabled = smbEnabled,
                 isSimpleMode = isSimpleMode,
                 calcProgress = calcProgress,
                 graphViewModel = graphViewModel,
@@ -155,8 +154,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
-                    tbrBasalText = tbrBasalText,            // ← nieuw
-                    showCob = showCob,
+                    smbEnabled = smbEnabled,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,
                     graphViewModel = graphViewModel,
@@ -188,8 +186,7 @@ fun OverviewScreen(
                     runningModeProgress = runningModeProgress,
                     runningModeSceneManaged = runningModeSceneManaged,
                     tbrState = tbrState,
-                    tbrBasalText = tbrBasalText,            // ← nieuw
-                    showCob = showCob,
+                    smbEnabled = smbEnabled,
                     isSimpleMode = isSimpleMode,
                     calcProgress = calcProgress,
                     graphViewModel = graphViewModel,

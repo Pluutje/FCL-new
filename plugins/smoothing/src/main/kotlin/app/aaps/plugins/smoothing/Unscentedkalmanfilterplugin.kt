@@ -16,6 +16,7 @@ import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.interfaces.smoothing.Smoothing
+import app.aaps.core.interfaces.smoothing.SmoothingContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -490,7 +491,7 @@ class UnscentedKalmanFilterPlugin @Inject constructor(
     // MAIN FILTERING API
     // ============================================================
 
-    override fun smooth(data: MutableList<InMemoryGlucoseValue>): MutableList<InMemoryGlucoseValue> {
+    override suspend fun smooth(data: MutableList<InMemoryGlucoseValue>, context: SmoothingContext): MutableList<InMemoryGlucoseValue> {
         if (data.isEmpty()) return data
 
         try {

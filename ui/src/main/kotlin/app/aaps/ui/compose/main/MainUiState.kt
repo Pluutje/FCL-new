@@ -45,12 +45,12 @@ data class MainUiState(
     val runningModeRecordId: Long = 0, // DB record ID (for scene override detection)
     // Running TBR state for chip (HIGH / LOW / NONE)
     val tbrState: TbrState = TbrState.NONE,
-    val tbrBasalText: String = "",
+    // SMB enabled in APS preferences — drives a small triangle marker on the running-mode chip
+    val smbEnabled: Boolean = false,
     // QuickWizard entries for treatment bottom sheet
     val quickWizardItems: List<QuickWizardItem> = emptyList(),
     // Navigation-triggered dialogs
-    val showAuthFailedDialog: Boolean = false,
-    val isFclActive: Boolean = false
+    val showAuthFailedDialog: Boolean = false
 )
 
 @Immutable

@@ -51,7 +51,7 @@ fun OverviewScreenStacked(
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
     tbrState: TbrState,
-    tbrBasalText: String = "",
+    smbEnabled: Boolean,
     isSimpleMode: Boolean,
     calcProgress: Int,
     graphViewModel: GraphViewModel,
@@ -66,7 +66,6 @@ fun OverviewScreenStacked(
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
-    showCob: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val config = LocalConfig.current
@@ -120,6 +119,7 @@ fun OverviewScreenStacked(
                 runningModeText = runningModeText,
                 runningModeProgress = runningModeProgress,
                 runningModeSceneManaged = runningModeSceneManaged,
+                smbEnabled = smbEnabled,
                 isSimpleMode = isSimpleMode,
                 profileName = profileName,
                 isProfileModified = isProfileModified,
@@ -131,9 +131,7 @@ fun OverviewScreenStacked(
                 tempTargetReason = tempTargetReason,
                 tempTargetSceneManaged = tempTargetSceneManaged,
                 tbrState = tbrState,
-                tbrBasalText = tbrBasalText,
                 iobUiState = iobUiState,
-                showCob = showCob,
                 cobUiState = cobUiState,
                 onNavigate = onNavigate,
                 onTbrChipClick = onTbrChipClick,

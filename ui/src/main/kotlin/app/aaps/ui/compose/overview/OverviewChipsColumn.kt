@@ -31,7 +31,6 @@ import app.aaps.ui.compose.overview.chips.TbrChip
 import app.aaps.ui.compose.overview.chips.TempTargetChip
 import app.aaps.ui.compose.overview.graphs.CobUiState
 import app.aaps.ui.compose.overview.graphs.IobUiState
-import androidx.compose.foundation.layout.wrapContentWidth
 
 @Composable
 fun OverviewChipsColumn(
@@ -39,6 +38,7 @@ fun OverviewChipsColumn(
     runningModeText: String,
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
+    smbEnabled: Boolean = false,
     isSimpleMode: Boolean,
     profileName: String,
     isProfileModified: Boolean,
@@ -50,10 +50,8 @@ fun OverviewChipsColumn(
     tempTargetReason: TT.Reason?,
     tempTargetSceneManaged: Boolean = false,
     tbrState: TbrState,
-    tbrBasalText: String = "",              // ← nieuw
     iobUiState: IobUiState,
     cobUiState: CobUiState,
-    showCob: Boolean = true,
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -79,6 +77,7 @@ fun OverviewChipsColumn(
                             runningModeText = runningModeText,
                             runningModeProgress = runningModeProgress,
                             runningModeSceneManaged = runningModeSceneManaged,
+                            smbEnabled = smbEnabled,
                             isSimpleMode = isSimpleMode,
                             profileName = profileName,
                             isProfileModified = isProfileModified,
@@ -90,7 +89,6 @@ fun OverviewChipsColumn(
                             tempTargetReason = tempTargetReason,
                             tempTargetSceneManaged = tempTargetSceneManaged,
                             tbrState = tbrState,
-                            tbrBasalText = tbrBasalText,            // ← nieuw
                             onNavigate = onNavigate,
                             onTbrChipClick = onTbrChipClick
                         )
@@ -107,6 +105,7 @@ fun OverviewChipsColumn(
                 runningModeText = runningModeText,
                 runningModeProgress = runningModeProgress,
                 runningModeSceneManaged = runningModeSceneManaged,
+                smbEnabled = smbEnabled,
                 isSimpleMode = isSimpleMode,
                 profileName = profileName,
                 isProfileModified = isProfileModified,
@@ -118,16 +117,13 @@ fun OverviewChipsColumn(
                 tempTargetReason = tempTargetReason,
                 tempTargetSceneManaged = tempTargetSceneManaged,
                 tbrState = tbrState,
-                tbrBasalText = tbrBasalText,            // ← nieuw
                 onNavigate = onNavigate,
                 onTbrChipClick = onTbrChipClick
             )
         }
         IobCobChipsRow(
             iobUiState = iobUiState,
-            cobUiState = cobUiState,
-            showCob = showCob,
-            modifier = Modifier.wrapContentWidth(Alignment.Start)
+            cobUiState = cobUiState
         )
     }
 }
@@ -138,6 +134,7 @@ private fun NarrowChips(
     runningModeText: String,
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean,
+    smbEnabled: Boolean,
     isSimpleMode: Boolean,
     profileName: String,
     isProfileModified: Boolean,
@@ -149,7 +146,6 @@ private fun NarrowChips(
     tempTargetReason: TT.Reason?,
     tempTargetSceneManaged: Boolean,
     tbrState: TbrState,
-    tbrBasalText: String = "",          // ← nieuw
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit
 ) {
@@ -161,6 +157,7 @@ private fun NarrowChips(
                 progress = runningModeProgress,
                 modifier = Modifier.weight(1f),
                 sceneManaged = runningModeSceneManaged,
+                smbEnabled = smbEnabled,
                 onClick = { onNavigate(NavigationRequest.Element(ElementType.RUNNING_MODE)) }
             )
             if (isSimpleMode) {
@@ -201,8 +198,7 @@ private fun NarrowChips(
         }
         TbrChip(
             state = tbrState,
-            onClick = onTbrChipClick,
-            basalText = tbrBasalText            // ← nieuw
+            onClick = onTbrChipClick
         )
     }
 }

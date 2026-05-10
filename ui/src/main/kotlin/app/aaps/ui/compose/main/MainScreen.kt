@@ -36,25 +36,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.interfaces.notifications.AapsNotification
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.pump.BolusProgressState
+import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.LocalSnackbarHostState
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
 import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
-import app.aaps.core.ui.R
-import androidx.compose.ui.res.stringResource
 import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.ui.compose.alertDialogs.AboutAlertDialog
 import app.aaps.ui.compose.alertDialogs.AboutDialogData
-import app.aaps.ui.compose.scenesSheet.ScenesBottomSheet
-import app.aaps.ui.compose.scenesSheet.ScenesViewModel
 import app.aaps.ui.compose.maintenance.ImportSource
 import app.aaps.ui.compose.maintenance.MaintenanceDialogs
 import app.aaps.ui.compose.maintenance.MaintenanceViewModel
@@ -66,6 +64,8 @@ import app.aaps.ui.compose.overview.statusLights.StatusViewModel
 import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchToolbar
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
+import app.aaps.ui.compose.scenesSheet.ScenesBottomSheet
+import app.aaps.ui.compose.scenesSheet.ScenesViewModel
 import app.aaps.ui.compose.treatmentsSheet.TreatmentBottomSheet
 import app.aaps.ui.compose.treatmentsSheet.TreatmentViewModel
 import app.aaps.ui.search.SearchIndexEntry
@@ -135,11 +135,7 @@ fun MainScreen(
     queueStatusText: String? = null,
     isPumpCommunicating: Boolean = false,
     onStopBolus: () -> Unit = {},
-    modifier: Modifier = Modifier,
-
-    // FCL Analyzer — geïnjecteerd vanuit ComposeMainActivity (app module)
-    // zodat de ui module geen dependency op plugins/aps hoeft te hebben
-    fclAnalyzerContent: (@Composable (onDismiss: () -> Unit) -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
     LocalDateUtil.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -147,7 +143,6 @@ fun MainScreen(
     var showTreatmentSheet by remember { mutableStateOf(false) }
     var showAutomationSheet by remember { mutableStateOf(false) }
     var showLoopActionSheet by remember { mutableStateOf(false) }
-    var showFclAnalyzer by remember { mutableStateOf(false) }
     val automationState by scenesViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
 
@@ -246,8 +241,7 @@ fun MainScreen(
                         runningModeProgress = uiState.runningModeProgress,
                         runningModeRecordId = uiState.runningModeRecordId,
                         tbrState = uiState.tbrState,
-                        tbrBasalText = uiState.tbrBasalText,
-                        showCob = !uiState.isFclActive,
+                        smbEnabled = uiState.smbEnabled,
                         isSimpleMode = uiState.isSimpleMode,
                         calcProgress = calcProgress,
                         graphViewModel = graphViewModel,
@@ -375,8 +369,6 @@ fun MainScreen(
                             onPermissionsClick = onPermissionsClick,
                             loopActionAvailable = loopActionState.actionAvailable,
                             onLoopActionClick = { showLoopActionSheet = true },
-                            isFclActive = uiState.isFclActive,
-                            onFclAnalyzerClick = { showFclAnalyzer = true },
                             modifier = Modifier.onSizeChanged { bottomBarHeightPx = it.height }
                         )
                     }
@@ -453,10 +445,6 @@ fun MainScreen(
             onPerform = { mainViewModel.performLoopAccept() },
             onDismiss = { showLoopActionSheet = false }
         )
-    }
-
-    if (showFclAnalyzer) {
-        fclAnalyzerContent?.invoke { showFclAnalyzer = false }
     }
 
     // Shared confirmation dialog (automation actions, TT presets, scene end — from toolbar or

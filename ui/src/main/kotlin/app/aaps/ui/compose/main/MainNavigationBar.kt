@@ -28,7 +28,6 @@ import app.aaps.core.ui.compose.icons.Pump
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.ui.R
 import app.aaps.core.ui.R as CoreUiR
-import androidx.compose.material.icons.filled.BarChart
 
 @Composable
 fun MainNavigationBar(
@@ -49,9 +48,7 @@ fun MainNavigationBar(
     permissionsMissing: Boolean = false,
     onPermissionsClick: () -> Unit = {},
     loopActionAvailable: Boolean = false,
-    onLoopActionClick: () -> Unit = {},
-    isFclActive: Boolean = false,
-    onFclAnalyzerClick: () -> Unit = {}
+    onLoopActionClick: () -> Unit = {}
 ) {
     val navColors = NavigationBarItemDefaults.colors(
         selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -91,23 +88,6 @@ fun MainNavigationBar(
             label = { Text(text = stringResource(CoreUiR.string.treatments)) },
             colors = navColors
         )
-
-        // FCL Analyzer knop (alleen zichtbaar als FCL actief is)
-        if (isFclActive) {
-            NavigationBarItem(
-                selected = false,
-                onClick = onFclAnalyzerClick,
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.BarChart,
-                        contentDescription = "FCL Analyzer",
-                        modifier = Modifier.size(24.dp)
-                    )
-                },
-                label = { Text(text = "Analyzer") },
-                colors = navColors
-            )
-        }
 
         // Automation action button (visible only when actions are available)
         if (automationCount > 0) {

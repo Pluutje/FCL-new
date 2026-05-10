@@ -12,4 +12,6 @@
     <string name="UKF_name">Unscented Kalman Filter</string>
     <string name="description_UKF">Adaptief Kalman filter met RTS smoothing. Leert de ruiskarakteristiek van jouw sensor aan en detecteert uitbijters statistisch. Reset automatisch bij sensorwissel.</string>
 
+    <string name="adaptive_smoothing_name">Adaptive smoothing</string>
+    <string name="description_adaptive_smoothing">"Context-aware adaptive smoothing: minimal lag on rapid rises, aggressive filtering on noisy data, hypo-safe on lows"</string>
 </resources>
