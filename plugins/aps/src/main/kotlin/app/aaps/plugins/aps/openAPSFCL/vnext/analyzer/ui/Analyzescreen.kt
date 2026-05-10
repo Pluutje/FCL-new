@@ -41,6 +41,12 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.FclAxisState
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Divider
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 fun AnalyzeScreen(
@@ -49,6 +55,8 @@ fun AnalyzeScreen(
     episodeMetrics: List<EpisodeMetrics>,
     classifications: List<EpisodeClassifier.EpisodeClassification>,
     currentAxisState: FclAxisState,
+    episodeEntities: List<EpisodeEntity> = emptyList(),
+    onRescueUserConfirmed: (startTs: String, confirmed: String) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
     var currentPage by remember(episodes.size) {
@@ -59,6 +67,9 @@ fun AnalyzeScreen(
     val metrics = episodeMetrics.getOrNull(currentPage)
     val classification = classifications.getOrNull(currentPage)
     val autonomy = remember(episode) { episode?.let { MealAutonomyAnalyzer.analyze(it) } }
+    val entity = remember(currentPage, episodeEntities) {
+        episode?.let { ep -> episodeEntities.find { it.startTs == ep.start.toString() } }
+    }
 
     Column(
         modifier = Modifier
@@ -87,7 +98,9 @@ fun AnalyzeScreen(
         EpisodePager(
             allRows = allRows,
             episodes = episodes,
-            onPageChanged = { page -> currentPage = page }
+            episodeEntities = episodeEntities,
+            onPageChanged = { page -> currentPage = page },
+            onRescueUserConfirmed = onRescueUserConfirmed
         )
 
         if (episode != null && metrics != null && classification != null && autonomy != null) {
@@ -105,6 +118,7 @@ fun AnalyzeScreen(
                     InfoTabPage("Start & detectie") {
                         AutonomyOverviewCard(autonomy)
                         StartTimingCard(episode, autonomy)
+                        entity?.let { MealTypeCard(it) }
                     },
                     InfoTabPage("Doseerlogica") {
                         DosingLogicCard(episode)
@@ -506,4 +520,85 @@ private fun autonomyClassLabel(value: MealAutonomyClass): String = when (value) 
     MealAutonomyClass.ASSIST_USED_OR_NEEDED -> "Assist gebruikt of nodig"
     MealAutonomyClass.SAFETY_LIMITED -> "Veiligheid remde"
     MealAutonomyClass.UNCLEAR -> "Nog onduidelijk"
+}
+// ── MealTypeCard ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun MealTypeCard(entity: EpisodeEntity) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val nachtFactor = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
+        .readActiveParams().nachtFactor
+
+    val type = entity.mealType
+    val (typeLabel, typeKleur) = when (type) {
+        "SNEL"  -> "⚡ Snel"    to Color(0xFFFF9800)
+        "TRAAG" -> "🐢 Traag"   to Color(0xFF4CAF50)
+        else    -> "🔀 Gemengd" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    val mealTypeEnum = when (type) {
+        "SNEL"  -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL
+        "TRAAG" -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG
+        else    -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.GEMENGD
+    }
+    val d   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getDForType(context, mealTypeEnum)
+    val f   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getFForType(context, mealTypeEnum)
+    val stv = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.toStvMap(d, f, nachtFactor)
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "🍽️ Maaltijdtype",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(typeLabel, style = MaterialTheme.typography.labelMedium,
+                     color = typeKleur, fontWeight = FontWeight.Bold)
+            }
+            Divider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                DetectieRij("Slope 0-15 min",  "${"%.2f".format(entity.mealTypeSlope0_15)} mmol/5min")
+                DetectieRij("Slope 15-30 min", "${"%.2f".format(entity.mealTypeSlope15_30)} mmol/5min")
+            }
+
+            Text("Parameters voor dit type:",
+                 style = MaterialTheme.typography.labelSmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                DetectieRij("D", "%.3f".format(d))
+                DetectieRij("F", "%.3f".format(f))
+                DetectieRij("S", "${stv["sterkte"]}%")
+                DetectieRij("T", "${stv["timing"]}%")
+                DetectieRij("V", "${stv["volhoudendheid"]}%")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetectieRij(label: String, waarde: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.labelSmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        Text(waarde, style = MaterialTheme.typography.labelMedium,
+             fontWeight = FontWeight.SemiBold)
+    }
 }

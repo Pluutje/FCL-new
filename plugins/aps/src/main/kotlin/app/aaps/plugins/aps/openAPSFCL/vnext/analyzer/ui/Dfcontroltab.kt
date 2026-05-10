@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
+import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
+import androidx.compose.ui.graphics.Color
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -104,6 +106,9 @@ fun DFControlTab(
             STVVerloopGrafiek(history = history, nachtFactor = nachtFactor)
         }
 
+        // ── Per maaltijdtype tabel + grafieken ───────────────────────────
+        MaaltijdTypeOverzicht(nachtFactor = nachtFactor)
+
         // ── Uitleg ────────────────────────────────────────────────────────
         Text(
             "Pas aan hoeveel insuline gegeven wordt (S), hoe vroeg dat " +
@@ -161,7 +166,7 @@ fun DFControlTab(
             },
             // Extra toelichting: earlyBoost en lateDecay activatiestatus
             extraToelichting = run {
-                val po = DFMapping.toParamOverrides(d, f)
+                val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
                 val eb = po.earlyBoostFactor ?: 1.0
                 val lcd = po.lateCommitDecayFactor ?: 0.0
                 buildList {
@@ -915,6 +920,236 @@ private fun KalibratieParm(
                 enabled = waarde < max - 0.001,
                 modifier = Modifier.weight(1f)
             ) { Text("+  ${formatFn((waarde + stap).coerceIn(min, max))} $eenheid", fontSize = 12.sp) }
+        }
+    }
+}
+
+// ── MaaltijdTypeOverzicht ─────────────────────────────────────────────────────
+// Tabel met huidige D/F/S/T/V per type + drie aparte verloopgrafieken.
+
+@Composable
+private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    data class TypeRij(
+        val label: String,
+        val emoji: String,
+        val type: MealTypeBridge.MealType,
+        val kleur: Color
+    )
+
+    val types = listOf(
+        TypeRij("Gemengd", "🔀", MealTypeBridge.MealType.GEMENGD, Color(0xFF9E9E9E)),
+        TypeRij("Snel",    "⚡", MealTypeBridge.MealType.SNEL,    Color(0xFFFF9800)),
+        TypeRij("Traag",   "🐢", MealTypeBridge.MealType.TRAAG,   Color(0xFF4CAF50))
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            Text(
+                "📊 D/F per maaltijdtype",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            // ── Tabel ─────────────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Header
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Type", modifier = Modifier.weight(1.8f),
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    for (h in listOf("D", "F", "S", "T", "V")) {
+                        Text(h, modifier = Modifier.weight(1f),
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                             textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                    }
+                }
+                Divider()
+
+                // Rijen
+                types.forEach { tr ->
+                    val d   = DFLearner.getDForType(context, tr.type)
+                    val f   = DFLearner.getFForType(context, tr.type)
+                    val stv = DFMapping.toStvMap(d, f, nachtFactor)
+                    val cnt = when (tr.type) {
+                        MealTypeBridge.MealType.SNEL  ->
+                            context.getSharedPreferences("df_learner_prefs", 0)
+                                .getInt("df_count_snel", 0)
+                        MealTypeBridge.MealType.TRAAG ->
+                            context.getSharedPreferences("df_learner_prefs", 0)
+                                .getInt("df_count_traag", 0)
+                        else -> null
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1.8f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(tr.emoji, fontSize = 11.sp)
+                            Text(tr.label, style = MaterialTheme.typography.labelSmall,
+                                 color = tr.kleur, fontWeight = FontWeight.SemiBold)
+                            cnt?.let {
+                                Text("($it)", style = MaterialTheme.typography.labelSmall,
+                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                     fontSize = 9.sp)
+                            }
+                        }
+                        for (w in listOf(
+                            "%.3f".format(d),
+                            "%.3f".format(f),
+                            "${stv["sterkte"]}%",
+                            "${stv["timing"]}%",
+                            "${stv["volhoudendheid"]}%"
+                        )) {
+                            Text(w, modifier = Modifier.weight(1f),
+                                 style = MaterialTheme.typography.labelSmall,
+                                 textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
+                    }
+                }
+            }
+
+            // ── Drie grafieken ────────────────────────────────────────────
+            types.forEach { tr ->
+                val hist = DFLearner.getHistoryForType(context, tr.type)
+                if (hist.size >= 2) {
+                    STVVerloopGrafiekKlein(
+                        history     = hist,
+                        nachtFactor = nachtFactor,
+                        titel       = "${tr.emoji} ${tr.label}",
+                        accentKleur = tr.kleur
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("${tr.emoji} ${tr.label}",
+                             style = MaterialTheme.typography.labelSmall,
+                             color = tr.kleur, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (tr.type == MealTypeBridge.MealType.GEMENGD)
+                                "Zie verloop hierboven"
+                            else "Nog te weinig data (min. 2 aanpassingen)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── STVVerloopGrafiekKlein ────────────────────────────────────────────────────
+// Compacte variant van STVVerloopGrafiek voor per-type weergave.
+
+@Composable
+private fun STVVerloopGrafiekKlein(
+    history: List<DFLearner.LearningStep>,
+    nachtFactor: Int,
+    titel: String,
+    accentKleur: Color
+) {
+    if (history.size < 2) return
+
+    val kleurS    = MaterialTheme.colorScheme.primary
+    val kleurT    = MaterialTheme.colorScheme.tertiary
+    val kleurV    = MaterialTheme.colorScheme.secondary
+    val kleurGrid = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+
+    data class Punt(val tsMs: Long, val s: Int, val t: Int, val v: Int)
+
+    val punten: List<Punt> = buildList {
+        val eersteTs = runCatching {
+            java.time.Instant.parse(history.first().tsUtc).toEpochMilli()
+        }.getOrDefault(0L)
+        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor)
+        add(Punt(eersteTs - 1, oudeStv["sterkte"] ?: 95, oudeStv["timing"] ?: 100, oudeStv["volhoudendheid"] ?: 95))
+        history.forEach { step ->
+            val ms  = runCatching { java.time.Instant.parse(step.tsUtc).toEpochMilli() }.getOrDefault(0L)
+            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor)
+            add(Punt(ms, stv["sterkte"] ?: 95, stv["timing"] ?: 100, stv["volhoudendheid"] ?: 95))
+        }
+    }.sortedBy { it.tsMs }
+
+    val tijdMin  = punten.first().tsMs
+    val tijdMax  = maxOf(punten.last().tsMs, System.currentTimeMillis())
+    val tijdSpan = (tijdMax - tijdMin).coerceAtLeast(1L).toDouble()
+
+    val alleWaarden = punten.flatMap { listOf(it.s, it.t, it.v) }
+    val yMin = (alleWaarden.min() - 4).coerceAtLeast(75)
+    val yMax = (alleWaarden.max() + 4).coerceAtMost(135)
+    val ySpan = (yMax - yMin).coerceAtLeast(10).toDouble()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(titel, style = MaterialTheme.typography.labelSmall,
+                 color = accentKleur, fontWeight = FontWeight.SemiBold)
+            Text("${history.size} aanp.", style = MaterialTheme.typography.labelSmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier.width(28.dp).height(90.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End
+            ) {
+                Text("${yMax}%", style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 8.sp)
+                Text("${yMin}%", style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 8.sp)
+            }
+
+            Canvas(modifier = Modifier.weight(1f).height(90.dp)) {
+                val w = size.width; val h = size.height
+                fun xOf(ms: Long) = ((ms - tijdMin) / tijdSpan * w).toFloat().coerceIn(0f, w)
+                fun yOf(pct: Int) = (h * (1.0 - (pct - yMin) / ySpan)).toFloat().coerceIn(0f, h)
+
+                // Grid + 100% lijn
+                drawLine(kleurGrid, Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1f)
+                val y100 = yOf(100)
+                if (y100 in 0f..h) drawLine(
+                    kleurGrid.copy(alpha = 0.4f), Offset(0f, y100), Offset(w, y100),
+                    strokeWidth = 1.5f,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 3f))
+                )
+
+                listOf(
+                    kleurS to { p: Punt -> p.s },
+                    kleurT to { p: Punt -> p.t },
+                    kleurV to { p: Punt -> p.v }
+                ).forEach { (kleur, getter) ->
+                    val path = Path()
+                    punten.forEachIndexed { i, pt ->
+                        if (i == 0) path.moveTo(xOf(pt.tsMs), yOf(getter(pt)))
+                        else path.lineTo(xOf(pt.tsMs), yOf(getter(pt)))
+                    }
+                    drawPath(path, kleur, style = Stroke(width = 2f))
+                    punten.forEach { drawCircle(kleur, radius = 3f, center = Offset(xOf(it.tsMs), yOf(getter(it)))) }
+                }
+            }
         }
     }
 }

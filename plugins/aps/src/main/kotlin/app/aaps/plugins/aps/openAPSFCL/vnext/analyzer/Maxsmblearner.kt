@@ -29,6 +29,7 @@ object MaxSmbLearner {
     private const val KEY_LAST_BRAKE_TS = "iob_brake_last_ts"
     private const val KEY_AUTO          = "max_smb_auto_enabled"
     private const val KEY_HISTORY       = "max_smb_history"
+    private const val KEY_LAST_MANUAL   = "max_smb_last_manual"  // detecteer profiel-wijzigingen
 
     // Vaste grenzen voor IOB-remdrempel — die schalen niet mee met gebruiker
     const val IOB_BRAKE_MIN     = 0.35
@@ -51,16 +52,16 @@ object MaxSmbLearner {
     fun dynamicMax(manualMaxSmb: Double): Double =
         (manualMaxSmb * MAX_SMB_UPPER_FRACTION).coerceIn(MAX_SMB_ABSOLUTE_MIN, MAX_SMB_ABSOLUTE_MAX)
 
-    private const val SMB_STEP_UP        = 0.05
-    private const val SMB_STEP_DOWN_HYPO = 0.10
+    const val SMB_STEP_UP        = 0.05
+    const val SMB_STEP_DOWN_HYPO = 0.10
     private const val SMB_STEP_DOWN_VGNT = 0.05
-    private const val BRAKE_STEP         = 0.02
+    const val BRAKE_STEP         = 0.02
 
-    private const val PEAK_TOO_HIGH     = 12.0
+    const val PEAK_TOO_HIGH      = 12.0
     private const val CAP_CYCLES_MIN    = 3
-    private const val HYPO_THRESHOLD    = 4.0
+    const val HYPO_THRESHOLD     = 4.0
     private const val S_MIN_DREMPEL     = 86
-    private const val MIN_HOURS_BETWEEN = 48
+    const val MIN_HOURS_BETWEEN  = 48
 
     data class LearningResult(
         val oldMaxSmb:   Double,
@@ -110,6 +111,36 @@ object MaxSmbLearner {
         manualMaxSmb: Double = MAX_SMB_DEFAULT,
         forceApply: Boolean = false
     ): LearningResult? {
+        val p = prefs(context)
+
+        // ── Detecteer profiel-wijziging (bijv. U200 correctie) ────────────
+        // Als manualMaxSmb significant verschilt van de laatste bekende waarde,
+        // reset de geleerde waarde naar het midden van het nieuwe bereik.
+        val lastManual = p.getFloat(KEY_LAST_MANUAL, MAX_SMB_DEFAULT.toFloat()).toDouble()
+        if (kotlin.math.abs(manualMaxSmb - lastManual) > manualMaxSmb * 0.15) {
+            // Profiel significant gewijzigd — reset naar midden van nieuw bereik
+            val resetValue = (dynamicMin(manualMaxSmb) + dynamicMax(manualMaxSmb)) / 2.0
+            p.edit()
+                .putFloat(KEY_MAX_SMB_DAY, resetValue.toFloat())
+                .putFloat(KEY_LAST_MANUAL, manualMaxSmb.toFloat())
+                .apply()
+            // Geef direct een resultaat terug zodat ConfigOverrideWriter
+            // de nieuwe waarde naar AAPS schrijft via de bridge
+            val oldVal = lastManual.coerceIn(dynamicMin(lastManual), dynamicMax(lastManual))
+            return LearningResult(
+                oldMaxSmb   = oldVal,
+                newMaxSmb   = resetValue,
+                oldIobBrake = getIobBrake(context),
+                newIobBrake = getIobBrake(context),
+                reason      = "Profiel gewijzigd (${"%+.2f".format(manualMaxSmb - lastManual)}U) " +
+                    "→ reset naar ${"%+.2f".format(resetValue)}U",
+                diagnose    = "PROFIEL_RESET",
+                tsUtc       = java.time.Instant.now().toString()
+            )
+        } else {
+            p.edit().putFloat(KEY_LAST_MANUAL, manualMaxSmb.toFloat()).apply()
+        }
+
         val currentMaxSmb = getMaxSmbDay(context)
         val currentBrake  = getIobBrake(context)
 
@@ -123,7 +154,8 @@ object MaxSmbLearner {
         val capStructureel = metrics.capReachedCycles >= CAP_CYCLES_MIN
         val boostWasActief = metrics.earlyBoostWasActive
         val sOpMinimum     = metrics.currentSterkte <= S_MIN_DREMPEL
-        val maxSmbBovenStd = currentMaxSmb > MAX_SMB_DEFAULT + 0.001
+        // "boven standaard" = boven de handmatige instelling (niet de hardcoded default)
+        val maxSmbBovenStd = currentMaxSmb > manualMaxSmb * 0.95
 
         var newMaxSmb = currentMaxSmb
         var newBrake  = currentBrake

@@ -37,6 +37,7 @@ data class EpisodeMetrics(
     val advisorWeight: Double,
     val includedInAdvice: Boolean,
     val adviceStatus: String,
+    val rescueConfirmed: Boolean = false,  // gebruiker bevestigde rescue carbs
 
     // ── Frontload kwaliteit ──────────────────────────────────────────────
     // firstCommitU: dosis van de eerste commit (episodeCommitNr=1).

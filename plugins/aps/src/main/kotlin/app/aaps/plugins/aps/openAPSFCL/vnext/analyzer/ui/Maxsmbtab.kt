@@ -243,15 +243,15 @@ fun MaxSmbTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Divider()
-                Text("↑ maxSMB +0.05U  als piek > 12 mmol + rem ≥ 3× actief + earlyBoost actief + geen hypo",
+                Text("↑ maxSMB +${"%.2f".format(MaxSmbLearner.SMB_STEP_UP)}U  als piek > ${MaxSmbLearner.PEAK_TOO_HIGH.toInt()} mmol + rem ≥ 3× actief + earlyBoost actief + geen hypo",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("↑ iobBrake +0.02  als maxSMB al op max en piek > 12 + rem actief",
+                Text("↑ iobBrake +${"%.2f".format(MaxSmbLearner.BRAKE_STEP)}  als maxSMB al op max en piek > ${MaxSmbLearner.PEAK_TOO_HIGH.toInt()} + rem actief",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("↓ maxSMB -0.10U  als hypo (< 4.0 mmol) na episode",
+                Text("↓ maxSMB -${"%.2f".format(MaxSmbLearner.SMB_STEP_DOWN_HYPO)}U  als hypo (< ${MaxSmbLearner.HYPO_THRESHOLD} mmol) na episode",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-                Text("↓ iobBrake -0.02  als hypo + iobBrake boven standaard",
+                Text("↓ iobBrake -${"%.2f".format(MaxSmbLearner.BRAKE_STEP)}  als hypo + iobBrake boven standaard",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-                Text("Grenzen: maxSMB 0.75–2.00 U  •  iobBrake 0.35–0.55  •  48u wachttijd",
+                Text("Grenzen: maxSMB ${"%.2f".format(smbMin)}–${"%.2f".format(smbMax)} U  •  iobBrake ${MaxSmbLearner.IOB_BRAKE_MIN}–${MaxSmbLearner.IOB_BRAKE_MAX}  •  ${MaxSmbLearner.MIN_HOURS_BETWEEN}u wachttijd",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

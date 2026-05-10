@@ -20,6 +20,8 @@ data class LogRow(
     val riseSinceMealStart: Double?,
     val finalDose: Double,
     val deliveredTotal: Double,
+    val rescueState: String = "IDLE",       // "IDLE" | "ARMED" | "CONFIRMED"
+    val rescueConfidence: Double = 0.0,
     val shouldDeliver: Boolean,
 
     val mealState: String,

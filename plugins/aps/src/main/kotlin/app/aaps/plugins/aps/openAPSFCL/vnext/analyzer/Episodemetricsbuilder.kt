@@ -97,6 +97,7 @@ object EpisodeMetricsBuilder {
                 advisorWeight = advisorWeight,
                 includedInAdvice = false,
                 adviceStatus = "NEW",
+                rescueConfirmed = false,  // wordt later overschreven vanuit DB
                 firstCommitU = firstCommitU,
                 iobRatioAt15min = iobRatioAt15min,
                 firstBigCommitFrac = firstBigCommitFrac,

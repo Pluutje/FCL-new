@@ -13,8 +13,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
+import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.*
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogEntity
@@ -52,6 +55,7 @@ fun FclAnalyzerScreen(
     var nightWindows by remember { mutableStateOf<List<NightWindowEntity>?>(null) }
     var currentAxisState by remember { mutableStateOf<FclAxisState?>(null) }
     val advisorResultState = remember { mutableStateOf<FclAdvisorRecommendation?>(null) }
+    var episodeEntities by remember { mutableStateOf<List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity>>(emptyList()) }
 
     fun loadFromDatabase(entities: List<FCLCycleLogEntity>) {
         val latest = entities.maxByOrNull { it.timestampMs }
@@ -93,6 +97,147 @@ fun FclAnalyzerScreen(
             }
 
             classifications = EpisodeClassifier.classifyAll(cleanedEpisodes)
+
+            // ── Stap 3: rescue-classificatie override toepassen ───────────
+            withContext(Dispatchers.IO) {
+                val rescueYes = db.episodeDao().getRescueConfirmedEpisodes()
+                    .map { it.startTs }.toSet()
+                if (rescueYes.isNotEmpty()) {
+                    classifications = EpisodeClassifier.applyRescueOverrides(
+                        classifications!!,
+                        rescueYes,
+                        cleanedEpisodes
+                    )
+                }
+            }
+
+            // ── Sla episodes op in DB (upsert) zodat rescue-vinkjes werken ──
+            withContext(Dispatchers.IO) {
+                val dao = db.episodeDao()
+                val existing = dao.getAllEpisodes().associateBy { it.startTs }
+                val toInsert = cleanedEpisodes.mapIndexedNotNull { i, episode ->
+                    val prev = existing[episode.start.toString()]
+
+                    // Bereken maaltijdtype op basis van slope in eerste cycli
+                    val epRows = allRows?.filter { r ->
+                        r.mealEpisodeId != null && r.mealEpisodeId == episode.id.toLong()
+                    } ?: emptyList()
+                    val samplesFirst15 = 3
+                    val avgSlope0_15 = epRows.take(samplesFirst15)
+                        .map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
+                    val avgSlope15_30 = epRows.drop(samplesFirst15).take(3)
+                        .map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
+                    val detectedType = when {
+                        avgSlope0_15 >= 0.35 -> "SNEL"
+                        avgSlope0_15 <= 0.05 && avgSlope15_30 <= 0.28 -> "TRAAG"
+                        else -> "GEMENGD"
+                    }
+                    EpisodeEntity(
+                        startTs              = episode.start.toString(),
+                        endTs                = episode.end.toString(),
+                        durationMinutes      = java.time.Duration.between(episode.start, episode.end).toMinutes(),
+                        peakBg               = episodeMetrics?.getOrNull(i)?.peakBg ?: 0.0,
+                        nadirBg              = episodeMetrics?.getOrNull(i)?.minBgInWindow ?: 0.0,
+                        tirPercent           = 0.0,
+                        hyper                = (episodeMetrics?.getOrNull(i)?.peakBg ?: 0.0) > 10.0,
+                        hypoEarly            = episode.hypoDetected,
+                        hypoLate             = (episodeMetrics?.getOrNull(i)?.minBgInWindow ?: 5.0) < 4.0,
+                        earlyAxisDir         = 0,
+                        lateAxisDir          = 0,
+                        earlyConfidence      = 0.0,
+                        lateConfidence       = 0.0,
+                        meetsGoal            = (episodeMetrics?.getOrNull(i)?.minBgInWindow ?: 0.0) >= 3.9
+                            && (episodeMetrics?.getOrNull(i)?.peakBg ?: 99.0) <= 10.0,
+                        sterktePct           = episode.sterktePct,
+                        timingPct            = episode.timingPct,
+                        volhoudendheidPct    = episode.volhoudendheidPct,
+                        doseDistribution     = episode.doseDistribution,
+                        totalInsulinDelivered = episodeMetrics?.getOrNull(i)?.totalInsulinDelivered ?: 0.0,
+                        advisorWeight        = episodeMetrics?.getOrNull(i)?.advisorWeight ?: 0.0,
+                        adviceStatus         = prev?.adviceStatus ?: "",
+                        // Bewaar rescue-velden van vorige insert
+                        rescueAutoState      = prev?.rescueAutoState ?: "NONE",
+                        rescueAutoConfidence = prev?.rescueAutoConfidence ?: 0.0,
+                        rescueUserConfirmed  = prev?.rescueUserConfirmed ?: "UNSET",
+                        rescueArmedIobRatio  = prev?.rescueArmedIobRatio ?: 0.0,
+                        rescueArmedSlope     = prev?.rescueArmedSlope ?: 0.0,
+                        rescueArmedBg        = prev?.rescueArmedBg ?: 0.0,
+                        rescueArmedMinAfterPeak = prev?.rescueArmedMinAfterPeak ?: 0,
+                        mealType             = detectedType,
+                        mealTypeSlope0_15    = avgSlope0_15,
+                        mealTypeSlope15_30   = avgSlope15_30
+                    )
+                }
+                if (toInsert.isNotEmpty()) dao.insertEpisodes(toInsert)
+
+                // ── Stap 1: rescue-status per episode aggregeren ──────────
+                // Zoek de hoogste rescue-state die tijdens elke episode bereikt werd
+                // en sla ARM-context op voor het leerproces.
+                for (episode in cleanedEpisodes) {
+                    val epRows = allRows?.filter {
+                        it.mealEpisodeId != null &&
+                            it.mealEpisodeId == episode.id.toLong()
+                    } ?: continue
+
+                    if (epRows.isEmpty()) continue
+
+                    // Hoogste state tijdens episode
+                    val hasConfirmed = epRows.any { it.rescueState == "CONFIRMED" }
+                    val hasArmed     = epRows.any { it.rescueState == "ARMED" }
+                    val autoState    = when {
+                        hasConfirmed -> "CONFIRMED"
+                        hasArmed     -> "ARMED"
+                        else         -> "NONE"
+                    }
+
+                    if (autoState == "NONE") continue
+
+                    // Confidence = max over alle cycli
+                    val autoConf = epRows.maxOf { it.rescueConfidence }
+
+                    // ARM-context: neem de eerste ARMED rij
+                    val armedRow = epRows.firstOrNull { it.rescueState == "ARMED" }
+
+                    // Minuten na pieik: zoek piek-index dan tel afstand tot armedRow
+                    val peakIdx = epRows.indexOfFirst { it.bg == epRows.maxOf { r -> r.bg } }
+                    val armedIdx = if (armedRow != null) epRows.indexOf(armedRow) else -1
+                    val minAfterPeak = if (peakIdx >= 0 && armedIdx > peakIdx)
+                        (armedIdx - peakIdx) * 5 else 0
+
+                    dao.updateRescueAuto(
+                        startTs          = episode.start.toString(),
+                        autoState        = autoState,
+                        autoConfidence   = autoConf,
+                        armedIobRatio    = armedRow?.iobRatio ?: 0.0,
+                        armedSlope       = armedRow?.slope ?: 0.0,
+                        armedBg          = armedRow?.bg ?: 0.0,
+                        armedMinAfterPeak = minAfterPeak
+                    )
+                }
+            }
+
+            // ── Stap 2: leerproces aansturen op basis van bevestigingen ──
+            withContext(Dispatchers.IO) {
+                val dao = db.episodeDao()
+                val rescueConfirmedEps = dao.getRescueConfirmedEpisodes()
+                val rescueFalsePos     = dao.getRescueFalsePositiveEpisodes()
+                val rescueMissed       = dao.getRescueMissedEpisodes()
+                RescueLearner.learn(context, rescueConfirmedEps, rescueFalsePos, rescueMissed)
+
+                // Stap 4: markeer episodeMetrics voor DFLearner
+                val rescueYesTs = rescueConfirmedEps.map { it.startTs }.toSet()
+                if (rescueYesTs.isNotEmpty()) {
+                    episodeMetrics = episodeMetrics?.mapIndexed { i, m ->
+                        val ep = cleanedEpisodes.getOrNull(i)
+                        if (ep != null && ep.start.toString() in rescueYesTs)
+                            m.copy(rescueConfirmed = true) else m
+                    }
+                }
+            }
+
+            episodeEntities = withContext(Dispatchers.IO) {
+                db.episodeDao().getAllEpisodes()
+            }
 
             nightWindows = withContext(Dispatchers.IO) {
                 db.nightWindowDao().getAllNightWindows()
@@ -137,6 +282,7 @@ fun FclAnalyzerScreen(
                                     episodeMetrics = episodeMetrics!!,
                                     classifications = classifications!!,
                                     currentAxisState = currentAxisState!!,
+                                    allRows = allRows ?: emptyList(),
                                     onMetricsUpdated = { episodeMetrics = it },
                                     onResult = {
                                         advisorResultState.value = it
@@ -155,6 +301,22 @@ fun FclAnalyzerScreen(
                 episodeMetrics = episodeMetrics!!,
                 classifications = classifications!!,
                 currentAxisState = currentAxisState ?: StvState(100, 100, 100),
+                episodeEntities = episodeEntities,
+                onRescueUserConfirmed = { startTs, confirmed ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            FCLAnalyzerDatabase.getInstance(context)
+                                .episodeDao()
+                                .updateRescueUserConfirmed(startTs, confirmed)
+                        }
+                        // Herlaad entities zodat de UI direct de nieuwe staat toont
+                        episodeEntities = withContext(Dispatchers.IO) {
+                            FCLAnalyzerDatabase.getInstance(context)
+                                .episodeDao()
+                                .getAllEpisodes()
+                        }
+                    }
+                },
                 onBack = { currentScreen = Screen.DASHBOARD }
             )
 
@@ -402,6 +564,7 @@ private suspend fun runAdvisorFlow(
     episodeMetrics: List<EpisodeMetrics>,
     classifications: List<EpisodeClassifier.EpisodeClassification>,
     currentAxisState: FclAxisState,
+    allRows: List<LogRow> = emptyList(),
     onMetricsUpdated: (List<EpisodeMetrics>) -> Unit,
     onResult: (FclAdvisorRecommendation) -> Unit
 ) {
@@ -489,9 +652,38 @@ private suspend fun runAdvisorFlow(
     // D/F leer-stap
     if (DFLearner.isAutoEnabled(context)) {
         val latestMetrics = filteredMetrics.lastOrNull()
+        val latestEpisode = episodes.lastOrNull()
         if (latestMetrics != null) {
-            val step = DFLearner.evaluate(context, latestMetrics)
-            val smbResult = MaxSmbLearner.evaluate(context, latestMetrics)
+            // Bepaal maaltijdtype van laatste episode (vanuit LogRow history)
+            val latestMealType: MealTypeBridge.MealType = if (latestEpisode != null) {
+                val epRows = allRows.filter { it.mealEpisodeId == latestEpisode.id.toLong() }
+                val samplesFirst15 = 3
+                val avgSlope0_15 = epRows.take(samplesFirst15)
+                    .map { row -> row.slope }.average().takeIf { !it.isNaN() } ?: 0.0
+                when {
+                    avgSlope0_15 >= 0.35 -> MealTypeBridge.MealType.SNEL
+                    avgSlope0_15 <= 0.05 -> MealTypeBridge.MealType.TRAAG
+                    else                 -> MealTypeBridge.MealType.GEMENGD
+                }
+            } else {
+                MealTypeBridge.MealType.GEMENGD
+            }
+
+            // Update MealTypeBridge active overrides voor komende FCLvNext cycli
+            if (latestMealType != MealTypeBridge.MealType.GEMENGD &&
+                latestMealType != MealTypeBridge.MealType.ONBEKEND) {
+                MealTypeBridge.activeTypeDOverride = DFLearner.getDForType(context, latestMealType)
+                MealTypeBridge.activeTypeFOverride = DFLearner.getFForType(context, latestMealType)
+            }
+
+            // Type-specifieke leer-stap
+            val step = DFLearner.evaluateForType(context, latestMetrics, latestMealType)
+            val smbResult = MaxSmbLearner.evaluate(
+                context,
+                latestMetrics,
+                manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay
+                    ?: MaxSmbLearner.MAX_SMB_DEFAULT
+            )
             val dfChanged = step != null && step.hasChange
             val smbChanged = smbResult != null && smbResult.hasChange
 

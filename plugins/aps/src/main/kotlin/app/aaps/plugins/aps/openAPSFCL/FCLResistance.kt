@@ -50,6 +50,15 @@ class FCLResistance(
     }
 
     fun updateResistentieIndienNodig(isNachtTime: Boolean) {
+        // Overdag altijd factor 1.0 — geen correctie.
+        // Maaltijden verstoren de BG-history te veel voor betrouwbare detectie.
+        // Structurele dagtijd-resistentie wordt opgevangen door D/F en S/T/V learning.
+        if (!isNachtTime) {
+            currentResistentieFactor = 1.0
+            currentResistentieLog = " → AutoSens: ☀️ Overdag uitgeschakeld (factor = 1.0)\n"
+            return
+        }
+
         val now = DateTime.now()
         val shouldUpdate = lastResistentieCalculation?.let {
             now.millis - it.millis > RESISTENTIE_CALCULATION_INTERVAL
@@ -60,8 +69,6 @@ class FCLResistance(
             currentResistentieFactor = result.resistentie
             currentResistentieLog = result.log
             lastResistentieCalculation = now
-
-            // Opslaan voor externe toegang
             saveCurrentResistance(currentResistentieFactor)
         }
     }
@@ -103,7 +110,7 @@ class FCLResistance(
     private fun resolveResistancePreset(
         behavior : String,
         stability : String
-     ): ResistancePreset {
+    ): ResistancePreset {
 
         val strength = behaviorStrength(behavior)
         val (days, hours) = stabilityWindow(stability)

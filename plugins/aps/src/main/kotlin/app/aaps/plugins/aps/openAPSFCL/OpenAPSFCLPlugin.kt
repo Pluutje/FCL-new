@@ -293,7 +293,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
                 val aapsBolus = rt.units ?: 0.0
                 val aapsDose = aapsRate + aapsBolus
                 if (aapsDose > 0.001) {
-                    deliveryHistory.addFirst(Triple(DateTime.now(), aapsDose, false))
+                    deliveryHistory.addFirst(Triple(DateTime(now), aapsDose, false))
                     while (deliveryHistory.size > MAX_DELIVERY_HISTORY) {
                         deliveryHistory.removeLast()
                     }
@@ -343,41 +343,41 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
     override fun applyConfiguration(configuration: JsonObject) {}
 
- /*   override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
+    /*   override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
+           key = "fcl_vnext_settings",
+           titleResId = R.string.openaps_fcl,
+           items = listOf(
+               PreferenceSubScreenDef(
+                   key = "fcl_vnext_general",
+                   titleResId = R.string.fcl_vnext_general_title,
+                   items = listOf(
+                       DoubleKey.max_bolus_day,
+                       DoubleKey.max_bolus_night,
+                       DoubleKey.fcl_vnext_MaxIOB,
+                       StringKey.fcl_vnext_dose_distribution_style,
+                       StringKey.fcl_vnext_night_response_style
+                   )
+               ),
+               PreferenceSubScreenDef(
+                   key = "fcl_vnext_context",
+                   titleResId = R.string.fcl_vnext_context_title,
+                   items = listOf(
+                       StringKey.WeekendDagen,
+                       StringKey.OchtendStart,
+                       StringKey.OchtendStartWeekend,
+                       StringKey.NachtStart,
+                       StringKey.fcl_vnext_resistance_behavior,
+                       StringKey.fcl_vnext_resistance_stability,
+                       StringKey.fcl_vnext_activity_behavior
+                   )
+               )
+           ),
+           icon = pluginDescription.icon
+       )   */
+    override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "fcl_vnext_settings",
         titleResId = R.string.openaps_fcl,
-        items = listOf(
-            PreferenceSubScreenDef(
-                key = "fcl_vnext_general",
-                titleResId = R.string.fcl_vnext_general_title,
-                items = listOf(
-                    DoubleKey.max_bolus_day,
-                    DoubleKey.max_bolus_night,
-                    DoubleKey.fcl_vnext_MaxIOB,
-                    StringKey.fcl_vnext_dose_distribution_style,
-                    StringKey.fcl_vnext_night_response_style
-                )
-            ),
-            PreferenceSubScreenDef(
-                key = "fcl_vnext_context",
-                titleResId = R.string.fcl_vnext_context_title,
-                items = listOf(
-                    StringKey.WeekendDagen,
-                    StringKey.OchtendStart,
-                    StringKey.OchtendStartWeekend,
-                    StringKey.NachtStart,
-                    StringKey.fcl_vnext_resistance_behavior,
-                    StringKey.fcl_vnext_resistance_stability,
-                    StringKey.fcl_vnext_activity_behavior
-                )
-            )
-        ),
+        items = emptyList(),
         icon = pluginDescription.icon
-    )   */
- override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
-     key = "fcl_vnext_settings",
-     titleResId = R.string.openaps_fcl,
-     items = emptyList(),
-     icon = pluginDescription.icon
- )
+    )
 }

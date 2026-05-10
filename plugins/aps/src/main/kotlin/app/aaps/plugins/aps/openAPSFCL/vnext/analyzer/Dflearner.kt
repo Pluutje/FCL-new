@@ -34,6 +34,20 @@ object DFLearner {
     private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
     private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
 
+    // ── Maaltijdtype-specifieke D/F waarden ──────────────────────────────
+    private const val KEY_D_SNEL  = "df_d_snel"
+    private const val KEY_F_SNEL  = "df_f_snel"
+    private const val KEY_D_TRAAG = "df_d_traag"
+    private const val KEY_F_TRAAG = "df_f_traag"
+    // Episodes per type (voor minimum-drempel)
+    private const val KEY_COUNT_SNEL  = "df_count_snel"
+    private const val KEY_COUNT_TRAAG = "df_count_traag"
+    private const val MIN_EPISODES_PER_TYPE = 3
+
+    // Type-specifieke history (apart van de algemene history)
+    private const val KEY_HISTORY_SNEL  = "df_history_snel"
+    private const val KEY_HISTORY_TRAAG = "df_history_traag"
+
     // ── Doelzone ──────────────────────────────────────────────────────────
     private const val TARGET_PEAK_BG    = 9.0    // mmol ideale piek
     private const val TARGET_IOBR_PEAK  = 0.45   // ideale IOBratio op piek
@@ -117,6 +131,113 @@ object DFLearner {
     fun setAutoEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
 
+    // ── Maaltijdtype-specifieke D/F get/set ──────────────────────────────
+
+    fun getDForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Double {
+        val p = prefs(context)
+        return when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  ->
+                p.getFloat(KEY_D_SNEL,  getD(context).toFloat()).toDouble()
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG ->
+                p.getFloat(KEY_D_TRAAG, getD(context).toFloat()).toDouble()
+            else -> getD(context)
+        }
+    }
+
+    fun getFForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Double {
+        val p = prefs(context)
+        return when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  ->
+                p.getFloat(KEY_F_SNEL,  getF(context).toFloat()).toDouble()
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG ->
+                p.getFloat(KEY_F_TRAAG, getF(context).toFloat()).toDouble()
+            else -> getF(context)
+        }
+    }
+
+    private fun setDForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, d: Double) {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_D_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_D_TRAAG
+            else -> return
+        }
+        prefs(context).edit().putFloat(key, d.coerceIn(DFMapping.D_MIN, DFMapping.D_MAX).toFloat()).apply()
+    }
+
+    private fun setFForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, f: Double) {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_F_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_F_TRAAG
+            else -> return
+        }
+        prefs(context).edit().putFloat(key, f.coerceIn(DFMapping.F_MIN, DFMapping.F_MAX).toFloat()).apply()
+    }
+
+    private fun getEpisodeCountForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Int {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_COUNT_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_COUNT_TRAAG
+            else -> return Int.MAX_VALUE  // GEMENGD telt altijd mee
+        }
+        return prefs(context).getInt(key, 0)
+    }
+
+    private fun incrementEpisodeCountForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType) {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_COUNT_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_COUNT_TRAAG
+            else -> return
+        }
+        val current = prefs(context).getInt(key, 0)
+        prefs(context).edit().putInt(key, current + 1).apply()
+    }
+
+    /**
+     * Type-specifieke evaluate: als mealType bekend is, wordt deltaD/deltaF
+     * opgeslagen in de type-specifieke sleutels in plaats van de algemene.
+     * Minimaal MIN_EPISODES_PER_TYPE episodes per type vereist voor learning.
+     */
+    fun evaluateForType(
+        context: Context,
+        metrics: EpisodeMetrics,
+        mealType: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType
+    ): LearningStep? {
+        // GEMENGD en ONBEKEND → gebruik standaard evaluate
+        if (mealType == app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.GEMENGD ||
+            mealType == app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.ONBEKEND) {
+            return evaluate(context, metrics)
+        }
+
+        // Minimale drempel: niet leren tot er genoeg type-episodes zijn
+        val count = getEpisodeCountForType(context, mealType)
+        incrementEpisodeCountForType(context, mealType)
+        if (count < MIN_EPISODES_PER_TYPE) return null
+
+        // Voer standaard evaluate uit maar sla resultaat op in type-sleutels
+        val step = evaluate(context, metrics) ?: return null
+
+        // Overschrijf D/F in type-specifieke sleutels
+        val currentD = getDForType(context, mealType)
+        val currentF = getFForType(context, mealType)
+        setDForType(context, mealType, currentD + step.deltaD)
+        setFForType(context, mealType, currentF + step.deltaF)
+
+        // Sla ook op in type-specifieke history
+        val histKey = when (mealType) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_HISTORY_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_HISTORY_TRAAG
+            else -> null
+        }
+        if (histKey != null) {
+            val existing = (prefs(context).getString(histKey, "") ?: "")
+                .split("\n").mapNotNull { parseStep(it) }.takeLast(19)
+            val all = (existing.map { serializeStep(it) } + serializeStep(step)).joinToString("\n")
+            prefs(context).edit().putString(histKey, all).apply()
+        }
+
+        return step
+    }
+
     // ── Kalibratie get/set ────────────────────────────────────────────────
 
     fun getRefWmd(context: Context): Double =
@@ -139,6 +260,20 @@ object DFLearner {
 
     fun getHistory(context: Context): List<LearningStep> {
         val raw = prefs(context).getString(KEY_HISTORY, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { parseStep(it) }
+    }
+
+    fun getHistoryForType(
+        context: Context,
+        type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType
+    ): List<LearningStep> {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_HISTORY_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_HISTORY_TRAAG
+            else -> return getHistory(context)
+        }
+        val raw = prefs(context).getString(key, "") ?: ""
         if (raw.isBlank()) return emptyList()
         return raw.split("\n").mapNotNull { parseStep(it) }
     }
@@ -215,6 +350,15 @@ object DFLearner {
         when {
             metrics.peakBg < MIN_VALID_PEAK_BG || metrics.totalInsulinDelivered < MIN_VALID_INSULIN -> {
                 rawDeltaD = 0.0; rawDeltaF = 0.0; diagnose = "SKIP_GEEN_EPISODE"
+            }
+
+            // ── RESCUE: te veel of te laat insuline — alleen stabiel door rescue carbs ──
+            // D licht omlaag (minder sterkte), F ook iets omlaag (minder frontload)
+            // tenzij er ook een hypo was (dan is de hypo-tak relevant)
+            metrics.rescueConfirmed && metrics.minBgInWindow >= HYPO_THRESHOLD -> {
+                rawDeltaD = -tp.alphaPiek * 0.5
+                rawDeltaF = -tp.alphaPiek * 0.2
+                diagnose  = "RESCUE_OVERPOWERED"
             }
 
             // ── TERUGSCHROEF: eerste commit was groot, geen follow-up, nadir laag ──

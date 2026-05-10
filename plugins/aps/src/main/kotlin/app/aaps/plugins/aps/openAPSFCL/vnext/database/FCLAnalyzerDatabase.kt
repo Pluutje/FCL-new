@@ -15,7 +15,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
         NightWindowEntity::class,
         BasalProfileHistoryEntity::class
     ],
-    version = 3,
+    version = 6,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {

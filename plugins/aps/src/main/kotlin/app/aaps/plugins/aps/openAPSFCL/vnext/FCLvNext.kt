@@ -3041,6 +3041,7 @@ class FCLvNext(
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
 
+            MealTypeBridge.resetEpisode()  // ← reset maaltijdtype bij nieuwe episode
             status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
         }
 
@@ -3049,12 +3050,19 @@ class FCLvNext(
 
             status.append("MEAL EPISODE END id=$activeMealEpisodeId\n")
 
+            MealTypeBridge.resetEpisode()  // ← reset ook bij einde
             activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
+        }
+
+        // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
+        if (activeMealEpisodeId != -1L && mealEpisodeStartTime != null) {
+            val minSinceStart = org.joda.time.Minutes.minutesBetween(mealEpisodeStartTime, now).minutes
+            MealTypeBridge.updateMealType(minSinceStart, ctx.slope)
         }
 
         // ─────────────────────────────────────────────

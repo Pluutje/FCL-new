@@ -49,6 +49,7 @@ object EpisodeClassifier {
         OVERPOWERED_EARLY,
         OVERPOWERED_LATE,
         OVERPOWERED_MIXED,
+        OVERPOWERED_RESCUE,   // te veel/te laat — alleen stabiel door rescue carbs
 
         IMBALANCED_EARLY_PLUS_LATE_OVER,
         IMBALANCED_EARLY_OVER_PLUS_LATE_UNDER
@@ -329,4 +330,26 @@ object EpisodeClassifier {
 
     fun classifyAll(episodes: List<Episode>, config: Config = Config()): List<EpisodeClassification> =
         episodes.map { classify(it, config) }
+
+    /**
+     * Pas classificaties aan op basis van rescue-bevestigingen uit de database.
+     * Episodes waarbij gebruiker rescue bevestigde worden OVERPOWERED_RESCUE
+     * tenzij ze al UNDERPOWERED waren (rescue bij hypo is ander scenario).
+     */
+    fun applyRescueOverrides(
+        classifications: List<EpisodeClassification>,
+        rescueConfirmedStartTs: Set<String>,
+        episodes: List<Episode>
+    ): List<EpisodeClassification> {
+        if (rescueConfirmedStartTs.isEmpty()) return classifications
+        return classifications.map { c ->
+            val episode = episodes.getOrNull(c.episodeId - 1) ?: return@map c
+            val isRescue = episode.start.toString() in rescueConfirmedStartTs
+            if (isRescue && !c.classification.name.startsWith("UNDERPOWERED")) {
+                c.copy(classification = EpisodeClass.OVERPOWERED_RESCUE)
+            } else {
+                c
+            }
+        }
+    }
 }

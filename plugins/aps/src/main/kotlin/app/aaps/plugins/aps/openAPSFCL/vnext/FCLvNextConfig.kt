@@ -8,6 +8,9 @@ import kotlin.Double
 import kotlin.math.roundToInt
 import kotlin.math.abs
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
+import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
 
 data class FCLvNextConfig(
 
@@ -539,6 +542,17 @@ fun loadFCLvNextConfig(
         .let { applyDoseDistributionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
         .let { applyParamOverrides(it, override?.paramOverrides) }
+        .let { cfg ->
+            // Maaltijdtype-specifieke parameter override (alleen overdag, tijdens episode)
+            if (!isNight) {
+                val typeOverride = MealTypeBridge.getParamOverridesForCurrentType(
+                    baseD = DFMapping.D_START,
+                    baseF = DFMapping.F_START
+                )
+                if (typeOverride != null) applyParamOverridesFromWriter(cfg, typeOverride)
+                else cfg
+            } else cfg
+        }
         .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nachtFactor) }
 }
 
@@ -689,6 +703,35 @@ private fun applyDoseDistributionStyle(
  * - Alle waarden worden geclamped op hun toegestane bereik
  * - Groep C parameters (hypoBlockThreshold, maxSMB, etc.) zitten niet in deze functie
  */
+/**
+ * Variant van applyParamOverrides die ConfigOverrideWriter.ParamOverrides accepteert.
+ * Gebruikt voor maaltijdtype-specifieke D/F overrides via MealTypeBridge.
+ */
+private fun applyParamOverridesFromWriter(
+    cfg: FCLvNextConfig,
+    overrides: ConfigOverrideWriter.ParamOverrides
+): FCLvNextConfig = applyParamOverrides(
+    cfg,
+    FCLvNextConfigOverride.ParamOverrides(
+        peakPredictionThreshold       = overrides.peakPredictionThreshold,
+        watchingFrontloadFrac         = overrides.watchingFrontloadFrac,
+        watchingMinDeltaToTarget      = overrides.watchingMinDeltaToTarget,
+        commitCooldownMinutes         = overrides.commitCooldownMinutes,
+        peakPredictionHorizonH        = overrides.peakPredictionHorizonH,
+        iobStart                      = overrides.iobStart,
+        peakIobBrakeSuppressThreshold = overrides.peakIobBrakeSuppressThreshold,
+        earlyBoostFactor              = overrides.earlyBoostFactor,
+        earlyBoostMinConfidence       = overrides.earlyBoostMinConfidence,
+        earlyBoostMaxCommits          = overrides.earlyBoostMaxCommits,
+        earlyRiseFracMin              = overrides.earlyRiseFracMin,
+        peakMaxSlopeWeight            = overrides.peakMaxSlopeWeight,
+        lateCommitDecayFactor         = overrides.lateCommitDecayFactor,
+        lateCommitDecayThreshold      = overrides.lateCommitDecayThreshold,
+        sustainedRiseSlopeMin         = overrides.sustainedRiseSlopeMin,
+        sustainedRiseMinTarget        = overrides.sustainedRiseMinTarget
+    )
+)
+
 private fun applyParamOverrides(
     cfg: FCLvNextConfig,
     overrides: FCLvNextConfigOverride.ParamOverrides?,
