@@ -62,6 +62,12 @@ interface PersistenceLayer {
      */
     fun observeAnyChange(): Flow<Set<KClass<*>>>
 
+    /**
+     * Emits Unit once whenever all tables are wiped (clearDatabases).
+     * Observers that cache DB-derived state (e.g. status lights) should subscribe and refresh.
+     */
+    val databaseClearedFlow: Flow<Unit>
+
     // BS
     /**
      * Get last bolus
@@ -150,11 +156,6 @@ interface PersistenceLayer {
      * @return List of inserted/updated records
      */
     suspend fun insertOrUpdateBolus(bolus: BS, action: Action, source: Sources, note: String? = null): TransactionResult<BS>
-
-    /**
-     * Update bolus record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateBolusNoLogging(bolus: BS)
 
     /**
      * Insert record
@@ -549,11 +550,6 @@ interface PersistenceLayer {
     suspend fun insertOrUpdateEffectiveProfileSwitch(effectiveProfileSwitch: EPS): TransactionResult<EPS>
 
     /**
-     * Update effective profile switch record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateEffectiveProfileSwitchNoLogging(effectiveProfileSwitch: EPS)
-
-    /**
      * Invalidate record with id
      *
      * @param id record id
@@ -656,11 +652,6 @@ interface PersistenceLayer {
      * @return List of inserted/updated records
      */
     suspend fun insertOrUpdateProfileSwitch(profileSwitch: PS, action: Action, source: Sources, note: String? = null, listValues: List<ValueWithUnit>): TransactionResult<PS>
-
-    /**
-     * Update profile switch record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateProfileSwitchNoLogging(profileSwitch: PS)
 
     /**
      * Invalidate record with id
@@ -1350,12 +1341,14 @@ interface PersistenceLayer {
     suspend fun getHeartRatesFromTimeToTime(startTime: Long, endTime: Long): List<HR>
 
     /**
-     * Insert or update if exists record
+     * Insert or update multiple records in a single DB transaction. Emits one change event
+     * for the whole batch instead of one per row. Callers with a single row should pass
+     * `listOf(row)`.
      *
-     * @param heartRate record
+     * @param heartRates records
      * @return List of inserted/updated records
      */
-    suspend fun insertOrUpdateHeartRate(heartRate: HR): TransactionResult<HR>
+    suspend fun insertOrUpdateHeartRates(heartRates: List<HR>): TransactionResult<HR>
 
     // FD
     /**
@@ -1489,12 +1482,14 @@ interface PersistenceLayer {
     suspend fun getLastStepsCountFromTimeToTime(startTime: Long, endTime: Long): SC?
 
     /**
-     * Insert or update if exists record
+     * Insert or update multiple records in a single DB transaction. Emits one change event
+     * for the whole batch instead of one per row. Callers with a single row should pass
+     * `listOf(row)`.
      *
-     * @param stepsCount record
+     * @param stepsCounts records
      * @return List of inserted/updated records
      */
-    suspend fun insertOrUpdateStepsCount(stepsCount: SC): TransactionResult<SC>
+    suspend fun insertOrUpdateStepsCounts(stepsCounts: List<SC>): TransactionResult<SC>
 
     // VersionChange
 
