@@ -98,7 +98,8 @@ object DFLearner {
         val peakFout: Double, val iobrFout: Double, val hypoStraf: Double,
         val reason: String,
         val diagnose: String = "",
-        val tsUtc: String
+        val tsUtc: String,
+        val mealType: String = "GEMENGD"   // "SNEL" | "TRAAG" | "GEMENGD"
     ) {
         val hasChange get() = abs(deltaD) > 0.001 || abs(deltaF) > 0.001
     }
@@ -215,12 +216,14 @@ object DFLearner {
 
         // Voer standaard evaluate uit maar sla resultaat op in type-sleutels
         val step = evaluate(context, metrics) ?: return null
+        // Corrigeer mealType in de step (evaluate zet altijd "GEMENGD")
+        val typedStep = step.copy(mealType = mealType.name)
 
         // Overschrijf D/F in type-specifieke sleutels
         val currentD = getDForType(context, mealType)
         val currentF = getFForType(context, mealType)
-        setDForType(context, mealType, currentD + step.deltaD)
-        setFForType(context, mealType, currentF + step.deltaF)
+        setDForType(context, mealType, currentD + typedStep.deltaD)
+        setFForType(context, mealType, currentF + typedStep.deltaF)
 
         // Sla ook op in type-specifieke history
         val histKey = when (mealType) {
@@ -231,11 +234,11 @@ object DFLearner {
         if (histKey != null) {
             val existing = (prefs(context).getString(histKey, "") ?: "")
                 .split("\n").mapNotNull { parseStep(it) }.takeLast(19)
-            val all = (existing.map { serializeStep(it) } + serializeStep(step)).joinToString("\n")
+            val all = (existing.map { serializeStep(it) } + serializeStep(typedStep)).joinToString("\n")
             prefs(context).edit().putString(histKey, all).apply()
         }
 
-        return step
+        return typedStep
     }
 
     // ── Kalibratie get/set ────────────────────────────────────────────────
@@ -508,7 +511,8 @@ object DFLearner {
             peakFout = peakFout, iobrFout = iobrFout, hypoStraf = hypoStraf,
             reason = reden,
             diagnose = diagnose,
-            tsUtc = java.time.Instant.ofEpochMilli(now).toString()
+            tsUtc = java.time.Instant.ofEpochMilli(now).toString(),
+            mealType = "GEMENGD"
         )
 
         appendHistory(context, step)
@@ -536,6 +540,27 @@ object DFLearner {
             .apply()
     }
 
+    /**
+     * Reset type-specifieke D/F waarden en history terug naar de algemene waarden.
+     * Gebruik dit na een verbetering van de type-detectielogica zodat het systeem
+     * opnieuw kan leren zonder vervuilde historische data.
+     */
+    fun resetTypeData(context: Context) {
+        prefs(context).edit()
+            // Type-specifieke D/F terug naar algemene waarden
+            .remove(KEY_D_SNEL)
+            .remove(KEY_F_SNEL)
+            .remove(KEY_D_TRAAG)
+            .remove(KEY_F_TRAAG)
+            // Episode-tellers resetten
+            .putInt(KEY_COUNT_SNEL, 0)
+            .putInt(KEY_COUNT_TRAAG, 0)
+            // Type-specifieke history wissen
+            .remove(KEY_HISTORY_SNEL)
+            .remove(KEY_HISTORY_TRAAG)
+            .apply()
+    }
+
     // ── Intern ────────────────────────────────────────────────────────────
 
     private fun prefs(context: Context) =
@@ -543,15 +568,13 @@ object DFLearner {
 
     private fun appendHistory(context: Context, step: LearningStep) {
         val existing = getHistory(context).takeLast(19)
-        val serialized = "${step.tsUtc}|${step.oldD}|${step.oldF}|${step.newD}|${step.newF}|" +
-            "${step.peakFout}|${step.iobrFout}|${step.hypoStraf}|${step.reason}"
-        val all = (existing.map { serializeStep(it) } + serialized).joinToString("\n")
+        val all = (existing.map { serializeStep(it) } + serializeStep(step)).joinToString("\n")
         prefs(context).edit().putString(KEY_HISTORY, all).apply()
     }
 
     private fun serializeStep(s: LearningStep) =
         "${s.tsUtc}|${s.oldD}|${s.oldF}|${s.newD}|${s.newF}|" +
-            "${s.peakFout}|${s.iobrFout}|${s.hypoStraf}|${s.reason}"
+            "${s.peakFout}|${s.iobrFout}|${s.hypoStraf}|${s.reason}|${s.diagnose}|${s.mealType}"
 
     private fun parseStep(line: String): LearningStep? {
         return try {
@@ -566,7 +589,9 @@ object DFLearner {
                 peakFout   = p[5].toDouble(),
                 iobrFout   = p[6].toDouble(),
                 hypoStraf  = p[7].toDouble(),
-                reason     = p[8]
+                reason     = p[8],
+                diagnose   = if (p.size > 9) p[9] else "",
+                mealType   = if (p.size > 10) p[10] else "GEMENGD"
             )
         } catch (_: Exception) { null }
     }

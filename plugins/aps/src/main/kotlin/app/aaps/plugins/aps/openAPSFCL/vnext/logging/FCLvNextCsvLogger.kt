@@ -491,7 +491,7 @@ object FCLvNextCsvLogger {
             row.guardIobLimited, row.guardPeakLimited, row.guardMaxSmbLimited,
             row.guardMinDeliverClipped, row.guardZoneLimited,
 
-            row.mealEpisodeId, row.minutesSinceMealStart,
+            "fcl_intern", row.minutesSinceMealStart,
             bg1(row.riseSinceMealStart),
             row.earlyStage, t2(row.earlyConfidence), u2(row.earlyTargetU), t2(row.sustainedHighSlopeMinutes),
             row.earlyBoostActive, row.earlyBoostCount, t2(row.earlyBoostFactor),
@@ -565,6 +565,3 @@ object FCLvNextCsvLogger {
     private fun t2(x: Double)  = String.format(Locale.US, "%.2f", x)
 
 }   */
-
-
-

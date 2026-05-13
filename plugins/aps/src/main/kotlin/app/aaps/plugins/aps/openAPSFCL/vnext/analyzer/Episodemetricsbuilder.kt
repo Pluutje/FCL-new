@@ -4,7 +4,12 @@ import java.time.Duration
 
 object EpisodeMetricsBuilder {
 
-    fun build(episodes: List<Episode>): List<EpisodeMetrics> {
+
+
+    fun build(
+        episodes: List<Episode>,
+        manualMaxSmb: Double = 1.25   // fallback als bridge niet beschikbaar
+    ): List<EpisodeMetrics> {
         val newestStart = episodes.maxOfOrNull { it.start.epochSecond }
             ?.let { java.time.Instant.ofEpochSecond(it) }
             ?: java.time.Instant.EPOCH
@@ -73,7 +78,12 @@ object EpisodeMetricsBuilder {
             // FIX 3: advisorWeight straft episodes met hoge IOB op de piek af.
             // Een episode met iobRatioAtPeak >= 0.70 is het resultaat van te-laat-burst
             // gedrag en is daarmee minder representatief voor de "echte" profielkwaliteit.
-            val advisorWeight = computeAdvisorWeight(totalInsulinDelivered, ageDays, iobAtPeak)
+            val advisorWeight = computeAdvisorWeight(
+                totalInsulinDelivered = totalInsulinDelivered,
+                ageDays               = ageDays,
+                iobRatioAtPeak        = iobAtPeak,
+                manualMaxSmb          = manualMaxSmb
+            )
 
             val timeToPeakMinutes = peakRow?.let {
                 Duration.between(episode.start, it.timestamp).toMinutes()
@@ -121,14 +131,42 @@ object EpisodeMetricsBuilder {
 private fun computeAdvisorWeight(
     totalInsulinDelivered: Double,
     ageDays: Long,
-    iobRatioAtPeak: Double
+    iobRatioAtPeak: Double,
+    manualMaxSmb: Double
 ): Double {
+
+    /**
+     * Minimale insulinedrempel voor een episode om mee te tellen in het leerproces.
+     * Uitgedrukt als fractie van maxBolus (manualMaxSmbDay).
+     * Default fallback als maxBolus niet beschikbaar: 1.0U absoluut minimum.
+     *
+     * Voorbeelden bij maxBolus = 2.5U:
+     *   MIN_INSULIN_FRAC = 0.60 → min = 1.0U
+     * Voorbeelden bij maxBolus = 1.25U:
+     *   MIN_INSULIN_FRAC = 0.40 → min = 0.50U
+     */
+    val MIN_INSULIN_FRAC     = 0.60   // 60% van maxBolus
+    val MIN_IOBR_AT_PEAK     = 0.25   // min 25% van maxIOB benut op piek
+
+    val insulinDrempel = (MIN_INSULIN_FRAC * manualMaxSmb)
+        .coerceAtLeast(0.40)   // absoluut minimum als fallback
+
     val insulinWeight = when {
-        totalInsulinDelivered < 0.5 -> 0.0
-        totalInsulinDelivered < 2.0 -> 0.4
-        totalInsulinDelivered < 5.0 -> 0.7
+        totalInsulinDelivered < insulinDrempel -> 0.0   // te weinig — verwerp
+        totalInsulinDelivered < manualMaxSmb * 0.80 -> 0.5  // matig — half gewicht
         else -> 1.0
     }
+
+    // ── IOB-bereik op piek: % van maxIOB ────────────────────────────────
+    // Als iobRatioAtPeak < MIN_IOBR_AT_PEAK heeft het systeem nauwelijks
+    // insuline in de werkzame fase gehad — episode is niet representatief.
+    val iobReachWeight = when {
+        iobRatioAtPeak < MIN_IOBR_AT_PEAK -> 0.0
+        else -> 1.0
+    }
+
+    // Als één van beide nul is → weight = 0 → "te weinig insuline"
+    if (insulinWeight == 0.0 || iobReachWeight == 0.0) return 0.0
 
     val recencyFactor = when {
         ageDays <= 2  -> 1.00
@@ -137,19 +175,13 @@ private fun computeAdvisorWeight(
         else          -> 0.60
     }
 
-    // FIX 3: episodes met hoge IOB op de piek wegen minder mee.
-    // Ze zijn informatief (laten een probleem zien), maar vertekenen de
-    // patroonherkenning omdat het gedrag gestuurd werd door een te-laat burst
-    // en dus niet het normale profielgedrag weerspiegelt.
-    // iobRatioAtPeak < 0.50 → geen penalty
-    // iobRatioAtPeak 0.50–0.85 → lineaire afbouw tot 0.60
-    // iobRatioAtPeak >= 0.85  → minimale weight 0.50
+    // IOB-piek penalty (bestaande logica)
     val iobPeakPenalty = when {
-        iobRatioAtPeak < 0.50 -> 1.00
+        iobRatioAtPeak < 0.50  -> 1.00
         iobRatioAtPeak >= 0.85 -> 0.50
         else -> {
             val t = (iobRatioAtPeak - 0.50) / (0.85 - 0.50)
-            1.00 - t * (1.00 - 0.50)
+            1.00 - t * 0.50
         }
     }
 

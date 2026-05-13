@@ -292,10 +292,15 @@ fun DFControlTab(
                         val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
                         val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
                         val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
+                        val typeEmoji = when (step.mealType) { "SNEL" -> "⚡"; "TRAAG" -> "🐢"; else -> "🔀" }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
-                                     style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text(typeEmoji, fontSize = 11.sp)
+                                    Text("$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
+                                         style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                }
                                 Text(step.reason.take(60), style = MaterialTheme.typography.labelSmall,
                                      color = when {
                                          step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
@@ -313,7 +318,67 @@ fun DFControlTab(
             }
         }
 
-        // ── 10. Geavanceerd (inklapbaar) ──────────────────────────────────
+        // ── 10. Reset type-data ──────────────────────────────────────────
+        var showResetBevestiging by remember { mutableStateOf(false) }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "🔄  Type-leerdata resetten",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Wist de aparte S/T/V waarden voor Snel en Traag zodat het systeem " +
+                        "opnieuw kan leren. De algemene (Gemengd) waarden blijven behouden. " +
+                        "Gebruik dit als de type-indeling onjuist was.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!showResetBevestiging) {
+                    OutlinedButton(
+                        onClick = { showResetBevestiging = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Type-data wissen en opnieuw leren", fontSize = 13.sp)
+                    }
+                } else {
+                    Text(
+                        "Zeker weten? De Snel en Traag waarden worden gewist.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { showResetBevestiging = false },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Annuleren") }
+                        Button(
+                            onClick = {
+                                DFLearner.resetTypeData(context)
+                                // Herlaad de huidige waarden
+                                d = DFLearner.getDForType(context, geselecteerdType)
+                                f = DFLearner.getFForType(context, geselecteerdType)
+                                history = DFLearner.getHistory(context)
+                                showResetBevestiging = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) { Text("Ja, wissen") }
+                    }
+                }
+            }
+        }
+
+        // ── 11. Geavanceerd (inklapbaar) ──────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -335,8 +400,10 @@ fun DFControlTab(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         // Kalibratie sub-items (refWff, refEb)
                         KalibratieParm(
-                            emoji = "💉", naam = "Grootte eerste reactie",
-                            uitleg = "Hoe groot de eerste insulinepuls is als het systeem een stijging detecteert. Hoger = grotere puls.",
+                            emoji = "💉", naam = "Grootte frontload-puls",
+                            uitleg = "Hoe groot de frontload-puls is als een stijging wordt gedetecteerd (als fractie van maxSMB). " +
+                                "Hoger = meer insuline naar voren geduwd bij stijging. " +
+                                "Standaard ${(DFMapping.REF_WFF_DEFAULT * 100).toInt()}% — verhoog dit als pieken te hoog blijven.",
                             waarde = refWff * 100, eenheid = "%", stap = 5.0,
                             min = DFMapping.REF_WFF_MIN * 100, max = DFMapping.REF_WFF_MAX * 100,
                             defaultWaarde = DFMapping.REF_WFF_DEFAULT * 100,

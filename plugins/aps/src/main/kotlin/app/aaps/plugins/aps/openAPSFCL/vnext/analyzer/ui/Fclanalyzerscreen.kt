@@ -91,7 +91,8 @@ fun FclAnalyzerScreen(
             val cleanedEpisodes = if (detected.size > 1) detected.drop(1) else emptyList()
             episodes = cleanedEpisodes
 
-            val builtMetrics = EpisodeMetricsBuilder.build(cleanedEpisodes)
+            val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25
+            val builtMetrics = EpisodeMetricsBuilder.build(cleanedEpisodes, manualMaxSmb)
             episodeMetrics = withContext(Dispatchers.IO) {
                 enrichMetricsWithAdviceState(context, builtMetrics)
             }
@@ -118,19 +119,57 @@ fun FclAnalyzerScreen(
                 val toInsert = cleanedEpisodes.mapIndexedNotNull { i, episode ->
                     val prev = existing[episode.start.toString()]
 
-                    // Bereken maaltijdtype op basis van slope in eerste cycli
+                    // Maaltijdtype detectie via tijdvenster (niet via mealEpisodeId —
+                    // die is FCLvNext-intern en komt niet overeen met analyzer episode IDs)
+                    // Koppel LogRows via tijdstip: rows binnen episode.start..episode.end
                     val epRows = allRows?.filter { r ->
-                        r.mealEpisodeId != null && r.mealEpisodeId == episode.id.toLong()
-                    } ?: emptyList()
-                    val samplesFirst15 = 3
-                    val avgSlope0_15 = epRows.take(samplesFirst15)
-                        .map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
-                    val avgSlope15_30 = epRows.drop(samplesFirst15).take(3)
-                        .map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
+                        r.timestamp >= episode.start && r.timestamp <= episode.end
+                    }?.sortedBy { it.timestamp } ?: emptyList()
+
+                    // Verbeterde type-detectie: zoek het EERSTE venster van echte stijging
+                    // (2+ opeenvolgende cycli met slope > 0.2 mmol/5min)
+                    // Reden: episode kan starten terwijl BG nog daalt van vorige dosis.
+                    // De eerste stijgingsfase bepaalt het karakter van de maaltijd.
+                    val stijgingsVensterIdx = run {
+                        val slopes = epRows.map { it.slope }
+                        var idx = -1
+                        for (j in 0 until slopes.size - 1) {
+                            if (slopes[j] > 0.20 && slopes[j + 1] > 0.20) {
+                                idx = j
+                                break
+                            }
+                        }
+                        idx
+                    }
+
+                    val avgSlopeVenster: Double
+                    val avgSlope0_15: Double
+                    val avgSlope15_30: Double
+
+                    if (stijgingsVensterIdx >= 0) {
+                        // Gebruik het stijgingsvenster voor type-detectie
+                        val vensterRows = epRows.drop(stijgingsVensterIdx).take(4)
+                        avgSlopeVenster = vensterRows.map { it.slope }
+                            .average().takeIf { !it.isNaN() } ?: 0.0
+                        // Bewaar ook originele 0-15 / 15-30 voor weergave
+                        avgSlope0_15 = epRows.take(3).map { it.slope }
+                            .average().takeIf { !it.isNaN() } ?: 0.0
+                        avgSlope15_30 = epRows.drop(3).take(3).map { it.slope }
+                            .average().takeIf { !it.isNaN() } ?: 0.0
+                    } else {
+                        // Geen stijging gevonden → TRAAG
+                        avgSlopeVenster = 0.0
+                        avgSlope0_15 = epRows.take(3).map { it.slope }
+                            .average().takeIf { !it.isNaN() } ?: 0.0
+                        avgSlope15_30 = epRows.drop(3).take(3).map { it.slope }
+                            .average().takeIf { !it.isNaN() } ?: 0.0
+                    }
+
                     val detectedType = when {
-                        avgSlope0_15 >= 0.35 -> "SNEL"
-                        avgSlope0_15 <= 0.05 && avgSlope15_30 <= 0.28 -> "TRAAG"
-                        else -> "GEMENGD"
+                        stijgingsVensterIdx < 0          -> "TRAAG"   // geen stijging
+                        avgSlopeVenster >= 0.50          -> "SNEL"    // steile stijging
+                        avgSlopeVenster >= 0.25          -> "GEMENGD" // matige stijging
+                        else                             -> "TRAAG"   // trage stijging
                     }
                     EpisodeEntity(
                         startTs              = episode.start.toString(),
@@ -652,21 +691,49 @@ private suspend fun runAdvisorFlow(
     // D/F leer-stap
     if (DFLearner.isAutoEnabled(context)) {
         val latestMetrics = filteredMetrics.lastOrNull()
-        val latestEpisode = episodes.lastOrNull()
+
+        // Gebruik de laatste AFGESLOTEN episode voor type-detectie
+        // Een lopende episode heeft mogelijk een afwijkend slopepatroon
+        val latestCompletedEpisode = episodes.lastOrNull { it.isComplete }
+            ?: episodes.lastOrNull()
+
         if (latestMetrics != null) {
-            // Bepaal maaltijdtype van laatste episode (vanuit LogRow history)
-            val latestMealType: MealTypeBridge.MealType = if (latestEpisode != null) {
-                val epRows = allRows.filter { it.mealEpisodeId == latestEpisode.id.toLong() }
-                val samplesFirst15 = 3
-                val avgSlope0_15 = epRows.take(samplesFirst15)
-                    .map { row -> row.slope }.average().takeIf { !it.isNaN() } ?: 0.0
-                when {
-                    avgSlope0_15 >= 0.35 -> MealTypeBridge.MealType.SNEL
-                    avgSlope0_15 <= 0.05 -> MealTypeBridge.MealType.TRAAG
-                    else                 -> MealTypeBridge.MealType.GEMENGD
+            // Bepaal maaltijdtype: eerst uit opgeslagen entity, dan herberekenen
+            val latestMealType: MealTypeBridge.MealType = run {
+                val entity = latestCompletedEpisode?.let { ep ->
+                    storedEpisodesByStart[ep.start.toString()]
                 }
-            } else {
-                MealTypeBridge.MealType.GEMENGD
+                when {
+                    entity?.mealType == "SNEL"   -> MealTypeBridge.MealType.SNEL
+                    entity?.mealType == "TRAAG"  -> MealTypeBridge.MealType.TRAAG
+                    entity?.mealType == "GEMENGD" -> MealTypeBridge.MealType.GEMENGD
+                    latestCompletedEpisode != null -> {
+                        // Koppel via tijdstip, niet via mealEpisodeId
+                        val epRows = allRows.filter { r ->
+                            r.timestamp >= latestCompletedEpisode.start &&
+                                r.timestamp <= latestCompletedEpisode.end
+                        }.sortedBy { it.timestamp }
+                        // Zelfde stijgingsvenster-logica als bij episode-insert
+                        val vensterIdx = run {
+                            val slopes = epRows.map { it.slope }
+                            var idx = -1
+                            for (j in 0 until slopes.size - 1) {
+                                if (slopes[j] > 0.20 && slopes[j + 1] > 0.20) { idx = j; break }
+                            }
+                            idx
+                        }
+                        val avgVenster = if (vensterIdx >= 0)
+                            epRows.drop(vensterIdx).take(4).map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
+                        else 0.0
+                        when {
+                            vensterIdx < 0       -> MealTypeBridge.MealType.TRAAG
+                            avgVenster >= 0.50   -> MealTypeBridge.MealType.SNEL
+                            avgVenster >= 0.25   -> MealTypeBridge.MealType.GEMENGD
+                            else                 -> MealTypeBridge.MealType.TRAAG
+                        }
+                    }
+                    else -> MealTypeBridge.MealType.GEMENGD
+                }
             }
 
             // Update MealTypeBridge active overrides voor komende FCLvNext cycli

@@ -210,9 +210,9 @@ private fun EpisodeOverviewCard(
             Text(
                 text = when {
                     metrics.includedInAdvice -> "Meegeteld in laatste aanbeveling"
+                    metrics.advisorWeight <= 0.0 -> "Niet beschikbaar – te weinig insuline"
                     metrics.adviceStatus == AdviceLifecycleStore.STATE_CONSUMED -> "Verbruikt na profielwijziging"
                     !matchesCurrentSettings -> "Niet beschikbaar – episode hoort bij andere instellingen"
-                    metrics.advisorWeight <= 0.0 -> "Niet beschikbaar – te weinig insuline"
                     metrics.adviceStatus == AdviceLifecycleStore.STATE_IN_LAST_RECOMMENDATION -> "Behoort bij laatste aanbeveling"
                     else -> "Beschikbaar voor advies"
                 },

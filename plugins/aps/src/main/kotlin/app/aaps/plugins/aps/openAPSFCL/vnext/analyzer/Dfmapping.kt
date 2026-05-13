@@ -42,7 +42,7 @@ object DFMapping {
     // Kalibratie-sectie in de Automaat-tab worden aangepast door de gebruiker.
     // Standaardwaarden zijn de gevalideerde baselines.
     const val REF_WMD_DEFAULT = 1.30   // Stijgingsdrempel frontload (mmol boven target)
-    const val REF_WFF_DEFAULT = 0.64   // Frontload grootte (fractie van max SMB)
+    const val REF_WFF_DEFAULT = 0.72   // Frontload grootte (fractie van max SMB)
     const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
 
     // Bereiken voor de kalibratie-knoppen
@@ -104,7 +104,7 @@ object DFMapping {
             // refEb=1.0 (default/uit): boost pas actief bij hogere F-waarden.
             earlyBoostFactor              = max(1.0, refEb + (fC - 0.5) * 2.5),
             earlyBoostMinConfidence       = max(0.40, 0.50 - (fC - 0.5) * 0.20),
-            earlyBoostMaxCommits          = if (fC >= 0.65) 3 else 2,
+            earlyBoostMaxCommits          = if (fC >= 0.65) 4 else 3,
 
             // Late commit decay: alleen actief bij F > 0.5
             // Koppelt automatisch aan earlyBoost: meer vroeg → meer late demping

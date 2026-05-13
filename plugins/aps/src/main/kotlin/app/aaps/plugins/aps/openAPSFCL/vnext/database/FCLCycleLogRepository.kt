@@ -149,7 +149,7 @@ private fun FCLCycleLogEntity.toCsvLine(
         bool(stagnationActive), d2(stagnationBoost),
         bool(guardIobLimited), bool(guardPeakLimited), bool(guardMaxSmbLimited),
         bool(guardMinDeliverClipped), bool(guardZoneLimited),
-        mealEpisodeId, minutesSinceMealStart, d2(riseSinceMealStart),
+        "fcl_intern", minutesSinceMealStart, d2(riseSinceMealStart),
         earlyStage, d2(earlyConfidence), d2(earlyTargetU), d2(sustainedHighSlopeMinutes),
         bool(earlyBoostActive), earlyBoostCount, d2(earlyBoostFactor),
         mealState, d2(commitFraction), minutesSinceCommit,
