@@ -214,7 +214,7 @@ class FCLvNextStatusFormatter(
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v1.5.4")
+        appendLine(" 🧠 FCL V6 v1.5.5")
         appendLine("════════════════════════")
         appendLine()
 
