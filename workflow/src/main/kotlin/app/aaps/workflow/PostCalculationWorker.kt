@@ -22,7 +22,6 @@ import app.aaps.core.interfaces.workflow.CalculationWorkflow
 import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.workflow.LoggingWorker
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import kotlinx.coroutines.Dispatchers
 import java.util.Calendar
 import javax.inject.Inject
@@ -42,7 +41,7 @@ class PostCalculationWorker(
     params: WorkerParameters
 ) : LoggingWorker(context, params, Dispatchers.Default) {
 
-    @Inject lateinit var dataWorkerStorage: DataWorkerStorage
+    @Inject lateinit var workflowChainData: WorkflowChainData
     @Inject lateinit var iobCobCalculator: IobCobCalculator
     @Inject lateinit var loop: Loop
     @Inject lateinit var widgetUpdater: WidgetUpdater
@@ -60,15 +59,20 @@ class PostCalculationWorker(
     )
 
     override suspend fun doWorkAndLog(): Result {
-        val data = dataWorkerStorage.pickupObject(inputData.getLong(DataWorkerStorage.STORE_KEY, -1)) as? PostCalculationData
-            ?: return Result.failure(workDataOf("Error" to "missing input data"))
+        val data = workflowChainData.postFor(
+            inputData.getString(WorkflowChainData.JOB_KEY),
+            inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
         if (data.runLoopAndWidgetPhase) {
             invokeLoop(data)
+            if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
             widgetUpdater.update("WorkFlow")
+            if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
         }
 
         preparePredictions(data)
+        if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         return Result.success()

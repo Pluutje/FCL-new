@@ -54,7 +54,6 @@ import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.combine
 import app.aaps.core.objects.workflow.LoggingWorker
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.workflow.iob.fromCarbs
 import kotlinx.coroutines.Dispatchers
 import java.util.Calendar
@@ -79,7 +78,7 @@ class PrepareGraphDataWorker(
     params: WorkerParameters
 ) : LoggingWorker(context, params, Dispatchers.Default) {
 
-    @Inject lateinit var dataWorkerStorage: DataWorkerStorage
+    @Inject lateinit var workflowChainData: WorkflowChainData
     @Inject lateinit var dateUtil: DateUtil
     @Inject lateinit var rxBus: RxBus
     @Inject lateinit var persistenceLayer: PersistenceLayer
@@ -108,8 +107,10 @@ class PrepareGraphDataWorker(
     )
 
     override suspend fun doWorkAndLog(): Result {
-        val data = dataWorkerStorage.pickupObject(inputData.getLong(DataWorkerStorage.STORE_KEY, -1)) as? PrepareGraphData
-            ?: return Result.failure(workDataOf("Error" to "missing input data"))
+        val data = workflowChainData.prepareFor(
+            inputData.getString(WorkflowChainData.JOB_KEY),
+            inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
         // ===== Phase 1: Load BG into ads + smooth (was LoadBgDataWorker) =====
         if (data.bgDataReload) {
