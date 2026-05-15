@@ -689,8 +689,17 @@ private suspend fun runAdvisorFlow(
     )
 
     // D/F leer-stap
+    // BELANGRIJK: gebruik ALLE afgesloten episodes voor het leerproces,
+    // NIET alleen de advisor-eligible episodes (filteredMetrics).
+    // CONSUMED betekent "niet meer bruikbaar voor advisor aanbeveling"
+    // maar de leerdata is nog steeds geldig voor D/F optimalisatie.
+    // Als we alleen filteredMetrics gebruiken stopt het leren zodra de automaat
+    // een aanpassing heeft gedaan (want dan worden alle vorige episodes CONSUMED).
     if (DFLearner.isAutoEnabled(context)) {
-        val latestMetrics = filteredMetrics.lastOrNull()
+        val allCompletedMetrics = episodeMetrics.filterIndexed { i, _ ->
+            episodes.getOrNull(i)?.isComplete == true
+        }
+        val latestMetrics = allCompletedMetrics.lastOrNull()
 
         // Gebruik de laatste AFGESLOTEN episode voor type-detectie
         // Een lopende episode heeft mogelijk een afwijkend slopepatroon

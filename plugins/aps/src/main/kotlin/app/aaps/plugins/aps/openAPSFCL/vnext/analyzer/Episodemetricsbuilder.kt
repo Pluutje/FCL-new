@@ -146,7 +146,7 @@ private fun computeAdvisorWeight(
      *   MIN_INSULIN_FRAC = 0.40 → min = 0.50U
      */
     val MIN_INSULIN_FRAC     = 0.60   // 60% van maxBolus
-    val MIN_IOBR_AT_PEAK     = 0.25   // min 25% van maxIOB benut op piek
+    val MIN_IOBR_AT_PEAK     = 0.10   // min 10% van maxIOB op piek (laag voor Lyumjev U200)
 
     val insulinDrempel = (MIN_INSULIN_FRAC * manualMaxSmb)
         .coerceAtLeast(0.40)   // absoluut minimum als fallback
@@ -158,8 +158,10 @@ private fun computeAdvisorWeight(
     }
 
     // ── IOB-bereik op piek: % van maxIOB ────────────────────────────────
-    // Als iobRatioAtPeak < MIN_IOBR_AT_PEAK heeft het systeem nauwelijks
-    // insuline in de werkzame fase gehad — episode is niet representatief.
+    // Bij snelwerkende insuline (Lyumjev U200) is de insuline grotendeels
+    // uitgewerkt tegen de piek — IOB@piek is structureel laag.
+    // Drempel verlaagd naar 0.10 zodat snelwerkende insuline niet wordt
+    // verworpen puur op basis van lage IOB@piek.
     val iobReachWeight = when {
         iobRatioAtPeak < MIN_IOBR_AT_PEAK -> 0.0
         else -> 1.0
