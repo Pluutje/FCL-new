@@ -35,7 +35,11 @@ object DFMapping {
     private const val REF_T   = 106
     private const val REF_V   = 95
     private const val REF_CC  = 13
-    private const val REF_PIB = 0.42
+    // ── Insuline-type aanpassing ──────────────────────────────────────────
+    // REF_PIB: peakIobBrake drempel. Verlaagd van 0.42 naar 0.22 voor
+    // snelwerkende insuline (Lyumjev U200) waarbij IOB@piek structureel laag is.
+    // Bij standaard insuline (Novorapid, Fiasp) kan dit naar 0.35-0.42.
+    private const val REF_PIB = 0.22
 
     // ── Kalibreerbare referentiewaarden ───────────────────────────────────
     // Deze drie bepalen het basisgedrag bij D=1.0, F=0.5 en kunnen via de
@@ -96,7 +100,10 @@ object DFMapping {
             peakPredictionHorizonH        = max(0.8, 1.2 - (fC - 0.5) * 0.6),
 
             // IOBstart-drempel voor WATCHING: F hoog = eerder actief
-            iobStart                      = max(0.25, 0.40 - (fC - 0.5) * 0.20),
+            // iobStart: drempel waar IOB-rem begint.
+            // Verlaagd van 0.40 naar 0.15 basis voor snelwerkende insuline.
+            // Bij Lyumjev U200 is IOB@piek 0.15-0.25 → rem moet eerder starten.
+            iobStart                      = max(0.10, 0.25 - (fC - 0.5) * 0.20),
 
             // Early boost: F hoog = sterkere vroege commits
             // refEb bepaalt het maximum bij F=0.8. Bij F=0.5 is boost altijd refEb.

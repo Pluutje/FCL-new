@@ -214,9 +214,28 @@ object DFLearner {
         incrementEpisodeCountForType(context, mealType)
         if (count < MIN_EPISODES_PER_TYPE) return null
 
-        // Voer standaard evaluate uit maar sla resultaat op in type-sleutels
-        val step = evaluate(context, metrics) ?: return null
-        // Corrigeer mealType in de step (evaluate zet altijd "GEMENGD")
+        // Bereken de leerstap op basis van de HUIDIGE type-specifieke D/F
+        // (niet via evaluate() die de algemene D/F aanpast)
+        val d = getDForType(context, mealType)
+        val f = getFForType(context, mealType)
+
+        // Voer evaluate uit puur voor signaalberekening
+        // maar BEWAAR de algemene D/F en herstel ze daarna
+        val savedD = getD(context)
+        val savedF = getF(context)
+        // Zet type-D/F als algemeen zodat evaluate de juiste basis gebruikt
+        setD(context, d)
+        setF(context, f)
+
+        val step = evaluate(context, metrics)
+
+        // Herstel algemene D/F — type-aanpassing mag die niet overschrijven
+        setD(context, savedD)
+        setF(context, savedF)
+
+        if (step == null) return null
+
+        // Corrigeer mealType in de step
         val typedStep = step.copy(mealType = mealType.name)
 
         // Overschrijf D/F in type-specifieke sleutels
