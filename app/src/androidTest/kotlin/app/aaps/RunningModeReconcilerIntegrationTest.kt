@@ -11,8 +11,8 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.db.PersistenceLayer
-import app.aaps.core.interfaces.profile.LocalProfileManager
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.pump.PumpSync
@@ -27,8 +27,10 @@ import app.aaps.plugins.aps.loop.runningMode.RunningModeExpiryWorker
 import app.aaps.plugins.aps.loop.runningMode.RunningModeReconciler
 import app.aaps.plugins.sync.nsShared.NsIncomingDataProcessor
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
@@ -58,7 +60,7 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
     @Inject lateinit var rxHelper: RxHelper
     @Inject lateinit var loop: Loop
     @Inject lateinit var profileFunction: ProfileFunction
-    @Inject lateinit var localProfileManager: LocalProfileManager
+    @Inject lateinit var profileRepository: ProfileRepository
     @Inject lateinit var nsIncomingDataProcessor: NsIncomingDataProcessor
     @Inject lateinit var pumpSync: PumpSync
 
@@ -73,12 +75,22 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
         // TestApplication does not start the reconciler / scheduler on its own — start them here.
         runningModeReconciler.start()
         runningModeExpiryScheduler.start()
+        // Drain late-arriving commands from the previous test's appScope coroutines (e.g. the
+        // reconciler is still inside commandQueue.tempBasalPercent when tearDown clears the queue,
+        // and the `add()` lands after the clear). Sleep briefly to let those coroutines reach
+        // their `add()` call site, then clear the queue once more.
+        Thread.sleep(200)
+        commandQueue.clear()
     }
 
     @After
     fun tearDown() {
         rxHelper.clear()
         WorkManager.getInstance(context).cancelAllWork()
+        // Reset queue state: `performing` is a singleton field and survives WorkManager.cancelAllWork().
+        // Without this, a long-running command (e.g. a virtual-pump bolus simulating delivery via
+        // SystemClock.sleep) leaves `performing != null`, and the next test's QueueWorker spins.
+        commandQueue.clear()
         runBlocking { persistenceLayer.clearDatabases() }
     }
 
@@ -89,8 +101,7 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
         insertActiveMode(RM.Mode.DISCONNECTED_PUMP, durationMs = T.mins(30).msecs())
         val rejection = CaptureCallback()
         val info = DetailedBolusInfo().apply { insulin = 1.0 }
-        val queued = commandQueue.bolus(info, rejection)
-        assertThat(queued).isFalse()
+        commandQueue.bolus(info, rejection)
         assertThat(rxHelper.waitUntil("bolus rejection callback fired", maxSeconds = 5) { rejection.invoked }).isTrue()
         assertThat(rejection.capturedResult?.success).isFalse()
         assertThat(rejection.capturedResult?.enacted).isFalse()
@@ -99,26 +110,24 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
     @Test
     fun `queue gate rejects extended bolus when mode is DISCONNECTED_PUMP`() = runTest {
         insertActiveMode(RM.Mode.DISCONNECTED_PUMP, durationMs = T.mins(30).msecs())
-        val rejection = CaptureCallback()
-        val queued = commandQueue.extendedBolus(2.0, 30, rejection)
-        assertThat(queued).isFalse()
-        assertThat(rxHelper.waitUntil("eb rejection callback fired", maxSeconds = 5) { rejection.invoked }).isTrue()
-        assertThat(rejection.capturedResult?.success).isFalse()
+        val result = commandQueue.extendedBolus(2.0, 30)
+        assertThat(result.success).isFalse()
     }
 
     @Test
     fun `queue gate allows cancelTempBasal during DISCONNECTED_PUMP`() = runTest {
         insertActiveMode(RM.Mode.DISCONNECTED_PUMP, durationMs = T.mins(30).msecs())
-        val queued = commandQueue.cancelTempBasal(enforceNew = true, autoForced = false, callback = null)
-        assertThat(queued).isTrue()
+        backgroundScope.launch { commandQueue.cancelTempBasal(enforceNew = true, autoForced = false) }
+        yield()
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
     fun `queue gate allows bolus when mode is working`() = runTest {
         insertActiveMode(RM.Mode.CLOSED_LOOP, durationMs = 0L)
         val info = DetailedBolusInfo().apply { insulin = 0.1 }
-        val queued = commandQueue.bolus(info, null)
-        assertThat(queued).isTrue()
+        commandQueue.bolus(info, null)
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
@@ -126,16 +135,15 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
         // Startup in working mode.
         insertActiveMode(RM.Mode.CLOSED_LOOP, durationMs = 0L)
         // Initial bolus passes.
-        val allowed = commandQueue.bolus(DetailedBolusInfo().apply { insulin = 0.05 }, null)
-        assertThat(allowed).isTrue()
+        commandQueue.bolus(DetailedBolusInfo().apply { insulin = 0.05 }, null)
+        assertThat(commandQueue.size()).isGreaterThan(0)
         commandQueue.clear()
 
         // Transition to DISCONNECTED_PUMP.
         insertActiveMode(RM.Mode.DISCONNECTED_PUMP, durationMs = T.mins(30).msecs())
         // Same call is now rejected.
         val rejection = CaptureCallback()
-        val rejected = commandQueue.bolus(DetailedBolusInfo().apply { insulin = 0.05 }, rejection)
-        assertThat(rejected).isFalse()
+        commandQueue.bolus(DetailedBolusInfo().apply { insulin = 0.05 }, rejection)
         assertThat(rxHelper.waitUntil("rejection callback after mode flip", maxSeconds = 5) { rejection.invoked }).isTrue()
     }
 
@@ -234,19 +242,15 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
         ensureProfile()
         val profile = profileFunction.getProfile() ?: error("profile not available")
         insertActiveMode(RM.Mode.DISCONNECTED_PUMP, durationMs = T.mins(30).msecs())
-        val rejection = CaptureCallback()
-        val queued = commandQueue.tempBasalAbsolute(
+        val result = commandQueue.tempBasalAbsolute(
             absoluteRate = 1.5,
             durationInMinutes = 30,
             enforceNew = true,
             profile = profile,
-            tbrType = PumpSync.TemporaryBasalType.NORMAL,
-            callback = rejection
+            tbrType = PumpSync.TemporaryBasalType.NORMAL
         )
-        assertThat(queued).isFalse()
-        assertThat(rxHelper.waitUntil("non-zero TBR rejection callback", maxSeconds = 5) { rejection.invoked }).isTrue()
-        assertThat(rejection.capturedResult?.success).isFalse()
-        assertThat(rejection.capturedResult?.enacted).isFalse()
+        assertThat(result.success).isFalse()
+        assertThat(result.enacted).isFalse()
     }
 
     @Test
@@ -372,7 +376,7 @@ class RunningModeReconcilerIntegrationTest @Inject constructor() {
         ) return
 
         nsIncomingDataProcessor.processProfile(JSONObject(profileData), false)
-        val store = localProfileManager.profile ?: error("no profile store after NS import")
+        val store = profileRepository.profile.value ?: error("no profile store after NS import")
         val defaultName = store.getDefaultProfileName() ?: error("no default profile name")
         profileFunction.createProfileSwitch(
             profileStore = store,

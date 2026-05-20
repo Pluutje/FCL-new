@@ -30,18 +30,16 @@ import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.implementation.queue.commands.CommandBolus
-import app.aaps.implementation.queue.commands.CommandCancelExtendedBolus
-import app.aaps.implementation.queue.commands.CommandCancelTempBasal
-import app.aaps.implementation.queue.commands.CommandClearAlarms
 import app.aaps.implementation.queue.commands.CommandCustomCommand
-import app.aaps.implementation.queue.commands.CommandDeactivate
-import app.aaps.implementation.queue.commands.CommandExtendedBolus
+import app.aaps.implementation.queue.commands.CommandInsightSetTBROverNotification
 import app.aaps.implementation.queue.commands.CommandLoadEvents
 import app.aaps.implementation.queue.commands.CommandLoadHistory
 import app.aaps.implementation.queue.commands.CommandReadStatus
 import app.aaps.implementation.queue.commands.CommandSMBBolus
-import app.aaps.implementation.queue.commands.CommandTempBasalPercent
-import app.aaps.implementation.queue.commands.CommandUpdateTime
+import app.aaps.implementation.queue.commands.CommandSetProfile
+import app.aaps.implementation.queue.commands.CommandSetUserSettings
+import app.aaps.implementation.queue.commands.CommandStartPump
+import app.aaps.implementation.queue.commands.CommandStopPump
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import com.google.common.util.concurrent.ListenableFuture
@@ -51,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyLong
@@ -71,6 +70,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     @Mock lateinit var powerManager: PowerManager
     @Mock lateinit var uiInteraction: UiInteraction
     @Mock lateinit var persistenceLayer: PersistenceLayer
+    @Mock lateinit var pumpSync: PumpSync
     @Mock lateinit var jobName: CommandQueueName
     @Mock lateinit var workManager: WorkManager
     @Mock lateinit var infos: ListenableFuture<List<WorkInfo>>
@@ -94,6 +94,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         persistenceLayer: PersistenceLayer,
         decimalFormatter: DecimalFormatter,
         pumpEnactResultProvider: Provider<PumpEnactResult>,
+        pumpSync: PumpSync,
         jobName: CommandQueueName,
         workManager: WorkManager,
         appScope: CoroutineScope,
@@ -101,7 +102,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     ) : CommandQueueImplementation(
         injector, aapsLogger, rxBus, rh, constraintChecker, profileFunction,
         activePlugin, config, dateUtil, fabricPrivacy,
-        uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, jobName, workManager, appScope, bolusProgressData
+        uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, jobName, workManager, appScope, bolusProgressData
     ) {
 
         override fun notifyAboutNewCommand(): Boolean = true
@@ -110,20 +111,19 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
 
     init {
         addInjector {
-            if (it is CommandCancelExtendedBolus) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandTempBasalPercent) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandCancelTempBasal) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
+            // pumpEnactResultProvider is required by every Command's default cancel(commentResId)
+            when (it) {
+                is CommandBolus -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandCustomCommand -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandInsightSetTBROverNotification -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandLoadEvents -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandLoadHistory -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandReadStatus -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandSMBBolus -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandSetProfile -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandSetUserSettings -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandStartPump -> it.pumpEnactResultProvider = pumpEnactResultProvider
+                is CommandStopPump -> it.pumpEnactResultProvider = pumpEnactResultProvider
             }
             if (it is CommandBolus) {
                 it.aapsLogger = aapsLogger
@@ -142,11 +142,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
                 it.rh = rh
                 it.activePlugin = activePlugin
             }
-            if (it is CommandExtendedBolus) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
             if (it is CommandLoadHistory) {
                 it.aapsLogger = aapsLogger
                 it.rh = rh
@@ -158,21 +153,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
                 it.activePlugin = activePlugin
             }
             if (it is CommandReadStatus) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandClearAlarms) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandDeactivate) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandUpdateTime) {
                 it.aapsLogger = aapsLogger
                 it.rh = rh
                 it.activePlugin = activePlugin
@@ -199,7 +179,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             whenever(persistenceLayer.observeChanges(anyOrNull<Class<*>>())).thenReturn(emptyFlow())
             commandQueue = CommandQueueMocked(
                 injector, aapsLogger, rxBus, rh, constraintChecker, profileFunction, activePlugin,
-                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, jobName, workManager, testScope, bolusProgressData
+                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, jobName, workManager, testScope, bolusProgressData
             )
             testPumpPlugin.pumpDescription.basalMinimumRate = 0.1
             testPumpPlugin.connected = true
@@ -227,6 +207,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             val percentageConstraint = ConstraintObject(0, aapsLogger)
             whenever(constraintChecker.applyBasalPercentConstraints(anyOrNull(), anyOrNull())).thenReturn(percentageConstraint)
             whenever(rh.gs(app.aaps.core.ui.R.string.connectiontimedout)).thenReturn("Connection timed out")
+            whenever(rh.gs(app.aaps.core.ui.R.string.command_replaced)).thenReturn("Replaced by newer command")
             whenever(rh.gs(eq(app.aaps.core.ui.R.string.format_insulin_units), anyOrNull())).thenReturn("%1\$.2f U")
             whenever(rh.gs(app.aaps.core.ui.R.string.goingtodeliver)).thenReturn("Going to deliver %1\$.2f U")
             whenever(workManager.getWorkInfosForUniqueWork(anyOrNull())).thenReturn(infos)
@@ -246,7 +227,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh,
             constraintChecker, profileFunction, activePlugin,
-            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, jobName, workManager, testScope, bolusProgressData
+            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, jobName, workManager, testScope, bolusProgressData
         )
         val handler: Handler = mock()
         whenever(handler.post(anyOrNull())).thenAnswer { invocation: InvocationOnMock ->
@@ -269,7 +250,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun doTests() {
+    fun doTests() = runTest {
 
         // start with empty queue
         assertThat(commandQueue.size()).isEqualTo(0)
@@ -291,27 +272,33 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // add tempbasal
-        commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)
+        backgroundScope.launch { commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
 
         // add tempbasal percent. it should replace previous TEMPBASAL
-        commandQueue.tempBasalPercent(0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)
+        backgroundScope.launch { commandQueue.tempBasalPercent(0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
 
         // cancel tempbasal it should replace previous TEMPBASAL
-        commandQueue.cancelTempBasal(enforceNew = false, autoForced = false, callback = null)
+        backgroundScope.launch { commandQueue.cancelTempBasal(enforceNew = false, autoForced = false) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
 
         // add extended bolus
-        commandQueue.extendedBolus(1.0, 30, null)
+        backgroundScope.launch { commandQueue.extendedBolus(1.0, 30) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(2)
 
         // add extended should remove previous extended setting
-        commandQueue.extendedBolus(1.0, 30, null)
+        backgroundScope.launch { commandQueue.extendedBolus(1.0, 30) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(2)
 
         // cancel extended bolus should replace previous extended
-        commandQueue.cancelExtended(null)
+        backgroundScope.launch { commandQueue.cancelExtended() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(2)
 
         // add setProfile
@@ -328,19 +315,18 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(4)
 
         // add clearAlarms
-        commandQueue.clearAlarms(null)
+        backgroundScope.launch { commandQueue.clearAlarms() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(5)
 
         // add deactivate
-        commandQueue.deactivate(null)
+        backgroundScope.launch { commandQueue.deactivate() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(6)
 
-        // add updateTime
-        commandQueue.updateTime(null)
-        assertThat(commandQueue.size()).isEqualTo(7)
-
         commandQueue.clear()
-        commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)
+        backgroundScope.launch { commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
         commandQueue.pickup()
         assertThat(commandQueue.size()).isEqualTo(0)
         assertThat(commandQueue.performing).isNotNull()
@@ -376,10 +362,9 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         commandQueue.bolus(DetailedBolusInfo(), null)
         val smb = DetailedBolusInfo()
         smb.bolusType = BS.Type.SMB
-        val queued: Boolean = commandQueue.bolus(smb, null)
+        commandQueue.bolus(smb, null)
 
         // then
-        assertThat(queued).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -392,10 +377,9 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         val bolus = DetailedBolusInfo()
         bolus.bolusType = BS.Type.SMB
         bolus.lastKnownBolusTime = 0
-        val queued: Boolean = commandQueue.bolus(bolus, null)
+        commandQueue.bolus(bolus, null)
 
         // then
-        assertThat(queued).isFalse()
         assertThat(commandQueue.size()).isEqualTo(0)
     }
 
@@ -405,13 +389,11 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        val queued1 = commandQueue.customCommand(CustomCommand1(), null)
-        val queued2 = commandQueue.customCommand(CustomCommand2(), null)
+        commandQueue.customCommand(CustomCommand1(), null)
+        commandQueue.customCommand(CustomCommand2(), null)
         commandQueue.pickup()
 
         // then
-        assertThat(queued1).isTrue()
-        assertThat(queued2).isTrue()
         assertThat(commandQueue.isCustomCommandInQueue(CustomCommand1::class.java)).isTrue()
         assertThat(commandQueue.isCustomCommandInQueue(CustomCommand2::class.java)).isTrue()
         assertThat(commandQueue.isCustomCommandInQueue(CustomCommand3::class.java)).isFalse()
@@ -456,65 +438,73 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isClearAlarmsCommandInQueue() {
+    fun isClearAlarmsCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.clearAlarms(null)
+        backgroundScope.launch { commandQueue.clearAlarms() }
+        yield()
+
+        // then
+        assertThat(commandQueue.isReadStatusScheduled()).isFalse()
+        assertThat(commandQueue.size()).isEqualTo(1)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.clearAlarms() }
+        yield()
+        assertThat(commandQueue.size()).isEqualTo(1)
+    }
+
+    @Test
+    fun isDeactivateCommandInQueue() = runTest {
+        // given
+        assertThat(commandQueue.size()).isEqualTo(0)
+
+        // when
+        backgroundScope.launch { commandQueue.deactivate() }
+        yield()
+
+        // then
+        assertThat(commandQueue.isReadStatusScheduled()).isFalse()
+        assertThat(commandQueue.size()).isEqualTo(1)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.deactivate() }
+        yield()
+        assertThat(commandQueue.size()).isEqualTo(1)
+    }
+
+    @Test
+    fun isUpdateTimeCommandInQueue() = runTest {
+        // given
+        assertThat(commandQueue.size()).isEqualTo(0)
+
+        // when
+        backgroundScope.launch { commandQueue.updateTime() }
+        yield() // let coroutine enqueue the command and suspend on the result Deferred
 
         // then
         assertThat(commandQueue.isReadStatusScheduled()).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
         // next should be ignored
-        commandQueue.clearAlarms(null)
+        backgroundScope.launch { commandQueue.updateTime() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
     @Test
-    fun isDeactivateCommandInQueue() {
+    fun isLoadTDDsCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.deactivate(null)
-
-        // then
-        assertThat(commandQueue.isReadStatusScheduled()).isFalse()
-        assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.deactivate(null)
-        assertThat(commandQueue.size()).isEqualTo(1)
-    }
-
-    @Test
-    fun isUpdateTimeCommandInQueue() {
-        // given
-        assertThat(commandQueue.size()).isEqualTo(0)
-
-        // when
-        commandQueue.updateTime(null)
-
-        // then
-        assertThat(commandQueue.isReadStatusScheduled()).isFalse()
-        assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.updateTime(null)
-        assertThat(commandQueue.size()).isEqualTo(1)
-    }
-
-    @Test
-    fun isLoadTDDsCommandInQueue() {
-        // given
-        assertThat(commandQueue.size()).isEqualTo(0)
-
-        // when
-        commandQueue.loadTDDs(null)
+        backgroundScope.launch { commandQueue.loadTDDs() }
+        yield()
 
         // then
         assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.loadTDDs(null)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.loadTDDs() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -555,12 +545,12 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         testPumpPlugin.isProfileSet = false
         commandQueue.setProfile(effectiveProfile, false, object : Callback() {
             override fun run() {
-                assertThat(result.success).isTrue()
-                assertThat(result.enacted).isTrue()
+                // Will be invoked when the next setProfile call supersedes this queued command.
+                assertThat(result.success).isFalse()
             }
         })
         assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
+        // next replaces the previously queued command (size stays at 1)
         commandQueue.setProfile(effectiveProfile, false, object : Callback() {
             override fun run() {
                 assertThat(result.success).isTrue()
@@ -615,12 +605,10 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        val queued1 = commandQueue.customCommand(CustomCommand1(), null)
-        val queued2 = commandQueue.customCommand(CustomCommand2(), null)
+        commandQueue.customCommand(CustomCommand1(), null)
+        commandQueue.customCommand(CustomCommand2(), null)
 
         // then
-        assertThat(queued1).isTrue()
-        assertThat(queued2).isTrue()
         assertThat(commandQueue.size()).isEqualTo(2)
     }
 
@@ -630,12 +618,10 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        val queued1 = commandQueue.customCommand(CustomCommand1(), null)
-        val queued2 = commandQueue.customCommand(CustomCommand1(), null)
+        commandQueue.customCommand(CustomCommand1(), null)
+        commandQueue.customCommand(CustomCommand1(), null)
 
         // then
-        assertThat(queued1).isTrue()
-        assertThat(queued2).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -645,12 +631,10 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        val queued1 = commandQueue.readStatus("1", null)
-        val queued2 = commandQueue.readStatus("2", null)
+        commandQueue.readStatus("1", null)
+        commandQueue.readStatus("2", null)
 
         // then
-        assertThat(queued1).isTrue()
-        assertThat(queued2).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
         assertThat(commandQueue.statusInQueue()).isTrue()
     }
@@ -682,25 +666,18 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     @Test
     fun `tempBasalAbsolute non-zero is rejected during DISCONNECTED_PUMP`() = runTest {
         stubActiveMode(app.aaps.core.data.model.RM.Mode.DISCONNECTED_PUMP)
-        var callbackInvoked = false
-        val callback = object : Callback() {
-            override fun run() {
-                callbackInvoked = true
-                assertThat(result.success).isFalse()
-                assertThat(result.enacted).isFalse()
-            }
-        }
-        val queued = commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, callback)
-        assertThat(queued).isFalse()
-        assertThat(callbackInvoked).isTrue()
+        val result = commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL)
+        assertThat(result.success).isFalse()
+        assertThat(result.enacted).isFalse()
     }
 
     @Test
     fun `tempBasalAbsolute rate zero passes during DISCONNECTED_PUMP`() = runTest {
         // The reconciler must be able to enact zero-TBR while DISCONNECTED_PUMP is active.
         stubActiveMode(app.aaps.core.data.model.RM.Mode.DISCONNECTED_PUMP)
-        val queued = commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.EMULATED_PUMP_SUSPEND, null)
-        assertThat(queued).isTrue()
+        backgroundScope.launch { commandQueue.tempBasalAbsolute(0.0, 30, true, validProfile, PumpSync.TemporaryBasalType.EMULATED_PUMP_SUSPEND) }
+        yield()
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
@@ -714,32 +691,24 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             }
         }
         val info = DetailedBolusInfo().also { it.insulin = 1.0 }
-        val queued = commandQueue.bolus(info, callback)
-        assertThat(queued).isFalse()
+        commandQueue.bolus(info, callback)
         assertThat(callbackInvoked).isTrue()
     }
 
     @Test
     fun `extendedBolus is rejected during DISCONNECTED_PUMP`() = runTest {
         stubActiveMode(app.aaps.core.data.model.RM.Mode.DISCONNECTED_PUMP)
-        var callbackInvoked = false
-        val callback = object : Callback() {
-            override fun run() {
-                callbackInvoked = true
-                assertThat(result.success).isFalse()
-            }
-        }
-        val queued = commandQueue.extendedBolus(2.0, 30, callback)
-        assertThat(queued).isFalse()
-        assertThat(callbackInvoked).isTrue()
+        val result = commandQueue.extendedBolus(2.0, 30)
+        assertThat(result.success).isFalse()
     }
 
     @Test
     fun `cancelTempBasal is allowed during DISCONNECTED_PUMP`() = runTest {
         // Cancel is always allowed — it is the primitive used by RESUME and startup drift.
         stubActiveMode(app.aaps.core.data.model.RM.Mode.DISCONNECTED_PUMP)
-        val queued = commandQueue.cancelTempBasal(enforceNew = true, autoForced = false, callback = null)
-        assertThat(queued).isTrue()
+        backgroundScope.launch { commandQueue.cancelTempBasal(enforceNew = true, autoForced = false) }
+        yield()
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
@@ -747,23 +716,28 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         // SUSPENDED_BY_USER is the temporary counterpart of DISABLED_LOOP — manual delivery stays
         // available; the gate does not block TBR / bolus / EB.
         stubActiveMode(app.aaps.core.data.model.RM.Mode.SUSPENDED_BY_USER)
-        val queued = commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)
-        assertThat(queued).isTrue()
+        backgroundScope.launch { commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
     fun `bolus is allowed during SUSPENDED_BY_USER`() = runTest {
         stubActiveMode(app.aaps.core.data.model.RM.Mode.SUSPENDED_BY_USER)
         val info = DetailedBolusInfo().also { it.insulin = 1.0 }
-        val queued = commandQueue.bolus(info, null)
-        assertThat(queued).isTrue()
+        commandQueue.bolus(info, null)
+        assertThat(commandQueue.size()).isGreaterThan(0)
     }
 
     @Test
     fun `working mode allows all commands`() = runTest {
         stubActiveMode(app.aaps.core.data.model.RM.Mode.CLOSED_LOOP)
-        assertThat(commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)).isTrue()
-        assertThat(commandQueue.cancelTempBasal(enforceNew = true, autoForced = false, callback = null)).isTrue()
+        backgroundScope.launch { commandQueue.tempBasalAbsolute(1.5, 30, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
+        // cancelTempBasal replaces pending TEMPBASAL commands, so size stays at 1
+        backgroundScope.launch { commandQueue.cancelTempBasal(enforceNew = true, autoForced = false) }
+        yield()
+        assertThat(commandQueue.size()).isEqualTo(1)
     }
 
     private suspend fun stubActiveMode(mode: app.aaps.core.data.model.RM.Mode) {

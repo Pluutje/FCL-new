@@ -71,12 +71,15 @@ import app.aaps.implementation.queue.commands.CommandTempBasalAbsolute
 import app.aaps.implementation.queue.commands.CommandTempBasalPercent
 import app.aaps.implementation.queue.commands.CommandUpdateTime
 import dagger.android.HasAndroidInjector
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import java.util.LinkedList
 import javax.inject.Inject
 import javax.inject.Provider
@@ -100,6 +103,7 @@ class CommandQueueImplementation @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val decimalFormatter: DecimalFormatter,
     private val pumpEnactResultProvider: Provider<PumpEnactResult>,
+    private val pumpSync: PumpSync,
     private val jobName: CommandQueueName,
     private val workManager: WorkManager,
     @ApplicationScope private val appScope: CoroutineScope,
@@ -170,12 +174,13 @@ class CommandQueueImplementation @Inject constructor(
      * Fails open on read errors — the gate is a belt, not the only line; upstream checks already
      * handle most suspended-mode paths in [LoopPlugin.invoke] and [applySMBRequest].
      */
-    private fun rejectedByRunningModeGate(kind: PumpCommandGate.CommandKind, callback: Callback?): Boolean {
+    /** Returns the rejection result if the gate rejects, or null if the command is allowed. */
+    private suspend fun rejectedByRunningModeGate(kind: PumpCommandGate.CommandKind): PumpEnactResult? {
         val mode = try {
-            runBlocking { persistenceLayer.getRunningModeActiveAt(dateUtil.now()) }.mode
+            persistenceLayer.getRunningModeActiveAt(dateUtil.now()).mode
         } catch (e: Throwable) {
             aapsLogger.warn(LTag.PUMPQUEUE, "Running-mode gate: failed to read active mode, allowing command: ${e.message}")
-            return false
+            return null
         }
         val decision = PumpCommandGate.check(mode, kind)
         if (decision is PumpCommandGate.Decision.Reject) {
@@ -190,13 +195,18 @@ class CommandQueueImplementation @Inject constructor(
                 LTag.PUMPQUEUE,
                 "Command rejected by running-mode gate: mode=$mode, kind=$kind, reason=${decision.reason}"
             )
-            callback?.result(
-                pumpEnactResultProvider.get().success(false).enacted(false).comment(commentRes)
-            )?.run()
-            return true
+            return pumpEnactResultProvider.get().success(false).enacted(false).comment(commentRes)
         }
-        return false
+        return null
     }
+
+    /** Callback-style wrapper for un-migrated callers. Removed once bolus/tempBasal* are migrated. */
+    private fun rejectedByRunningModeGate(kind: PumpCommandGate.CommandKind, callback: Callback?): Boolean =
+        runBlocking {
+            val rejection = rejectedByRunningModeGate(kind) ?: return@runBlocking false
+            callback?.result(rejection)?.run()
+            true
+        }
 
     override fun isRunning(type: CommandType): Boolean = performing?.commandType == type
 
@@ -205,6 +215,7 @@ class CommandQueueImplementation @Inject constructor(
         synchronized(queue) {
             for (i in queue.indices.reversed()) {
                 if (queue[i].commandType == type) {
+                    queue[i].cancel(app.aaps.core.ui.R.string.command_replaced)
                     queue.removeAt(i)
                 }
             }
@@ -257,8 +268,7 @@ class CommandQueueImplementation @Inject constructor(
         performing = null
         synchronized(queue) {
             for (i in queue.indices) {
-                queue[i].cancel()
-
+                queue[i].cancel(app.aaps.core.ui.R.string.connectiontimedout)
             }
             queue.clear()
         }
@@ -330,7 +340,7 @@ class CommandQueueImplementation @Inject constructor(
 
     // returns true if command is queued
     @Synchronized
-    override fun bolus(detailedBolusInfo: DetailedBolusInfo, callback: Callback?): Boolean {
+    override fun bolus(detailedBolusInfo: DetailedBolusInfo, callback: Callback?) {
         // Check if pump store carbs
         // If not, it's not necessary add command to the queue and initiate connection
         // Assuming carbs in the future and carbs with duration are NOT stores anyway
@@ -342,9 +352,9 @@ class CommandQueueImplementation @Inject constructor(
                 detailedBolusInfo.carbsDuration != 0L ||
                 (detailedBolusInfo.carbsTimestamp ?: detailedBolusInfo.timestamp) > dateUtil.now())*/
         ) {
-            carbsRunnable = Runnable {
+            // Carbs-only path: store and report storage result via callback exactly once.
+            if (detailedBolusInfo.insulin == 0.0) {
                 aapsLogger.debug(LTag.PUMPQUEUE, "Going to store carbs")
-                detailedBolusInfo.carbs = originalCarbs
                 appScope.launch {
                     try {
                         persistenceLayer.insertOrUpdateCarbs(
@@ -357,36 +367,47 @@ class CommandQueueImplementation @Inject constructor(
                         callback?.result(pumpEnactResultProvider.get().enacted(false).success(false))?.run()
                     }
                 }
+                return
+            }
+            // Bolus + carbs path: carbsRunnable persists carbs only; the bolus result drives the callback.
+            carbsRunnable = Runnable {
+                aapsLogger.debug(LTag.PUMPQUEUE, "Going to store carbs")
+                detailedBolusInfo.carbs = originalCarbs
+                appScope.launch {
+                    try {
+                        persistenceLayer.insertOrUpdateCarbs(
+                            carbs = detailedBolusInfo.createCarbs(),
+                            action = Action.CARBS,
+                            source = Sources.Database
+                        )
+                    } catch (e: Exception) {
+                        aapsLogger.error(LTag.PUMPQUEUE, "Failed to store carbs after bolus", e)
+                    }
+                }
             }
             // Do not process carbs anymore
             detailedBolusInfo.carbs = 0.0
-            // if no insulin just exit
-            if (detailedBolusInfo.insulin == 0.0) {
-                carbsRunnable.run() // store carbs
-                return true
-            }
-
         }
         // Running-mode gate: reject bolus if current mode forbids new delivery.
-        if (rejectedByRunningModeGate(PumpCommandGate.CommandKind.BOLUS, callback)) return false
+        if (rejectedByRunningModeGate(PumpCommandGate.CommandKind.BOLUS, callback)) return
         val type = if (detailedBolusInfo.bolusType == BS.Type.SMB) CommandType.SMB_BOLUS else CommandType.BOLUS
         if (type == CommandType.SMB_BOLUS) {
             if (bolusInQueue()) {
                 aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting SMB since a bolus is queue/running")
                 callback?.result(pumpEnactResultProvider.get().enacted(false).success(false))?.run()
-                return false
+                return
             }
             val lastBolusTime = runBlocking { persistenceLayer.getNewestBolus() }?.timestamp ?: 0L
             if (detailedBolusInfo.lastKnownBolusTime < lastBolusTime) {
                 aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting bolus, another bolus was issued since request time")
                 callback?.result(pumpEnactResultProvider.get().enacted(false).success(false))?.run()
-                return false
+                return
             }
             removeAll(CommandType.SMB_BOLUS)
         }
         if (isRunning(type)) {
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
         // remove all unfinished boluses
         removeAll(type)
@@ -405,7 +426,6 @@ class CommandQueueImplementation @Inject constructor(
             }
         }
         notifyAboutNewCommand()
-        return true
     }
 
     override fun stopPump(callback: Callback?) {
@@ -435,82 +455,67 @@ class CommandQueueImplementation @Inject constructor(
         Thread { activePlugin.activePump.stopBolusDelivering() }.start()
     }
 
-    // returns true if command is queued
-    override fun tempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType, callback: Callback?): Boolean {
+    override suspend fun tempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
         val gateKind = if (absoluteRate == 0.0) PumpCommandGate.CommandKind.TEMP_BASAL_ZERO else PumpCommandGate.CommandKind.TEMP_BASAL_NONZERO
-        if (rejectedByRunningModeGate(gateKind, callback)) return false
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+        rejectedByRunningModeGate(gateKind)?.let { return it }
+        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
         removeAll(CommandType.TEMPBASAL)
         val rateAfterConstraints = constraintChecker.applyBasalConstraints(ConstraintObject(absoluteRate, aapsLogger), profile).value()
-        // add new command to queue
-        add(CommandTempBasalAbsolute(injector, rateAfterConstraints, durationInMinutes, enforceNew, tbrType, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandTempBasalAbsolute(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun tempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType, callback: Callback?): Boolean {
+    override suspend fun tempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
         val gateKind = if (percent == 0) PumpCommandGate.CommandKind.TEMP_BASAL_ZERO else PumpCommandGate.CommandKind.TEMP_BASAL_NONZERO
-        if (rejectedByRunningModeGate(gateKind, callback)) return false
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+        rejectedByRunningModeGate(gateKind)?.let { return it }
+        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
         removeAll(CommandType.TEMPBASAL)
         val percentAfterConstraints = constraintChecker.applyBasalPercentConstraints(ConstraintObject(percent, aapsLogger), profile).value()
-        // add new command to queue
-        add(CommandTempBasalPercent(injector, percentAfterConstraints, durationInMinutes, enforceNew, tbrType, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandTempBasalPercent(aapsLogger, rh, activePlugin, pumpEnactResultProvider, percentAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun extendedBolus(insulin: Double, durationInMinutes: Int, callback: Callback?): Boolean {
-        if (rejectedByRunningModeGate(PumpCommandGate.CommandKind.EXTENDED_BOLUS, callback)) return false
-        if (isRunning(CommandType.EXTENDEDBOLUS)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
+    override suspend fun extendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
+        rejectedByRunningModeGate(PumpCommandGate.CommandKind.EXTENDED_BOLUS)?.let { return it }
+        if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
         val rateAfterConstraints = constraintChecker.applyExtendedBolusConstraints(ConstraintObject(insulin, aapsLogger)).value()
-        // remove all unfinished
         removeAll(CommandType.EXTENDEDBOLUS)
-        // add new command to queue
-        add(CommandExtendedBolus(injector, rateAfterConstraints, durationInMinutes, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun cancelTempBasal(enforceNew: Boolean, autoForced: Boolean, callback: Callback?): Boolean {
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun cancelTempBasal(enforceNew: Boolean, autoForced: Boolean): PumpEnactResult {
+        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
         removeAll(CommandType.TEMPBASAL)
-        // add new command to queue
-        add(CommandCancelTempBasal(injector, enforceNew, autoForced = autoForced, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandCancelTempBasal(aapsLogger, rh, activePlugin, pumpSync, dateUtil, pumpEnactResultProvider, enforceNew, autoForced, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun cancelExtended(callback: Callback?): Boolean {
-        if (isRunning(CommandType.EXTENDEDBOLUS)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun cancelExtended(): PumpEnactResult {
+        if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
         removeAll(CommandType.EXTENDEDBOLUS)
-        // add new command to queue
-        add(CommandCancelExtendedBolus(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandCancelExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
     // returns true if command is queued
@@ -544,17 +549,16 @@ class CommandQueueImplementation @Inject constructor(
     }
 
     // returns true if command is queued
-    override fun readStatus(reason: String, callback: Callback?): Boolean {
+    override fun readStatus(reason: String, callback: Callback?) {
         if (isReadStatusScheduled()) {
             aapsLogger.debug(LTag.PUMPQUEUE, "READSTATUS $reason ignored as duplicated")
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
 
         // add new command to queue
         add(CommandReadStatus(injector, reason, callback))
         notifyAboutNewCommand()
-        return true
     }
 
     @Synchronized
@@ -571,112 +575,98 @@ class CommandQueueImplementation @Inject constructor(
     }
 
     // returns true if command is queued
-    override fun loadHistory(type: Byte, callback: Callback?): Boolean {
+    override fun loadHistory(type: Byte, callback: Callback?) {
         if (isRunning(CommandType.LOAD_HISTORY)) {
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
         // remove all unfinished
         removeAll(CommandType.LOAD_HISTORY)
         // add new command to queue
         add(CommandLoadHistory(injector, type, callback))
         notifyAboutNewCommand()
-        return true
     }
 
     // returns true if command is queued
-    override fun setUserOptions(callback: Callback?): Boolean {
+    override fun setUserOptions(callback: Callback?) {
         if (isRunning(CommandType.SET_USER_SETTINGS)) {
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
         // remove all unfinished
         removeAll(CommandType.SET_USER_SETTINGS)
         // add new command to queue
         add(CommandSetUserSettings(injector, callback))
         notifyAboutNewCommand()
-        return true
     }
 
-    // returns true if command is queued
-    override fun loadTDDs(callback: Callback?): Boolean {
-        if (isRunning(CommandType.LOAD_TDD)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun loadTDDs(): PumpEnactResult {
+        if (isRunning(CommandType.LOAD_TDD)) return executingNowError()
         removeAll(CommandType.LOAD_TDD)
-        // add new command to queue
-        add(CommandLoadTDDs(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandLoadTDDs(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
     // returns true if command is queued
-    override fun loadEvents(callback: Callback?): Boolean {
+    override fun loadEvents(callback: Callback?) {
         if (isRunning(CommandType.LOAD_EVENTS)) {
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
         // remove all unfinished
         removeAll(CommandType.LOAD_EVENTS)
         // add new command to queue
         add(CommandLoadEvents(injector, callback))
         notifyAboutNewCommand()
-        return true
     }
 
-    // returns true if command is queued
-    override fun clearAlarms(callback: Callback?): Boolean {
-        if (isRunning(CommandType.CLEAR_ALARMS)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun clearAlarms(): PumpEnactResult {
+        if (isRunning(CommandType.CLEAR_ALARMS)) return executingNowError()
         removeAll(CommandType.CLEAR_ALARMS)
-        // add new command to queue
-        add(CommandClearAlarms(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandClearAlarms(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    override fun deactivate(callback: Callback?): Boolean {
-        if (isRunning(CommandType.DEACTIVATE)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun deactivate(): PumpEnactResult {
+        if (isRunning(CommandType.DEACTIVATE)) return executingNowError()
         removeAll(CommandType.DEACTIVATE)
-        // add new command to queue
-        add(CommandDeactivate(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandDeactivate(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    override fun updateTime(callback: Callback?): Boolean {
-        if (isRunning(CommandType.UPDATE_TIME)) {
-            callback?.result(executingNowError())?.run()
-            return false
-        }
-        // remove all unfinished
+    override suspend fun updateTime(): PumpEnactResult {
+        if (isRunning(CommandType.UPDATE_TIME)) return executingNowError()
         removeAll(CommandType.UPDATE_TIME)
-        // add new command to queue
-        add(CommandUpdateTime(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandUpdateTime(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
-        return true
+        return deferred.await()
     }
 
-    override fun customCommand(customCommand: CustomCommand, callback: Callback?): Boolean {
+    override fun customCommand(customCommand: CustomCommand, callback: Callback?) {
         if (isCustomCommandInQueue(customCommand.javaClass)) {
             callback?.result(executingNowError())?.run()
-            return false
+            return
         }
         // remove all unfinished
         removeAllCustomCommands(customCommand.javaClass)
         // add new command to queue
         add(CommandCustomCommand(injector, customCommand, callback))
         notifyAboutNewCommand()
-        return true
     }
 
     @Synchronized

@@ -32,15 +32,14 @@ import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.interfaces.overview.graph.TempTargetDisplayData
 import app.aaps.core.interfaces.overview.graph.TempTargetState
 import app.aaps.core.interfaces.plugin.ActivePlugin
-import app.aaps.core.interfaces.profile.LocalProfileManager
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
-import app.aaps.core.interfaces.queue.Callback
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
@@ -102,7 +101,7 @@ class MainViewModel @Inject constructor(
     private val quickWizard: QuickWizard,
     private val automation: Automation,
     private val persistenceLayer: PersistenceLayer,
-    private val localProfileManager: LocalProfileManager,
+    private val profileRepository: ProfileRepository,
     private val aapsLogger: AAPSLogger,
     private val quickLaunchResolver: QuickLaunchResolver,
     private val commandQueue: CommandQueue,
@@ -444,13 +443,10 @@ class MainViewModel @Inject constructor(
                         eventType = app.aaps.core.data.model.TE.Type.CORRECTION_BOLUS
                         this.insulin = insulinAfterConstraints
                     }
-                    commandQueue.bolus(detailedBolusInfo, object : Callback() {
-                        override fun run() {
-                            if (!result.success) {
-                                uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                            }
-                        }
-                    })
+                    val result = commandQueue.bolus(detailedBolusInfo)
+                    if (!result.success) {
+                        uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
+                    }
                     entry.markAsUsed()
                 }
             )
@@ -480,13 +476,10 @@ class MainViewModel @Inject constructor(
                         this.carbs = carbs.toDouble()
                         carbsTimestamp = dateUtil.now()
                     }
-                    commandQueue.bolus(detailedBolusInfo, object : Callback() {
-                        override fun run() {
-                            if (!result.success) {
-                                uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                            }
-                        }
-                    })
+                    val result = commandQueue.bolus(detailedBolusInfo)
+                    if (!result.success) {
+                        uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
+                    }
                     entry.markAsUsed()
                 }
             )
@@ -771,7 +764,7 @@ class MainViewModel @Inject constructor(
             }
 
             is ConfirmableAction.ActivateProfile          -> {
-                val store = localProfileManager.profile ?: return@launch
+                val store = profileRepository.profile.value ?: return@launch
                 profileFunction.createProfileSwitch(
                     profileStore = store,
                     profileName = action.profileName,
