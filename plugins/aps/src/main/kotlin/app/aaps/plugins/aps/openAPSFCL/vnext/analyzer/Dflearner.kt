@@ -227,7 +227,7 @@ object DFLearner {
         setD(context, d)
         setF(context, f)
 
-        val step = evaluate(context, metrics)
+        val step = evaluate(context, metrics, skipHistory = true)
 
         // Herstel algemene D/F — type-aanpassing mag die niet overschrijven
         setD(context, savedD)
@@ -244,7 +244,7 @@ object DFLearner {
         setDForType(context, mealType, currentD + typedStep.deltaD)
         setFForType(context, mealType, currentF + typedStep.deltaF)
 
-        // Sla ook op in type-specifieke history
+        // Sla op in type-specifieke history
         val histKey = when (mealType) {
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_HISTORY_SNEL
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_HISTORY_TRAAG
@@ -256,6 +256,10 @@ object DFLearner {
             val all = (existing.map { serializeStep(it) } + serializeStep(typedStep)).joinToString("\n")
             prefs(context).edit().putString(histKey, all).apply()
         }
+
+        // Sla ook op in de ALGEMENE history met het correcte type
+        // zodat "Laatste aanpassingen" het juiste maaltijdtype toont
+        appendHistory(context, typedStep)
 
         return typedStep
     }
@@ -306,7 +310,8 @@ object DFLearner {
      */
     fun evaluate(
         context: Context,
-        metrics: EpisodeMetrics
+        metrics: EpisodeMetrics,
+        skipHistory: Boolean = false   // true als aangeroepen vanuit evaluateForType
     ): LearningStep? {
         if (!isAutoEnabled(context)) return null
 
@@ -534,7 +539,7 @@ object DFLearner {
             mealType = "GEMENGD"
         )
 
-        appendHistory(context, step)
+        appendHistory(context, step, skip = skipHistory)
         return step
     }
 
@@ -585,7 +590,8 @@ object DFLearner {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private fun appendHistory(context: Context, step: LearningStep) {
+    private fun appendHistory(context: Context, step: LearningStep, skip: Boolean = false) {
+        if (skip) return
         val existing = getHistory(context).takeLast(19)
         val all = (existing.map { serializeStep(it) } + serializeStep(step)).joinToString("\n")
         prefs(context).edit().putString(KEY_HISTORY, all).apply()
