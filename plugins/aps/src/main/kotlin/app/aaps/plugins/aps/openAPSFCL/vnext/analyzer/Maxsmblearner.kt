@@ -24,6 +24,8 @@ object MaxSmbLearner {
     private const val PREFS_NAME = "max_smb_learner_prefs"
 
     private const val KEY_MAX_SMB_DAY   = "max_smb_day_learned"
+    // Geleerde fractie t.o.v. manualMaxSmb (1.0 = 100% van handmatige instelling)
+    private const val KEY_MAX_SMB_FRAC  = "max_smb_day_frac"
     private const val KEY_IOB_BRAKE     = "iob_brake_learned"
     private const val KEY_LAST_SMB_TS   = "max_smb_last_ts"
     private const val KEY_LAST_BRAKE_TS = "iob_brake_last_ts"
@@ -77,8 +79,24 @@ object MaxSmbLearner {
                 abs(newIobBrake - oldIobBrake) > 0.001
     }
 
-    fun getMaxSmbDay(context: Context): Double =
-        prefs(context).getFloat(KEY_MAX_SMB_DAY, MAX_SMB_DEFAULT.toFloat()).toDouble()
+    /**
+     * Geeft de geleerde maxSMB als absolute waarde.
+     * Intern opgeslagen als fractie van manualMaxSmb zodat verhoging van de
+     * handmatige instelling automatisch de geleerde waarde meeschaalt.
+     *
+     * @param manualMaxSmb de handmatige instelling uit AAPS profiel
+     */
+    fun getMaxSmbDay(context: Context, manualMaxSmb: Double = MAX_SMB_DEFAULT): Double {
+        val frac = prefs(context).getFloat(KEY_MAX_SMB_FRAC, -1f).toDouble()
+        return if (frac > 0.0) {
+            // Fractie opgeslagen → schaal mee met handmatige instelling
+            (frac * manualMaxSmb).coerceIn(dynamicMin(manualMaxSmb), dynamicMax(manualMaxSmb))
+        } else {
+            // Nog geen fractie opgeslagen → gebruik oude absolute waarde als fallback
+            val abs = prefs(context).getFloat(KEY_MAX_SMB_DAY, MAX_SMB_DEFAULT.toFloat()).toDouble()
+            abs.coerceIn(dynamicMin(manualMaxSmb), dynamicMax(manualMaxSmb))
+        }
+    }
 
     fun getIobBrake(context: Context): Double =
         prefs(context).getFloat(KEY_IOB_BRAKE, IOB_BRAKE_DEFAULT.toFloat()).toDouble()
@@ -89,10 +107,14 @@ object MaxSmbLearner {
     fun setAutoEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
 
-    fun setMaxSmbDay(context: Context, value: Double) =
+    fun setMaxSmbDay(context: Context, value: Double, manualMaxSmb: Double = MAX_SMB_DEFAULT) {
+        val clamped = value.coerceIn(MAX_SMB_ABSOLUTE_MIN, MAX_SMB_ABSOLUTE_MAX)
+        val frac = if (manualMaxSmb > 0.0) clamped / manualMaxSmb else 1.0
         prefs(context).edit()
-            .putFloat(KEY_MAX_SMB_DAY, value.coerceIn(MAX_SMB_ABSOLUTE_MIN, MAX_SMB_ABSOLUTE_MAX).toFloat())
+            .putFloat(KEY_MAX_SMB_DAY, clamped.toFloat())
+            .putFloat(KEY_MAX_SMB_FRAC, frac.toFloat())
             .apply()
+    }
 
     fun setIobBrake(context: Context, value: Double) =
         prefs(context).edit()
@@ -117,12 +139,17 @@ object MaxSmbLearner {
         // Als manualMaxSmb significant verschilt van de laatste bekende waarde,
         // reset de geleerde waarde naar het midden van het nieuwe bereik.
         val lastManual = p.getFloat(KEY_LAST_MANUAL, MAX_SMB_DEFAULT.toFloat()).toDouble()
-        if (kotlin.math.abs(manualMaxSmb - lastManual) > manualMaxSmb * 0.15) {
+        // Drempel verlaagd van 15% naar 8% — voorkomt dat stapsgewijze verhogingen
+        // de reset omzeilen. Met fractie-opslag is reset nu minder kritisch want
+        // getMaxSmbDay schaalt toch al mee, maar reset zorgt voor een nette herstart.
+        if (kotlin.math.abs(manualMaxSmb - lastManual) > manualMaxSmb * 0.08) {
             // Profiel significant gewijzigd — reset naar midden van nieuw bereik
             val resetValue = (dynamicMin(manualMaxSmb) + dynamicMax(manualMaxSmb)) / 2.0
+            val resetFrac = resetValue / manualMaxSmb
             p.edit()
-                .putFloat(KEY_MAX_SMB_DAY, resetValue.toFloat())
-                .putFloat(KEY_LAST_MANUAL, manualMaxSmb.toFloat())
+                .putFloat(KEY_MAX_SMB_DAY,  resetValue.toFloat())
+                .putFloat(KEY_MAX_SMB_FRAC, resetFrac.toFloat())
+                .putFloat(KEY_LAST_MANUAL,  manualMaxSmb.toFloat())
                 .apply()
             // Geef direct een resultaat terug zodat ConfigOverrideWriter
             // de nieuwe waarde naar AAPS schrijft via de bridge
@@ -141,7 +168,7 @@ object MaxSmbLearner {
             p.edit().putFloat(KEY_LAST_MANUAL, manualMaxSmb.toFloat()).apply()
         }
 
-        val currentMaxSmb = getMaxSmbDay(context)
+        val currentMaxSmb = getMaxSmbDay(context, manualMaxSmb)
         val currentBrake  = getIobBrake(context)
 
         // Dynamische grenzen gebaseerd op handmatige instelling
@@ -245,7 +272,9 @@ object MaxSmbLearner {
         if (isAutoEnabled(context) || forceApply) {
             val edit = prefs(context).edit()
             if (abs(effMaxSmb - currentMaxSmb) > 0.001) {
+                val newFrac = if (manualMaxSmb > 0.0) effMaxSmb / manualMaxSmb else 1.0
                 edit.putFloat(KEY_MAX_SMB_DAY,  effMaxSmb.toFloat())
+                edit.putFloat(KEY_MAX_SMB_FRAC, newFrac.toFloat())
                 edit.putLong(KEY_LAST_SMB_TS,   nowMs)
             }
             if (abs(effBrake - currentBrake) > 0.001) {

@@ -165,10 +165,12 @@ fun FclAnalyzerScreen(
                             .average().takeIf { !it.isNaN() } ?: 0.0
                     }
 
+                    // Vereenvoudigd: alleen SNEL of TRAAG, geen GEMENGD meer.
+                    // SNEL: stijgingsvenster gemiddeld ≥ 0.35 mmol/5min
+                    // TRAAG: al het overige (langzame stijging of geen stijging)
                     val detectedType = when {
                         stijgingsVensterIdx < 0          -> "TRAAG"   // geen stijging
-                        avgSlopeVenster >= 0.50          -> "SNEL"    // steile stijging
-                        avgSlopeVenster >= 0.25          -> "GEMENGD" // matige stijging
+                        avgSlopeVenster >= 0.35          -> "SNEL"    // snelle stijging
                         else                             -> "TRAAG"   // trage stijging
                     }
                     EpisodeEntity(
@@ -736,12 +738,11 @@ private suspend fun runAdvisorFlow(
                         else 0.0
                         when {
                             vensterIdx < 0       -> MealTypeBridge.MealType.TRAAG
-                            avgVenster >= 0.50   -> MealTypeBridge.MealType.SNEL
-                            avgVenster >= 0.25   -> MealTypeBridge.MealType.GEMENGD
+                            avgVenster >= 0.35   -> MealTypeBridge.MealType.SNEL
                             else                 -> MealTypeBridge.MealType.TRAAG
                         }
                     }
-                    else -> MealTypeBridge.MealType.GEMENGD
+                    else -> MealTypeBridge.MealType.TRAAG   // veilige fallback
                 }
             }
 
@@ -767,8 +768,19 @@ private suspend fun runAdvisorFlow(
             val smbChanged = smbResult != null && smbResult.hasChange
 
             if (dfChanged || smbChanged) {
-                val newD = DFLearner.getD(context)
-                val newF = DFLearner.getF(context)
+                // Gebruik type-specifieke D/F als er een type-aanpassing was,
+                // anders de algemene D/F.
+                // Reden: evaluateForType past KEY_D_SNEL/KEY_F_SNEL aan maar
+                // getD/getF levert de ALGEMENE waarden → T zou nooit bewegen voor Snel.
+                val newD = if (dfChanged && latestMealType != MealTypeBridge.MealType.ONBEKEND)
+                    DFLearner.getDForType(context, latestMealType)
+                else
+                    DFLearner.getD(context)
+
+                val newF = if (dfChanged && latestMealType != MealTypeBridge.MealType.ONBEKEND)
+                    DFLearner.getFForType(context, latestMealType)
+                else
+                    DFLearner.getF(context)
                 val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
                 ConfigOverrideWriter.writeWithStvAndParams(
                     stvMap           = DFMapping.toStvMap(newD, newF, nachtFactor),

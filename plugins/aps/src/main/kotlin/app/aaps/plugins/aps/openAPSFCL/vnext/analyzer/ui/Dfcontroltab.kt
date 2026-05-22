@@ -55,7 +55,8 @@ fun DFControlTab(
     val context = LocalContext.current
 
     // ── Maaltijdtype selector ─────────────────────────────────────────────
-    var geselecteerdType by remember { mutableStateOf(MealTypeBridge.MealType.GEMENGD) }
+    // Vereenvoudigd: alleen SNEL en TRAAG, geen GEMENGD meer
+    var geselecteerdType by remember { mutableStateOf(MealTypeBridge.MealType.SNEL) }
 
     // ── D/F state per type ────────────────────────────────────────────────
     fun dVoorType() = DFLearner.getDForType(context, geselecteerdType)
@@ -93,16 +94,9 @@ fun DFControlTab(
     fun vNaarD(v: Int) = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
 
     fun slaTypeOp(nieuweD: Double, nieuweF: Double = f) {
-        when (geselecteerdType) {
-            MealTypeBridge.MealType.GEMENGD -> {
-                DFLearner.setD(context, nieuweD)
-                if (nieuweF != f) DFLearner.setF(context, nieuweF)
-            }
-            else -> {
-                DFLearner.setDForType(context, geselecteerdType, nieuweD)
-                if (nieuweF != f) DFLearner.setFForType(context, geselecteerdType, nieuweF)
-            }
-        }
+        // Altijd type-specifiek opslaan (SNEL of TRAAG)
+        DFLearner.setDForType(context, geselecteerdType, nieuweD)
+        if (nieuweF != f) DFLearner.setFForType(context, geselecteerdType, nieuweF)
     }
 
     // Frontload timing omrekening: REF_WMD → begrijpelijk label
@@ -331,9 +325,8 @@ fun DFControlTab(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "Wist de aparte S/T/V waarden voor Snel en Traag zodat het systeem " +
-                        "opnieuw kan leren. De algemene (Gemengd) waarden blijven behouden. " +
-                        "Gebruik dit als de type-indeling onjuist was.",
+                    "Wist de geleerde S/T/V waarden voor Snel en Traag zodat het systeem " +
+                        "opnieuw kan leren met de huidige type-indeling.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -464,7 +457,6 @@ private fun MaaltijdTypeSelector(
     onSelect: (MealTypeBridge.MealType) -> Unit
 ) {
     val types = listOf(
-        Triple(MealTypeBridge.MealType.GEMENGD, "🔀", "Gemengd"),
         Triple(MealTypeBridge.MealType.SNEL,    "⚡", "Snel"),
         Triple(MealTypeBridge.MealType.TRAAG,   "🐢", "Traag")
     )
@@ -1137,7 +1129,6 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
     )
 
     val types = listOf(
-        TypeRij("Gemengd", "🔀", MealTypeBridge.MealType.GEMENGD, Color(0xFF9E9E9E)),
         TypeRij("Snel",    "⚡", MealTypeBridge.MealType.SNEL,    Color(0xFFFF9800)),
         TypeRij("Traag",   "🐢", MealTypeBridge.MealType.TRAAG,   Color(0xFF4CAF50))
     )
@@ -1236,9 +1227,7 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
                              style = MaterialTheme.typography.labelSmall,
                              color = tr.kleur, fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (tr.type == MealTypeBridge.MealType.GEMENGD)
-                                "Zie verloop hierboven"
-                            else "Nog te weinig data (min. 2 aanpassingen)",
+                            "Nog te weinig data (min. 2 aanpassingen)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

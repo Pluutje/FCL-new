@@ -39,7 +39,7 @@ fun MaxSmbTab(
 ) {
     val context = LocalContext.current
 
-    var maxSmbDay    by remember { mutableStateOf(MaxSmbLearner.getMaxSmbDay(context)) }
+    var maxSmbDay    by remember { mutableStateOf(MaxSmbLearner.getMaxSmbDay(context, manualMaxSmb)) }
     var iobBrake     by remember { mutableStateOf(MaxSmbLearner.getIobBrake(context)) }
     var autoEnabled  by remember { mutableStateOf(MaxSmbLearner.isAutoEnabled(context)) }
     var history      by remember { mutableStateOf(MaxSmbLearner.getHistory(context)) }
@@ -153,7 +153,7 @@ fun MaxSmbTab(
                             onClick = {
                                 // Sla op en stuur naar AAPS
                                 MaxSmbLearner.evaluate(context, latestMetrics!!, forceApply = true)
-                                maxSmbDay   = MaxSmbLearner.getMaxSmbDay(context)
+                                maxSmbDay   = MaxSmbLearner.getMaxSmbDay(context, manualMaxSmb)
                                 iobBrake    = MaxSmbLearner.getIobBrake(context)
                                 history     = MaxSmbLearner.getHistory(context)
                                 val ok = onApplyToAaps(maxSmbDay, iobBrake)

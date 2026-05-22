@@ -45,7 +45,7 @@ object DFMapping {
     // Deze drie bepalen het basisgedrag bij D=1.0, F=0.5 en kunnen via de
     // Kalibratie-sectie in de Automaat-tab worden aangepast door de gebruiker.
     // Standaardwaarden zijn de gevalideerde baselines.
-    const val REF_WMD_DEFAULT = 1.30   // Stijgingsdrempel frontload (mmol boven target)
+    const val REF_WMD_DEFAULT = 1.10   // Stijgingsdrempel frontload (mmol boven target) — verlaagd voor snellere trigger
     const val REF_WFF_DEFAULT = 0.72   // Frontload grootte (fractie van max SMB)
     const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
 
