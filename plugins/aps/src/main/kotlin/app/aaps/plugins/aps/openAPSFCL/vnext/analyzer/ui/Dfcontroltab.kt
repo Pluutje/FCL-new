@@ -58,12 +58,14 @@ fun DFControlTab(
     // Vereenvoudigd: alleen SNEL en TRAAG, geen GEMENGD meer
     var geselecteerdType by remember { mutableStateOf(MealTypeBridge.MealType.SNEL) }
 
-    // ── D/F state per type ────────────────────────────────────────────────
-    fun dVoorType() = DFLearner.getDForType(context, geselecteerdType)
-    fun fVoorType() = DFLearner.getFForType(context, geselecteerdType)
+    // ── D/F/vExtra state per type ─────────────────────────────────────────
+    fun dVoorType()      = DFLearner.getDForType(context, geselecteerdType)
+    fun fVoorType()      = DFLearner.getFForType(context, geselecteerdType)
+    fun vExtraVoorType() = DFLearner.getVExtraForType(context, geselecteerdType)
 
-    var d by remember(geselecteerdType) { mutableStateOf(dVoorType()) }
-    var f by remember(geselecteerdType) { mutableStateOf(fVoorType()) }
+    var d      by remember(geselecteerdType) { mutableStateOf(dVoorType()) }
+    var f      by remember(geselecteerdType) { mutableStateOf(fVoorType()) }
+    var vExtra by remember(geselecteerdType) { mutableStateOf(vExtraVoorType()) }
 
     // Algemene state
     var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
@@ -79,24 +81,39 @@ fun DFControlTab(
     var refEb  by remember { mutableStateOf(DFLearner.getRefEb(context)) }
 
     // S/T/V voor geselecteerd type
-    val stv  = DFMapping.toStvMap(d, f, nachtFactor)
-    val sNu  = stv["sterkte"]       ?: 95
-    val tNu  = stv["timing"]        ?: 100
+    // S en T worden berekend via D en F (zoals voorheen).
+    // V wordt berekend via D + vExtra — onafhankelijk van S.
+    val stv  = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
+    val sNu  = stv["sterkte"]        ?: 95
+    val tNu  = stv["timing"]         ?: 100
     val vNu  = stv["volhoudendheid"] ?: 95
+
+    // Bereken ook S en V puur op basis van D (zonder vExtra) voor de S-kaart.
+    // Zo ziet de gebruiker dat S alleen via D beweegt, en V via vExtra.
+    val stvZonderVExtra = DFMapping.toStvMap(d, f, nachtFactor, 0.0)
+    val sViaD           = stvZonderVExtra["sterkte"] ?: 95
 
     val sStap = 5; val tStap = 4; val vStap = 5
     val sMin = DFMapping.toStvMap(DFMapping.D_MIN, f, nachtFactor)["sterkte"] ?: 80
     val sMax = DFMapping.toStvMap(DFMapping.D_MAX, f, nachtFactor)["sterkte"] ?: 128
-    val tMin = 80; val tMax = 120; val vMin = 70; val vMax = 130
+    val tMin = 80; val tMax = 120
+    // V-grenzen op basis van vExtra-bereik (D-component is constant bij V-aanpassing)
+    val vBasisViaDOnly = stvZonderVExtra["volhoudendheid"] ?: 95
+    val vMin = (vBasisViaDOnly + (-0.5 * 30).toInt()).coerceAtLeast(70)
+    val vMax = (vBasisViaDOnly + (0.5 * 30).toInt()).coerceAtMost(125)
 
     fun sNaarD(s: Int) = (s.toDouble() / 95.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
     fun tNaarF(t: Int) = (0.5 + (t.toDouble() - 106.0) / 40.0).coerceIn(DFMapping.F_MIN, DFMapping.F_MAX)
-    fun vNaarD(v: Int) = (1.0 + (v.toDouble() - 95.0) / 50.0).coerceIn(DFMapping.D_MIN, DFMapping.D_MAX)
+    // V → vExtra: V = vBasisViaDOnly + vExtra*30  →  vExtra = (V - vBasisViaDOnly) / 30
+    fun vNaarVExtra(v: Int) = ((v.toDouble() - vBasisViaDOnly) / 30.0).coerceIn(-0.5, 0.5)
 
     fun slaTypeOp(nieuweD: Double, nieuweF: Double = f) {
-        // Altijd type-specifiek opslaan (SNEL of TRAAG)
         DFLearner.setDForType(context, geselecteerdType, nieuweD)
         if (nieuweF != f) DFLearner.setFForType(context, geselecteerdType, nieuweF)
+    }
+
+    fun slaVExtraOp(nieuweVExtra: Double) {
+        DFLearner.setVExtraForType(context, geselecteerdType, nieuweVExtra)
     }
 
     // Frontload timing omrekening: REF_WMD → begrijpelijk label
@@ -116,7 +133,7 @@ fun DFControlTab(
         // ── 1. Maaltijdtype selector ──────────────────────────────────────
         MaaltijdTypeSelector(
             geselecteerd = geselecteerdType,
-            onSelect = { geselecteerdType = it; d = dVoorType(); f = fVoorType() }
+            onSelect = { geselecteerdType = it; d = dVoorType(); f = fVoorType(); vExtra = vExtraVoorType() }
         )
 
         // ── 2. Insulinesterkte ────────────────────────────────────────────
@@ -124,14 +141,14 @@ fun DFControlTab(
             emoji = "💊",
             titel = "Hoeveel insuline",
             omschrijving = "Totale hoeveelheid per maaltijd  •  100% = standaard",
-            waarde = sNu, waardeSuffix = "%", eenheid100Label = "standaard",
+            waarde = sViaD, waardeSuffix = "%", eenheid100Label = "standaard",
             stapMinus = sStap, stapPlus = sStap, min = sMin, max = sMax,
             onMinus = {
-                val nieuwD = sNaarD((sNu - sStap).coerceIn(sMin, sMax))
+                val nieuwD = sNaarD((sViaD - sStap).coerceIn(sMin, sMax))
                 d = nieuwD; slaTypeOp(nieuwD)
             },
             onPlus = {
-                val nieuwD = sNaarD((sNu + sStap).coerceIn(sMin, sMax))
+                val nieuwD = sNaarD((sViaD + sStap).coerceIn(sMin, sMax))
                 d = nieuwD; slaTypeOp(nieuwD)
             }
         )
@@ -164,23 +181,28 @@ fun DFControlTab(
         )
 
         // ── 4. Vasthoudendheid ────────────────────────────────────────────
+        // V is nu volledig ontkoppeld van S: aanpassen via vExtra, niet via D.
+        // "Vasthoudend" = hoe agressief het systeem na de piek bijstuurt als
+        // BG niet snel genoeg naar target zakt.
         StvKaart(
             emoji = "🔁",
-            titel = "Hoe vasthoudend bijgestuurd wordt",
-            omschrijving = "Persistentie na de maaltijdpiek  •  100% = standaard",
+            titel = "Hoe vasthoudend na de piek",
+            omschrijving = "Bijsturing als BG na de piek te langzaam daalt  •  onafhankelijk van Hoeveel",
             waarde = vNu, waardeSuffix = "%", eenheid100Label = "standaard",
             stapMinus = vStap, stapPlus = vStap, min = vMin, max = vMax,
             onMinus = {
-                val nieuwD = vNaarD((vNu - vStap).coerceIn(vMin, vMax))
-                d = nieuwD; slaTypeOp(nieuwD)
+                val nieuwVExtra = vNaarVExtra((vNu - vStap).coerceIn(vMin, vMax))
+                vExtra = nieuwVExtra; slaVExtraOp(nieuwVExtra)
             },
             onPlus = {
-                val nieuwD = vNaarD((vNu + vStap).coerceIn(vMin, vMax))
-                d = nieuwD; slaTypeOp(nieuwD)
+                val nieuwVExtra = vNaarVExtra((vNu + vStap).coerceIn(vMin, vMax))
+                vExtra = nieuwVExtra; slaVExtraOp(nieuwVExtra)
             },
-            extraToelichting = "Insulinesterkte wordt ook: ${
-                DFMapping.toStvMap(vNaarD(vNu), f, nachtFactor)["sterkte"] ?: sNu
-            }%"
+            extraToelichting = when {
+                vExtra > 0.05  -> "Hoeveel (S) blijft ${sViaD}% — alleen persistentie omhoog"
+                vExtra < -0.05 -> "Hoeveel (S) blijft ${sViaD}% — alleen persistentie omlaag"
+                else           -> "Gelijk aan standaard (S=${sViaD}%)"
+            }
         )
 
         // ── 5. Frontload timing ───────────────────────────────────────────
@@ -201,8 +223,8 @@ fun DFControlTab(
         if (onApplyToAaps != null) {
             Button(
                 onClick = {
-                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
-                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
+                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb, vExtra)
+                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
                     val ok = onApplyToAaps(po, stvMap)
                     applyResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
                     applyTs = System.currentTimeMillis()
@@ -285,7 +307,8 @@ fun DFControlTab(
                         val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
                         val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
                         val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
-                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
+                        // V in history toont alleen de D-component (vExtra niet opgeslagen per stap)
+                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V±D: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
                         val typeEmoji = when (step.mealType) { "SNEL" -> "⚡"; "TRAAG" -> "🐢"; else -> "🔀" }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -358,6 +381,7 @@ fun DFControlTab(
                                 // Herlaad de huidige waarden
                                 d = DFLearner.getDForType(context, geselecteerdType)
                                 f = DFLearner.getFForType(context, geselecteerdType)
+                                vExtra = DFLearner.getVExtraForType(context, geselecteerdType)
                                 history = DFLearner.getHistory(context)
                                 showResetBevestiging = false
                             },
@@ -426,11 +450,12 @@ fun DFControlTab(
                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (showExpert) {
-                            val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
-                            val stvMap = DFMapping.toStvMap(d, f, nachtFactor)
+                            val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb, vExtra)
+                            val stvMap = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 ExpertRij("D (intern)", "%.3f".format(d))
                                 ExpertRij("F (intern)", "%.3f".format(f))
+                                ExpertRij("vExtra (intern)", "%.3f".format(vExtra))
                                 ExpertRij("REF_WMD", "%.2f".format(refWmd))
                                 ExpertRij("earlyBoostFactor", fmtD2(po.earlyBoostFactor))
                                 ExpertRij("watchingFrontload", fmtD2(po.watchingFrontloadFrac))
@@ -440,6 +465,8 @@ fun DFControlTab(
                                 ExpertRij("peakHorizon", fmtD2(po.peakPredictionHorizonH) + " uur")
                                 ExpertRij("iobStart", fmtD2(po.iobStart))
                                 ExpertRij("peakIobBrake", fmtD2(po.peakIobBrakeSuppressThreshold))
+                                ExpertRij("lateDecay", fmtD2(po.lateCommitDecayFactor))
+                                ExpertRij("sustainedRiseMin", fmtInt(po.sustainedRiseMinTarget) + "m")
                             }
                         }
                     }
@@ -1152,20 +1179,27 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
                     Text("Type", modifier = Modifier.weight(2.5f),
                          style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    for (h in listOf("S", "T", "V")) {
+                    for (h in listOf("S", "T", "V*")) {
                         Text(h, modifier = Modifier.weight(1f),
                              style = MaterialTheme.typography.labelSmall,
                              color = MaterialTheme.colorScheme.onSurfaceVariant,
                              textAlign = androidx.compose.ui.text.style.TextAlign.End)
                     }
                 }
+                Text(
+                    "* V is onafhankelijk van S — aparte instelling per maaltijdtype",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 9.sp
+                )
                 Divider()
 
                 // Rijen
                 types.forEach { tr ->
                     val d   = DFLearner.getDForType(context, tr.type)
                     val f   = DFLearner.getFForType(context, tr.type)
-                    val stv = DFMapping.toStvMap(d, f, nachtFactor)
+                    val ve  = DFLearner.getVExtraForType(context, tr.type)
+                    val stv = DFMapping.toStvMap(d, f, nachtFactor, ve)
                     val cnt = when (tr.type) {
                         MealTypeBridge.MealType.SNEL  ->
                             context.getSharedPreferences("df_learner_prefs", 0)
@@ -1209,13 +1243,15 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
 
             // ── Drie grafieken ────────────────────────────────────────────
             types.forEach { tr ->
-                val hist = DFLearner.getHistoryForType(context, tr.type)
+                val hist   = DFLearner.getHistoryForType(context, tr.type)
+                val veType = DFLearner.getVExtraForType(context, tr.type)
                 if (hist.size >= 2) {
                     STVVerloopGrafiekKlein(
                         history     = hist,
                         nachtFactor = nachtFactor,
                         titel       = "${tr.emoji} ${tr.label}",
-                        accentKleur = tr.kleur
+                        accentKleur = tr.kleur,
+                        vExtra      = veType
                     )
                 } else {
                     Row(
@@ -1246,7 +1282,8 @@ private fun STVVerloopGrafiekKlein(
     history: List<DFLearner.LearningStep>,
     nachtFactor: Int,
     titel: String,
-    accentKleur: Color
+    accentKleur: Color,
+    vExtra: Double = 0.0   // huidige vExtra voor dit type — gebruikt voor V-lijn
 ) {
     if (history.size < 2) return
 
@@ -1261,11 +1298,11 @@ private fun STVVerloopGrafiekKlein(
         val eersteTs = runCatching {
             java.time.Instant.parse(history.first().tsUtc).toEpochMilli()
         }.getOrDefault(0L)
-        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor)
+        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor, vExtra)
         add(Punt(eersteTs - 1, oudeStv["sterkte"] ?: 95, oudeStv["timing"] ?: 100, oudeStv["volhoudendheid"] ?: 95))
         history.forEach { step ->
             val ms  = runCatching { java.time.Instant.parse(step.tsUtc).toEpochMilli() }.getOrDefault(0L)
-            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor)
+            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor, vExtra)
             add(Punt(ms, stv["sterkte"] ?: 95, stv["timing"] ?: 100, stv["volhoudendheid"] ?: 95))
         }
     }.sortedBy { it.tsMs }

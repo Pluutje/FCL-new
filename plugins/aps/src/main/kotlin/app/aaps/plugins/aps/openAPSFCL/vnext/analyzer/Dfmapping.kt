@@ -56,18 +56,26 @@ object DFMapping {
 
     /**
      * Bereken alle 17 parameters als ConfigOverrideWriter.ParamOverrides
-     * op basis van D, F en de drie kalibreerbare referentiewaarden.
+     * op basis van D, F, vExtra en de drie kalibreerbare referentiewaarden.
      * Kan direct worden geschreven naar AAPS via ConfigOverrideWriter.
+     *
+     * vExtra (−0.5 .. +0.5): onafhankelijke volhoudendheidsoffset per maaltijdtype.
+     *   vExtra > 0: meer persistentie na de piek — lager lateCommitDecay,
+     *               lagere sustainedRiseMinTarget, lagere peakIobBrakeLockout.
+     *   vExtra < 0: minder persistentie — hogere lateCommitDecay, eerder remmen.
+     *   vExtra = 0: gedrag identiek aan de situatie vóór introductie van vExtra.
      */
     fun toParamOverrides(
         d: Double,
         f: Double,
         refWmd: Double = REF_WMD_DEFAULT,
         refWff: Double = REF_WFF_DEFAULT,
-        refEb:  Double = REF_EB_DEFAULT
+        refEb:  Double = REF_EB_DEFAULT,
+        vExtra: Double = 0.0
     ): ConfigOverrideWriter.ParamOverrides {
         val dC = d.coerceIn(D_MIN, D_MAX)
         val fC = f.coerceIn(F_MIN, F_MAX)
+        val vC = vExtra.coerceIn(-0.5, 0.5)   // onafhankelijke volhoudendheidsas
 
         return ConfigOverrideWriter.ParamOverrides(
             // ── D-afhankelijk ───────────────────────────────────────────
@@ -117,7 +125,9 @@ object DFMapping {
             // Koppelt automatisch aan earlyBoost: meer vroeg → meer late demping
             // lateDecay: uit bij F≤0.5, 0.20 bij F=0.6, 0.60 bij F=0.8
             // Milder dan earlyBoost zodat late commits niet te hard worden afgeknepen.
-            lateCommitDecayFactor         = max(0.0, (fC - 0.5) * 2.0),
+            // vC > 0 verlaagt de decay (minder remmen na de piek = meer volhoudendheid).
+            // vC < 0 verhoogt de decay (eerder afkappen = minder volhoudendheid).
+            lateCommitDecayFactor         = max(0.0, (fC - 0.5) * 2.0 - vC * 0.6),
             lateCommitDecayThreshold      = max(0.40, 0.55 - (fC - 0.5) * 0.10),
 
             // Piekkalibr.: F hoog = steilere vroege stijging verwacht
@@ -133,21 +143,32 @@ object DFMapping {
 
             // Reactiesnelheid: F hoog = sneller reageren (minder minuten vereist)
             // F=0.50: 12 min  F=0.60: 10 min  F=0.70: 8 min  F=0.80: 6 min
-            sustainedRiseMinTarget        = max(5, (12 - ((fC - 0.5) * 20).toInt()))
+            // vC > 0 = nog sneller reageren na de piek als BG niet zakt
+            // vC=+0.5: -2 min extra; vC=-0.5: +2 min extra
+            sustainedRiseMinTarget        = max(5, (12 - ((fC - 0.5) * 20).toInt() - (vC * 4).toInt()))
         )
     }
 
     /**
      * Bereken sterkte, timing en volhoudendheid als STV-map voor
      * ConfigOverrideWriter.writeWithStvAndParams().
+     *
+     * vExtra (−0.5 .. +0.5): onafhankelijke V-offset, los van D.
+     *   S = round(95 × D)           — alleen gestuurd door D
+     *   T = round(106 + (F−0.5)×40) — alleen gestuurd door F
+     *   V = round(95 + (D−1.0)×50 + vExtra×30) — D-basis + vrije V-offset
+     *
+     * Met vExtra=0 is het gedrag identiek aan vóór de introductie van vExtra.
+     * Bij vExtra=+0.33: V +10% zonder dat S meebeweegt.
      */
-    fun toStvMap(d: Double, f: Double, nachtFactor: Int): Map<String, Int> {
+    fun toStvMap(d: Double, f: Double, nachtFactor: Int, vExtra: Double = 0.0): Map<String, Int> {
         val dC = d.coerceIn(D_MIN, D_MAX)
         val fC = f.coerceIn(F_MIN, F_MAX)
+        val vC = vExtra.coerceIn(-0.5, 0.5)
         return mapOf(
             "sterkte"        to (REF_S * dC).roundToInt().coerceIn(75, 125),
             "timing"         to (REF_T + (fC - 0.5) * 40).roundToInt().coerceIn(80, 125),
-            "volhoudendheid" to (REF_V + (dC - 1.0) * 50).roundToInt().coerceIn(70, 125),
+            "volhoudendheid" to (REF_V + (dC - 1.0) * 50 + vC * 30).roundToInt().coerceIn(70, 125),
             "nacht_factor"   to nachtFactor
         )
     }
@@ -156,9 +177,9 @@ object DFMapping {
      * Geeft een leesbare samenvatting van de belangrijkste afgeleide waarden.
      * Voor weergave in de UI naast de D/F knoppen.
      */
-    fun summary(d: Double, f: Double): String {
-        val stv = toStvMap(d, f, 85)
-        val po  = toParamOverrides(d, f)
+    fun summary(d: Double, f: Double, vExtra: Double = 0.0): String {
+        val stv = toStvMap(d, f, 85, vExtra)
+        val po  = toParamOverrides(d, f, vExtra = vExtra)
         return buildString {
             append("S=${stv["sterkte"]} T=${stv["timing"]} V=${stv["volhoudendheid"]}")
             if ((po.earlyBoostFactor ?: 1.0) > 1.01)

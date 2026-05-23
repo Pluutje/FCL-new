@@ -39,6 +39,16 @@ object DFLearner {
     private const val KEY_F_SNEL  = "df_f_snel"
     private const val KEY_D_TRAAG = "df_d_traag"
     private const val KEY_F_TRAAG = "df_f_traag"
+
+    // ── Onafhankelijke volhoudendheidsoffset per type (los van D) ─────────
+    // vExtra ∈ −0.5..+0.5 → V = 95 + (D−1)*50 + vExtra*30
+    // Stap per aanpassing: ±0.067 ≈ ±2% V.
+    private const val KEY_V_EXTRA_SNEL  = "df_v_extra_snel"
+    private const val KEY_V_EXTRA_TRAAG = "df_v_extra_traag"
+    private const val V_EXTRA_MIN = -0.5
+    private const val V_EXTRA_MAX =  0.5
+    private const val V_EXTRA_STEP = 0.067   // ≈ 2% V per stap
+
     // Episodes per type (voor minimum-drempel)
     private const val KEY_COUNT_SNEL  = "df_count_snel"
     private const val KEY_COUNT_TRAAG = "df_count_traag"
@@ -180,6 +190,31 @@ object DFLearner {
         prefs(context).edit().putFloat(key, f.coerceIn(DFMapping.F_MIN, DFMapping.F_MAX).toFloat()).apply()
     }
 
+    // ── Onafhankelijke volhoudendheidsoffset (vExtra) get/set ─────────────
+
+    fun getVExtraForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Double {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_V_EXTRA_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_V_EXTRA_TRAAG
+            else -> return 0.0
+        }
+        return prefs(context).getFloat(key, 0f).toDouble()
+    }
+
+    fun setVExtraForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, v: Double) {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_V_EXTRA_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_V_EXTRA_TRAAG
+            else -> return
+        }
+        prefs(context).edit().putFloat(key, v.coerceIn(V_EXTRA_MIN, V_EXTRA_MAX).toFloat()).apply()
+    }
+
+    fun adjustVExtraForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType, delta: Double) {
+        val current = getVExtraForType(context, type)
+        setVExtraForType(context, type, current + delta)
+    }
+
     private fun getEpisodeCountForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Int {
         val key = when (type) {
             app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_COUNT_SNEL
@@ -273,6 +308,42 @@ object DFLearner {
         val currentF = getFForType(context, effectiveMealType)
         setDForType(context, effectiveMealType, currentD + typedStep.deltaD)
         setFForType(context, effectiveMealType, currentF + typedStep.deltaF)
+
+        // ── Leer vExtra: onafhankelijke volhoudendheidsoffset ──────────────
+        // vExtra reageert op late BG-daling (na de piek):
+        //   minBgInWindow hoog én piekBg hoog → piek daalde niet snel genoeg
+        //     → vExtra omhoog (meer persistentie): langer actief blijven na piek
+        //   minBgInWindow laag (hypo) → vExtra omlaag (minder persistentie)
+        //   MEER_DOSIS bij TRAAG → vExtra ook omhoog (vetrijke maaltijden zakken traag)
+        //   Diagnose OK of TE_WEINIG → vExtra neutraal (D is de juiste knop)
+        val vExtraDelta = when {
+            // Hypo: te veel persistentie was de oorzaak → terugschroeven
+            typedStep.hypoStraf > 0.0 ->
+                -V_EXTRA_STEP * (typedStep.hypoStraf / 2.0).coerceAtMost(2.0)
+
+            // Piek hoog maar verdeling was al goed (MEER_DOSIS):
+            // bij TRAAG specifiek ook vExtra omhoog — vetrijke maaltijden zakken traag
+            typedStep.diagnose == "MEER_DOSIS"
+                && effectiveMealType == app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG ->
+                +V_EXTRA_STEP * 0.8
+
+            // Piek hoog maar piek was óók laag na episode: BG zakte te snel terug
+            // dit is een D-probleem, vExtra neutraal laten
+            typedStep.diagnose == "TE_WEINIG" -> 0.0
+
+            // TIMING_SPREAD of FRONTLOAD_LAG → timing-probleem, vExtra neutraal
+            typedStep.diagnose == "TIMING_SPREAD" || typedStep.diagnose == "FRONTLOAD_LAG" -> 0.0
+
+            // Alles OK maar piek was net iets te hoog (peakFout 0.3..1.0):
+            // subtiel meer persistentie voor late resorptie
+            typedStep.diagnose == "OK" && typedStep.peakFout > 0.3 ->
+                +V_EXTRA_STEP * 0.4
+
+            else -> 0.0
+        }
+        if (kotlin.math.abs(vExtraDelta) > 0.001) {
+            adjustVExtraForType(context, effectiveMealType, vExtraDelta)
+        }
 
         // Sla op in type-specifieke history
         val histKey = when (effectiveMealType) {
@@ -624,6 +695,9 @@ object DFLearner {
             .remove(KEY_F_SNEL)
             .remove(KEY_D_TRAAG)
             .remove(KEY_F_TRAAG)
+            // Onafhankelijke V-offset resetten naar nul
+            .remove(KEY_V_EXTRA_SNEL)
+            .remove(KEY_V_EXTRA_TRAAG)
             // Episode-tellers resetten
             .putInt(KEY_COUNT_SNEL, 0)
             .putInt(KEY_COUNT_TRAAG, 0)

@@ -1026,10 +1026,17 @@ private fun hypoProtection(
     // Fix2 (projectedMinWithInsulin >= 4.0) is de enige veiligheidscheck die
     // nodig is — die is gebaseerd op de werkelijke BG-projectie en werkt
     // correct ongeacht de aanleiding van de stijging (maaltijd of rebound).
+    // fastLaneRising: bypas bij agressieve maaltijdstijging.
+    // recentSlope-drempel verlaagd van 5.0 naar 3.0 voor de lage-IOB situatie
+    // (iobRatio < 0.15): bij een verse episode met weinig IOB is een stijging
+    // van 3+ mmol/uur voldoende bewijs. De hogere drempel van 5.0 blijft gelden
+    // als er al meer IOB staat (0.15-0.25), want dan is de hypo-projectie
+    // gevaarlijker bij een grote commit.
+    val effectiveFastLaneSlope = if (ctx.iobRatio < 0.15) 3.0 else 5.0
     val fastLaneRising =
         mealSignal != null &&
             mealSignal.state == MealState.CONFIRMED &&
-            ctx.recentSlope >= 5.0 &&
+            ctx.recentSlope >= effectiveFastLaneSlope &&
             ctx.recentDelta5m >= 0.30 &&
             ctx.iobRatio < 0.25 &&
             ctx.input.bgNow >= 5.5 &&
@@ -1052,9 +1059,19 @@ private fun hypoProtection(
     //   2) BG stijgt duidelijk op beide tijdschalen (macro + fast-lane)
     //   3) zelfs zónder de geplande dosis is er geen hypo-risico
     //   4) ook MET de geplande dosis blijft de projectie veilig
+    // clearlyRisingMealContext: bypas bij bevestigde stijging.
+    // Origineel eiste ctx.slope >= 0.6 (macro-slope). Na een sensorwissel herstelt
+    // de macro-slope trager dan de 5-min delta, waardoor een echte stijging van 10+
+    // mmol/uur werd geblokkeerd terwijl de macro-slope nog negatief was.
+    // Fix: macro-slope >= 0.6 OR (recentSlope >= 3.0 AND recentDelta5m > 0.0).
+    // De veiligheidseis projectedMinWithInsulin >= 4.0 blijft intact: die blokkeert
+    // de bypass als de geplande dosis zelf een hypo projecteert.
+    val risingOnEitherTimescale =
+        ctx.slope >= 0.6 ||
+            (ctx.recentSlope >= 3.0 && ctx.recentDelta5m > 0.0)
     val clearlyRisingMealContext = mealSignal != null &&
         mealSignal.state == MealState.CONFIRMED &&
-        ctx.slope >= 0.6 &&
+        risingOnEitherTimescale &&
         ctx.recentDelta5m >= 0.0 &&
         ctx.iobRatio < 0.50 &&
         projectedMinNoInsulin >= 4.8 &&
@@ -1847,13 +1864,18 @@ private fun evaluatePostPeak(
     // Vier eisen samen voorkomen false positives:
     // 1. meal CONFIRMED (niet op één artefact-cyclus)
     // 2. episode >= 5 min actief (artefact bereikt nooit 5 min CONFIRMED duur)
-    // 3. deltaToTarget >= 3.0 (voldoende marge voor volledige IOB-staart bij vals signaal)
+    // 3. deltaToTarget >= 2.0 + recentSlope >= 3.0 bij lage IOB (was >= 3.0 altijd).
+    //    Reden verlaging: bevestigde stijging bij BG 7.8 (delta=2.28, recentSlope=10,
+    //    iobRatio=0.04) werd ten onrechte geblokkeerd door ABSORPTION-suppress terwijl
+    //    er geen werkelijk hypo-risico was. Extra veiligheidseis: iobRatio < 0.15.
     // 4. recentDelta5m >= 0.30 (meetbare snelle stijging, geen CGM-drift)
     val newMealOverride =
         mealSignal.state == MealState.CONFIRMED &&
             minutesSinceEpisodeStart >= 5 &&
-            ctx.deltaToTarget >= 3.0 &&
-            ctx.recentDelta5m >= 0.30
+            ctx.recentDelta5m >= 0.30 &&
+            ctx.iobRatio < 0.15 &&
+            (ctx.deltaToTarget >= 3.0 ||
+                (ctx.deltaToTarget >= 2.0 && ctx.recentSlope >= 3.0))
 
     // episode-like: ook zonder absorption kunnen we een top herkennen
     val episodeLike =
@@ -4011,12 +4033,31 @@ class FCLvNext(
                     else 0.0
                 logRow.commitDoseRaw = commitDose
 
+                // Hypo-debt compensatie in commit-pad:
+                // Als in deze episode insuline werd achtergehouden door de hypo-guard
+                // (episodeHypoDebtU > 0), wordt de commit-dosis verhoogd om de schuld
+                // deels in te lopen. Max +50% van commit-dosis, nooit meer dan schuld.
+                val commitDebtBonus =
+                    if (episodeHypoDebtU > 0.01 &&
+                        mealSignal.state == MealState.CONFIRMED &&
+                        ctx.recentDelta5m > 0.0 &&
+                        hypoNoInsulinProjection >= 4.8) {
+                        val maxBonus = commitDose * 0.50
+                        val bonus = minOf(maxBonus, episodeHypoDebtU)
+                        if (bonus > 0.01) {
+                            episodeHypoDebtU = (episodeHypoDebtU - bonus).coerceAtLeast(0.0)
+                            status.append("COMMIT DEBT+" + String.format("%.2f", bonus) +
+                                              "U (rest=" + String.format("%.2f", episodeHypoDebtU) + "U)\n")
+                        }
+                        bonus
+                    } else 0.0
                 val committedDose =
                     if (peakCategory >= PeakCategory.HIGH)
-                        maxOf(finalDose, commitDose * 1.15)
+                        maxOf(finalDose, (commitDose + commitDebtBonus) * 1.15)
                     else
-                        maxOf(finalDose, commitDose)
-                logRow.commitDoseFinal = committedDose
+                        maxOf(finalDose, commitDose + commitDebtBonus)
+                val committedDoseCapped = committedDose.coerceAtMost(config.maxSMB)
+                logRow.commitDoseFinal = committedDoseCapped
 
 
                 val effectiveMinCommitDose = when {
@@ -4037,7 +4078,7 @@ class FCLvNext(
 
                 if (committedDose >= effectiveMinCommitDose) {
 
-                    commandedDose = committedDose
+                    commandedDose = committedDoseCapped
 
                     lastCommitAt = now
                     lastCommitDose = committedDose
