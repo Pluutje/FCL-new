@@ -34,6 +34,8 @@
     <string name="event_type">Hendelsestype</string>
     <string name="mgdl">mg/dl</string>
     <string name="mmol">mmol/l</string>
+    <string name="bg_mgdl">%1$d mg/dL</string>
+    <string name="bg_mmol">%1$.1f mmol/L</string>
     <string name="save">Lagre</string>
     <string name="skip">Hopp over</string>
     <string name="switch_to_edit">Rediger</string>
@@ -470,6 +472,7 @@
     <string name="arrow_center">Midten</string>
     <!--    Command-->
     <string name="connectiontimedout">Tilkoblingen ble tidsavbrutt</string>
+    <string name="command_replaced">Erstattet av en nyere kommando</string>
     <string name="pump_not_configured">Pumpe ikke konfigurert</string>
     <!--    PumpEnactResult-->
     <string name="enacted">Utført</string>
@@ -646,6 +649,10 @@
     <string name="basal">Basal</string>
     <string name="basalpct">Basal %</string>
     <string name="sensitivity">Sensitivitet</string>
+    <string name="isf_for_carbs">Gjennomsnittlig ISF for kalkulator og karboabsorpsjon: %1$.1f</string>
+    <string name="isf_profile">Profil ISF: %1$.1f</string>
+    <string name="isf_variable">Dynamisk ISF: %1$.1f</string>
+    <string name="isf_effective">Effektiv ISF: %1$.1f</string>
     <string name="autosens_long">Autosens-verdi: %.0f%%</string>
     <string name="autosens_short">%.0f%%</string>
     <string name="algorithm_long">Algoritmens sensitivitet: %.0f%%</string>
