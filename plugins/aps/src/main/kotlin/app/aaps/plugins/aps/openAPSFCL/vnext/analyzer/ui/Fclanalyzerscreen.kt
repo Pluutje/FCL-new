@@ -59,8 +59,10 @@ fun FclAnalyzerScreen(
 
     fun loadFromDatabase(entities: List<FCLCycleLogEntity>) {
         val latest = entities.maxByOrNull { it.timestampMs }
+        val aggLevel = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getAggressiveness(context)
         currentAxisState = latest?.let {
-            CurrentAxisStateResolver.fromLogRow(it)
+            val base = CurrentAxisStateResolver.fromLogRow(it)
+            CurrentAxisStateResolver.withAggLevel(base, aggLevel)
         }
         allRows = entities.map { it.toLogRow() }
     }
@@ -88,10 +90,23 @@ fun FclAnalyzerScreen(
             }
 
             val detected = EpisodeDetector.detect(allRows!!)
-            val cleanedEpisodes = if (detected.size > 1) detected.drop(1) else emptyList()
+            val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25
+
+            // Filter nutteloze episodes: toon en sla alleen episodes op waarbij
+            // FCLvNext minimaal 1 keer een echte maaltijdbolus heeft gegeven
+            // (>= 80% van maxSMB). Episodes met alleen kleine correcties (zoals
+            // nachtcorrecties of sensor-artefacten) zijn niet nuttig voor de
+            // learner en verwarren de gebruiker in de episode viewer.
+            // De meest recente (nog actieve) episode wordt altijd getoond.
+            val significantDoseThreshold = manualMaxSmb * 0.80
+            val allCleaned = if (detected.size > 1) detected.drop(1) else emptyList()
+            val lastEpisode = allCleaned.lastOrNull()
+            val cleanedEpisodes = allCleaned.filter { ep ->
+                ep == lastEpisode ||   // meest recente altijd tonen
+                ep.rows.any { it.deliveredTotal >= significantDoseThreshold }
+            }
             episodes = cleanedEpisodes
 
-            val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25
             val builtMetrics = EpisodeMetricsBuilder.build(cleanedEpisodes, manualMaxSmb)
             episodeMetrics = withContext(Dispatchers.IO) {
                 enrichMetricsWithAdviceState(context, builtMetrics)
@@ -372,8 +387,10 @@ fun FclAnalyzerScreen(
                             val d = DFLearner.getD(context)
                             val f = DFLearner.getF(context)
                             ConfigOverrideWriter.writeWithStvAndParams(
-                                stvMap       = DFMapping.toStvMap(d, f, activeParams.nachtFactor),
-                                paramOverrides = DFMapping.toParamOverrides(d, f),
+                                stvMap       = DFMapping.toStvMap(d, f, activeParams.nachtFactor,
+                                    aggLevel = DFLearner.getAggressiveness(context)),
+                                paramOverrides = DFMapping.toParamOverrides(d, f,
+                                    aggLevel = DFLearner.getAggressiveness(context)),
                                 reason       = "Initiële param-sync: earlyBoost nog op default",
                                 episodeCount = episodes?.size ?: 0
                             )
@@ -394,7 +411,8 @@ fun FclAnalyzerScreen(
                             val f = DFLearner.getF(context)
                             ConfigOverrideWriter.writeWithStvAndParams(
                                 stvMap = stvMap,
-                                paramOverrides = DFMapping.toParamOverrides(d, f),
+                                paramOverrides = DFMapping.toParamOverrides(d, f,
+                                    aggLevel = DFLearner.getAggressiveness(context)),
                                 reason = result.summary,
                                 episodeCount = episodes?.size ?: 0
                             )
@@ -423,8 +441,10 @@ fun FclAnalyzerScreen(
                             val f = DFLearner.getF(context)
                             val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
                             ConfigOverrideWriter.writeWithStvAndParams(
-                                stvMap           = DFMapping.toStvMap(d, f, nachtFactor),
-                                paramOverrides   = DFMapping.toParamOverrides(d, f),
+                                stvMap           = DFMapping.toStvMap(d, f, nachtFactor,
+                                    aggLevel = DFLearner.getAggressiveness(context)),
+                                paramOverrides   = DFMapping.toParamOverrides(d, f,
+                                    aggLevel = DFLearner.getAggressiveness(context)),
                                 reason           = "Handmatig MaxSMB: maxSMB=${"%.2f".format(newMaxSmb)}U brake=${"%.3f".format(newIobBrake)}",
                                 episodeCount     = episodes?.size ?: 0,
                                 maxSmbDayLearned = newMaxSmb,
@@ -783,8 +803,10 @@ private suspend fun runAdvisorFlow(
                     DFLearner.getF(context)
                 val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
                 ConfigOverrideWriter.writeWithStvAndParams(
-                    stvMap           = DFMapping.toStvMap(newD, newF, nachtFactor),
-                    paramOverrides   = DFMapping.toParamOverrides(newD, newF),
+                    stvMap           = DFMapping.toStvMap(newD, newF, nachtFactor,
+                        aggLevel = DFLearner.getAggressiveness(context)),
+                    paramOverrides   = DFMapping.toParamOverrides(newD, newF,
+                        aggLevel = DFLearner.getAggressiveness(context)),
                     reason           = buildString {
                         if (dfChanged)  append("D/F: ${step!!.reason} ")
                         if (smbChanged) append("MaxSMB: ${smbResult!!.reason}")

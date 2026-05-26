@@ -362,6 +362,13 @@ class DetermineBasalFCL @Inject constructor(
             val bgHistoryMmol = bgHistoryPoints.map { it.timestamp to it.bg }
             val bgNowMmol = bgHistoryMmol.last().second
 
+            // Externe bolus detectie via IOB-delta.
+            // Moet VOOR getAdvice() worden aangeroepen (update interne IOB-state).
+            val externalBolusDetected = fclvNext.estimateExternalBolus(
+                currentIob = currentIOB
+            )
+            val manualBolusDetected = externalBolusDetected >= 0.5
+
             val fclInput = FCLvNextInput(
                 bgNow = bgNowMmol,
                 bgHistory = bgHistoryMmol,
@@ -369,6 +376,7 @@ class DetermineBasalFCL @Inject constructor(
                 maxIOB = profile.max_iob,
                 effectiveISF = sensMgdl / 18.0,
                 targetBG = targetMgdl / 18.0,
+                externalBolusU = externalBolusDetected,
                 isNight = isNight
             )
 
@@ -390,10 +398,6 @@ class DetermineBasalFCL @Inject constructor(
                 if (isNight) preferences.get(DoubleKey.max_bolus_night)
                 else preferences.get(DoubleKey.max_bolus_day)
 
-// TODO later: echte detectie van manual bolus vanuit pump events
-            val manualBolusDetected = false
-
-
 // 1) Log elke cycle (lichtgewicht)
             fclMetrics.onFiveMinuteTick(
                 currentBG = bgNowMmol,          // ✅ mmol/L (zeker correct)
@@ -407,6 +411,7 @@ class DetermineBasalFCL @Inject constructor(
             val statusFormatter =
                 FCLvNextStatusFormatter(
                     prefs = preferences,
+                    context = context,
                 )
 
 

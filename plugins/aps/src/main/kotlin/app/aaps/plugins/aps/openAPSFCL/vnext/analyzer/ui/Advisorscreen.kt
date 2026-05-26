@@ -593,6 +593,15 @@ private fun AdvisorSummaryCard(recommendation: FclAdvisorRecommendation) {
 
 @Composable
 private fun AdvisorCurrentSettingsCard(current: StvState) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val aggLevel = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getAggressiveness(context)
+    val aggLabel = when {
+        aggLevel <= 2 -> "Zeer voorzichtig"
+        aggLevel <= 4 -> "Voorzichtig"
+        aggLevel == 5 -> "Standaard"
+        aggLevel <= 7 -> "Agressief"
+        else          -> "Maximaal agressief"
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -601,10 +610,26 @@ private fun AdvisorCurrentSettingsCard(current: StvState) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Huidige instellingen", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Huidige instellingen", style = MaterialTheme.typography.titleMedium)
+                Text("Agressiviteit $aggLevel — $aggLabel",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text("💪 Sterkte (S): ${current.sterkte}%")
             Text("⏱️ Timing (T): ${current.timing}%")
             Text("🔁 Volhoudendheid (V): ${current.volhoudendheid}%")
+            if (aggLevel != 5) {
+                Text(
+                    "Agressiviteitsschuif staat op $aggLevel — waarden zijn al gecorrigeerd.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

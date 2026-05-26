@@ -15,6 +15,18 @@ object CurrentAxisStateResolver {
             volhoudendheid = row.volhoudendheidPct.coerceIn(70, 130)
         )
 
+    // Bereken de effectieve S/T/V zoals ze worden gebruikt na toepassing
+    // van de agressiviteitsschuif. Dit is wat de gebruiker ziet en verwacht:
+    // consistent met wat StatusFormatter toont na de volgende cyclus.
+    fun withAggLevel(base: StvState, aggLevel: Int): StvState {
+        val scale = (aggLevel - 5) / 4.0
+        return StvState(
+            sterkte        = (base.sterkte * (1.0 + scale * 0.12)).toInt().coerceIn(75, 130),
+            timing         = (base.timing  * (1.0 + scale * 0.06)).toInt().coerceIn(80, 130),
+            volhoudendheid = (base.volhoudendheid * (1.0 + scale * 0.10)).toInt().coerceIn(70, 130)
+        )
+    }
+
     /**
      * Vergelijkt de S/T/V waarden van een episode met de huidige staat.
      * Gebruikt een tolerantie van ±2% om kleine afwijkingen te tolereren.

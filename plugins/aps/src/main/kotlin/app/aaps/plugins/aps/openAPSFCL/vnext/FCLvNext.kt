@@ -25,7 +25,8 @@ data class FCLvNextInput(
     val maxIOB: Double,
     val effectiveISF: Double,                   // mmol/L per U
     val targetBG: Double,                       // mmol/L
-    val isNight: Boolean
+    val isNight: Boolean,
+    val externalBolusU: Double = 0.0            // gedetecteerde externe bolus (IOB-delta)
 )
 
 data class FCLvNextContext(
@@ -299,6 +300,9 @@ private val peakEstimator = PeakEstimatorContext()
 private var lastCommitAt: DateTime? = null
 private var lastCommitDose: Double = 0.0
 private var lastCommitReason: String = ""
+// IOB-tracking voor externe bolus detectie
+private var prevIobForExternalDetect: Double = -1.0
+private var prevFclDoseForExternalDetect: Double = 0.0
 
 private var lastReentryCommitAt: DateTime? = null
 
@@ -983,8 +987,13 @@ private fun hypoProtection(
         val vFast = (ctx.recentDelta5m * 12.0).coerceIn(-6.0, 6.0)
         val vMacro = ctx.slope.coerceIn(-6.0, 6.0)
 
-        // Worst-case downtrend:
-        val vEff = minOf(vMacro, vFast * 0.9)
+        // Worst-case downtrend - MAAR bij snelle maaltijdstijging (recentSlope>=8.0)
+        // is de worst-case NIET de macro-daling: die is een artefact van de vorige
+        // episode. Gebruik dan de stijging (vFast) voor een realistische projectie.
+        val vEff = if (ctx.recentSlope >= 8.0 && vFast > vMacro)
+            maxOf(vMacro, vFast * 0.7)   // stijging, max 70% gewicht
+        else
+            minOf(vMacro, vFast * 0.9)   // origineel: worst-case daling
 
         val a = ctx.acceleration.coerceIn(-1.2, 1.2)
 
@@ -1033,6 +1042,10 @@ private fun hypoProtection(
     // als er al meer IOB staat (0.15-0.25), want dan is de hypo-projectie
     // gevaarlijker bij een grote commit.
     val effectiveFastLaneSlope = if (ctx.iobRatio < 0.15) 3.0 else 5.0
+    // projectedMinNoInsulin >= 4.8 was onhaalbaar bij hoge IOB (na frontload):
+    // iob=3.39*ISF4.7 geeft altijd negatieve no-insulin projectie.
+    // Vervangen door: projectedMinWithInsulin >= 2.0 (MET dosis minimaal veilig)
+    // EN recentSlope >= 8.0 (alleen bij sterke stijging, niet bij ruis).
     val fastLaneRising =
         mealSignal != null &&
             mealSignal.state == MealState.CONFIRMED &&
@@ -1040,7 +1053,7 @@ private fun hypoProtection(
             ctx.recentDelta5m >= 0.30 &&
             ctx.iobRatio < 0.25 &&
             ctx.input.bgNow >= 5.5 &&
-            projectedMinNoInsulin >= 4.8
+            projectedMinWithInsulin >= 2.0   // was projectedMinNoInsulin>=4.8
 
     if (fastLaneRising) {
         return HypoProtection(
@@ -1069,13 +1082,18 @@ private fun hypoProtection(
     val risingOnEitherTimescale =
         ctx.slope >= 0.6 ||
             (ctx.recentSlope >= 3.0 && ctx.recentDelta5m > 0.0)
+    // projectedMinWithInsulin drempel: normaal 4.0 maar bij zeer steile stijging
+    // (recentSlope >= 8.0) is 2.0 voldoende veilig. Zo wordt niet geblokkeerd
+    // als een grote IOB (na frontload) de no-insulin projectie negatief maakt
+    // terwijl de BG snel stijgt en het hyporisico minimaal is.
+    val safeProjectionThreshold = if (ctx.recentSlope >= 8.0) 2.0 else 4.0
     val clearlyRisingMealContext = mealSignal != null &&
         mealSignal.state == MealState.CONFIRMED &&
         risingOnEitherTimescale &&
         ctx.recentDelta5m >= 0.0 &&
         ctx.iobRatio < 0.50 &&
-        projectedMinNoInsulin >= 4.8 &&
-        projectedMinWithInsulin >= 4.0   // voorkomt bypass als dosis zelf gevaarlijk is
+        projectedMinWithInsulin >= safeProjectionThreshold
+        // projectedMinNoInsulin verwijderd: onhaalbaar bij hoge IOB na frontload
 
     if (clearlyRisingMealContext) {
         return HypoProtection(
@@ -1084,6 +1102,31 @@ private fun hypoProtection(
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
             reason = "HYPO PROTECT BYPASSED (confirmed meal, rising, safe no-insulin projection)"
+        )
+    }
+
+    // strongRisingWithIob bypass: sterke stijging terwijl IOB al hoog is.
+    // Na een frontload stijgt BG soms door ondanks hoge IOB.
+    // projectedMinWithInsulin is dan negatief door hoge IOB maar dat
+    // overschat het risico: de bestaande IOB werkt pas volledig na 60-90 min.
+    // Sleutel: projNoInsulin >= 5.0 bewijst dat BG zonder extra dosis
+    // niet hypo gaat. Die check is conservatief genoeg als veiligheidsgate.
+    val strongRisingWithIob =
+        mealSignal != null &&
+            mealSignal.state == MealState.CONFIRMED &&
+            ctx.recentSlope >= 12.0 &&
+            ctx.recentDelta5m >= 0.50 &&
+            ctx.iobRatio < 0.50 &&
+            ctx.input.bgNow >= 7.0 &&
+            projectedMinNoInsulin >= 5.0
+
+    if (strongRisingWithIob) {
+        return HypoProtection(
+            active = false,
+            projectedMin = projectedMin,
+            projectedMinNoInsulin = projectedMinNoInsulin,
+            projectedMinWithPlannedInsulin = projectedMinWithInsulin,
+            reason = "HYPO PROTECT BYPASSED (strong rise with existing IOB, no-insulin safe)"
         )
     }
     // ── einde meal-context vrijstelling ───────────────────────────────────
@@ -1663,9 +1706,15 @@ private fun computeEarlyDoseDecision(
     conf = conf.coerceIn(0.0, 1.0)
 
     val baseStage1Min = 0.28
-// ✅ Stage2 eerder als de voorspelde piek groot is (timing fix, niet meer totaal)
-    val stage2Min =
-        if (peak.predictedPeak >= 16.0) 0.48 else 0.55
+// Stage2 eerder als de voorspelde piek groot is
+    // Avondmaaltijdanalyse 25/05: stage2 vuurde te laat (pred_peak 9-10, BG al 10.2).
+    // Verlaging naar 0.45 bij pred_peak >= 9.5 zodat stage2 ~10 min eerder kan vuren.
+    val stage2Min = when {
+        peak.predictedPeak >= 16.0 -> 0.45
+        peak.predictedPeak >= 12.5 -> 0.47
+        peak.predictedPeak >=  9.5 -> 0.50  // nieuw: ook bij piek >= 9.5
+        else                       -> 0.55
+    }
 
 // jouw bestaande fast-carb versneller (blijft bestaan)
     val fastCarbStage1Mul =
@@ -1700,10 +1749,21 @@ private fun computeEarlyDoseDecision(
     val allowLarge = (trend.state == TrendState.RISING_CONFIRMED)
 
 // stageToFire:
+    // Stage 3: tweede grote boosted commit, 5 min na stage 2.
+    // Alleen als BG nog stijgt (slope >= 0.50) en IOB nog niet te hoog.
+    // iobRatio drempel: 0.55 normaal, maar 0.65 bij pred_peak >= 11.5
+    // want de piek-voorspelling geeft extra zekerheid dat de dosis nodig is.
+    val stage3IobMax = if (peak.predictedPeak >= 11.5) 0.65 else 0.55
+    val allowStage3 = allowLarge &&
+        ctx.slope >= 0.50 &&
+        ctx.iobRatio < stage3IobMax &&
+        ctx.recentSlope >= 3.0
     val stageToFire = when {
         earlyDose.stage == 0 && conf >= dynamicStage1Min -> 1
         earlyDose.stage == 1 && conf >= stage2Min &&
             minutesSinceLastFire >= 5 && allowLarge -> 2
+        earlyDose.stage == 2 && conf >= stage2Min &&
+            minutesSinceLastFire >= 5 && allowStage3 -> 3
         else -> 0
     }
     if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= 5 && !allowLarge) {
@@ -1714,8 +1774,11 @@ private fun computeEarlyDoseDecision(
         return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: no fire", remainingDebtU = episodeHypoDebtU)
     }
 
-    val (minF, maxF) =
-        if (stageToFire == 1) 0.40 to 0.70 else 0.55 to 0.90
+    val (minF, maxF) = when (stageToFire) {
+        1    -> 0.40 to 0.70
+        2    -> 0.55 to 0.90
+        else -> 0.45 to 0.65  // stage 3: groter dan watching maar kleiner dan stage 2
+    }
 
     var factor = lerp(minF, maxF, conf)
 
@@ -2927,6 +2990,21 @@ class FCLvNext(
     }
 
 
+    // Externe bolus schatting (IOB-delta methode)
+    // Roep aan vanuit DetermineBasalFCL VOOR getAdvice().
+    // Geeft de geschatte externe bolus (U) terug op basis van IOB-stijging
+    // boven wat FCLvNext zelf de vorige cyclus heeft gegeven.
+    fun estimateExternalBolus(currentIob: Double): Double {
+        val result = if (prevIobForExternalDetect >= 0.0) {
+            val iobDelta = currentIob - prevIobForExternalDetect
+            val external = (iobDelta - prevFclDoseForExternalDetect).coerceAtLeast(0.0)
+            external
+        } else 0.0
+        prevIobForExternalDetect = currentIob
+        prevFclDoseForExternalDetect = 0.0
+        return result
+    }
+
     // ================================================    Get Advice ++++++++++++++++++++++++++++++++++++++
     @SuppressLint("SuspiciousIndentation") fun getAdvice(input: FCLvNextInput): FCLvNextAdvice {
         // reset reserve logging per cycle
@@ -3818,8 +3896,17 @@ class FCLvNext(
         //   budget = 0.5U: schaling = max(0.50, 1.0 - 0.5/2.50) = 0.80 → 0.74U
         //   budget = 1.0U: schaling = max(0.50, 1.0 - 1.0/2.50) = 0.60 → 0.56U
         //   budget = 2.0U: schaling = max(0.50, 1.0 - 2.0/2.50) = 0.50 → 0.47U (minimum 50%)
+        // wffBudgetScaling minimum: normaal 0.50 maar bij hoge predicted peak
+        // (>=11.0 mmol) wordt het minimum 0.65. Dit voorkomt dat de watching
+        // frontload target te klein wordt juist als de piek hoog wordt verwacht.
+        // Bij pred_peak>=12.5: minimum 0.75 voor nog meer ruimte.
+        val wffScalingMin = when {
+            peak.predictedPeak >= 12.5 -> 0.75
+            peak.predictedPeak >= 11.0 -> 0.65
+            else                       -> 0.50
+        }
         val wffBudgetScaling = if (episodeBoostBudgetU > 0.1) {
-            (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(0.50, 1.0)
+            (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
         val watchingFrontloadTargetU =
             (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling)
@@ -4067,7 +4154,7 @@ class FCLvNext(
 
                 lateDecayMul = if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
-                        .coerceIn(0.25, 1.0)
+                        .coerceIn(0.35, 1.0)  // floor 0.25->0.35: commit 3+ groter
                 } else 1.0
 
                 if (lateDecayActive) {
@@ -4804,6 +4891,9 @@ class FCLvNext(
         logRow.finalDose = finalDose
         logRow.commandedDose = commandedDose
         logRow.deliveredTotal = effectiveDeliveredNow
+        logRow.externalBolusU = input.externalBolusU
+        // Update prevFclDose voor externe bolus detectie volgende cyclus
+        prevFclDoseForExternalDetect = effectiveDeliveredNow
         logRow.bolus = effectiveBolus
         logRow.basalRate = effectiveBasalRate
 

@@ -15,6 +15,7 @@ data class FclUiSnapshot(
 
 class FCLvNextStatusFormatter(
     private val prefs: Preferences,
+    private val context: android.content.Context,
 ) {
 
     // ── Label-helpers ─────────────────────────────────────────────────────────
@@ -167,13 +168,19 @@ class FCLvNextStatusFormatter(
         if (activeConfig == null) return "🔧 ANALYZER-WAARDEN\n─────────────────────\nConfig nog niet beschikbaar (wacht op eerste FCLvNext cyclus)"
 
         val snapManual = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 0.0
+        // Gebruik de live berekende maxSMB via MaxSmbLearner (geleerde fractie
+        // x huidige manualMaxSmb). Identiek aan wat het MaxSMB-tabblad toont.
+        val liveMaxSmb = if (snapManual > 0.001)
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner
+                .getMaxSmbDay(context, snapManual)
+        else activeConfig.maxSMB
 
         return buildString {
             appendLine("🔧 ANALYZER-GESTUURDE WAARDEN (config)")
             appendLine("─────────────────────")
-            appendLine("• MaxSMB dag        : ${"%.2f".format(activeConfig.maxSMB)} U")
-            if (snapManual > 0.001 && kotlin.math.abs(activeConfig.maxSMB - snapManual) > 0.01) {
-                val richting = if (activeConfig.maxSMB < snapManual) "verlaagd" else "verhoogd"
+            appendLine("• MaxSMB dag        : ${"%.2f".format(liveMaxSmb)} U")
+            if (snapManual > 0.001 && kotlin.math.abs(liveMaxSmb - snapManual) > 0.01) {
+                val richting = if (liveMaxSmb < snapManual) "verlaagd" else "verhoogd"
                 appendLine("  ↳ handmatig: ${"%.2f".format(snapManual)} U ($richting door analyzer)")
             }
             appendLine("• IOB-remdrempel    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
@@ -214,7 +221,7 @@ class FCLvNextStatusFormatter(
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v1.6.4")
+        appendLine(" 🧠 FCL V6 v1.7.2")
         appendLine("════════════════════════")
         appendLine()
 

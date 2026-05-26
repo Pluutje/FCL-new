@@ -32,7 +32,7 @@ object FCLvNextActiveParamsWriter {
         const val STERKTE        = 100
         const val TIMING         = 100
         const val VOLHOUDENDHEID = 100
-        const val NACHT_FACTOR   = 85
+        const val NACHT_FACTOR   = 90   // verhoogd van 85: nacht was te passief
         // Groep-A params — gelijk aan DFMapping-referentie bij D=1.0, F=0.50.
         // Dit is de enige bron van default-kennis binnen AAPS voor active_params.json.
         // ConfigOverrideWriter.Defaults (Analyzer) en DoubleKey/IntKey defaultValues

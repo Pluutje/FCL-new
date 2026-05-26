@@ -26,7 +26,14 @@ object EpisodeMetricsBuilder {
             val avgBg = if (rows.isNotEmpty()) rows.map { it.bg }.average() else episode.startBg
             val endBg = rows.lastOrNull()?.bg ?: episode.startBg
 
+            // FCLvNext eigen doses
             val totalInsulinDelivered = rows.sumOf { it.deliveredTotal }
+            // Externe bolussen (handmatig of AAPS SMB) per cyclus gesommeerd
+            val externalBolusTotal = rows.sumOf { it.externalBolusU }
+            // Totaal inclusief externe bolussen = werkelijke insulinebelasting
+            val totalInsulinIncExternal = totalInsulinDelivered + externalBolusTotal
+            // Markeer episode als handmatig gecorrigeerd (>= 0.5U extern)
+            val hasManualCorrection = externalBolusTotal >= 0.5
             val ageDays = Duration.between(episode.start, newestStart).toDays().coerceAtLeast(0)
 
             // Frontload kwaliteit
@@ -78,12 +85,16 @@ object EpisodeMetricsBuilder {
             // FIX 3: advisorWeight straft episodes met hoge IOB op de piek af.
             // Een episode met iobRatioAtPeak >= 0.70 is het resultaat van te-laat-burst
             // gedrag en is daarmee minder representatief voor de "echte" profielkwaliteit.
-            val advisorWeight = computeAdvisorWeight(
+            val advisorWeightBase = computeAdvisorWeight(
                 totalInsulinDelivered = totalInsulinDelivered,
                 ageDays               = ageDays,
                 iobRatioAtPeak        = iobAtPeak,
                 manualMaxSmb          = manualMaxSmb
             )
+            // Episodes met handmatige correctie zijn minder representatief:
+            // de piekdaling was mede door de externe bolus, niet door de parameters.
+            // Halveer het gewicht zodat het leeralgoritme hier minder op leunt.
+            val advisorWeight = if (hasManualCorrection) advisorWeightBase * 0.30 else advisorWeightBase
 
             val timeToPeakMinutes = peakRow?.let {
                 Duration.between(episode.start, it.timestamp).toMinutes()
@@ -110,6 +121,9 @@ object EpisodeMetricsBuilder {
                 maxIobRatio = maxIobRatio,
                 iobRatioAtPeak = iobAtPeak,
                 totalInsulinDelivered = totalInsulinDelivered,
+                totalInsulinIncExternal = totalInsulinIncExternal,
+                externalBolusTotal = externalBolusTotal,
+                hasManualCorrection = hasManualCorrection,
                 advisorWeight = advisorWeight,
                 includedInAdvice = false,
                 adviceStatus = "NEW",

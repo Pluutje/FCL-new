@@ -36,6 +36,7 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
     bolus                  = bolus,
     basalRate              = basalRate,
     shouldDeliver          = shouldDeliver,
+    externalBolusU         = externalBolusU,
 
     // TRENDS
     slope                  = slope,

@@ -20,6 +20,7 @@ data class LogRow(
     val riseSinceMealStart: Double?,
     val finalDose: Double,
     val deliveredTotal: Double,
+    val externalBolusU: Double = 0.0,   // handmatige bolus of AAPS SMB buiten FCLvNext
     val rescueState: String = "IDLE",       // "IDLE" | "ARMED" | "CONFIRMED"
     val rescueConfidence: Double = 0.0,
     val shouldDeliver: Boolean,

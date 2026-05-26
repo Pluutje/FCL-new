@@ -115,6 +115,7 @@ data class FCLvNextCsvLogRow(
     var bolus: Double = 0.0,
     var basalRate: Double = 0.0,
     var shouldDeliver: Boolean = false,
+    var externalBolusU: Double = 0.0,
 
     // ── Reserve ──
     var reserveU: Double = 0.0,
@@ -270,6 +271,7 @@ object FCLvNextCsvLogger {
         "bolus",
         "basal_u_h",
         "should_deliver",
+        "external_bolus_u",
 
         // TRENDS
         "slope",
@@ -477,6 +479,7 @@ object FCLvNextCsvLogger {
 
             u2(row.finalDose), u2(row.commandedDose), u2(row.deliveredTotal),
             u2(row.bolus), u2(row.basalRate), row.shouldDeliver,
+            u2(row.externalBolusU),
 
             t2(row.slope), a2(row.accel), t2(row.recentSlope),
             t2(row.recentDelta5m), t2(row.consistency),

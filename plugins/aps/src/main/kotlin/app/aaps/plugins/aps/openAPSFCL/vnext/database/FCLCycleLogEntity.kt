@@ -21,7 +21,7 @@ data class FCLCycleLogEntity(
     val id: Long = 0,
 
     // ── META ──────────────────────────────────────────────────────────────
-    val schemaVersion: String = "6",
+    val schemaVersion: String = "7",
     val timestampMs: Long,              // ts_utc als epochMillis
 
     // ── CONTEXT ───────────────────────────────────────────────────────────
@@ -49,6 +49,11 @@ data class FCLCycleLogEntity(
     val bolus: Double,
     val basalRate: Double,
     val shouldDeliver: Boolean,
+    // Externe insuline (handmatige bolus of AAPS SMB) gedetecteerd via IOB-delta.
+    // Berekend als max(0, currentIOB - prevIOB + expectedDecay - fclOwnDose).
+    // 0.0 als geen externe bolus gedetecteerd. Gebruikt door analyzer voor
+    // correcte totalInsulinDelivered en hasManualCorrection markering.
+    val externalBolusU: Double = 0.0,
 
     // ── TRENDS ────────────────────────────────────────────────────────────
     val slope: Double,

@@ -34,6 +34,14 @@ object DFLearner {
     private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
     private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
 
+    // Agressiviteitsschaal (1-9). Stap 1: opgeslagen maar nog niet
+    // gekoppeld aan params (dat gebeurt in Stap 2).
+    // 1=voorzichtig, 5=standaard, 9=agressief
+    private const val KEY_AGGRESSIVENESS = "df_aggressiveness"
+    const val AGGRESSIVENESS_DEFAULT = 5
+    const val AGGRESSIVENESS_MIN = 1
+    const val AGGRESSIVENESS_MAX = 9
+
     // ── Maaltijdtype-specifieke D/F waarden ──────────────────────────────
     private const val KEY_D_SNEL  = "df_d_snel"
     private const val KEY_F_SNEL  = "df_f_snel"
@@ -397,6 +405,26 @@ object DFLearner {
     fun setRefEb(context: Context, v: Double) =
         prefs(context).edit().putFloat(KEY_REF_EB, v.coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX).toFloat()).apply()
 
+    // Agressiviteitsschaal (Stap 1: opslag, Stap 2: koppeling aan params)
+    fun getAggressiveness(context: Context): Int =
+        prefs(context).getInt(KEY_AGGRESSIVENESS, AGGRESSIVENESS_DEFAULT)
+
+    fun setAggressiveness(context: Context, level: Int) {
+        prefs(context).edit()
+            .putInt(KEY_AGGRESSIVENESS, level.coerceIn(AGGRESSIVENESS_MIN, AGGRESSIVENESS_MAX))
+            .apply()
+    }
+
+    // Leergeschiedenis tellers (voor de status-indicator in de UI)
+    fun getCountForType(context: Context, type: app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType): Int {
+        val key = when (type) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL  -> KEY_COUNT_SNEL
+            app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG -> KEY_COUNT_TRAAG
+            else -> return 0
+        }
+        return prefs(context).getInt(key, 0)
+    }
+
     fun getHistory(context: Context): List<LearningStep> {
         val raw = prefs(context).getString(KEY_HISTORY, "") ?: ""
         if (raw.isBlank()) return emptyList()
@@ -689,7 +717,15 @@ object DFLearner {
      * opnieuw kan leren zonder vervuilde historische data.
      */
     fun resetTypeData(context: Context) {
+        // Resetwaarden: 1 stap agressiever dan de neutrale standaard.
+        // D=0.968 -> S~92%, F=0.775 -> T~117%, V~93%.
+        // Dit is de basisinstelling voor een ervaren gebruiker van Lyumjev U200.
+        val resetD = 0.968f
+        val resetF = 0.775f
         prefs(context).edit()
+            // Algemene D/F resetten naar verhoogde basiswaarden
+            .putFloat(KEY_D, resetD)
+            .putFloat(KEY_F, resetF)
             // Type-specifieke D/F terug naar algemene waarden
             .remove(KEY_D_SNEL)
             .remove(KEY_F_SNEL)
@@ -701,9 +737,10 @@ object DFLearner {
             // Episode-tellers resetten
             .putInt(KEY_COUNT_SNEL, 0)
             .putInt(KEY_COUNT_TRAAG, 0)
-            // Type-specifieke history wissen
+            // Alle history wissen zodat 'Laatste aanpassingen' leeg is na reset
             .remove(KEY_HISTORY_SNEL)
             .remove(KEY_HISTORY_TRAAG)
+            .remove(KEY_HISTORY)
             .apply()
     }
 

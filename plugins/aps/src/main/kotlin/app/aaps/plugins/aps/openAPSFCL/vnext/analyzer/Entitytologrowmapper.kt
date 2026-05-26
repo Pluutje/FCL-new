@@ -27,6 +27,7 @@ fun FCLCycleLogEntity.toLogRow(): LogRow = LogRow(
     riseSinceMealStart     = riseSinceMealStart.takeIf { it > 0.0 },
     finalDose              = finalDose,
     deliveredTotal         = deliveredTotal,
+    externalBolusU         = externalBolusU,
     shouldDeliver          = shouldDeliver,
     mealState              = mealState,
     earlyConfidence        = earlyConfidence,

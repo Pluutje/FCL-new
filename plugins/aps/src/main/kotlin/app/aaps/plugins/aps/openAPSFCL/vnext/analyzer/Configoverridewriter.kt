@@ -35,7 +35,7 @@ object ConfigOverrideWriter {
         const val STERKTE        = 100
         const val TIMING         = 100
         const val VOLHOUDENDHEID = 100
-        const val NACHT_FACTOR   = 85
+        const val NACHT_FACTOR   = 90   // verhoogd van 85: nacht was te passief
         val MAX_SMB_DAY_LEARNED: Double? = null
         val IOB_BRAKE_LEARNED:   Double? = null
     }

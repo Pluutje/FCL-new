@@ -24,11 +24,11 @@ object DFMapping {
     // ── Grenzen ───────────────────────────────────────────────────────────
     const val D_MIN = 0.85
     const val D_MAX = 1.35
-    const val D_START = 1.00
+    const val D_START = 1.05   // startpunt na reset: ~92% sterkte (was 1.00 = 95%)
 
     const val F_MIN = 0.20
     const val F_MAX = 0.80
-    const val F_START = 0.60   // iets boven neutraal, gezien structureel hoge IOBratios
+    const val F_START = 0.65   // startpunt na reset: ~118% timing (was 0.60 = 110%)
 
     // ── Referentiewaarden (bij D=1.0, F=0.5) ─────────────────────────────
     private const val REF_S   = 95
@@ -71,11 +71,18 @@ object DFMapping {
         refWmd: Double = REF_WMD_DEFAULT,
         refWff: Double = REF_WFF_DEFAULT,
         refEb:  Double = REF_EB_DEFAULT,
-        vExtra: Double = 0.0
+        vExtra: Double = 0.0,
+        aggLevel: Int = 5
     ): ConfigOverrideWriter.ParamOverrides {
-        val dC = d.coerceIn(D_MIN, D_MAX)
-        val fC = f.coerceIn(F_MIN, F_MAX)
-        val vC = vExtra.coerceIn(-0.5, 0.5)   // onafhankelijke volhoudendheidsas
+        val dC    = d.coerceIn(D_MIN, D_MAX)
+        val fC    = f.coerceIn(F_MIN, F_MAX)
+        val vC    = vExtra.coerceIn(-0.5, 0.5)
+        // Agressiviteitsmultiplier: verschuift D/F effectief zonder ze op te slaan.
+        // aggLevel 5 = geen effect. Niveau 9: dC +12%, fC +6%, refWmd -0.25.
+        val scale = aggScaleFromLevel(aggLevel)
+        val dEff  = (dC * (1.0 + scale * 0.12)).coerceIn(D_MIN * 0.85, D_MAX * 1.15)
+        val fEff  = (fC + scale * (F_MAX - 0.5) * 0.06).coerceIn(F_MIN * 0.90, F_MAX * 1.05)
+        val wmdEff = (refWmd - scale * 0.25).coerceIn(0.70, 1.60)
 
         return ConfigOverrideWriter.ParamOverrides(
             // ── D-afhankelijk ───────────────────────────────────────────
@@ -86,40 +93,40 @@ object DFMapping {
             // Zie ook DFMapping.toStvMap() voor de stv-blok waarden.
 
             // Piek-drempel: D hoog = agressiever = eerder remmen gewenst
-            peakPredictionThreshold       = max(10.5, 12.5 - (dC - 1.0) * 2.0),
+            peakPredictionThreshold       = max(10.5, 12.5 - (dEff - 1.0) * 2.0),
 
             // Actiedrempel: D hoog = systeem activeert bij kleinere stijging
             // F hoog = eerder frontload gewenst = ook lagere activatiedrempel
             // Gecombineerd: D verlaagt (meer insuline nodig), F verlaagt (eerder actief)
-            watchingMinDeltaToTarget      = max(0.5, refWmd - (dC - 1.0) * 0.5 - (fC - 0.5) * 0.8),
+            watchingMinDeltaToTarget      = max(0.5, wmdEff - (dEff - 1.0) * 0.5 - (fEff - 0.5) * 0.8),
 
             // ── F-afhankelijk ───────────────────────────────────────────
 
             // Frontload dosis bij stijgingsdetectie
-            watchingFrontloadFrac         = min(0.90, refWff + (fC - 0.5) * 0.40),
+            watchingFrontloadFrac         = min(0.90, refWff + (fEff - 0.5) * 0.40),
 
             // Commit pauze: F hoog = frequenter committen
-            commitCooldownMinutes         = max(5, (REF_CC - (fC - 0.5) * 10).roundToInt()),
+            commitCooldownMinutes         = max(5, (REF_CC - (fEff - 0.5) * 10).roundToInt()),
 
             // IOB-rem: F hoog = eerder remmen (insuline al vroeg actief)
-            peakIobBrakeSuppressThreshold = max(0.30, REF_PIB - (fC - 0.5) * 0.10),
+            peakIobBrakeSuppressThreshold = max(0.30, REF_PIB - (fEff - 0.5) * 0.10),
 
             // Horizon: F hoog = korter vooruit kijken (vroege actie domineert)
-            peakPredictionHorizonH        = max(0.8, 1.2 - (fC - 0.5) * 0.6),
+            peakPredictionHorizonH        = max(0.8, 1.2 - (fEff - 0.5) * 0.6),
 
             // IOBstart-drempel voor WATCHING: F hoog = eerder actief
             // iobStart: drempel waar IOB-rem begint.
             // Verlaagd van 0.40 naar 0.15 basis voor snelwerkende insuline.
             // Bij Lyumjev U200 is IOB@piek 0.15-0.25 → rem moet eerder starten.
-            iobStart                      = max(0.10, 0.25 - (fC - 0.5) * 0.20),
+            iobStart                      = max(0.10, 0.25 - (fEff - 0.5) * 0.20),
 
             // Early boost: F hoog = sterkere vroege commits
             // refEb bepaalt het maximum bij F=0.8. Bij F=0.5 is boost altijd refEb.
-            // Bij F>0.5 schaalt de boost op tot max(refEb, refEb + (fC-0.5)*2.5).
+            // Bij F>0.5 schaalt de boost op tot max(refEb, refEb + (fEff-0.5)*2.5).
             // refEb=1.0 (default/uit): boost pas actief bij hogere F-waarden.
-            earlyBoostFactor              = max(1.0, refEb + (fC - 0.5) * 2.5),
-            earlyBoostMinConfidence       = max(0.40, 0.50 - (fC - 0.5) * 0.20),
-            earlyBoostMaxCommits          = if (fC >= 0.65) 4 else 3,
+            earlyBoostFactor              = max(1.0, refEb + (fEff - 0.5) * 2.5),
+            earlyBoostMinConfidence       = max(0.40, 0.50 - (fEff - 0.5) * 0.20),
+            earlyBoostMaxCommits          = if (fEff >= 0.65) 4 else 3,
 
             // Late commit decay: alleen actief bij F > 0.5
             // Koppelt automatisch aan earlyBoost: meer vroeg → meer late demping
@@ -127,25 +134,29 @@ object DFMapping {
             // Milder dan earlyBoost zodat late commits niet te hard worden afgeknepen.
             // vC > 0 verlaagt de decay (minder remmen na de piek = meer volhoudendheid).
             // vC < 0 verhoogt de decay (eerder afkappen = minder volhoudendheid).
-            lateCommitDecayFactor         = max(0.0, (fC - 0.5) * 2.0 - vC * 0.6),
-            lateCommitDecayThreshold      = max(0.40, 0.55 - (fC - 0.5) * 0.10),
+            // lateCommitDecayFactor: coeff verlaagd 2.0 -> 1.4 voor Lyumjev U200.
+            // Bij F=0.75: lcd=0.35 (was 0.50). Gecombineerd met budgetDecay
+            // blijft effectiveDecay onder het max van 0.70, wat commit 2
+            // iets groter maakt (lateDecayMul 0.33 i.p.v. 0.30).
+            lateCommitDecayFactor         = max(0.0, (fEff - 0.5) * 1.4 - vC * 0.6),
+            lateCommitDecayThreshold      = max(0.40, 0.55 - (fEff - 0.5) * 0.10),
 
             // Piekkalibr.: F hoog = steilere vroege stijging verwacht
-            earlyRiseFracMin              = min(0.65, 0.35 + (fC - 0.5) * 0.50),
-            peakMaxSlopeWeight            = max(0.0, (fC - 0.6) * 0.5),
+            earlyRiseFracMin              = min(0.65, 0.35 + (fEff - 0.5) * 0.50),
+            peakMaxSlopeWeight            = max(0.0, (fEff - 0.6) * 0.5),
 
             // Sustained Rise Response: F hoog = makkelijker triggeren
             // F=0.50: drempel=0.40 (conservatief)
             // F=0.60: drempel=0.35 (standaard)
             // F=0.70: drempel=0.30 (gevoelig)
             // F=0.80: drempel=0.25 (zeer gevoelig)
-            sustainedRiseSlopeMin         = max(0.20, 0.40 - (fC - 0.5) * 0.50),
+            sustainedRiseSlopeMin         = max(0.20, 0.40 - (fEff - 0.5) * 0.50),
 
             // Reactiesnelheid: F hoog = sneller reageren (minder minuten vereist)
             // F=0.50: 12 min  F=0.60: 10 min  F=0.70: 8 min  F=0.80: 6 min
             // vC > 0 = nog sneller reageren na de piek als BG niet zakt
             // vC=+0.5: -2 min extra; vC=-0.5: +2 min extra
-            sustainedRiseMinTarget        = max(5, (12 - ((fC - 0.5) * 20).toInt() - (vC * 4).toInt()))
+            sustainedRiseMinTarget        = max(5, (12 - ((fEff - 0.5) * 20).toInt() - (vC * 4).toInt()))
         )
     }
 
@@ -161,14 +172,25 @@ object DFMapping {
      * Met vExtra=0 is het gedrag identiek aan vóór de introductie van vExtra.
      * Bij vExtra=+0.33: V +10% zonder dat S meebeweegt.
      */
-    fun toStvMap(d: Double, f: Double, nachtFactor: Int, vExtra: Double = 0.0): Map<String, Int> {
-        val dC = d.coerceIn(D_MIN, D_MAX)
-        val fC = f.coerceIn(F_MIN, F_MAX)
-        val vC = vExtra.coerceIn(-0.5, 0.5)
+    // Agressiviteitsschaal uit niveau 1-9 (5=standaard=0.0)
+    fun aggScaleFromLevel(level: Int): Double = (level - 5) / 4.0
+
+    // aggLevel verschuift de geleerde waarden met een multiplier.
+    // De geleerde D/F/vExtra blijven ongewijzigd in SharedPreferences.
+    // Niveau 5 = geen effect (mul=1.0). Niveau 9 = +12% S, +6% T, +10% V.
+    fun toStvMap(d: Double, f: Double, nachtFactor: Int, vExtra: Double = 0.0,
+                 aggLevel: Int = 5): Map<String, Int> {
+        val dC    = d.coerceIn(D_MIN, D_MAX)
+        val fC    = f.coerceIn(F_MIN, F_MAX)
+        val vC    = vExtra.coerceIn(-0.5, 0.5)
+        val scale = aggScaleFromLevel(aggLevel)
+        val sMul  = 1.0 + scale * 0.12
+        val tMul  = 1.0 + scale * 0.06
+        val vMul  = 1.0 + scale * 0.10
         return mapOf(
-            "sterkte"        to (REF_S * dC).roundToInt().coerceIn(75, 125),
-            "timing"         to (REF_T + (fC - 0.5) * 40).roundToInt().coerceIn(80, 125),
-            "volhoudendheid" to (REF_V + (dC - 1.0) * 50 + vC * 30).roundToInt().coerceIn(70, 125),
+            "sterkte"        to ((REF_S * dC) * sMul).roundToInt().coerceIn(75, 130),
+            "timing"         to ((REF_T + (fC - 0.5) * 40) * tMul).roundToInt().coerceIn(80, 130),
+            "volhoudendheid" to ((REF_V + (dC - 1.0) * 50 + vC * 30) * vMul).roundToInt().coerceIn(70, 130),
             "nacht_factor"   to nachtFactor
         )
     }

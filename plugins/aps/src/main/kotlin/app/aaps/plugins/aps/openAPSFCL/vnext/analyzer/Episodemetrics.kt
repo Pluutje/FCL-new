@@ -33,7 +33,10 @@ data class EpisodeMetrics(
     // en FclPatternAdvisor het kunnen gebruiken voor kwaliteitsweging
     val iobRatioAtPeak: Double,
 
-    val totalInsulinDelivered: Double,
+    val totalInsulinDelivered: Double,   // FCLvNext eigen doses
+    val totalInsulinIncExternal: Double, // incl. handmatige bolussen en AAPS SMBs
+    val externalBolusTotal: Double,      // som van alle externe bolussen in episode
+    val hasManualCorrection: Boolean,    // True als handmatige bolus >= 0.5U tijdens episode
     val advisorWeight: Double,
     val includedInAdvice: Boolean,
     val adviceStatus: String,

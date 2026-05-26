@@ -70,6 +70,7 @@ fun DFControlTab(
     // Algemene state
     var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
     var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
+    var aggressiveness by remember { mutableStateOf(DFLearner.getAggressiveness(context)) }
     var history by remember { mutableStateOf(DFLearner.getHistory(context)) }
     var showGeavanceerd by remember { mutableStateOf(false) }
     var applyResult by remember { mutableStateOf<String?>(null) }
@@ -130,122 +131,113 @@ fun DFControlTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // ── 1. Maaltijdtype selector ──────────────────────────────────────
-        MaaltijdTypeSelector(
-            geselecteerd = geselecteerdType,
-            onSelect = { geselecteerdType = it; d = dVoorType(); f = fVoorType(); vExtra = vExtraVoorType() }
-        )
-
-        // ── 2. Insulinesterkte ────────────────────────────────────────────
-        StvKaart(
-            emoji = "💊",
-            titel = "Hoeveel insuline",
-            omschrijving = "Totale hoeveelheid per maaltijd  •  100% = standaard",
-            waarde = sViaD, waardeSuffix = "%", eenheid100Label = "standaard",
-            stapMinus = sStap, stapPlus = sStap, min = sMin, max = sMax,
-            onMinus = {
-                val nieuwD = sNaarD((sViaD - sStap).coerceIn(sMin, sMax))
-                d = nieuwD; slaTypeOp(nieuwD)
-            },
-            onPlus = {
-                val nieuwD = sNaarD((sViaD + sStap).coerceIn(sMin, sMax))
-                d = nieuwD; slaTypeOp(nieuwD)
+        // ── 1. Agressiviteitsschaal ────────────────────────────────────────
+        AggressiviteitsKaart(
+            niveau = aggressiveness,
+            onChanged = { nieuw ->
+                aggressiveness = nieuw
+                DFLearner.setAggressiveness(context, nieuw)
             }
         )
 
-        // ── 3. Hoe vroeg ──────────────────────────────────────────────────
-        StvKaart(
-            emoji = "⏱",
-            titel = "Hoe vroeg insuline gegeven wordt",
-            omschrijving = "Concentratie aan het begin van de maaltijd  •  100% = neutraal",
-            waarde = tNu, waardeSuffix = "%", eenheid100Label = "neutraal",
-            stapMinus = tStap, stapPlus = tStap, min = tMin, max = tMax,
-            onMinus = {
-                val nieuwF = tNaarF((tNu - tStap).coerceIn(tMin, tMax))
-                f = nieuwF; slaTypeOp(d, nieuwF)
-            },
-            onPlus = {
-                val nieuwF = tNaarF((tNu + tStap).coerceIn(tMin, tMax))
-                f = nieuwF; slaTypeOp(d, nieuwF)
-            },
-            extraToelichting = run {
-                val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb)
-                val eb = po.earlyBoostFactor ?: 1.0
-                val lcd = po.lateCommitDecayFactor ?: 0.0
-                buildList {
-                    if (eb > 1.01) add("vroeg ×${"%.2f".format(eb)}")
-                    if (lcd > 0.01) add("laat −${(lcd * 100).toInt()}%")
-                    if (eb <= 1.01 && lcd <= 0.01) add("lineaire verdeling")
-                }.joinToString("  ")
-            }
-        )
-
-        // ── 4. Vasthoudendheid ────────────────────────────────────────────
-        // V is nu volledig ontkoppeld van S: aanpassen via vExtra, niet via D.
-        // "Vasthoudend" = hoe agressief het systeem na de piek bijstuurt als
-        // BG niet snel genoeg naar target zakt.
-        StvKaart(
-            emoji = "🔁",
-            titel = "Hoe vasthoudend na de piek",
-            omschrijving = "Bijsturing als BG na de piek te langzaam daalt  •  onafhankelijk van Hoeveel",
-            waarde = vNu, waardeSuffix = "%", eenheid100Label = "standaard",
-            stapMinus = vStap, stapPlus = vStap, min = vMin, max = vMax,
-            onMinus = {
-                val nieuwVExtra = vNaarVExtra((vNu - vStap).coerceIn(vMin, vMax))
-                vExtra = nieuwVExtra; slaVExtraOp(nieuwVExtra)
-            },
-            onPlus = {
-                val nieuwVExtra = vNaarVExtra((vNu + vStap).coerceIn(vMin, vMax))
-                vExtra = nieuwVExtra; slaVExtraOp(nieuwVExtra)
-            },
-            extraToelichting = when {
-                vExtra > 0.05  -> "Hoeveel (S) blijft ${sViaD}% — alleen persistentie omhoog"
-                vExtra < -0.05 -> "Hoeveel (S) blijft ${sViaD}% — alleen persistentie omlaag"
-                else           -> "Gelijk aan standaard (S=${sViaD}%)"
-            }
-        )
-
-        // ── 5. Frontload timing ───────────────────────────────────────────
-        FrontloadKaart(
-            refWmd = refWmd,
-            label = frontloadLabel(refWmd),
-            onEerder = {
-                val nieuw = (refWmd - 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)
-                refWmd = nieuw; DFLearner.setRefWmd(context, nieuw)
-            },
-            onLater = {
-                val nieuw = (refWmd + 0.10).coerceIn(DFMapping.REF_WMD_MIN, DFMapping.REF_WMD_MAX)
-                refWmd = nieuw; DFLearner.setRefWmd(context, nieuw)
-            }
-        )
-
-        // ── 6. Toepassen ──────────────────────────────────────────────────
-        if (onApplyToAaps != null) {
-            Button(
-                onClick = {
-                    val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb, vExtra)
-                    val stvMap = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
-                    val ok = onApplyToAaps(po, stvMap)
-                    applyResult = if (ok) "✓ Verzonden naar AAPS" else "✗ Verzenden mislukt"
-                    applyTs = System.currentTimeMillis()
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Text("Toepassen in AAPS", style = MaterialTheme.typography.titleSmall,
-                     fontWeight = FontWeight.SemiBold)
-            }
-            applyResult?.let { msg ->
-                if (System.currentTimeMillis() - applyTs < 20_000L) {
-                    Text(msg, style = MaterialTheme.typography.bodySmall,
-                         color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
-                         else MaterialTheme.colorScheme.error,
-                         modifier = Modifier.fillMaxWidth())
+                // Actieve S/T/V samenvatting
+        // Effectieve waarden incl. agressiviteitsmultiplier -- consistent met StatusFormatter
+        val stvEffectief = DFMapping.toStvMap(d, f, nachtFactor, vExtra, aggLevel = aggressiveness)
+        val sEff = stvEffectief["sterkte"] ?: sViaD
+        val tEff = stvEffectief["timing"] ?: tNu
+        val vEff = stvEffectief["volhoudendheid"] ?: vNu
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+            )
+        ) {
+            Column(modifier = Modifier.padding(14.dp),
+                   verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Actieve instellingen",
+                         style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (aggressiveness != 5) {
+                        Text("agressiviteit $aggressiveness",
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("💊 Sterkte",
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${sEff}%",
+                             style = MaterialTheme.typography.titleMedium,
+                             fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏱ Timing",
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${tEff}%",
+                             style = MaterialTheme.typography.titleMedium,
+                             fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🔁 Vasthoudend",
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${vEff}%",
+                             style = MaterialTheme.typography.titleMedium,
+                             fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (aggressiveness != 5) {
+                    Text("Geleerde basis: S=${sViaD}% T=${tNu}% V=${vNu}%",
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
 
-        // ── 7. Automaat ───────────────────────────────────────────────────
+// ── 2. Toepassen in AAPS ──────────────────────────────────────────
+        if (onApplyToAaps != null) {
+            Button(
+                onClick = {
+                    val dApply = DFLearner.getDForType(context, MealTypeBridge.MealType.SNEL)
+                    val fApply = DFLearner.getFForType(context, MealTypeBridge.MealType.SNEL)
+                    val veApply = DFLearner.getVExtraForType(context, MealTypeBridge.MealType.SNEL)
+                    val po = DFMapping.toParamOverrides(dApply, fApply, DFLearner.getRefWmd(context),
+                        DFLearner.getRefWff(context), DFLearner.getRefEb(context), veApply,
+                        aggLevel = aggressiveness)
+                    val stvMap = DFMapping.toStvMap(dApply, fApply, nachtFactor, veApply,
+                        aggLevel = aggressiveness)
+                    val ok = onApplyToAaps(po, stvMap)
+                    applyResult = if (ok) "Toegepast" else "Fout"
+                    applyTs = System.currentTimeMillis()
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Toepassen in AAPS", style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold)
+            }
+            val msg = applyResult
+            if (msg != null && System.currentTimeMillis() - applyTs < 4000) {
+                Text(msg, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+
+        // ── 3. Automaat leert ─────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -289,10 +281,34 @@ fun DFControlTab(
             }
         }
 
-        // ── 8. Verloop per maaltijdtype ───────────────────────────────────
-        MaaltijdTypeOverzicht(nachtFactor = nachtFactor)
+        // ── 4. Compacte leer-status ───────────────────────────────────────
+        // Toont hoeveel maaltijden het systeem heeft geleerd zonder details
+        val snelCount = DFLearner.getCountForType(context, MealTypeBridge.MealType.SNEL)
+        val traagCount = DFLearner.getCountForType(context, MealTypeBridge.MealType.TRAAG)
+        if (snelCount + traagCount > 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Leergeschiedenis",
+                         style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        buildString {
+                            if (snelCount > 0) append("⚡ $snelCount snelle maaltijden  ")
+                            if (traagCount > 0) append("🐢 $traagCount trage maaltijden")
+                        }.trim(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
 
-        // ── 9. Laatste aanpassingen ───────────────────────────────────────
+        // ── 5. Laatste aanpassingen door automaat ─────────────────────────
         if (history.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -307,8 +323,7 @@ fun DFControlTab(
                         val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
                         val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
                         val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
-                        // V in history toont alleen de D-component (vExtra niet opgeslagen per stap)
-                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V±D: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
+                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
                         val typeEmoji = when (step.mealType) { "SNEL" -> "⚡"; "TRAAG" -> "🐢"; else -> "🔀" }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -335,139 +350,35 @@ fun DFControlTab(
             }
         }
 
-        // ── 10. Reset type-data ──────────────────────────────────────────
+        // ── 6. Reset (onopvallend onderaan) ───────────────────────────────
         var showResetBevestiging by remember { mutableStateOf(false) }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "🔄  Type-leerdata resetten",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "Wist de geleerde S/T/V waarden voor Snel en Traag zodat het systeem " +
-                        "opnieuw kan leren met de huidige type-indeling.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (!showResetBevestiging) {
-                    OutlinedButton(
-                        onClick = { showResetBevestiging = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text("Type-data wissen en opnieuw leren", fontSize = 13.sp)
-                    }
-                } else {
-                    Text(
-                        "Zeker weten? De Snel en Traag waarden worden gewist.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { showResetBevestiging = false },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("Annuleren") }
+        if (!showResetBevestiging) {
+            androidx.compose.material3.TextButton(
+                onClick = { showResetBevestiging = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Leerdata wissen en opnieuw beginnen",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            }
+        } else {
+            Card(modifier = Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Weet je het zeker? Alle geleerde waarden worden gewist.",
+                         style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
                                 DFLearner.resetTypeData(context)
-                                // Herlaad de huidige waarden
-                                d = DFLearner.getDForType(context, geselecteerdType)
-                                f = DFLearner.getFForType(context, geselecteerdType)
-                                vExtra = DFLearner.getVExtraForType(context, geselecteerdType)
                                 history = DFLearner.getHistory(context)
                                 showResetBevestiging = false
                             },
-                            modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            )
-                        ) { Text("Ja, wissen") }
-                    }
-                }
-            }
-        }
-
-        // ── 11. Geavanceerd (inklapbaar) ──────────────────────────────────
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { showGeavanceerd = !showGeavanceerd }
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Geavanceerd", style = MaterialTheme.typography.labelMedium,
-                         fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (showGeavanceerd) "▲" else "▼", style = MaterialTheme.typography.labelSmall,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (showGeavanceerd) {
-                    Divider(modifier = Modifier.padding(horizontal = 14.dp))
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        // Kalibratie sub-items (refWff, refEb)
-                        KalibratieParm(
-                            emoji = "💉", naam = "Grootte frontload-puls",
-                            uitleg = "Hoe groot de frontload-puls is als een stijging wordt gedetecteerd (als fractie van maxSMB). " +
-                                "Hoger = meer insuline naar voren geduwd bij stijging. " +
-                                "Standaard ${(DFMapping.REF_WFF_DEFAULT * 100).toInt()}% — verhoog dit als pieken te hoog blijven.",
-                            waarde = refWff * 100, eenheid = "%", stap = 5.0,
-                            min = DFMapping.REF_WFF_MIN * 100, max = DFMapping.REF_WFF_MAX * 100,
-                            defaultWaarde = DFMapping.REF_WFF_DEFAULT * 100,
-                            formatFn = { "%.0f".format(it) },
-                            onMinus = { refWff = ((refWff * 100 - 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX); DFLearner.setRefWff(context, refWff) },
-                            onPlus  = { refWff = ((refWff * 100 + 5.0) / 100).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX); DFLearner.setRefWff(context, refWff) },
-                            onReset = { refWff = DFMapping.REF_WFF_DEFAULT; DFLearner.setRefWff(context, refWff) }
-                        )
-                        KalibratieParm(
-                            emoji = "🚀", naam = "Versterking vroege commits",
-                            uitleg = "Versterkt de eerste 1-2 insulinepulsen extra. 1.0 = geen versterking. Hoger = meer insuline vroeg in de maaltijd.",
-                            waarde = refEb, eenheid = "×", stap = 0.10,
-                            min = DFMapping.REF_EB_MIN, max = DFMapping.REF_EB_MAX,
-                            defaultWaarde = DFMapping.REF_EB_DEFAULT,
-                            formatFn = { "%.1f".format(it) },
-                            onMinus = { refEb = (refEb - 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX); DFLearner.setRefEb(context, refEb) },
-                            onPlus  = { refEb = (refEb + 0.10).coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX); DFLearner.setRefEb(context, refEb) },
-                            onReset = { refEb = DFMapping.REF_EB_DEFAULT; DFLearner.setRefEb(context, refEb) }
-                        )
-                        // Technische params
-                        var showExpert by remember { mutableStateOf(false) }
-                        Row(modifier = Modifier.fillMaxWidth().clickable { showExpert = !showExpert },
-                            horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Technische parameters", style = MaterialTheme.typography.labelSmall,
-                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(if (showExpert) "▲" else "▼", style = MaterialTheme.typography.labelSmall,
-                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (showExpert) {
-                            val po = DFMapping.toParamOverrides(d, f, refWmd, refWff, refEb, vExtra)
-                            val stvMap = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                ExpertRij("D (intern)", "%.3f".format(d))
-                                ExpertRij("F (intern)", "%.3f".format(f))
-                                ExpertRij("vExtra (intern)", "%.3f".format(vExtra))
-                                ExpertRij("REF_WMD", "%.2f".format(refWmd))
-                                ExpertRij("earlyBoostFactor", fmtD2(po.earlyBoostFactor))
-                                ExpertRij("watchingFrontload", fmtD2(po.watchingFrontloadFrac))
-                                ExpertRij("watchingMinDelta", fmtD2(po.watchingMinDeltaToTarget) + " mmol")
-                                ExpertRij("commitCooldown", fmtInt(po.commitCooldownMinutes) + "m")
-                                ExpertRij("peakThreshold", fmtD1(po.peakPredictionThreshold) + " mmol")
-                                ExpertRij("peakHorizon", fmtD2(po.peakPredictionHorizonH) + " uur")
-                                ExpertRij("iobStart", fmtD2(po.iobStart))
-                                ExpertRij("peakIobBrake", fmtD2(po.peakIobBrakeSuppressThreshold))
-                                ExpertRij("lateDecay", fmtD2(po.lateCommitDecayFactor))
-                                ExpertRij("sustainedRiseMin", fmtInt(po.sustainedRiseMinTarget) + "m")
-                            }
+                                containerColor = MaterialTheme.colorScheme.error)
+                        ) { Text("Wissen") }
+                        OutlinedButton(onClick = { showResetBevestiging = false }) {
+                            Text("Annuleren")
                         }
                     }
                 }
@@ -1393,3 +1304,85 @@ private fun fmtTs(tsUtc: String): String = try {
     val instant = Instant.parse(tsUtc)
     DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault()).format(instant)
 } catch (_: Exception) { tsUtc.take(10) }
+
+// AggressiviteitsKaart: Stap 1 van de vereenvoudiging.
+// Schuif is zichtbaar en opgeslagen, nog niet gekoppeld aan params.
+// Stap 2 koppelt de waarde aan S/T/V/refWmd/refWff/refEb tegelijk.
+@androidx.compose.runtime.Composable
+private fun AggressiviteitsKaart(
+    niveau: Int,
+    onChanged: (Int) -> Unit
+) {
+    val labels = mapOf(
+        1 to "Zeer voorzichtig",
+        2 to "Voorzichtig",
+        3 to "Iets voorzichtig",
+        4 to "Licht conservatief",
+        5 to "Standaard",
+        6 to "Licht agressief",
+        7 to "Agressief",
+        8 to "Zeer agressief",
+        9 to "Maximaal agressief"
+    )
+    val accentKleur = when {
+        niveau <= 2 -> androidx.compose.ui.graphics.Color(0xFF4FC3F7)
+        niveau <= 4 -> androidx.compose.ui.graphics.Color(0xFF81C784)
+        niveau == 5 -> androidx.compose.material3.MaterialTheme.colorScheme.primary
+        niveau <= 7 -> androidx.compose.ui.graphics.Color(0xFFFFB74D)
+        else        -> androidx.compose.ui.graphics.Color(0xFFE57373)
+    }
+    androidx.compose.material3.Card(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = accentKleur.copy(alpha = 0.10f)
+        )
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = androidx.compose.ui.Modifier.padding(16.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+        ) {
+            androidx.compose.foundation.layout.Row(
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.Text(
+                    "Agressiviteit",
+                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+                androidx.compose.material3.Text(
+                    "$niveau  —  ${labels[niveau] ?: "Standaard"}",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    color = accentKleur
+                )
+            }
+            androidx.compose.material3.Slider(
+                value = niveau.toFloat(),
+                onValueChange = { onChanged(it.toInt()) },
+                valueRange = 1f..9f,
+                steps = 7,
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = accentKleur,
+                    activeTrackColor = accentKleur
+                )
+            )
+            androidx.compose.foundation.layout.Row(
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+            ) {
+                androidx.compose.material3.Text("Voorzichtig",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.Text("Agressief",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Text(
+                "Verschuift de geleerde S/T/V en frontload-timing — niveau 5 = geen effect",
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
