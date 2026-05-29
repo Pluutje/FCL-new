@@ -1,4 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
+import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -51,16 +53,21 @@ fun PeakPredictionChart(
 
     if (active.isEmpty()) return
 
-    val actualPeak = episodeRows.maxOf { it.bg }
+    val ctx = LocalContext.current
+    val mgdl = BgUnits.isMgdl(ctx)
+    fun bg(mmol: Double) = if (mgdl) mmol * 18.0 else mmol
+
+    val actualPeak = bg(episodeRows.maxOf { it.bg })
 
     // Y-domein: van net onder min BG tot boven max van ballistic
-    val allPredicted = active.mapNotNull { it.predictedPeak }.filter { it > 0 }
-    val allBallistic = active.map { it.predictedPeakBallistic }.filter { it > 0 }
-    val allBg = active.map { it.bg }
+    val allPredicted = active.mapNotNull { it.predictedPeak }.filter { it > 0 }.map { bg(it) }
+    val allBallistic = active.map { it.predictedPeakBallistic }.filter { it > 0 }.map { bg(it) }
+    val allBg = active.map { bg(it.bg) }
 
-    val yMax = (listOf(allPredicted, allBallistic, allBg).flatten().maxOrNull() ?: 12.0)
-        .let { kotlin.math.ceil(it / 2.0) * 2.0 }
-        .coerceAtLeast(10.0)
+    val bgStep = if (mgdl) 20.0 else 2.0
+    val yMax = (listOf(allPredicted, allBallistic, allBg).flatten().maxOrNull() ?: bg(12.0))
+        .let { kotlin.math.ceil(it / bgStep) * bgStep }
+        .coerceAtLeast(if (mgdl) 180.0 else 10.0)
     val yMin = 0.0
 
     // X-domein: minuten sinds maaltijdstart
@@ -85,10 +92,10 @@ fun PeakPredictionChart(
         drawRect(color = ChartBg, topLeft = Offset(0f, 0f), size = size)
 
         // Grid
-        val gridSteps = generateSequence(2.0) { it + 2.0 }.takeWhile { it <= yMax }.toList()
+        val gridSteps = generateSequence(bgStep) { it + bgStep }.takeWhile { it <= yMax }.toList()
         gridSteps.forEach { v ->
             val y = yOf(v)
-            val is10 = v == 10.0
+            val is10 = kotlin.math.abs(v - bg(10.0)) < (if (mgdl) 5.0 else 0.1)
             drawLine(
                 color = if (is10) Color(0x88FFD600) else GridColor,
                 start = Offset(lPad, y),
@@ -179,7 +186,7 @@ fun PeakPredictionChart(
         var bgStarted = false
         active.forEach { r ->
             val x = xOf(r.minutesSinceMealStart ?: return@forEach)
-            val y = yOf(r.bg)
+            val y = yOf(bg(r.bg))
             if (!bgStarted) { bgPath.moveTo(x, y); bgStarted = true }
             else bgPath.lineTo(x, y)
         }
@@ -188,9 +195,9 @@ fun PeakPredictionChart(
         // BG punten
         active.forEach { r ->
             val x = xOf(r.minutesSinceMealStart ?: return@forEach)
-            val y = yOf(r.bg)
+            val y = yOf(bg(r.bg))
             drawCircle(
-                color = if (r.bg > 10.0) ColorPeakLine else ColorActualPeak,
+                color = if (bg(r.bg) > bg(10.0)) ColorPeakLine else ColorActualPeak,
                 radius = 2.5f,
                 center = Offset(x, y)
             )
@@ -211,7 +218,7 @@ fun PeakPredictionChart(
             color = ColorPeakLine.toArgb(); textSize = 24f; isAntiAlias = true
         }
         drawContext.canvas.nativeCanvas.drawText(
-            "▶ %.1f".format(actualPeak), lPad + plotW + 2f, yPeakLine + 8f, peakLabelPaint
+            "▶ ${"%.0f".format(actualPeak)}", lPad + plotW + 2f, yPeakLine + 8f, peakLabelPaint
         )
 
         // X-as labels (minuten)

@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -37,6 +38,7 @@ fun MaxSmbTab(
     manualMaxSmb: Double = MaxSmbLearner.MAX_SMB_DEFAULT,
     onApplyToAaps: ((Double, Double) -> Boolean)? = null
 ) {
+    val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
     val context = LocalContext.current
 
     var maxSmbDay    by remember { mutableStateOf(MaxSmbLearner.getMaxSmbDay(context, manualMaxSmb)) }
@@ -243,11 +245,11 @@ fun MaxSmbTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Divider()
-                Text("↑ maxSMB +${"%.2f".format(MaxSmbLearner.SMB_STEP_UP)}U  als piek > ${MaxSmbLearner.PEAK_TOO_HIGH.toInt()} mmol + rem ≥ 3× actief + earlyBoost actief + geen hypo",
+                Text("↑ maxSMB +${"%.2f".format(MaxSmbLearner.SMB_STEP_UP)}U  als piek > ${if (mgdl) "%.0f".format(MaxSmbLearner.PEAK_TOO_HIGH * 18.0) else "%.1f".format(MaxSmbLearner.PEAK_TOO_HIGH)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)} + rem ≥ 3× actief + earlyBoost actief + geen hypo",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("↑ iobBrake +${"%.2f".format(MaxSmbLearner.BRAKE_STEP)}  als maxSMB al op max en piek > ${MaxSmbLearner.PEAK_TOO_HIGH.toInt()} + rem actief",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("↓ maxSMB -${"%.2f".format(MaxSmbLearner.SMB_STEP_DOWN_HYPO)}U  als hypo (< ${MaxSmbLearner.HYPO_THRESHOLD} mmol) na episode",
+                Text("↓ maxSMB -${"%.2f".format(MaxSmbLearner.SMB_STEP_DOWN_HYPO)}U  als hypo (< ${if (mgdl) "%.0f".format(MaxSmbLearner.HYPO_THRESHOLD * 18.0) else "%.1f".format(MaxSmbLearner.HYPO_THRESHOLD)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}) na episode",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
                 Text("↓ iobBrake -${"%.2f".format(MaxSmbLearner.BRAKE_STEP)}  als hypo + iobBrake boven standaard",
                      style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)

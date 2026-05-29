@@ -278,5 +278,6 @@ enum class DoubleKey(
     fcl_vnext_late_commit_decay_threshold(key = "fcl_vnext_late_commit_decay_threshold", defaultValue = 0.55, min = 0.30, max = 0.70, titleResId = R.string.fcl_vnext_internal),
     fcl_vnext_sustained_rise_slope_min(key = "fcl_vnext_sustained_rise_slope_min", defaultValue = 0.40, min = 0.15, max = 0.80, titleResId = R.string.fcl_vnext_internal),
 
-
+    fcl_aaps_mulitplier_day(key = "fcl_aaps_mulitplier_day", defaultValue = 1.0, min = 0.8, max = 2.0, titleResId = R.string.fcl_aaps_mulitplier_day_title, unitType = UnitType.INSULIN),
+    fcl_aaps_mulitplier_night(key = "fcl_aaps_mulitplier_night", defaultValue = 1.0, min = 0.8, max = 2.0, titleResId = R.string.fcl_aaps_mulitplier_night_title, unitType = UnitType.INSULIN),
 }

@@ -1,4 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
+import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -46,13 +48,18 @@ fun EpisodeChart(
     val gridColor = Color(0x33FFFFFF)
     val labelColor = Color(0xCCFFFFFF)
 
+    val ctx = LocalContext.current
+    val mgdl = BgUnits.isMgdl(ctx)
+    fun bg(mmol: Double) = if (mgdl) mmol * 18.0 else mmol
+
     val sorted = rows.sortedBy { it.timestamp }
     val minTime = sorted.first().timestamp
     val maxTime = sorted.last().timestamp
 
-    val rawMaxBg = sorted.maxOf { it.bg }
-    val roundedBgMax = kotlin.math.ceil(rawMaxBg / 2.0) * 2.0
-    val maxBg = roundedBgMax.coerceAtLeast(10.0)   // minimum 8 voor leesbaarheid, schaalt mee omhoog
+    val rawMaxBg = bg(sorted.maxOf { it.bg })
+    val bgStep = if (mgdl) 20.0 else 2.0
+    val roundedBgMax = kotlin.math.ceil(rawMaxBg / bgStep) * bgStep
+    val maxBg = roundedBgMax.coerceAtLeast(if (mgdl) 180.0 else 10.0)
     val minBg = 0.0
 
     val hasPredPeak = sorted.any { it.predictedPeak != null && it.predictedPeak > 0.0 }
@@ -91,12 +98,12 @@ fun EpisodeChart(
         drawRect(color = ChartBg, topLeft = Offset(0f, 0f), size = size)
 
         // TIR zone (3.9–10.0)
-        val yTirTop = yBg(10.0)
-        val yTirBot = yBg(3.9)
+        val yTirTop = yBg(bg(10.0))
+        val yTirBot = yBg(bg(3.9))
         drawRect(color = RangeBg, topLeft = Offset(leftPad, yTirTop), size = androidx.compose.ui.geometry.Size(plotW, yTirBot - yTirTop))
 
         // Hypo zone (<3.9)
-        val yHypoTop = yBg(3.9)
+        val yHypoTop = yBg(bg(3.9))
         val yHypoBot = topPad + plotH
         drawRect(color = HypoBg, topLeft = Offset(leftPad, yHypoTop), size = androidx.compose.ui.geometry.Size(plotW, yHypoBot - yHypoTop))
 
@@ -108,13 +115,13 @@ fun EpisodeChart(
         }
 
         // Grid-lijnen (BG) — dynamisch op basis van maxBg
-        val bgGridStep = if (maxBg <= 10.0) 1.0 else 2.0
+        val bgGridStep = if (mgdl) (if (maxBg <= 180.0) 20.0 else 40.0) else (if (maxBg <= 10.0) 1.0 else 2.0)
         val bgGridSteps = generateSequence(bgGridStep) { it + bgGridStep }
             .takeWhile { it <= maxBg }
             .toList()
         bgGridSteps.forEach { bgVal ->
             val y = yBg(bgVal)
-            val isTarget10 = bgVal == 10.0   // doelgrens altijd markeren
+            val isTarget10 = kotlin.math.abs(bgVal - bg(10.0)) < (if (mgdl) 5.0 else 0.1)
             drawLine(
                 color = if (isTarget10) Color(0x88FFD600) else gridColor,
                 start = Offset(leftPad, y),
@@ -148,7 +155,7 @@ fun EpisodeChart(
                 val pp = row.predictedPeak ?: return@forEach
                 if (pp <= 0.0) return@forEach
                 val x = xOf(row.timestamp)
-                val y = yBg(pp)
+                val y = yBg(bg(pp))
                 if (!predStarted) { predPath.moveTo(x, y); predStarted = true }
                 else predPath.lineTo(x, y)
             }
@@ -172,7 +179,7 @@ fun EpisodeChart(
         var bgStarted = false
         sorted.forEach { row ->
             val x = xOf(row.timestamp)
-            val y = yBg(row.bg)
+            val y = yBg(bg(row.bg))
             if (!bgStarted) { bgPath.moveTo(x, y); bgStarted = true } else bgPath.lineTo(x, y)
         }
         drawPath(bgPath, color = AapsGreen, style = Stroke(width = 2f))
@@ -180,7 +187,7 @@ fun EpisodeChart(
         // BG punten gekleurd
         sorted.forEach { row ->
             val x = xOf(row.timestamp)
-            val y = yBg(row.bg)
+            val y = yBg(bg(row.bg))
             val dotColor = when {
                 row.bg < 3.9  -> AapsRed
                 row.bg > 10.0 -> AapsYellow
@@ -202,7 +209,7 @@ fun EpisodeChart(
             )
         }
         // Markeer de piekwaarde als die boven 10 uitkomt
-        if (rawMaxBg > 10.1) {
+        if (rawMaxBg > bg(10.1)) {
             val peakPaint = android.graphics.Paint().apply {
                 color = Color(0xCCFFD600).toArgb()
                 textSize = 26f

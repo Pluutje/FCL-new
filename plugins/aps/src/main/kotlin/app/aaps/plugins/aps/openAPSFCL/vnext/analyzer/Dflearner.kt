@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import android.content.Context
 import kotlin.math.abs
 import kotlin.math.max
@@ -651,7 +652,12 @@ object DFLearner {
         // ── Reden opbouwen ──────────────────────────────────────────────
         val reden = buildString {
             append("[$diagnose] ")
-            if (abs(peakFout) > 0.5) append("piek ${if (peakFout > 0) "+" else ""}${String.format("%.1f", peakFout)}mmol ")
+            if (abs(peakFout) > 0.5) {
+                val mgdl654 = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(context)
+                val pv = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.fromMmol(peakFout, mgdl654)
+                val pfmt = if (mgdl654) "%.0f".format(pv) else "%.1f".format(pv)
+                append("piek ${if (peakFout > 0) "+" else ""}$pfmt${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl654)} ")
+            }
             if (abs(iobrFout) > 0.05) append("IOBpiek ${if (iobrFout > 0) "+" else ""}${String.format("%.2f", iobrFout)} ")
             if (hypoStraf > 0.1) append("hypo_straf=${String.format("%.2f", hypoStraf)} ")
             append("[tempo=$tempo]")

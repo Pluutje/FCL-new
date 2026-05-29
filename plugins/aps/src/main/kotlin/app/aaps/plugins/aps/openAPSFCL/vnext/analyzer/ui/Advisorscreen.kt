@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -861,6 +862,7 @@ private fun HandmatigParametersTab(
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)?
 ) {
     val D = ConfigOverrideWriter.Defaults
+    val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -880,13 +882,13 @@ private fun HandmatigParametersTab(
         )
 
         ParameterLeesCategorie("⏱ Commit & timing") {
-            ParameterLeesRij("Stijgingsdrempel frontload",  "%.2f mmol".format(activeParams.watchingMinDeltaToTarget), D.WATCHING_MIN_DELTA_TARGET)
+            ParameterLeesRij("Stijgingsdrempel frontload",  app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatDelta(activeParams.watchingMinDeltaToTarget, mgdl), D.WATCHING_MIN_DELTA_TARGET)
             ParameterLeesRij("Frontload grootte",           "%.0f%%".format(activeParams.watchingFrontloadFrac * 100),  D.WATCHING_FRONTLOAD_FRAC * 100)
             ParameterLeesRij("Commit pauze",                "${activeParams.commitCooldownMinutes} min",                D.COMMIT_COOLDOWN_MINUTES.toDouble(), activeParams.commitCooldownMinutes.toDouble())
         }
 
         ParameterLeesCategorie("📈 Piekdrempels") {
-            ParameterLeesRij("Piekdrempel",        "%.1f mmol".format(activeParams.peakPredictionThreshold),       D.PEAK_PREDICTION_THRESHOLD)
+            ParameterLeesRij("Piekdrempel",        app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(activeParams.peakPredictionThreshold, mgdl),       D.PEAK_PREDICTION_THRESHOLD)
             ParameterLeesRij("Piekhorizon",         "%.1f uur".format(activeParams.peakPredictionHorizonH),        D.PEAK_PREDICTION_HORIZON_H)
             ParameterLeesRij("IOB startfractie",    "%.2f".format(activeParams.iobStart),                          D.IOB_START)
             ParameterLeesRij("IOB-remdrempel piek", "%.2f".format(activeParams.peakIobBrakeSuppressThreshold),     D.PEAK_IOB_BRAKE_SUPPRESS)

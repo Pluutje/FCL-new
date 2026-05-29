@@ -38,7 +38,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
                     FCLAnalyzerDatabase::class.java,
                     DB_NAME
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }
             }

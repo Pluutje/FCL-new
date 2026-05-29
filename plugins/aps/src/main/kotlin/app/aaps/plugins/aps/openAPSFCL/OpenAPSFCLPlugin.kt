@@ -241,7 +241,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             current_basal = activePlugin.activePump.baseBasalRate.cU,
             temptargetSet = isTempTarget,
             autosens_max = preferences.get(DoubleKey.AutosensMax),
-            out_units = if (profileFunction.getUnits() == GlucoseUnit.MMOL) "mmol/L" else "mg/dl",
+            out_units   = if (profileFunction.getUnits() == GlucoseUnit.MMOL) "mmol/L" else "mg/dl",
             variable_sens = 0.0,
             insulinDivisor = 0,
             TDD = 0.0
@@ -343,7 +343,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
     override fun applyConfiguration(configuration: JsonObject) {}
 
-    /*   override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
+    override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
            key = "fcl_vnext_settings",
            titleResId = R.string.openaps_fcl,
            items = listOf(
@@ -351,14 +351,15 @@ open class OpenAPSFCLPlugin @Inject constructor(
                    key = "fcl_vnext_general",
                    titleResId = R.string.fcl_vnext_general_title,
                    items = listOf(
-                       DoubleKey.max_bolus_day,
-                       DoubleKey.max_bolus_night,
+                       DoubleKey.fcl_aaps_mulitplier_day,
+                       DoubleKey.fcl_aaps_mulitplier_night,
+                    /*   DoubleKey.max_bolus_night,
                        DoubleKey.fcl_vnext_MaxIOB,
                        StringKey.fcl_vnext_dose_distribution_style,
-                       StringKey.fcl_vnext_night_response_style
+                       StringKey.fcl_vnext_night_response_style   */
                    )
                ),
-               PreferenceSubScreenDef(
+            /*   PreferenceSubScreenDef(
                    key = "fcl_vnext_context",
                    titleResId = R.string.fcl_vnext_context_title,
                    items = listOf(
@@ -370,14 +371,14 @@ open class OpenAPSFCLPlugin @Inject constructor(
                        StringKey.fcl_vnext_resistance_stability,
                        StringKey.fcl_vnext_activity_behavior
                    )
-               )
+               )   */
            ),
            icon = pluginDescription.icon
-       )   */
-    override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
+       )
+  /*  override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "fcl_vnext_settings",
         titleResId = R.string.openaps_fcl,
         items = emptyList(),
         icon = pluginDescription.icon
-    )
+    )   */
 }

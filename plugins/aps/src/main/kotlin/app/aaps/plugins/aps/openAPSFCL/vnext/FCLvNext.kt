@@ -300,6 +300,11 @@ private val peakEstimator = PeakEstimatorContext()
 private var lastCommitAt: DateTime? = null
 private var lastCommitDose: Double = 0.0
 private var lastCommitReason: String = ""
+// Tijdstip van de laatste earlyBoost-fire (stage2/3)
+// Gebruikt om de 1-2 cycli daarna een verhoogde TBR mee te geven
+// zodat de bedoelde dosis ook daadwerkelijk geleverd wordt.
+private var lastEarlyBoostAt: DateTime? = null
+private var lastEarlyBoostDoseU: Double = 0.0
 // IOB-tracking voor externe bolus detectie
 private var prevIobForExternalDetect: Double = -1.0
 private var prevFclDoseForExternalDetect: Double = 0.0
@@ -1004,10 +1009,20 @@ private fun hypoProtection(
 
     // Conservatieve “worst-case” insulin impact fracties
     // (veiligheids-gate: liever te streng dan te los).
+    //
+    // Bij actieve maaltijdstijging (CONFIRMED + recentSlope>=2.0 + bgNow>=7.0)
+    // compenseert glucoseabsorptie ~45% van de insulinewerking in 90 min.
+    // Zonder compensatie blokkeert de hypo-guard stage2 bij BG=9.2 stijgend.
+    val mealCompensationFactor = if (
+        mealSignal?.state == MealState.CONFIRMED &&
+            ctx.recentSlope >= 2.0 &&
+            ctx.input.bgNow >= 7.0
+    ) 0.55 else 1.0
+
     fun insulinActionFrac(min: Int): Double = when {
-        min <= 30 -> config.hypoInsulinFrac30
-        min <= 60 -> config.hypoInsulinFrac60
-        else      -> config.hypoInsulinFrac90
+        min <= 30 -> config.hypoInsulinFrac30 * mealCompensationFactor
+        min <= 60 -> config.hypoInsulinFrac60 * mealCompensationFactor
+        else      -> config.hypoInsulinFrac90 * mealCompensationFactor
     }
 
     val horizons = listOf(30, 60, 90)
@@ -1127,6 +1142,27 @@ private fun hypoProtection(
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
             reason = "HYPO PROTECT BYPASSED (strong rise with existing IOB, no-insulin safe)"
+        )
+    }
+
+    // lowIobHighBg bypass: BG ruim boven target, IOB laag, niet hard dalend.
+    // Situatie: BG 7.5+ na maaltijdpiek met bijna uitgewerkte IOB (iobRatio < 0.12).
+    // FCLvNext was hier geblokkeerd terwijl AAPS kleine correcties gaf.
+    // Veiligheid: rawProjection = bg - iob*isf > 2.0 garandeert geen hypo.
+    val rawNoInsulinProjection = ctx.input.bgNow - ctx.input.currentIOB * ctx.input.effectiveISF
+    val lowIobHighBg =
+        ctx.input.bgNow >= 7.5 &&
+            ctx.iobRatio < 0.12 &&
+            ctx.slope >= -0.5 &&
+            rawNoInsulinProjection > 2.0
+
+    if (lowIobHighBg) {
+        return HypoProtection(
+            active = false,
+            projectedMin = projectedMin,
+            projectedMinNoInsulin = projectedMinNoInsulin,
+            projectedMinWithPlannedInsulin = projectedMinWithInsulin,
+            reason = "HYPO PROTECT BYPASSED (low IOB, high BG, no-insulin projection safe)"
         )
     }
     // ── einde meal-context vrijstelling ───────────────────────────────────
@@ -1939,6 +1975,18 @@ private fun evaluatePostPeak(
             (ctx.deltaToTarget >= 3.0 ||
                 (ctx.deltaToTarget >= 2.0 && ctx.recentSlope >= 3.0))
 
+    // slowCarbOverride: doorbreekt absorptionWindow bij slow-carb stijging
+    // (bier, kaas, dessert) waarbij UNCERTAIN voldoende is maar BG al hoog is.
+    // Vereisten: BG >= 8.0 (echt te hoog), aanhoudende stijging >= 30 min,
+    // lage IOB (geen hypo-risico), zowel 5m als langere trend positief.
+    val slowCarbOverride =
+        mealSignal.state in listOf(MealState.CONFIRMED, MealState.UNCERTAIN) &&
+            minutesSinceEpisodeStart >= 30 &&
+            ctx.input.bgNow >= 8.0 &&
+            ctx.recentSlope >= 2.5 &&
+            ctx.recentDelta5m >= 0.10 &&
+            ctx.iobRatio < 0.20
+
     // episode-like: ook zonder absorption kunnen we een top herkennen
     val episodeLike =
         mealSignal.state != MealState.NONE || peakEstimator.active || peak.state != PeakPredictionState.IDLE
@@ -2024,7 +2072,7 @@ private fun evaluatePostPeak(
     val suppress =
         reliable && (
             // bestaande post-commit suppress — niet bij bewezen nieuwe maaltijdstijging
-            (inAbsorption && !newMealOverride &&
+            (inAbsorption && !newMealOverride && !slowCarbOverride &&
                 (ctx.slope <= config.peakSlopeThreshold || ctx.acceleration <= config.peakAccelThreshold)
                 )
                 // bestaande pre-commit top/plateau suppress
@@ -2042,7 +2090,7 @@ private fun evaluatePostPeak(
         (0.30 + 0.07 * ctx.deltaToTarget).coerceIn(0.30, 0.70)
     val lockout =
         reliable && (
-            (inAbsorption && !newMealOverride &&
+            (inAbsorption && !newMealOverride && !slowCarbOverride &&
                 ((ctx.slope <= config.peakSlopeThreshold) || (ctx.acceleration <= config.peakAccelThreshold)) &&
                 (ctx.iobRatio >= dynamicIobThreshold)
                 )
@@ -3717,6 +3765,9 @@ class FCLvNext(
             if (finalDose > before) {
                 episodeCommitCount++
                 earlyFiredThisCycle = true
+                // Onthoud tijdstip en grootte voor post-boost TBR-continuatie
+                lastEarlyBoostAt = now
+                lastEarlyBoostDoseU = finalDose
             }
 
             status.append(
@@ -3908,8 +3959,14 @@ class FCLvNext(
         val wffBudgetScaling = if (episodeBoostBudgetU > 0.1) {
             (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
+        // IOB-penalty op de watching target: bij hoge lopende IOB (iobRatio >= 0.40)
+        // worden watching commits kleiner. Dit voorkomt dat de 'staart' van een
+        // episode te veel insuline geeft terwijl de frontload al fors was.
+        // Formule: penalty = 1 - max(0, (iobRatio - 0.40) * 0.70)
+        // iobRatio=0.40 -> geen effect. iobRatio=0.68 -> factor 0.80. iobRatio=0.80 -> factor 0.72.
+        val wffIobPenalty = (1.0 - maxOf(0.0, (ctx.iobRatio - 0.40) * 0.70)).coerceIn(0.60, 1.0)
         val watchingFrontloadTargetU =
-            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling)
+            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling * wffIobPenalty)
                 .coerceAtMost(config.maxSMB)
 
 // 3) Echte triggerconditie
@@ -4198,7 +4255,10 @@ class FCLvNext(
 
                     commandedDose = committedDose
 
-                    lastCommitAt = now
+                    // Verlengt absorptionWindow alleen bij substantiele commits (>= 0.40U).
+                    // Kleine correctie-commits (0.20-0.35U) mogen de suppress-window
+                    // niet eindeloos verlengen: dat blokkeerde de borrel-stijging.
+                    if (committedDose >= 0.40) lastCommitAt = now
                     lastCommitDose = committedDose
                     lastCommitReason = "${mealSignal.state} frac=${"%.2f".format(fraction)}"
 
@@ -4558,7 +4618,21 @@ class FCLvNext(
                 ctx.recentSlope <= 0.30 && kotlin.math.abs(ctx.recentDelta5m) <= 0.04
 
             val highRoom = if ((zoneEnum == BgZone.HIGH || zoneEnum == BgZone.EXTREME) && !fastPlateau) 1.45 else 1.10
-            val cap10m = highRoom * config.maxSMB
+            var cap10m = highRoom * config.maxSMB
+
+            // Als FCLvNext zelf kort geleden een grote earlyBoost heeft gegeven
+            // (stage2/3), dan is die dosis al 'ingepland' en telt hij mee in
+            // burst_delivered_10m. Stage3 en de eerste watching commit krijgen
+            // daardoor onterecht een reacquire-cap van 0.35U.
+            // Fix: verhoog de cap tijdelijk met de earlyBoost-dosis zodat
+            // geplande stage-doses gewoon doorgang vinden.
+            val minsSinceBoost = lastEarlyBoostAt?.let {
+                org.joda.time.Minutes.minutesBetween(it, now).minutes
+            } ?: 999
+            if (minsSinceBoost <= 10 && lastEarlyBoostDoseU >= 1.0) {
+                cap10m += lastEarlyBoostDoseU
+            }
+
             logRow.burstCap10m = cap10m
 
             val remaining = (cap10m - delivered10m).coerceAtLeast(0.0)

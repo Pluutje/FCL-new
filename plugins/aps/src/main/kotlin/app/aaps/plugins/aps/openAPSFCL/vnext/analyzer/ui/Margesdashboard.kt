@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Card
@@ -38,6 +39,7 @@ private val GridC         = Color(0x33FFFFFF)
  */
 @Composable
 fun MargesDashboardCard(episode: Episode) {
+    val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
     val rows = episode.rows
         .filter { (it.minutesSinceMealStart ?: -1) >= 0 }
         .sortedBy { it.minutesSinceMealStart }
@@ -353,6 +355,7 @@ private fun MargeGrafiek(
 
 @Composable
 private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) {
+    val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -385,7 +388,7 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
 
             fun foutLabel(f: Double?): String {
                 if (f == null) return "—"
-                return if (f >= 0) "+%.2f mmol".format(f) else "%.2f mmol".format(f)
+                return if (f >= 0) "+${if (mgdl) "%.0f".format(f*18.0) else "%.2f".format(f)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}" else "${if (mgdl) "%.0f".format(f*18.0) else "%.2f".format(f)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}"
             }
 
             fun foutKleur(f: Double?): Color = when {
@@ -405,9 +408,9 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                MetricBlock("Werkelijke piek", "%.1f mmol".format(actualPeak))
-                MetricBlock("Gem. voorspelling", "%.1f mmol".format(correctedGem))
-                MetricBlock("IOB-correctie", "-%.2f mmol".format(iobCorrectie))
+                MetricBlock("Werkelijke piek", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(actualPeak, mgdl))
+                MetricBlock("Gem. voorspelling", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(correctedGem, mgdl))
+                MetricBlock("IOB-correctie", "-${if (mgdl) "%.0f".format(iobCorrectie*18.0) else "%.2f".format(iobCorrectie)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}")
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -450,7 +453,7 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     "Floor-correctie actief in $floorActief cycli " +
-                        "(gem. +%.2f mmol) — compenseert vroege onderschatting".format(gemFloor),
+                        "(gem. +${if (mgdl) "%.0f".format(gemFloor*18.0) else "%.2f".format(gemFloor)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}) — compenseert vroege onderschatting",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                 )

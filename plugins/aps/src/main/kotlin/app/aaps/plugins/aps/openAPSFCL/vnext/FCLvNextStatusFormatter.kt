@@ -1,5 +1,7 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext
 
+import android.content.Context
+
 import org.joda.time.DateTime
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
@@ -52,7 +54,8 @@ class FCLvNextStatusFormatter(
         appendLine("🔄 SITUATIE — $dagNacht  $tijd")
         appendLine("─────────────────────")
         val deltaStr = ui.delta5m?.let { " (%+.2f/5m)".format(it) } ?: ""
-        appendLine("• Glucose:  ${"%.1f".format(ui.bgNow)} mmol/L$deltaStr")
+        val mgdl = BgUnits.isMgdl(context)
+        appendLine("• Glucose:  ${BgUnits.formatBg(ui.bgNow, mgdl)} $deltaStr")
         appendLine("• IOB:      ${"%.2f".format(ui.iob)} U")
 
         advice?.peakState?.let { state ->
@@ -63,7 +66,7 @@ class FCLvNextStatusFormatter(
                 else        -> state
             }
             val peakStr = advice.predictedPeak
-                ?.let { "  →  verwacht ${"%.1f".format(it)} mmol/L" } ?: ""
+                ?.let { "  →  verwacht ${BgUnits.formatBg(it, mgdl)}" } ?: ""
             append("• FCL piek: $uitleg$peakStr")
         }
     }
@@ -175,6 +178,7 @@ class FCLvNextStatusFormatter(
                 .getMaxSmbDay(context, snapManual)
         else activeConfig.maxSMB
 
+        val mgdl = BgUnits.isMgdl(context)
         return buildString {
             appendLine("🔧 ANALYZER-GESTUURDE WAARDEN (config)")
             appendLine("─────────────────────")
@@ -189,7 +193,7 @@ class FCLvNextStatusFormatter(
             appendLine("─────────────────────")
             appendLine("• iobStart          : ${"%.2f".format(activeConfig.iobStart)}")
             appendLine("• commitCooldown    : ${activeConfig.commitCooldownMinutes} min")
-            appendLine("• peakPredThreshold : ${"%.1f".format(activeConfig.peakPredictionThreshold)} mmol")
+            appendLine("• peakPredThreshold : ${BgUnits.formatBg(activeConfig.peakPredictionThreshold, mgdl)}")
             appendLine("• peakHorizon       : ${"%.1f".format(activeConfig.peakPredictionHorizonH)} h")
             appendLine("• watchingFrac      : ${"%.2f".format(activeConfig.watchingFrontloadFrac)}")
             appendLine("• watchingDeltaMin  : ${"%.2f".format(activeConfig.watchingMinDeltaToTarget)}")
@@ -201,7 +205,7 @@ class FCLvNextStatusFormatter(
             appendLine("• lateDecayFactor   : ${"%.2f".format(activeConfig.lateCommitDecayFactor)}")
             appendLine("• lateDecayThreshold: ${"%.2f".format(activeConfig.lateCommitDecayThreshold)}")
             appendLine("• sustainedSlopeMin : ${"%.2f".format(activeConfig.sustainedRiseSlopeMin)}")
-            append(    "• sustainedMinTarget: ${activeConfig.sustainedRiseMinTarget} mmol")
+            append(    "• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
         }
     }
 
@@ -221,7 +225,7 @@ class FCLvNextStatusFormatter(
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v1.7.2")
+        appendLine(" 🧠 FCL V6 v1.8.2")
         appendLine("════════════════════════")
         appendLine()
 

@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import android.content.Context
 import kotlin.math.abs
 
@@ -249,12 +250,13 @@ object MaxSmbLearner {
 
         val reden = buildString {
             append("[$diagnose] ")
-            append("piek=${"%.1f".format(metrics.peakBg)}mmol ")
+            val mgdlMs = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(context)
+            append("piek=${if (mgdlMs) "%.0f".format(metrics.peakBg * 18.0) else "%.1f".format(metrics.peakBg)}${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdlMs)} ")
             append("cap=${metrics.capReachedCycles}× ")
             append("rem=${metrics.brakeActiveCycles}× ")
             append("boost=${metrics.earlyBoostWasActive} ")
             append("S=${metrics.currentSterkte}% ")
-            if (hypoNaEpisode) append("hypo=${"%.1f".format(metrics.minBgInWindow)}mmol ")
+            if (hypoNaEpisode) append("hypo=${if (mgdlMs) "%.0f".format(metrics.minBgInWindow * 18.0) else "%.1f".format(metrics.minBgInWindow)}${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdlMs)} ")
             append("→ maxSMB ${"%+.2f".format(effMaxSmb - currentMaxSmb)}U ")
             append("brake ${"%+.3f".format(effBrake - currentBrake)}")
         }

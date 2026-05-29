@@ -120,7 +120,7 @@
 
 
     <!-- FCL vNext — scherm- en veldtitels -->
-    <string name="fcl_vnext_general_title">⚡ Gedrag &amp; limieten</string>
+    <string name="fcl_vnext_general_title">⚡ AAPs standaard Gedrag</string>
     <string name="fcl_vnext_context_title">🌙 🛡️ 🚶 Context</string>
     <string name="max_bolus_day_title">Max bolus dag</string>
     <string name="max_bolus_day_summary">Referentiewaarde voor de Analyzer. De Analyzer stuurt de actieve maxSMB bij tussen 50% en 125% van deze waarde.</string>

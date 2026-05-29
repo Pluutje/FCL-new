@@ -301,6 +301,12 @@ class DetermineBasalFCL @Inject constructor(
         val dayNightHelper = FCLvNextDayNightHelper(preferences)
         val isNight: Boolean = dayNightHelper.isNightNow()
 
+        // Sla unit-keuze op zodat composables (BgUnits) geen profileFunction nodig hebben
+        app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.setIsMgdl(
+            context,
+            profileFunction.getUnits() != app.aaps.core.data.model.GlucoseUnit.MMOL
+        )
+
         basalProfileNightLogger.onFiveMinuteTick(
             currentTimeMillis = currentTime,
             isNight = isNight
@@ -798,6 +804,14 @@ class DetermineBasalFCL @Inject constructor(
 // *************************************************************************************************************************8
 
 
+        // AAPS-multiplier: schaalt alleen de AAPS-correcties (Laag 2), niet FCLvNext.
+        // Dag: hoger = agressievere AAPS micro-bolussen bij hoge BG.
+        // Nacht: lager = voorzichtigere AAPS correcties (default 0.9 = 10% minder).
+        // Range 0.9-1.5. Heeft geen effect op FCLvNext zelf.
+        val aaps_multiplier =
+            if (isNight) preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
+            else preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
+
         if ((bolusAmount > 0.0 || basalRate > 0.0) && shouldDeliver) {
 
             if (basalRate > 0) {
@@ -1162,6 +1176,8 @@ class DetermineBasalFCL @Inject constructor(
             // rate required to deliver insulinReq more insulin over 30m:
             var rate = basal + (2 * insulinReq)
             rate = round_basal(rate)
+            // Schaal insulinReq met aaps_multiplier voor AAPS-laag correcties
+            insulinReq = insulinReq * aaps_multiplier
             insulinReq = round(insulinReq, 3)
             rT.insulinReq = insulinReq
 

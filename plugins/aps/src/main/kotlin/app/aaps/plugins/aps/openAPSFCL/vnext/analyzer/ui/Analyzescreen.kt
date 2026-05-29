@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -115,26 +116,11 @@ fun AnalyzeScreen(
                             currentAxisState = currentAxisState
                         )
                     },
-                    InfoTabPage("Start & detectie") {
-                        AutonomyOverviewCard(autonomy)
-                        StartTimingCard(episode, autonomy)
-                        entity?.let { MealTypeCard(it) }
-                    },
-                    InfoTabPage("Doseerlogica") {
-                        DosingLogicCard(episode)
-                    },
                     InfoTabPage("Piek analyse") {
                         PeakAnalyseCard(episode)
                     },
                     InfoTabPage("Marges") {
                         MargesDashboardCard(episode)
-                    },
-                    InfoTabPage("Instellingen") {
-                        EpisodeSettingsCard(
-                            episode = episode,
-                            metrics = metrics,
-                            currentAxisState = currentAxisState
-                        )
                     }
                 )
             )
@@ -410,6 +396,8 @@ private fun PeakAnalyseCard(episode: Episode) {
 
     val actualPeak = episode.rows.maxOf { it.bg }
     val hasPredData = episodeRows.any { (it.predictedPeak ?: 0.0) > 0.0 }
+    val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
+    val bgUnit = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -421,7 +409,7 @@ private fun PeakAnalyseCard(episode: Episode) {
         ) {
             Text("Piekvoorspelling vs werkelijkheid", style = MaterialTheme.typography.titleMedium)
             Text(
-                "X-as: minuten na episodestart  \u00b7  Y-as: BG mmol/L  \u00b7  Gele lijn = werkelijke piek",
+                "X-as: minuten na episodestart  \u00b7  Y-as: BG ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitLabel(app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current))}  \u00b7  Gele lijn = werkelijke piek",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
@@ -462,7 +450,8 @@ private fun PeakAnalyseCard(episode: Episode) {
                         )
                         Text(
                             vroegFout?.let {
-                                if (it >= 0) "+%.2f mmol".format(it) else "%.2f mmol".format(it)
+                                if (it >= 0) "+${if (mgdl) "%.0f".format(it * 18.0) else "%.2f".format(it)} $bgUnit"
+                                else "${if (mgdl) "%.0f".format(it * 18.0) else "%.2f".format(it)} $bgUnit"
                             } ?: "\u2014",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -482,7 +471,8 @@ private fun PeakAnalyseCard(episode: Episode) {
                         )
                         Text(
                             piekFout?.let {
-                                if (it >= 0) "+%.2f mmol".format(it) else "%.2f mmol".format(it)
+                                if (it >= 0) "+${if (mgdl) "%.0f".format(it * 18.0) else "%.2f".format(it)} $bgUnit"
+                                else "${if (mgdl) "%.0f".format(it * 18.0) else "%.2f".format(it)} $bgUnit"
                             } ?: "\u2014",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -501,7 +491,7 @@ private fun PeakAnalyseCard(episode: Episode) {
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                         Text(
-                            "%.1f mmol".format(actualPeak),
+                            app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(actualPeak, mgdl),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -536,6 +526,7 @@ private fun MealTypeCard(entity: EpisodeEntity) {
         else    -> "🔀 Gemengd" to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
+    val mgdlM = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
     val mealTypeEnum = when (type) {
         "SNEL"  -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL
         "TRAAG" -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG
@@ -572,8 +563,8 @@ private fun MealTypeCard(entity: EpisodeEntity) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                DetectieRij("Slope 0-15 min",  "${"%.2f".format(entity.mealTypeSlope0_15)} mmol/5min")
-                DetectieRij("Slope 15-30 min", "${"%.2f".format(entity.mealTypeSlope15_30)} mmol/5min")
+                DetectieRij("Slope 0-15 min",  app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(entity.mealTypeSlope0_15, mgdlM))
+                DetectieRij("Slope 15-30 min", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(entity.mealTypeSlope15_30, mgdlM))
             }
 
             Text("Parameters voor dit type:",

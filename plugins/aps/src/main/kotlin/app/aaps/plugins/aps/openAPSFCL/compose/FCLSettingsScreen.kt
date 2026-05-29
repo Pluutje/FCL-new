@@ -67,6 +67,13 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var expandedContext   by remember { mutableStateOf(false) }
     var expandedAutosens  by remember { mutableStateOf(false) }
 
+    // Expert modus: pincode "0000"
+    var showExpertSection   by remember { mutableStateOf(false) }
+    var expertPinInput      by remember { mutableStateOf("") }
+    var expertPinError      by remember { mutableStateOf(false) }
+    var expertPinDialogOpen by remember { mutableStateOf(false) }
+    val EXPERT_PIN = "0000"
+
     // ── Picker-zichtbaarheid ──────────────────────────────────────────────
     var showOchtendPicker        by remember { mutableStateOf(false) }
     var showOchtendWeekendPicker by remember { mutableStateOf(false) }
@@ -430,6 +437,74 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 onSelect = {
                     actBehavior = it
                     sp.putString(StringKey.fcl_vnext_activity_behavior.key, it)
+                }
+            )
+        }
+
+        // Expert modus sectie (pincode: 0000)
+        if (!showExpertSection) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = { expertPinDialogOpen = true; expertPinInput = ""; expertPinError = false },
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+            ) {
+                androidx.compose.material3.Text("Expert modus")
+            }
+        } else {
+            FCLSection(
+                title = "Expert modus",
+                expanded = true,
+                onToggle = { showExpertSection = false }
+            ) {
+                androidx.compose.material3.Text(
+                    "Expertmodus actief. Meer opties volgen.",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (expertPinDialogOpen) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { expertPinDialogOpen = false },
+                title = { androidx.compose.material3.Text("Expert modus") },
+                text = {
+                    androidx.compose.foundation.layout.Column(
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                    ) {
+                        androidx.compose.material3.Text(
+                            "Voer de pincode in (standaard: 0000).",
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                        )
+                        androidx.compose.material3.OutlinedTextField(
+                            value = expertPinInput,
+                            onValueChange = { if (it.length <= 4) { expertPinInput = it; expertPinError = false } },
+                            label = { androidx.compose.material3.Text("Pincode") },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                            ),
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            isError = expertPinError,
+                            singleLine = true
+                        )
+                        if (expertPinError) {
+                            androidx.compose.material3.Text(
+                                "Onjuiste pincode",
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.Button(onClick = {
+                        if (expertPinInput == EXPERT_PIN) {
+                            showExpertSection = true; expertPinDialogOpen = false
+                        } else expertPinError = true
+                    }) { androidx.compose.material3.Text("Openen") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { expertPinDialogOpen = false }) {
+                        androidx.compose.material3.Text("Annuleren")
+                    }
                 }
             )
         }
