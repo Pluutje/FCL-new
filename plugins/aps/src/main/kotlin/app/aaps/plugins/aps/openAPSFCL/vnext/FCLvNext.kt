@@ -1800,9 +1800,44 @@ private fun computeEarlyDoseDecision(
     // iobRatio drempel: 0.55 normaal, maar 0.65 bij pred_peak >= 11.5
     // want de piek-voorspelling geeft extra zekerheid dat de dosis nodig is.
     val stage3IobMax = if (peak.predictedPeak >= 11.5) 0.65 else 0.55
+
+    // ── Second Boost Window: versoepel stage3 na een grote stage2 ────────────
+    // Probleem: na een grote stage2 commit (bijv. 3.5U) schiet iobRatio direct
+    // omhoog naar 0.55-0.70. Stage3 vereist iobRatio < 0.55 en is daarmee
+    // structureel geblokkeerd. Het systeem valt terug op 4-5 kleine watching
+    // commits die samen evenveel insuline geven maar later gespreid:
+    // hogere IOB op de piek, meer staartrisico.
+    //
+    // Second Boost Window: als alle volgende voorwaarden gelden mag
+    // stage3 vuren ondanks verhoogde iobRatio:
+    //   1. Stage2 is < 20 min geleden gevuurd (we zitten in frontload-fase)
+    //   2. BG stijgt nog actief (slope >= 0.50 EN recentSlope >= 3.0)
+    //   3. PredictedPeak >= 9.5 (algoritme verwacht substantiële stijging)
+    //   4. iobRatio < 0.75 (ruimere drempel, maar niet onbeperkt)
+    //   5. rawNoInsulinProjection > 3.5 mmol (strengere veiligheidsmarge
+    //      dan normaal omdat IOB al hoog is)
+    //
+    // De dosis wordt beperkt door de verhoogde iobPenalty die al actief is
+    // (iobRatio 0.56 → penalty ~0.35, factor geschaald naar ~0.65× normaal).
+    // Plus: de cap10m burst-rem voorkomt dat te snel na de stage2 een nieuwe
+    // grote dosis wordt gegeven — minimaal 10 min tussenruimte.
+    val rawNoInsulinProjectionStage3 = ctx.input.bgNow - ctx.input.currentIOB * ctx.input.effectiveISF
+    val minutesSinceStage2 = lastEarlyBoostAt?.let {
+        org.joda.time.Minutes.minutesBetween(it, now).minutes
+    } ?: Int.MAX_VALUE
+    val inSecondBoostWindow =
+        earlyDose.stage == 2 &&
+        minutesSinceStage2 in 5..20 &&
+        ctx.slope >= 0.50 &&
+        ctx.recentSlope >= 3.0 &&
+        peak.predictedPeak >= 9.5 &&
+        ctx.iobRatio < 0.75 &&
+        rawNoInsulinProjectionStage3 > 3.5
+
+    val effectiveStage3IobMax = if (inSecondBoostWindow) 0.75 else stage3IobMax
     val allowStage3 = allowLarge &&
         ctx.slope >= 0.50 &&
-        ctx.iobRatio < stage3IobMax &&
+        ctx.iobRatio < effectiveStage3IobMax &&
         ctx.recentSlope >= 3.0
     val stageToFire = when {
         earlyDose.stage == 0 && conf >= dynamicStage1Min -> 1
@@ -1823,7 +1858,10 @@ private fun computeEarlyDoseDecision(
     val (minF, maxF) = when (stageToFire) {
         1    -> 0.40 to 0.70
         2    -> 0.55 to 0.90
-        else -> 0.45 to 0.65  // stage 3: groter dan watching maar kleiner dan stage 2
+        // stage 3 normaal: groter dan watching maar kleiner dan stage 2
+        // stage 3 second boost window: groter dan normaal, proportioneel aan
+        // de nog verwachte stijging (predictedPeak - bgNow)
+        else -> if (inSecondBoostWindow) 0.60 to 0.85 else 0.45 to 0.65
     }
 
     var factor = lerp(minF, maxF, conf)
@@ -3975,8 +4013,52 @@ class FCLvNext(
         // Formule: penalty = 1 - max(0, (iobRatio - 0.40) * 0.70)
         // iobRatio=0.40 -> geen effect. iobRatio=0.68 -> factor 0.80. iobRatio=0.80 -> factor 0.72.
         val wffIobPenalty = (1.0 - maxOf(0.0, (ctx.iobRatio - 0.40) * 0.70)).coerceIn(0.60, 1.0)
+
+        // ── Watching consolidation: vergroot watching commits na grote frontload ──
+        // Probleem: na een stage2 commit van bijv. 3.5U geeft het systeem 4-5
+        // kleine watching commits (~0.70U elk) terwijl één geconsolideerde
+        // tweede commit van ~1.5U effectiever zou zijn:
+        //   - Insuline werkt eerder op de BG-stijging
+        //   - Lagere IOB op de piek → minder hypo-staartrisico
+        //
+        // Consolidatiefactor actief als:
+        //   1. Grote frontload < 20 min geleden (lastEarlyBoostDoseU >= 1.5U)
+        //   2. BG nog stijgend (slope >= 0.40 en recentSlope >= 2.0)
+        //   3. iobRatio < 0.80 (voorkomen bij extreem hoge IOB)
+        //   4. predictedPeak >= 8.5 (systeem verwacht nog substantiële stijging)
+        //
+        // Factor: 1.0 (geen effect) tot max 1.6 afhankelijk van hoe vroeg
+        // we na de frontload zitten en hoe sterk de stijging is.
+        // Na 20 min valt de factor lineair terug naar 1.0.
+        val minsNaFrontload = lastEarlyBoostAt?.let {
+            org.joda.time.Minutes.minutesBetween(it, now).minutes
+        } ?: Int.MAX_VALUE
+        // Consolidatievenster: 5-30 min (was 5-20)
+        // Langere window zodat de hogere watching commits ook de cycli
+        // op t=20-30 min bereiken — die zijn vanochtend nog relevant.
+        val inConsolidationWindow = lastEarlyBoostDoseU >= 1.5 &&
+            minsNaFrontload in 5..30 &&
+            ctx.slope >= 0.40 &&
+            ctx.recentSlope >= 2.0 &&
+            ctx.iobRatio < 0.85 &&
+            peak.predictedPeak >= 8.5
+        val watchingConsolidationFactor = if (inConsolidationWindow) {
+            // Lineair aflopend: t=5min → factor 1.6, t=30min → factor 1.0
+            val t = ((minsNaFrontload - 5).toDouble() / 25.0).coerceIn(0.0, 1.0)
+            1.6 - t * 0.6  // 1.6 → 1.0 over 25 minuten
+        } else 1.0
+
+        // In het consolidatievenster: iobPenalty minder streng
+        // Normaal start penalty bij iobRatio=0.40 (max 35% aftrek).
+        // In venster: start bij 0.55 zodat grote watching commits bij
+        // iobRatio 0.55-0.75 minder worden afgeremd.
+        val wffIobPenaltyEffective = if (inConsolidationWindow)
+            (1.0 - maxOf(0.0, (ctx.iobRatio - 0.55) * 0.50)).coerceIn(0.70, 1.0)
+        else wffIobPenalty
+
         val watchingFrontloadTargetU =
-            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling * wffIobPenalty)
+            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling * wffIobPenaltyEffective
+                * watchingConsolidationFactor)
                 .coerceAtMost(config.maxSMB)
 
 // 3) Echte triggerconditie

@@ -504,6 +504,26 @@ object DFLearner {
         val earlyPredTeLaag   = earlyFout0_20 != null && earlyFout0_20 < -EARLY_PRED_DEAD_ZONE
         val earlyPredStrength = if (earlyFout0_20 != null) (abs(earlyFout0_20) / 1.5).coerceIn(0.0, 1.0) else 0.0
 
+        // ── IOB-spreiding signaal: iobRatioAtPeak ─────────────────────────────
+        // iobRatioAtPeak > 0.65: veel insuline nog actief op de piek
+        //   → insuline was te gespreid in de stijgingsfase (watching in plaats van
+        //     geconsolideerde 2e commit)
+        //   → F omhoog: volgende keer eerder en groter frontloaden
+        //
+        // Alleen als:
+        //   - Piek was acceptabel (geen hyper = peakBg < 11.0)
+        //   - Geen hypo achteraf (nadirBg >= HYPO_THRESHOLD)
+        //   - Er waren genoeg follow-ups (safeFollowUp) — bewijs dat het
+        //     systeem heeft bijgedoseerd na de frontload
+        // Dit is het "te laat geconsolideerd" patroon.
+        val iobRatioAtPeak = metrics.iobRatioAtPeak
+        val IOB_SPREAD_THRESHOLD = 0.65
+        val teGespreid = iobRatioAtPeak > IOB_SPREAD_THRESHOLD &&
+            metrics.peakBg < 11.0 &&
+            nadirBg >= HYPO_THRESHOLD
+        // Sterkte van het signaal: hoe verder boven 0.65, hoe sterker het F-signaal
+        val spreadStrength = ((iobRatioAtPeak - IOB_SPREAD_THRESHOLD) / 0.20).coerceIn(0.0, 1.0)
+
         val frac      = metrics.firstBigCommitFrac
         val fracLaag  = frac < TARGET_FIRST_FRAC - DEAD_ZONE_FRAC   // < 0.35
         val fracHoog  = frac > TARGET_FIRST_FRAC + DEAD_ZONE_FRAC   // > 0.55
@@ -612,6 +632,18 @@ object DFLearner {
                 rawDeltaD = 0.0
                 rawDeltaF = +tp.gammaIobr * 0.6 * abs(frac - TARGET_FIRST_FRAC) * eb
                 diagnose  = if (earlyPredTeLaag) "FRONTLOAD_LAG_VROEG" else "FRONTLOAD_LAG"
+            }
+
+            // ── IOB SPREIDING: piek OK maar insuline te laat geconsolideerd ──────
+            // Piek was acceptabel, geen hypo, maar iobRatioAtPeak te hoog.
+            // Dit is het patroon: frontload was klein aandeel, systeem doseerde
+            // daarna met veel kleine watching commits.
+            // F omhoog zodat volgende keer eerder een grotere 2e commit wordt gegeven.
+            // Geen D-aanpassing: totale dosis was OK, alleen timing was suboptimaal.
+            !peekHoog && !peekLaag && teGespreid && safeFollowUp -> {
+                rawDeltaD = 0.0
+                rawDeltaF = +tp.gammaIobr * 1.2 * spreadStrength
+                diagnose  = "IOB_SPREAD_TE_LAAT"
             }
 
             else -> {
