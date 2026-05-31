@@ -69,6 +69,20 @@ object EpisodeMetricsBuilder {
             // earlyBoostWasActive: was earlyBoost ooit actief in deze episode?
             val earlyBoostWasActive = rows.any { it.earlyBoostActive && it.earlyBoostFactor > 1.01 }
 
+            // Gemiddelde voorspellingsfout per tijdvenster
+            // predFout = gemiddelde(predictedPeak) - werkelijke piek
+            // Positief = overschatting, negatief = onderschatting
+            fun predFoutVenster(minStart: Int, minEnd: Int): Double? {
+                val venster = rows.filter {
+                    val m = it.minutesSinceMealStart ?: return@filter false
+                    m in minStart..minEnd && (it.predictedPeak ?: 0.0) > 0.0
+                }
+                if (venster.isEmpty()) return null
+                return venster.mapNotNull { it.predictedPeak }.average() - peakBg
+            }
+            val predFout0_20  = predFoutVenster(0, 20)
+            val predFout20_40 = predFoutVenster(21, 40)
+
             // capReachedCycles: cycli waarbij maxSMB de limiterende factor was
             // Dit is het directe bewijs dat de cap te laag staat — systeem wilde meer
             val capReachedCycles = rows.count { it.guardMaxSmbLimited }
@@ -136,7 +150,9 @@ object EpisodeMetricsBuilder {
                 earlyBoostWasActive = earlyBoostWasActive,
                 capReachedCycles = capReachedCycles,
                 currentSterkte = currentSterkte,
-                firstFrontloadMinutes = firstFrontloadMinutes
+                firstFrontloadMinutes = firstFrontloadMinutes,
+                predFout0_20  = predFout0_20,
+                predFout20_40 = predFout20_40
             )
         }
     }

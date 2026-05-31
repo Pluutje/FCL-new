@@ -235,7 +235,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             enableSMB_always = true,
             enableSMB_after_carbs = true,
             maxSMBBasalMinutes = 240,
-            maxUAMSMBBasalMinutes = 240,
+            maxUAMSMBBasalMinutes = 300,
             bolus_increment = pump.pumpDescription.bolusStep,
             carbsReqThreshold = 20,
             current_basal = activePlugin.activePump.baseBasalRate.cU,

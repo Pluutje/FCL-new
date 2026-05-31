@@ -48,6 +48,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
 import kotlin.math.roundToInt
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 @Composable
 fun AdvisorScreen(
@@ -68,6 +69,8 @@ fun AdvisorScreen(
     // MaxSmbLearner: (newMaxSmbDay, newIobBrake) -> succes
     onApplyMaxSmb: ((Double, Double) -> Boolean)? = null
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -78,14 +81,14 @@ fun AdvisorScreen(
     ) {
         Button(onClick = onBack) { Text("← Terug") }
 
-        Text("Advisor Analyse", style = MaterialTheme.typography.headlineMedium)
+        Text(s.advisorAnalyse, style = MaterialTheme.typography.headlineMedium)
 
         InfoTabPager(
             modifier = Modifier,
             pages = listOf(
 
                 // ── 1. Automaat: D/F zelflerend systeem (startblad) ───────
-                InfoTabPage("Automaat") {
+                InfoTabPage(s.automaat) {
                     DFControlTab(
                         episodes    = episodes,
                         metrics     = metrics,
@@ -95,7 +98,7 @@ fun AdvisorScreen(
                 },
 
                 // ── 2. MaxSMB: veiligheidsmarges leren ────────────────────
-                InfoTabPage("MaxSMB") {
+                InfoTabPage(s.maxSmb) {
                     MaxSmbTab(
                         metrics      = metrics,
                         manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25,
@@ -104,7 +107,7 @@ fun AdvisorScreen(
                 },
 
                 // ── 3. Parameters: handmatige fijnafstelling ──────────────
-                InfoTabPage("Parameters") {
+                InfoTabPage(s.parameters) {
                     HandmatigParametersTab(
                         activeParams  = activeParams,
                         onApplyParams = onApplyParams
@@ -112,7 +115,7 @@ fun AdvisorScreen(
                 },
 
                 // ── 3. Nacht N: nachtfactor instelling ────────────────────
-                InfoTabPage("Nacht N") {
+                InfoTabPage(s.nachtNLabel) {
                     NachtTab(
                         currentNachtFactor = activeParams.nachtFactor,
                         nightWindows = nightWindows,
@@ -121,7 +124,7 @@ fun AdvisorScreen(
                 },
 
                 // ── 4. Analyse: patroon + voorstel (achtergrond info) ──────
-                InfoTabPage("Analyse") {
+                InfoTabPage(s.analyse) {
                     AdvisorOverviewCard(recommendation)
                     AdvisorSummaryCard(recommendation)
                     Spacer(Modifier.height(4.dp))
@@ -144,6 +147,7 @@ fun AdvisorScreen(
 
 @Composable
 private fun AdvisorOverviewCard(recommendation: FclAdvisorRecommendation) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val stats = recommendation.stats
     val selection = recommendation.selectionInfo
 
@@ -155,7 +159,7 @@ private fun AdvisorOverviewCard(recommendation: FclAdvisorRecommendation) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("Analyse-overzicht", style = MaterialTheme.typography.titleMedium)
+            Text(s.advisorOverzicht, style = MaterialTheme.typography.titleMedium)
 
             Text(
                 formatPatternLabel(recommendation.dominantPattern),
@@ -169,20 +173,20 @@ private fun AdvisorOverviewCard(recommendation: FclAdvisorRecommendation) {
             )
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                AdvisorMetricBlock("Confidence", "${(recommendation.confidence * 100).toInt()}%")
-                AdvisorMetricBlock("Gebruikt", "${selection.usedEpisodeCount}")
-                AdvisorMetricBlock("Uitgesloten", "${selection.excludedTotal}")
+                AdvisorMetricBlock(s.confidence, "${(recommendation.confidence * 100).toInt()}%")
+                AdvisorMetricBlock(s.gebruikt, "${selection.usedEpisodeCount}")
+                AdvisorMetricBlock(s.uitgesloten, "${selection.excludedTotal}")
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                AdvisorMetricBlock("Avg peak", "%.1f".format(stats.avgPeakBg))
-                AdvisorMetricBlock("Avg insuline", "%.2f U".format(stats.avgInsulinDelivered))
-                AdvisorMetricBlock("Avg duur", "${stats.avgDurationMinutes} min")
+                AdvisorMetricBlock(s.avgPeak, "%.1f".format(stats.avgPeakBg))
+                AdvisorMetricBlock(s.avgInsuline, "%.2f U".format(stats.avgInsulinDelivered))
+                AdvisorMetricBlock(s.avgDuur, "${stats.avgDurationMinutes} min")
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                AdvisorMetricBlock("Hyper", "${stats.hyperPercent}%")
-                AdvisorMetricBlock("Hypo", "${stats.hypoPercent}%")
+                AdvisorMetricBlock(s.hyper, "${stats.hyperPercent}%")
+                AdvisorMetricBlock(s.hypo, "${stats.hypoPercent}%")
                 AdvisorMetricBlock("Binnen doel", "${stats.meetsGoalPercent}%")
             }
         }
@@ -191,6 +195,7 @@ private fun AdvisorOverviewCard(recommendation: FclAdvisorRecommendation) {
 
 @Composable
 private fun AdvisorSelectionCard(recommendation: FclAdvisorRecommendation) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val selection = recommendation.selectionInfo
 
     Card(
@@ -205,8 +210,8 @@ private fun AdvisorSelectionCard(recommendation: FclAdvisorRecommendation) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 AdvisorMetricBlock("Totaal", "${selection.totalEpisodesSeen}")
-                AdvisorMetricBlock("Gebruikt", "${selection.usedEpisodeCount}")
-                AdvisorMetricBlock("Uitgesloten", "${selection.excludedTotal}")
+                AdvisorMetricBlock(s.gebruikt, "${selection.usedEpisodeCount}")
+                AdvisorMetricBlock(s.uitgesloten, "${selection.excludedTotal}")
             }
 
             if (selection.excludedTotal > 0) {
@@ -861,6 +866,7 @@ private fun HandmatigParametersTab(
     activeParams: ConfigOverrideWriter.ActiveParams,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)?
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val D = ConfigOverrideWriter.Defaults
     val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
 
@@ -869,7 +875,7 @@ private fun HandmatigParametersTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "Actuele parameters",
+            s.actuelParams,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )

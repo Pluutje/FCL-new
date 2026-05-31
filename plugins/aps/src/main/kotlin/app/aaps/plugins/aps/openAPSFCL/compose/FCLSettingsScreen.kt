@@ -6,6 +6,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
@@ -15,6 +16,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.keys.DoubleKey
@@ -22,22 +25,11 @@ import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.pickers.TimeWheelPicker
 import app.aaps.core.ui.compose.pickers.WeekDaySelector
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FCL vNext — Instellingen scherm
-//
-// Drie groepen:
-//   1. Dosering & gedrag  (limieten + insulineverdeling + nachtrespons)
-//   2. Context            (dag/nacht tijden + weekenddagen)
-//   3. AutoSens & activiteit
-//
-// Per instelling: korte toelichting zichtbaar, ℹ️-knop voor uitgebreide uitleg.
-// ─────────────────────────────────────────────────────────────────────────────
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 @Composable
 fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
-    // ── Hulpfuncties ─────────────────────────────────────────────────────
     fun String.toHour(): Int = split(":").getOrNull(0)?.toIntOrNull() ?: 7
     fun String.toMinute(): Int = split(":").getOrNull(1)?.toIntOrNull() ?: 0
 
@@ -48,7 +40,6 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     fun boolArrayToWeekendDagen(arr: BooleanArray): String =
         arr.indices.filter { arr[it] }.map { it + 1 }.joinToString(",")
 
-    // ── State ─────────────────────────────────────────────────────────────
     var maxBolusDay       by remember { mutableStateOf(preferences.get(DoubleKey.max_bolus_day)) }
     var maxBolusNight     by remember { mutableStateOf(preferences.get(DoubleKey.max_bolus_night)) }
     var maxIob            by remember { mutableStateOf(preferences.get(DoubleKey.fcl_vnext_MaxIOB)) }
@@ -62,24 +53,25 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var ochtendWeekend    by remember { mutableStateOf(preferences.get(StringKey.OchtendStartWeekend)) }
     var nachtStart        by remember { mutableStateOf(preferences.get(StringKey.NachtStart)) }
 
-    // ── Sectie-uitklapstatus ──────────────────────────────────────────────
     var expandedDosering  by remember { mutableStateOf(true) }
     var expandedContext   by remember { mutableStateOf(false) }
     var expandedAutosens  by remember { mutableStateOf(false) }
 
-    // Expert modus: pincode "0000"
     var showExpertSection   by remember { mutableStateOf(false) }
     var expertPinInput      by remember { mutableStateOf("") }
     var expertPinError      by remember { mutableStateOf(false) }
     var expertPinDialogOpen by remember { mutableStateOf(false) }
     val EXPERT_PIN = "0000"
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var selectedLocale by remember {
+        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.loadLocale(ctx))
+    }
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
-    // ── Picker-zichtbaarheid ──────────────────────────────────────────────
     var showOchtendPicker        by remember { mutableStateOf(false) }
     var showOchtendWeekendPicker by remember { mutableStateOf(false) }
     var showNachtPicker          by remember { mutableStateOf(false) }
 
-    // ── Info-dialoog ──────────────────────────────────────────────────────
     var infoDialogTitle   by remember { mutableStateOf("") }
     var infoDialogText    by remember { mutableStateOf("") }
     var showInfoDialog    by remember { mutableStateOf(false) }
@@ -90,41 +82,39 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         showInfoDialog  = true
     }
 
-    // ── Keuzelijsten ─────────────────────────────────────────────────────
     val doseOptions = listOf(
-        "VERY_SMOOTH" to "🌊 Ultra smooth",
-        "SMOOTH"      to "🫧 Smooth",
-        "BALANCED"    to "⚖️ Balanced (standaard)",
-        "PULSED"      to "🔨 Pulsed",
-        "VERY_PULSED" to "⚡ Ultra pulsed"
+        "VERY_SMOOTH" to s.doseStyleLabel("VERY_SMOOTH"),
+        "SMOOTH"      to s.doseStyleLabel("SMOOTH"),
+        "BALANCED"    to s.doseStyleLabel("BALANCED"),
+        "PULSED"      to s.doseStyleLabel("PULSED"),
+        "VERY_PULSED" to s.doseStyleLabel("VERY_PULSED")
     )
     val nightOptions = listOf(
-        "VERY_GUARDED" to "🛑 Zeer terughoudend",
-        "GUARDED"      to "🧯 Terughoudend",
-        "BALANCED"     to "⚖️ Gebalanceerd (standaard)",
-        "RESPONSIVE"   to "🌙 Reageert eerder",
-        "PROACTIVE"    to "🚀 Proactief"
+        "VERY_GUARDED" to s.nightStyleLabel("VERY_GUARDED"),
+        "GUARDED"      to s.nightStyleLabel("GUARDED"),
+        "BALANCED"     to s.nightStyleLabel("BALANCED"),
+        "RESPONSIVE"   to s.nightStyleLabel("RESPONSIVE"),
+        "PROACTIVE"    to s.nightStyleLabel("PROACTIVE")
     )
     val resBehaviorOptions = listOf(
-        "OFF"        to "Uitgeschakeld",
+        "OFF"        to s.autosensGedragLabel("OFF"),
         "LIGHT"      to "Licht",
-        "NORMAL"     to "Normaal (aanbevolen)",
+        "NORMAL"     to s.autosensGedragLabel("NORMAL"),
         "STRONG"     to "Sterk",
-        "AGGRESSIVE" to "Agressief"
+        "AGGRESSIVE" to s.autosensGedragLabel("AGGRESSIVE")
     )
     val resStabilityOptions = listOf(
-        "VERY_STABLE" to "Zeer stabiel",
-        "STANDARD"    to "Standaard",
-        "RESPONSIVE"  to "Responsief"
+        "VERY_STABLE" to s.autosensStabiliteitLabel("VERY_STABLE"),
+        "STANDARD"    to s.autosensStabiliteitLabel("STANDARD"),
+        "RESPONSIVE"  to s.autosensStabiliteitLabel("RESPONSIVE")
     )
     val actOptions = listOf(
-        "OFF"    to "Uit",
+        "OFF"    to s.activiteitLabel("OFF"),
         "LIGHT"  to "Licht",
         "NORMAL" to "Normaal",
         "STRONG" to "Sterk"
     )
 
-    // ── UI ────────────────────────────────────────────────────────────────
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -133,17 +123,13 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
 
-        // ══════════════════════════════════════════════════════════════════
-        // GROEP 1 — Dosering & gedrag
-        // ══════════════════════════════════════════════════════════════════
         FCLSection(
-            title = "💉 Dosering & gedrag",
+            title = s.settingsDosisBehavior,
             expanded = expandedDosering,
             onToggle = { expandedDosering = !expandedDosering }
         ) {
-            // ── Max bolus dag ────────────────────────────────────────────
             FCLDoubleRow(
-                label = "Max bolus dag",
+                label = s.settingsMaxBolusDay,
                 summary = "Referentiewaarde voor de Analyzer (actieve maxSMB = 50–125% van deze waarde).",
                 value = maxBolusDay,
                 min = 0.1, max = 8.0, step = 0.05, unit = "U",
@@ -155,8 +141,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                             "• De Analyzer mag de actieve maxSMB verhogen tot 125% van deze waarde\n" +
                             "• De Analyzer mag de actieve maxSMB verlagen tot 50% van deze waarde\n" +
                             "• De waarde die je hier instelt wordt zelf nooit gewijzigd\n\n" +
-                            "Stel dit in op wat je normaal als maximale maaltijdbolus zou nemen. " +
-                            "De actuele actieve maxSMB is zichtbaar in het FCL status-tabblad."
+                            "Stel dit in op wat je normaal als maximale maaltijdbolus zou nemen."
                     )
                 },
                 onValueChange = {
@@ -165,18 +150,16 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 }
             )
 
-            // ── Max bolus nacht ──────────────────────────────────────────
             FCLDoubleRow(
-                label = "Max bolus nacht",
+                label = s.settingsMaxBolusNight,
                 summary = "Maximale SMB 's nachts in één actie.",
                 value = maxBolusNight,
                 min = 0.1, max = 8.0, step = 0.05, unit = "U",
                 onInfo = {
                     showInfo(
-                        "Max bolus nacht",
+                        s.settingsMaxBolusNight,
                         "Maximale hoeveelheid insuline die FCL vNext 's nachts in één actie " +
-                            "mag toedienen.\n\nExtra bescherming tegen nachtelijke hypo's. Stel dit " +
-                            "lager in dan de dagwaarde — de meeste gebruikers zitten op 0,4–0,7 U."
+                            "mag toedienen.\n\nExtra bescherming tegen nachtelijke hypo's."
                     )
                 },
                 onValueChange = {
@@ -185,19 +168,17 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 }
             )
 
-            // ── Max IOB ──────────────────────────────────────────────────
             FCLDoubleRow(
-                label = "Max IOB",
+                label = s.settingsMaxIob,
                 summary = "Maximaal actief insuline in het lichaam.",
                 value = maxIob,
                 min = 1.0, max = 25.0, step = 0.5, unit = "U",
                 onInfo = {
                     showInfo(
-                        "Max IOB",
+                        s.settingsMaxIob,
                         "FCL vNext levert geen extra insuline als het actieve insuline (IOB) " +
                             "boven deze waarde komt.\n\nStel dit in op ongeveer 2–3× je gemiddelde " +
-                            "maaltijdbolus. Een te lage waarde kan ertoe leiden dat het systeem " +
-                            "stopt met bijsturen terwijl dat nog nodig is."
+                            "maaltijdbolus."
                     )
                 },
                 onValueChange = {
@@ -208,7 +189,6 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // ── Insulineverdeling ────────────────────────────────────────
             FCLListRow(
                 label = "💉 Insulineverdeling",
                 summary = "Hoe insuline wordt verdeeld: meer basaal (smooth) of meer SMB (pulsen).",
@@ -218,11 +198,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                     showInfo(
                         "Insulineverdeling",
                         "Bepaalt de verhouding tussen tijdelijke basaalraten en SMB-bolussen.\n\n" +
-                            "🌊 Ultra smooth: bijna uitsluitend basaal, minimale SMB's.\n" +
-                            "🫧 Smooth: overwegend basaal.\n" +
-                            "⚖️ Balanced: standaard mix — aanbevolen startpunt.\n" +
-                            "🔨 Pulsed: meer SMB's, minder basaal.\n" +
-                            "⚡ Ultra pulsed: korte, krachtige SMB's — voor systemen met snelle insuline."
+                            "⚖️ Balanced: standaard mix — aanbevolen startpunt."
                     )
                 },
                 onSelect = {
@@ -233,7 +209,6 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // ── Nachtrespons ─────────────────────────────────────────────
             FCLListRow(
                 label = "🌙 Nachtrespons",
                 summary = "Hoe vroeg en hoe gelijkmatig FCL 's nachts reageert bij aanhoudende stijging.",
@@ -243,12 +218,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                     showInfo(
                         "Nachtrespons",
                         "Bepaalt hoe agressief FCL vNext 's nachts reageert op een stijgende " +
-                            "glucosewaarde.\n\n" +
-                            "🛑 Zeer terughoudend: pas actie bij duidelijke, langdurige stijging.\n" +
-                            "🧯 Terughoudend: conservatief, weinig nacht-SMB's.\n" +
-                            "⚖️ Gebalanceerd: standaard — aanbevolen voor de meeste gebruikers.\n" +
-                            "🌙 Reageert eerder: eerder ingrijpen, minder hypo-buffer.\n" +
-                            "🚀 Proactief: snel reageren — alleen voor stabiele nachten."
+                            "glucosewaarde."
                     )
                 },
                 onSelect = {
@@ -258,11 +228,8 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             )
         }
 
-        // ══════════════════════════════════════════════════════════════════
-        // GROEP 2 — Dag / nacht context
-        // ══════════════════════════════════════════════════════════════════
         FCLSection(
-            title = "⏰ Dag / nacht context",
+            title = s.settingsDagNacht,
             expanded = expandedContext,
             onToggle = { expandedContext = !expandedContext }
         ) {
@@ -274,19 +241,16 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // ── Weekenddagen ─────────────────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Weekenddagen", style = MaterialTheme.typography.bodyMedium)
+                Text(s.settingsWeekendDagen, style = MaterialTheme.typography.bodyMedium)
                 IconButton(onClick = {
                     showInfo(
-                        "Weekenddagen",
-                        "Selecteer de dagen die als weekend worden behandeld. Op weekenddagen " +
-                            "geldt de latere ochtendstarttijd, zodat het systeem je niet onnodig " +
-                            "vroeg wakker stuurt via insuline-aanpassingen."
+                        s.settingsWeekendDagen,
+                        "Selecteer de dagen die als weekend worden behandeld."
                     )
                 }) {
                     Icon(Icons.Default.Info, contentDescription = null,
@@ -305,18 +269,13 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // ── Tijden ───────────────────────────────────────────────────
             FCLTimeRow(
                 label = "Ochtendstart (doordeweeks)",
                 summary = "Tijdstip waarop FCL overschakelt naar daginstellingen.",
                 value = ochtendStart,
                 onInfo = {
-                    showInfo(
-                        "Ochtendstart (doordeweeks)",
-                        "Vanaf dit tijdstip gelden de daglimiet (max bolus dag) en de " +
-                            "dag-nachtfactor.\n\nKies een tijdstip waarop je normaal wakker bent " +
-                            "en actief begint te worden — bijv. 07:00."
-                    )
+                    showInfo("Ochtendstart (doordeweeks)",
+                             "Vanaf dit tijdstip gelden de daglimiet en de dag-nachtfactor.")
                 },
                 onWijzig = { showOchtendPicker = true }
             )
@@ -326,12 +285,8 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 summary = "Tijdstip waarop FCL in het weekend overschakelt naar daginstellingen.",
                 value = ochtendWeekend,
                 onInfo = {
-                    showInfo(
-                        "Ochtendstart (weekend)",
-                        "Dezelfde functie als doordeweeks, maar dan voor de weekenddagen " +
-                            "die je hierboven hebt geselecteerd.\n\nStel dit later in als je " +
-                            "in het weekend later opstaat — bijv. 08:00 of 09:00."
-                    )
+                    showInfo("Ochtendstart (weekend)",
+                             "Dezelfde functie als doordeweeks, maar voor weekenddagen.")
                 },
                 onWijzig = { showOchtendWeekendPicker = true }
             )
@@ -341,22 +296,15 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 summary = "Tijdstip waarop FCL overschakelt naar nachtinstellingen.",
                 value = nachtStart,
                 onInfo = {
-                    showInfo(
-                        "Nachtstart",
-                        "Vanaf dit tijdstip gelden de nachtlimiet (max bolus nacht), de " +
-                            "nacht-factor en de nachtrespons-instelling.\n\nKies een tijdstip " +
-                            "waarop je normaal naar bed gaat — bijv. 23:00."
-                    )
+                    showInfo("Nachtstart",
+                             "Vanaf dit tijdstip gelden de nachtlimiet en de nachtrespons-instelling.")
                 },
                 onWijzig = { showNachtPicker = true }
             )
         }
 
-        // ══════════════════════════════════════════════════════════════════
-        // GROEP 3 — AutoSens & activiteit
-        // ══════════════════════════════════════════════════════════════════
         FCLSection(
-            title = "🛡️ AutoSens & activiteit",
+            title = s.settingsAutosens,
             expanded = expandedAutosens,
             onToggle = { expandedAutosens = !expandedAutosens }
         ) {
@@ -368,23 +316,15 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // ── AutoSens gedrag ──────────────────────────────────────────
             FCLListRow(
                 label = "AutoSens – Gedrag",
                 summary = "Hoe sterk AutoSens mag ingrijpen bij structurele afwijking van target.",
                 options = resBehaviorOptions,
                 selected = resBehavior,
                 onInfo = {
-                    showInfo(
-                        "AutoSens – Gedrag",
-                        "Bepaalt hoe sterk AutoSens mag ingrijpen wanneer je glucose " +
-                            "structureel boven of onder target ligt.\n\n" +
-                            "Uitgeschakeld: geen AutoSens-correctie.\n" +
-                            "Licht: subtiele aanpassingen.\n" +
-                            "Normaal: standaard — aanbevolen voor de meeste gebruikers.\n" +
-                            "Sterk: grotere aanpassingen, voor uitgesproken resistentie.\n" +
-                            "Agressief: maximale correctie — gebruik voorzichtig."
-                    )
+                    showInfo("AutoSens – Gedrag",
+                             "Bepaalt hoe sterk AutoSens mag ingrijpen wanneer je glucose " +
+                                 "structureel boven of onder target ligt.")
                 },
                 onSelect = {
                     resBehavior = it
@@ -392,21 +332,15 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 }
             )
 
-            // ── AutoSens stabiliteit ─────────────────────────────────────
             FCLListRow(
                 label = "AutoSens – Stabiliteit",
                 summary = "Hoeveel dagen worden gebruikt om AutoSens te berekenen.",
                 options = resStabilityOptions,
                 selected = resStability,
                 onInfo = {
-                    showInfo(
-                        "AutoSens – Stabiliteit",
-                        "Bepaalt hoeveel dagen en uren worden gebruikt om de AutoSens-ratio " +
-                            "te berekenen.\n\n" +
-                            "Zeer stabiel: traag reageren op veranderingen — goed bij onregelmatige data.\n" +
-                            "Standaard: aanbevolen balans.\n" +
-                            "Responsief: snel aanpassen — goed als je leefpatroon regelmatig is."
-                    )
+                    showInfo("AutoSens – Stabiliteit",
+                             "Bepaalt hoeveel dagen en uren worden gebruikt om de AutoSens-ratio " +
+                                 "te berekenen.")
                 },
                 onSelect = {
                     resStability = it
@@ -416,23 +350,15 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // ── Activiteit ───────────────────────────────────────────────
             FCLListRow(
                 label = "🚶 Activiteit",
                 summary = "Past insuline en target aan op basis van beweging via de stappenteller.",
                 options = actOptions,
                 selected = actBehavior,
                 onInfo = {
-                    showInfo(
-                        "Activiteit",
-                        "Bij activering wordt op basis van de stappenteller een tijdelijk " +
-                            "target ingesteld en de ISF verhoogd. Dit resulteert in minder " +
-                            "insuline tijdens activiteit.\n\n" +
-                            "Uit: geen verandering.\n" +
-                            "Licht: insuline 70%, TT +1,5 mmol, max 15 min naijl.\n" +
-                            "Normaal: insuline 60%, TT +2,0 mmol, max 25 min naijl.\n" +
-                            "Sterk: insuline 50%, TT +2,5 mmol, max 35 min naijl."
-                    )
+                    showInfo("Activiteit",
+                             "Bij activering wordt op basis van de stappenteller een tijdelijk " +
+                                 "target ingesteld en de ISF verhoogd.")
                 },
                 onSelect = {
                     actBehavior = it
@@ -441,74 +367,109 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             )
         }
 
-        // Expert modus sectie (pincode: 0000)
+        // ── Expert modus ──────────────────────────────────────────────────
         if (!showExpertSection) {
-            androidx.compose.material3.OutlinedButton(
+            OutlinedButton(
                 onClick = { expertPinDialogOpen = true; expertPinInput = ""; expertPinError = false },
-                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth()
             ) {
-                androidx.compose.material3.Text("Expert modus")
+                Text(s.expertModus)
             }
         } else {
             FCLSection(
-                title = "Expert modus",
+                title = s.expertModus,
                 expanded = true,
                 onToggle = { showExpertSection = false }
             ) {
-                androidx.compose.material3.Text(
-                    "Expertmodus actief. Meer opties volgen.",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                // ── Taalinstelling ───────────────────────────────────
+                Text(
+                    if (selectedLocale.code == "nl") "Taalinstelling" else "Language",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-        }
-        if (expertPinDialogOpen) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { expertPinDialogOpen = false },
-                title = { androidx.compose.material3.Text("Expert modus") },
-                text = {
-                    androidx.compose.foundation.layout.Column(
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclLocale.values().forEach { locale ->
+                        FilterChip(
+                            selected = selectedLocale == locale,
+                            onClick = {
+                                selectedLocale = locale
+                                app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.saveLocale(ctx, locale)
+                            },
+                            label = { Text(locale.displayName) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // ── Expert modus aan/uit toggle ──────────────────────
+                var expertModeActive by remember {
+                    mutableStateOf(
+                        ctx.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+                            .getBoolean("expert_mode_active", false)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (expertModeActive) s.expertModeAan else s.expertModeUit,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            s.fijnafstemming,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = expertModeActive,
+                        onCheckedChange = { active ->
+                            expertModeActive = active
+                            ctx.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+                                .edit().putBoolean("expert_mode_active", active).apply()
+                        }
+                    )
+                }
+
+                // ── Fijnafstemming blok (alleen zichtbaar als expert mode aan) ──
+                if (expertModeActive) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     ) {
-                        androidx.compose.material3.Text(
-                            "Voer de pincode in (standaard: 0000).",
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall
-                        )
-                        androidx.compose.material3.OutlinedTextField(
-                            value = expertPinInput,
-                            onValueChange = { if (it.length <= 4) { expertPinInput = it; expertPinError = false } },
-                            label = { androidx.compose.material3.Text("Pincode") },
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
-                            ),
-                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                            isError = expertPinError,
-                            singleLine = true
-                        )
-                        if (expertPinError) {
-                            androidx.compose.material3.Text(
-                                "Onjuiste pincode",
-                                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                s.fijnafstemming,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                            )
+                            Text(
+                                s.expertModusMeerOpties,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                },
-                confirmButton = {
-                    androidx.compose.material3.Button(onClick = {
-                        if (expertPinInput == EXPERT_PIN) {
-                            showExpertSection = true; expertPinDialogOpen = false
-                        } else expertPinError = true
-                    }) { androidx.compose.material3.Text("Openen") }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { expertPinDialogOpen = false }) {
-                        androidx.compose.material3.Text("Annuleren")
-                    }
                 }
-            )
+            }
         }
-    }
+
+    } // einde Column
 
     // ── Tijdpickers (buiten Column — zijn Popups) ─────────────────────────
     if (showOchtendPicker) {
@@ -556,8 +517,51 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             text = { Text(infoDialogText) },
             confirmButton = {
                 TextButton(onClick = { showInfoDialog = false }) {
-                    Text("Sluiten")
+                    Text(s.close)
                 }
+            }
+        )
+    }
+
+    // ── Pincode dialoog voor expert modus ─────────────────────────────────
+    if (expertPinDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { expertPinDialogOpen = false },
+            title = { Text(s.expertModus) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Voer de pincode in (standaard: 0000).",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = expertPinInput,
+                        onValueChange = { if (it.length <= 4) { expertPinInput = it; expertPinError = false } },
+                        label = { Text(s.pincode) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        isError = expertPinError,
+                        singleLine = true
+                    )
+                    if (expertPinError) {
+                        Text(
+                            s.expertPinFout,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (expertPinInput == EXPERT_PIN) {
+                        showExpertSection = true
+                        expertPinDialogOpen = false
+                    } else expertPinError = true
+                }) { Text(s.openen) }
+            },
+            dismissButton = {
+                TextButton(onClick = { expertPinDialogOpen = false }) { Text(s.annuleren) }
             }
         )
     }
@@ -665,6 +669,7 @@ private fun FCLListRow(
     onInfo: () -> Unit,
     onSelect: (String) -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     var expanded by remember { mutableStateOf(false) }
     val selectedLabel = options.firstOrNull { it.first == selected }?.second ?: selected
 
@@ -695,7 +700,7 @@ private fun FCLListRow(
             )
         }
         Box {
-            TextButton(onClick = { expanded = true }) { Text("Wijzig") }
+            TextButton(onClick = { expanded = true }) { Text(s.change) }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { (value, display) ->
                     DropdownMenuItem(
@@ -716,6 +721,7 @@ private fun FCLTimeRow(
     onInfo: () -> Unit,
     onWijzig: () -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -742,6 +748,6 @@ private fun FCLTimeRow(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        TextButton(onClick = onWijzig) { Text("Wijzig") }
+        TextButton(onClick = onWijzig) { Text(s.change) }
     }
 }

@@ -15,6 +15,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 /**
  * MaxSmbTab — interface voor de MaxSmbLearner.
@@ -24,7 +25,7 @@ import java.time.format.DateTimeFormatter
  *   - Advies op basis van meest recente episode
  *   - Automaat aan/uit schakelaar
  *   - Geschiedenis van aanpassingen
- *   - "Toepassen in AAPS" knop (handmatige modus)
+ *   - s.dfControlToepassen knop (handmatige modus)
  *
  * Leerregels (zichtbaar voor gebruiker):
  *   maxSMB ↑ +0.05U als: piek > 12 mmol + rem ≥ 3× actief + earlyBoost actief + geen hypo
@@ -38,6 +39,8 @@ fun MaxSmbTab(
     manualMaxSmb: Double = MaxSmbLearner.MAX_SMB_DEFAULT,
     onApplyToAaps: ((Double, Double) -> Boolean)? = null
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
     val context = LocalContext.current
 
@@ -266,7 +269,7 @@ fun MaxSmbTab(
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Laatste aanpassingen",
+                        s.maxSmbGeschiedenisLabel,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )

@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.foundation.Canvas
@@ -32,8 +33,6 @@ private val EpisodeBg = Color(0x2200FF00)
 
 // Chart gebruikt altijd een donkere achtergrond — de gekleurde zones
 // en lijnen zijn ontworpen voor dark-mode en zien er goed uit op donker
-private val ChartBg = Color(0xFF101010)
-
 @Composable
 fun EpisodeChart(
     rows: List<LogRow>,
@@ -45,8 +44,10 @@ fun EpisodeChart(
 ) {
     if (rows.isEmpty()) return
 
-    val gridColor = Color(0x33FFFFFF)
-    val labelColor = Color(0xCCFFFFFF)
+    // Adaptieve kleuren: passen zich aan aan het systeem thema (licht/donker)
+    val chartBgColor  = MaterialTheme.colorScheme.surfaceContainer
+    val gridColor     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val labelColor    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
 
     val ctx = LocalContext.current
     val mgdl = BgUnits.isMgdl(ctx)
@@ -95,7 +96,7 @@ fun EpisodeChart(
         fun yIob(iob: Double) = topPad + plotH * (1.0 - (iob / maxIob)).toFloat()
 
         // Achtergrond
-        drawRect(color = ChartBg, topLeft = Offset(0f, 0f), size = size)
+        drawRect(color = chartBgColor, topLeft = Offset(0f, 0f), size = size)
 
         // TIR zone (3.9–10.0)
         val yTirTop = yBg(bg(10.0))

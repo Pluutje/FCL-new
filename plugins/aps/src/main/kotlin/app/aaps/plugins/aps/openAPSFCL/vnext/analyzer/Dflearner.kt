@@ -495,6 +495,15 @@ object DFLearner {
         val nadirBg   = metrics.minBgInWindow
         val hypoStraf = max(0.0, (HYPO_THRESHOLD - nadirBg) * HYPO_WEIGHT)
 
+        // Vroege voorspellingssignaal
+        // predFout0_20 = gemiddelde(predictedPeak) - werkelijkePiek in 0-20 min venster
+        // Negatief = onderschatting = algoritme dacht piek lager = frontload te klein
+        // Positief = overschatting  = algoritme dacht piek hoger = frontload te groot
+        val earlyFout0_20  = metrics.predFout0_20
+        val EARLY_PRED_DEAD_ZONE = 0.5
+        val earlyPredTeLaag   = earlyFout0_20 != null && earlyFout0_20 < -EARLY_PRED_DEAD_ZONE
+        val earlyPredStrength = if (earlyFout0_20 != null) (abs(earlyFout0_20) / 1.5).coerceIn(0.0, 1.0) else 0.0
+
         val frac      = metrics.firstBigCommitFrac
         val fracLaag  = frac < TARGET_FIRST_FRAC - DEAD_ZONE_FRAC   // < 0.35
         val fracHoog  = frac > TARGET_FIRST_FRAC + DEAD_ZONE_FRAC   // > 0.55
@@ -561,13 +570,21 @@ object DFLearner {
             }
 
             // ── PIEK HOOG ─────────────────────────────────────────────────────────
-            // Piek hoog + verdeling slecht: frontload én meer totaal nodig
+            // Piek hoog + verdeling slecht: frontload en meer totaal nodig
+            // Vroeg onderschat: verstevig F-signaal
             peekHoog && fracLaag -> {
+                val earlyBoost = if (earlyPredTeLaag) 1.0 + earlyPredStrength else 1.0
                 rawDeltaD = +tp.alphaPiek * 0.5 * abs(peakFout)
-                rawDeltaF = +tp.gammaIobr * 2.5 * abs(frac - TARGET_FIRST_FRAC)
-                diagnose  = "TIMING_SPREAD"
+                rawDeltaF = +tp.gammaIobr * 2.5 * abs(frac - TARGET_FIRST_FRAC) * earlyBoost
+                diagnose  = if (earlyPredTeLaag) "TIMING_SPREAD_VROEG" else "TIMING_SPREAD"
             }
-            // Piek hoog + verdeling was al goed: meer totaal nodig, F met rust
+            // Piek hoog + verdeling was al goed
+            // Vroeg onderschat: algoritme zag het aankomen maar durfde niet -> ook F omhoog
+            peekHoog && earlyPredTeLaag -> {
+                rawDeltaD = +tp.alphaPiek * 1.5 * abs(peakFout)
+                rawDeltaF = +tp.gammaIobr * 1.2 * earlyPredStrength
+                diagnose  = "MEER_DOSIS_VROEG_ONDERSCHAT"
+            }
             peekHoog -> {
                 rawDeltaD = +tp.alphaPiek * 2.0 * abs(peakFout)
                 rawDeltaF = 0.0
@@ -585,15 +602,16 @@ object DFLearner {
             // Piek was OK maar eerste commit was klein aandeel van totaal.
             // Er waren genoeg follow-ups → veilig bewijs: F omhoog.
             fracLaag && safeFollowUp -> {
+                val eb = if (earlyPredTeLaag) 1.0 + earlyPredStrength * 0.5 else 1.0
                 rawDeltaD = 0.0
-                rawDeltaF = +tp.gammaIobr * 1.5 * abs(frac - TARGET_FIRST_FRAC)
-                diagnose  = "FRONTLOAD_LAG"
+                rawDeltaF = +tp.gammaIobr * 1.5 * abs(frac - TARGET_FIRST_FRAC) * eb
+                diagnose  = if (earlyPredTeLaag) "FRONTLOAD_LAG_VROEG" else "FRONTLOAD_LAG"
             }
-            // Piek OK, verdeling slecht, maar onvoldoende follow-ups: voorzichtiger
             fracLaag -> {
+                val eb = if (earlyPredTeLaag) 1.0 + earlyPredStrength * 0.3 else 1.0
                 rawDeltaD = 0.0
-                rawDeltaF = +tp.gammaIobr * 0.6 * abs(frac - TARGET_FIRST_FRAC)
-                diagnose  = "FRONTLOAD_LAG"
+                rawDeltaF = +tp.gammaIobr * 0.6 * abs(frac - TARGET_FIRST_FRAC) * eb
+                diagnose  = if (earlyPredTeLaag) "FRONTLOAD_LAG_VROEG" else "FRONTLOAD_LAG"
             }
 
             else -> {

@@ -55,7 +55,7 @@ class FCLResistance(
         // Structurele dagtijd-resistentie wordt opgevangen door D/F en S/T/V learning.
         if (!isNachtTime) {
             currentResistentieFactor = 1.0
-            currentResistentieLog = " → AutoSens: ☀️ Overdag uitgeschakeld (factor = 1.0)\n"
+            currentResistentieLog = " → AutoSens: ☀️ Daytime disabled (factor = 1.0)\n"
             return
         }
 
@@ -169,7 +169,7 @@ class FCLResistance(
         val preset = resolveResistancePreset(behavior, stability)
 
         if (behavior == "OFF") {
-            return ResistentieResult(1.0, " → AutoSens: ❌ UIT\n")
+            return ResistentieResult(1.0, " → AutoSens: ❌ OFF\n")
         }
 
         val resistentie_percentage = preset.strengthPercent

@@ -23,6 +23,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 /**
  * DFControlTab — primaire interface voor het zelflerend systeem.
@@ -40,7 +41,7 @@ import kotlin.math.roundToInt
  * De gebruiker past S, T of V aan → D en F worden terug berekend →
  * DFMapping genereert een volledige param_overrides set → één JSON naar AAPS.
  *
- * Garantie: elke "Toepassen in AAPS" schrijft altijd BEIDE blokken:
+ * Garantie: elke s.dfControlToepassen schrijft altijd BEIDE blokken:
  *   stv { sterkte, timing, volhoudendheid, nacht_factor }
  *   param_overrides { alle 16 DFMapping-params }
  */
@@ -52,6 +53,8 @@ fun DFControlTab(
     onApplyToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
     nachtFactor: Int = 85
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     val context = LocalContext.current
 
     // ── Maaltijdtype selector ─────────────────────────────────────────────
@@ -76,7 +79,7 @@ fun DFControlTab(
     var applyResult by remember { mutableStateOf<String?>(null) }
     var applyTs by remember { mutableStateOf(0L) }
 
-    // Frontload timing (REF_WMD) — zichtbaar als "hoe vroeg reageert het systeem"
+    // Frontload timing (REF_WMD) — zichtbaar als s.dfControlHoeVroeg
     var refWmd by remember { mutableStateOf(DFLearner.getRefWmd(context)) }
     var refWff by remember { mutableStateOf(DFLearner.getRefWff(context)) }
     var refEb  by remember { mutableStateOf(DFLearner.getRefEb(context)) }
@@ -119,11 +122,11 @@ fun DFControlTab(
 
     // Frontload timing omrekening: REF_WMD → begrijpelijk label
     fun frontloadLabel(wmd: Double): String = when {
-        wmd <= 0.90 -> "Zeer vroeg"
-        wmd <= 1.10 -> "Vroeg"
-        wmd <= 1.30 -> "Normaal"
-        wmd <= 1.60 -> "Laat"
-        else        -> "Zeer laat"
+        wmd <= 0.90 -> s.zeervroeg
+        wmd <= 1.10 -> s.vroeg
+        wmd <= 1.30 -> s.normaal
+        wmd <= 1.60 -> s.laat
+        else        -> s.zeerlaat
     }
 
     Column(
@@ -159,7 +162,7 @@ fun DFControlTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Actieve instellingen",
+                    Text(s.actuelParams,
                          style = MaterialTheme.typography.labelMedium,
                          fontWeight = FontWeight.SemiBold,
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -226,7 +229,7 @@ fun DFControlTab(
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Toepassen in AAPS", style = MaterialTheme.typography.titleSmall,
+                Text(s.dfControlToepassen, style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold)
             }
             val msg = applyResult
@@ -270,7 +273,7 @@ fun DFControlTab(
                             label = {
                                 Text(when (t) {
                                          DFLearner.Tempo.LANGZAAM -> "Langzaam"
-                                         DFLearner.Tempo.NORMAAL  -> "Normaal"
+                                         DFLearner.Tempo.NORMAAL  -> s.normaal
                                          DFLearner.Tempo.SNEL     -> "Snel"
                                      }, style = MaterialTheme.typography.labelSmall)
                             },
@@ -453,14 +456,15 @@ private fun FrontloadKaart(
     onEerder: () -> Unit,
     onLater: () -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val context = androidx.compose.ui.platform.LocalContext.current
     val gemiddeldeMarge = remember { FrontloadLearner.getGemiddeldeMarge(context) }
     val evalCount       = remember { FrontloadLearner.getEvalCount(context) }
     val flHistory       = remember { FrontloadLearner.getHistory(context) }
 
     val kleur = when (label) {
-        "Zeer vroeg", "Vroeg" -> MaterialTheme.colorScheme.primary
-        "Laat", "Zeer laat"  -> MaterialTheme.colorScheme.tertiary
+        s.zeervroeg, s.vroeg -> MaterialTheme.colorScheme.primary
+        s.laat, s.zeerlaat  -> MaterialTheme.colorScheme.tertiary
         else                  -> MaterialTheme.colorScheme.onSurface
     }
 

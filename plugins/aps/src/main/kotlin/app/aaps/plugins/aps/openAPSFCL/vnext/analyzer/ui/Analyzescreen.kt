@@ -48,6 +48,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 @Composable
 fun AnalyzeScreen(
@@ -60,6 +61,7 @@ fun AnalyzeScreen(
     onRescueUserConfirmed: (startTs: String, confirmed: String) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     var currentPage by remember(episodes.size) {
         mutableStateOf(episodes.lastIndex.coerceAtLeast(0))
     }
@@ -86,11 +88,11 @@ fun AnalyzeScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Button(onClick = onBack) { Text("← Terug") }
-            Text("Episode Viewer", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(s.episodeViewer, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         }
 
         if (episodes.isEmpty()) {
-            Text("Geen episodes gevonden.")
+            Text(s.geenEpisodesGevonden)
             return@Column
         }
 
@@ -108,7 +110,7 @@ fun AnalyzeScreen(
             InfoTabPager(
                 modifier = Modifier,
                 pages = listOf(
-                    InfoTabPage("Overzicht") {
+                    InfoTabPage(s.overzicht) {
                         EpisodeOverviewCard(
                             episode = episode,
                             metrics = metrics,
@@ -116,10 +118,10 @@ fun AnalyzeScreen(
                             currentAxisState = currentAxisState
                         )
                     },
-                    InfoTabPage("Piek analyse") {
+                    InfoTabPage(s.piekAnalyse) {
                         PeakAnalyseCard(episode)
                     },
-                    InfoTabPage("Marges") {
+                    InfoTabPage(s.marges) {
                         MargesDashboardCard(episode)
                     }
                 )
@@ -135,6 +137,7 @@ private fun EpisodeOverviewCard(
     classification: EpisodeClassifier.EpisodeClassification,
     currentAxisState: FclAxisState
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val statusColor = when {
         classification.hyper -> MaterialTheme.colorScheme.error
         classification.hypoEarly || classification.hypoLate -> MaterialTheme.colorScheme.error
@@ -157,12 +160,12 @@ private fun EpisodeOverviewCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("Samenvatting", style = MaterialTheme.typography.titleMedium)
+            Text(s.samenvatting, style = MaterialTheme.typography.titleMedium)
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MetricBlock("Insuline", "%.2f U".format(metrics.totalInsulinDelivered))
-                MetricBlock("IOB@piek", "%.2f".format(metrics.iobRatioAtPeak))
-                MetricBlock("Peak +min", metrics.timeToPeakMinutes?.toString() ?: "-")
+                MetricBlock(s.insulineLabel, "%.2f U".format(metrics.totalInsulinDelivered))
+                MetricBlock(s.iobAtPiek, "%.2f".format(metrics.iobRatioAtPeak))
+                MetricBlock(s.peakPlusMin, metrics.timeToPeakMinutes?.toString() ?: "-")
             }
 
 // Gebruik de predictedPeak op het moment van de werkelijke BG-piek,
@@ -181,26 +184,26 @@ private fun EpisodeOverviewCard(
                 val diff = classification.peakBg - predPeakAtPeak
                 val diffStr = if (diff >= 0) "+%.1f".format(diff) else "%.1f".format(diff)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    MetricBlock("Werkelijke piek", "%.1f".format(classification.peakBg))
-                    MetricBlock("Pred. piek", "%.1f".format(predPeakAtPeak))
-                    MetricBlock("Δ voorspelling", diffStr)
+                    MetricBlock(s.werkelijkePiek, "%.1f".format(classification.peakBg))
+                    MetricBlock(s.predPiek, "%.1f".format(predPeakAtPeak))
+                    MetricBlock(s.deltaVoorspelling, diffStr)
                 }
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MetricBlock("Insuline", "%.2f U".format(metrics.totalInsulinDelivered))
-                MetricBlock("Gewicht", "%.2f".format(metrics.advisorWeight))
-                MetricBlock("Peak +min", metrics.timeToPeakMinutes?.toString() ?: "-")
+                MetricBlock(s.insulineLabel, "%.2f U".format(metrics.totalInsulinDelivered))
+                MetricBlock(s.gewicht, "%.2f".format(metrics.advisorWeight))
+                MetricBlock(s.peakPlusMin, metrics.timeToPeakMinutes?.toString() ?: "-")
             }
 
             Text(
                 text = when {
-                    metrics.includedInAdvice -> "Meegeteld in laatste aanbeveling"
+                    metrics.includedInAdvice -> s.meegeteldInAanbeveling
                     metrics.advisorWeight <= 0.0 -> "Niet beschikbaar – te weinig insuline"
-                    metrics.adviceStatus == AdviceLifecycleStore.STATE_CONSUMED -> "Verbruikt na profielwijziging"
+                    metrics.adviceStatus == AdviceLifecycleStore.STATE_CONSUMED -> s.verbruiktNaWijziging
                     !matchesCurrentSettings -> "Niet beschikbaar – episode hoort bij andere instellingen"
-                    metrics.adviceStatus == AdviceLifecycleStore.STATE_IN_LAST_RECOMMENDATION -> "Behoort bij laatste aanbeveling"
-                    else -> "Beschikbaar voor advies"
+                    metrics.adviceStatus == AdviceLifecycleStore.STATE_IN_LAST_RECOMMENDATION -> s.behoortBijAanbeveling
+                    else -> s.beschikbaarVoorAdvies
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
@@ -211,7 +214,7 @@ private fun EpisodeOverviewCard(
                     classification.hyper -> "Glucose steeg te hoog."
                     classification.hypoEarly -> "Vroege hypo – vroege insuline mogelijk te sterk."
                     classification.hypoLate -> "Late hypo – totale insuline mogelijk te hoog."
-                    classification.meetsGoal -> "Glucose bleef stabiel binnen doel."
+                    classification.meetsGoal -> s.glucoseBleefStabiel
                     else -> "Lichte afwijking zonder duidelijke fout."
                 },
                 color = statusColor
@@ -390,6 +393,7 @@ private fun TimingRow(label: String, value: String) {
 
 @Composable
 private fun PeakAnalyseCard(episode: Episode) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val episodeRows = episode.rows
         .filter { (it.minutesSinceMealStart ?: -1) >= 0 }
         .sortedBy { it.minutesSinceMealStart }
@@ -407,7 +411,7 @@ private fun PeakAnalyseCard(episode: Episode) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Piekvoorspelling vs werkelijkheid", style = MaterialTheme.typography.titleMedium)
+            Text(s.piekVoorspellingVsWerkelijkheid, style = MaterialTheme.typography.titleMedium)
             Text(
                 "X-as: minuten na episodestart  \u00b7  Y-as: BG ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitLabel(app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current))}  \u00b7  Gele lijn = werkelijke piek",
                 style = MaterialTheme.typography.bodySmall,
@@ -465,7 +469,7 @@ private fun PeakAnalyseCard(episode: Episode) {
                     }
                     Column {
                         Text(
-                            "Fout bij piek",
+                            s.foutBijPiek,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
@@ -486,7 +490,7 @@ private fun PeakAnalyseCard(episode: Episode) {
                     }
                     Column {
                         Text(
-                            "Werkelijke piek",
+                            s.werkelijkePiek,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )

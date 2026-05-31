@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 private enum class Screen { DASHBOARD, ANALYZE, ADVISOR }
 
@@ -41,6 +42,8 @@ private enum class Screen { DASHBOARD, ANALYZE, ADVISOR }
 fun FclAnalyzerScreen(
     onDismiss: () -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -475,6 +478,7 @@ private fun DashboardScreen(
     onOpenEpisodes: () -> Unit,
     onOpenAdvisor: () -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val metricCount = metrics?.size ?: 0
     val advisorEnabled = episodes?.isNotEmpty() == true && metrics?.isNotEmpty() == true
 
@@ -497,10 +501,10 @@ private fun DashboardScreen(
             IconButton(onClick = onBack) {
                 androidx.compose.material3.Icon(
                     imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Terug"
+                    contentDescription = s.terug
                 )
             }
-            Text("FCL Analyzer", style = MaterialTheme.typography.titleLarge)
+            Text(s.analyzerTabLabel, style = MaterialTheme.typography.titleLarge)
             // Spacer zodat titel gecentreerd lijkt
             androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
         }
@@ -516,7 +520,7 @@ private fun DashboardScreen(
         ) {
             NavTile(
                 emoji = "📊",
-                label = "Episodes",
+                label = s.episodes,
                 badge = if (episodeCount > 0) "$episodeCount" else null,
                 enabled = hasData,
                 onClick = onOpenEpisodes,
@@ -524,7 +528,7 @@ private fun DashboardScreen(
             )
             NavTile(
                 emoji = "🧠",
-                label = "Advisor",
+                label = s.advisor,
                 badge = if (metricCount > 0) "$metricCount" else null,
                 enabled = advisorEnabled,
                 onClick = onOpenAdvisor,
@@ -544,7 +548,7 @@ private fun DashboardScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Gegevens", style = MaterialTheme.typography.titleMedium)
+                    Text(s.gegevens, style = MaterialTheme.typography.titleMedium)
                     Text(
                         text = if (allRows != null)
                             "${allRows.size} cycli • data direct uit AAPS database"
@@ -555,7 +559,7 @@ private fun DashboardScreen(
                     )
                 }
                 TextButton(onClick = onRefreshData) {
-                    Text("Vernieuwen")
+                    Text(s.vernieuwen)
                 }
             }
         }

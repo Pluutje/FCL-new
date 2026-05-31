@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 @Composable
 fun EpisodePager(
@@ -23,6 +24,8 @@ fun EpisodePager(
     onPageChanged: (Int) -> Unit,
     onRescueUserConfirmed: (startTs: String, confirmed: String) -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     val pagerState = rememberPagerState(
         initialPage = episodes.size - 1,
         pageCount = { episodes.size }
@@ -68,7 +71,7 @@ fun EpisodePager(
                         )
                     ) {
                         Text(
-                            "LIVE",
+                            s.live,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             color = MaterialTheme.colorScheme.onSecondary,
                             style = MaterialTheme.typography.labelMedium
@@ -124,6 +127,7 @@ private fun RescueSectie(
     entity: EpisodeEntity,
     onUserConfirmed: (String) -> Unit
 ) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val autoState     = entity.rescueAutoState
     val autoConf      = entity.rescueAutoConfidence
     val userConfirmed = entity.rescueUserConfirmed
@@ -158,7 +162,7 @@ private fun RescueSectie(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Auto:",
+                        "${s.auto}:",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -173,7 +177,7 @@ private fun RescueSectie(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Daadwerkelijk genomen:",
+                    s.daadwerkelijkGenomen,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)

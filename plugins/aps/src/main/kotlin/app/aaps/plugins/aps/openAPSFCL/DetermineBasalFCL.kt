@@ -1173,13 +1173,15 @@ class DetermineBasalFCL @Inject constructor(
                 insulinReq = max_iob - iob_data.iob
             }
 
-            // rate required to deliver insulinReq more insulin over 30m:
-            var rate = basal + (2 * insulinReq)
-            rate = round_basal(rate)
             // Schaal insulinReq met aaps_multiplier voor AAPS-laag correcties
             insulinReq = insulinReq * aaps_multiplier
             insulinReq = round(insulinReq, 3)
             rT.insulinReq = insulinReq
+
+            // rate required to deliver insulinReq more insulin over 30m:
+            var rate = basal + (2 * insulinReq)
+            rate = round_basal(rate)
+
 
             // only allow microboluses with COB or low temp targets, or within DIA hours of a bolus
             val maxBolus: Double

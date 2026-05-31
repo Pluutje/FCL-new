@@ -21,14 +21,14 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.Episode
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.LogRow
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 // ── Kleurpalet consistent met EpisodeChart ──────────────────────────────────
 private val MargePositief = Color(0xFF00C853)   // groen: ruim onder drempel (veilig)
 private val MargeKrap     = Color(0xFFFFD600)   // geel: dicht bij drempel
 private val MargeActief   = Color(0xFFFF5252)   // rood: drempel geraakt
 private val ColorErrorNeg2 = Color(0x551A73E8)   // blauw transparant — pred te laag
-private val ChartBg2      = Color(0xFF101010)
-private val GridC         = Color(0x33FFFFFF)
+// ChartBg2 en GridC worden adaptief bepaald in de composable
 
 /**
  * Scherm 2: Marges-dashboard
@@ -39,7 +39,11 @@ private val GridC         = Color(0x33FFFFFF)
  */
 @Composable
 fun MargesDashboardCard(episode: Episode) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
     val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
+    val ChartBg2 = MaterialTheme.colorScheme.surfaceContainer
+    val GridC    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
     val rows = episode.rows
         .filter { (it.minutesSinceMealStart ?: -1) >= 0 }
         .sortedBy { it.minutesSinceMealStart }
@@ -50,7 +54,7 @@ fun MargesDashboardCard(episode: Episode) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Text(
-                "Geen episode-data beschikbaar",
+                s.geenEpisodesGevonden,
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -75,6 +79,7 @@ fun MargesDashboardCard(episode: Episode) {
 
 @Composable
 private fun SuppressRedenKaart(rows: List<LogRow>) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -83,7 +88,7 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Rem-activaties", style = MaterialTheme.typography.titleMedium)
+            Text(s.remActivaties, style = MaterialTheme.typography.titleMedium)
 
             // Suppress redenen
             val suppressCounts = rows
@@ -103,14 +108,14 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
 
             if (suppressCounts.isEmpty() && lockoutCounts.isEmpty() && commitBlockCounts.isEmpty()) {
                 Text(
-                    "Geen rem-activaties in deze episode",
+                    s.geenRemActivaties,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             } else {
                 if (suppressCounts.isNotEmpty()) {
                     Text(
-                        "Suppress",
+                        s.suppress,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -122,7 +127,7 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
 
                 if (lockoutCounts.isNotEmpty()) {
                     Text(
-                        "Lockout",
+                        s.lockout,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -134,7 +139,7 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
 
                 if (commitBlockCounts.isNotEmpty()) {
                     Text(
-                        "Commit geblokkeerd",
+                        s.commitGeblokkeerd,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -152,16 +157,16 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
             if (earlyResets > 0 || downtrendRows > 0 || sensorBlips > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Overige events",
+                    s.overigeEvents,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
                 if (earlyResets > 0)
-                    RedenRij("Early reset", earlyResets, Color(0xFF00B0FF))
+                    RedenRij(s.earlyReset, earlyResets, Color(0xFF00B0FF))
                 if (downtrendRows > 0)
-                    RedenRij("Downtrend locked", downtrendRows, Color(0xFF78909C))
+                    RedenRij(s.downtrendLocked, downtrendRows, Color(0xFF78909C))
                 if (sensorBlips > 0)
-                    RedenRij("Sensor blip", sensorBlips, Color(0xFFFF8C00))
+                    RedenRij(s.sensorBlip, sensorBlips, Color(0xFFFF8C00))
             }
         }
     }
@@ -169,6 +174,7 @@ private fun SuppressRedenKaart(rows: List<LogRow>) {
 
 @Composable
 private fun RedenRij(reden: String, count: Int, kleur: Color) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -203,14 +209,14 @@ private fun redenLabel(reden: String): String = when (reden) {
     "PEAK_IOB_BRAKE"     -> "Peak IOB-rem"
     "PEAK_IOB_BRAKE_HIGH"-> "Peak IOB-rem (hoog)"
     "DECEL_HIGH_IOB"     -> "Afremmen + hoge IOB"
-    "Early reset"        -> "Early reset (momentum weg)"
-    "Downtrend locked"   -> "Dalende trend geblokkeerd"
-    "Sensor blip"        -> "Sensor-artefact"
+    "EARLY_RESET"        -> "Early reset (momentum weg)"
+    "DOWNTREND_LOCKED"   -> "Dalende trend geblokkeerd"
     else                 -> reden
 }
 
 @Composable
 private fun MargesOverTijdKaart(rows: List<LogRow>) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -219,7 +225,7 @@ private fun MargesOverTijdKaart(rows: List<LogRow>) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Marges tot drempels over tijd", style = MaterialTheme.typography.titleMedium)
+            Text(s.margesTotDrempels, style = MaterialTheme.typography.titleMedium)
             Text(
                 "Negatief = onder drempel (rem inactief) · Nul = drempel geraakt · Positief = rem actief",
                 style = MaterialTheme.typography.bodySmall,
@@ -258,6 +264,8 @@ private fun MargeGrafiek(
     values: List<Pair<Int?, Double>>,
     yRange: Pair<Double, Double>
 ) {
+    val ChartBg2 = MaterialTheme.colorScheme.surfaceContainer
+    val GridC    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
     val valid = values.filter { (min, v) -> min != null && min >= 0 }
     if (valid.isEmpty()) return
 
@@ -355,7 +363,10 @@ private fun MargeGrafiek(
 
 @Composable
 private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) {
+    val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
+    val ChartBg2 = MaterialTheme.colorScheme.surfaceContainer
+    val GridC    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -364,7 +375,7 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Voorspellingskwaliteit", style = MaterialTheme.typography.titleMedium)
+            Text(s.voorspellingsKwaliteit, style = MaterialTheme.typography.titleMedium)
 
             val activeRows = rows.filter {
                 (it.minutesSinceMealStart ?: -1) >= 0 &&
@@ -409,39 +420,80 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 MetricBlock("Werkelijke piek", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(actualPeak, mgdl))
-                MetricBlock("Gem. voorspelling", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(correctedGem, mgdl))
-                MetricBlock("IOB-correctie", "-${if (mgdl) "%.0f".format(iobCorrectie*18.0) else "%.2f".format(iobCorrectie)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}")
+                MetricBlock(s.gemVoorspelling, app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatBg(correctedGem, mgdl))
+                MetricBlock(s.iobCorrectie, "-${if (mgdl) "%.0f".format(iobCorrectie*18.0) else "%.2f".format(iobCorrectie)} ${app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.unitShort(mgdl)}")
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                "Gemiddelde fout per tijdvenster",
+                s.gemFoutPerTijdvenster,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
 
+            // Per tijdvenster: gemiddelde VOORSPELLING + fout t.o.v. werkelijke piek
+            // Zodat zichtbaar is of het algoritme vroeg al wist waar de piek zou uitkomen
+            fun gemVoorspelling(rijen: List<LogRow>): Double? {
+                if (rijen.isEmpty()) return null
+                return rijen.mapNotNull { it.predictedPeak }.takeIf { it.isNotEmpty() }?.average()
+            }
+
+            fun vensterLabel(f: Double?, gem: Double?): String {
+                if (gem == null) return "—"
+                val gemStr = BgUnits.formatBgValue(gem, mgdl)
+                val fStr = foutLabel(f)
+                return "$gemStr ($fStr)"
+            }
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val fVroeg  = fout(vroeg)
-                val fMidden = fout(midden)
-                val fLaat   = fout(laat)
+                val fVroeg  = fout(vroeg);  val gVroeg  = gemVoorspelling(vroeg)
+                val fMidden = fout(midden); val gMidden = gemVoorspelling(midden)
+                val fLaat   = fout(laat);   val gLaat   = gemVoorspelling(laat)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("0–20 min", style = MaterialTheme.typography.labelSmall,
+                    Text(s.venster0_20, style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                    Text(foutLabel(fVroeg), style = MaterialTheme.typography.titleSmall,
-                         fontWeight = FontWeight.SemiBold, color = foutKleur(fVroeg))
+                    Text(
+                        if (gVroeg != null) BgUnits.formatBgValue(gVroeg, mgdl) else "—",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = foutKleur(fVroeg)
+                    )
+                    Text(
+                        foutLabel(fVroeg),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = foutKleur(fVroeg).copy(alpha = 0.7f)
+                    )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("20–40 min", style = MaterialTheme.typography.labelSmall,
+                    Text(s.venster20_40, style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                    Text(foutLabel(fMidden), style = MaterialTheme.typography.titleSmall,
-                         fontWeight = FontWeight.SemiBold, color = foutKleur(fMidden))
+                    Text(
+                        if (gMidden != null) BgUnits.formatBgValue(gMidden, mgdl) else "—",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = foutKleur(fMidden)
+                    )
+                    Text(
+                        foutLabel(fMidden),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = foutKleur(fMidden).copy(alpha = 0.7f)
+                    )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(">40 min", style = MaterialTheme.typography.labelSmall,
+                    Text(s.vensterBoven40, style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                    Text(foutLabel(fLaat), style = MaterialTheme.typography.titleSmall,
-                         fontWeight = FontWeight.SemiBold, color = foutKleur(fLaat))
+                    Text(
+                        if (gLaat != null) BgUnits.formatBgValue(gLaat, mgdl) else "—",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = foutKleur(fLaat)
+                    )
+                    Text(
+                        foutLabel(fLaat),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = foutKleur(fLaat).copy(alpha = 0.7f)
+                    )
                 }
             }
 

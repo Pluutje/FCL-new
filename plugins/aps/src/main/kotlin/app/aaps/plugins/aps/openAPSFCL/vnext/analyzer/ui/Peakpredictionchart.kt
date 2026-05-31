@@ -25,9 +25,7 @@ private val ColorBallistic   = Color(0xFF00B0FF)   // blauw — ballistisch (vó
 private val ColorPeakLine    = Color(0xFFFFD600)   // geel — werkelijke piek referentie
 private val ColorErrorPos    = Color(0x55FF4444)   // rood transparant — overschatting
 private val ColorErrorNeg    = Color(0x551A73E8)   // blauw transparant — onderschatting
-private val ChartBg          = Color(0xFF101010)
-private val GridColor        = Color(0x33FFFFFF)
-private val LabelColor       = Color(0xCCFFFFFF)
+// ChartBg, GridColor en LabelColor worden adaptief bepaald vanuit MaterialTheme
 
 /**
  * Toont per episode:
@@ -56,6 +54,11 @@ fun PeakPredictionChart(
     val ctx = LocalContext.current
     val mgdl = BgUnits.isMgdl(ctx)
     fun bg(mmol: Double) = if (mgdl) mmol * 18.0 else mmol
+
+    // Adaptieve kleuren
+    val ChartBg   = MaterialTheme.colorScheme.surfaceContainer
+    val GridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val LabelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
 
     val actualPeak = bg(episodeRows.maxOf { it.bg })
 

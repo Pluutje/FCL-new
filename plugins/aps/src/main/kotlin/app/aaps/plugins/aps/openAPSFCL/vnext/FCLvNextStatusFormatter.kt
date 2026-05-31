@@ -1,5 +1,7 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext
 
+import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
+
 import android.content.Context
 
 import org.joda.time.DateTime
@@ -22,52 +24,37 @@ class FCLvNextStatusFormatter(
 
     // ── Label-helpers ─────────────────────────────────────────────────────────
 
-    private fun nightResponsLabel(value: String): String =
-        when (value) {
-            "VERY_GUARDED" -> "🛑 Zeer terughoudend"
-            "GUARDED"      -> "🧤 Terughoudend"
-            "BALANCED"     -> "⚖️ Gebalanceerd"
-            "RESPONSIVE"   -> "🌙 Reageert eerder"
-            "PROACTIVE"    -> "🚀 Proactief"
-            else           -> value
-        }
+    private fun nightResponsLabel(key: String): String = FclStrings.get(context).nightStyleLabel(key)
 
-    private fun doseDistributionLabel(value: String): String =
-        when (value) {
-            "VERY_SMOOTH" -> "🌊 Ultra smooth"
-            "SMOOTH"      -> "🫧 Smooth"
-            "BALANCED"    -> "⚖️ Balanced"
-            "PULSED"      -> "🔨 Pulsed"
-            "VERY_PULSED" -> "⚡ Ultra pulsed"
-            else          -> value
-        }
 
-    // ── Sectie 1: Situatie ───────────────────────────────────────────────────
+    // ── Sectie 1: Situatie ─────────────────────
 
     private fun buildSituatieSectie(
         isNight: Boolean,
         ui: FclUiSnapshot,
-        advice: FCLvNextAdvice?
-    ): String = buildString {
-        val dagNacht = if (isNight) "'S NACHTS" else "OVERDAG"
-        val tijd = DateTime.now().toString("HH:mm")
-        appendLine("🔄 SITUATIE — $dagNacht  $tijd")
-        appendLine("─────────────────────")
-        val deltaStr = ui.delta5m?.let { " (%+.2f/5m)".format(it) } ?: ""
+        advice: app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice?
+    ): String {
+        val str = FclStrings.get(context)
         val mgdl = BgUnits.isMgdl(context)
-        appendLine("• Glucose:  ${BgUnits.formatBg(ui.bgNow, mgdl)} $deltaStr")
-        appendLine("• IOB:      ${"%.2f".format(ui.iob)} U")
-
-        advice?.peakState?.let { state ->
-            val uitleg = when (state) {
-                "IDLE"      -> "Geen actieve stijging"
-                "WATCHING"  -> "Sterke stijging actief"
-                "CONFIRMED" -> "Piek bevestigd – afremming verwacht"
-                else        -> state
-            }
-            val peakStr = advice.predictedPeak
-                ?.let { "  →  verwacht ${BgUnits.formatBg(it, mgdl)}" } ?: ""
-            append("• FCL piek: $uitleg$peakStr")
+        val timeStr = org.joda.time.DateTime.now()
+            .toString("HH:mm")
+        val header = if (isNight) str.situatieNacht else str.situatieOverdag
+        val deltaStr = ui.delta5m?.let { d ->
+            val sign = if (d >= 0) "+" else ""
+            " ($sign${BgUnits.formatBgValue(d, mgdl)}/5m)"
+        } ?: ""
+        val peakLine = when {
+            advice == null -> ""
+            advice.predictedPeak != null && advice.predictedPeak > 0 ->
+                "${str.fclPiekSterkeStijging}  →  ${str.verwacht} ${BgUnits.formatBg(advice.predictedPeak, mgdl)}"
+            else -> str.fclPiekGeen
+        }
+        return buildString {
+            appendLine("🏃 $header  $timeStr")
+            appendLine("─────────────────────")
+            appendLine("• ${str.glucose}:  ${BgUnits.formatBg(ui.bgNow, mgdl)}$deltaStr")
+            appendLine("• ${str.iob}:     ${"%.2f".format(ui.iob)} U")
+            if (peakLine.isNotEmpty()) appendLine("• ${str.fclPiek}: $peakLine")
         }
     }
 
@@ -78,20 +65,21 @@ class FCLvNextStatusFormatter(
         basalRate: Double,
         shouldDeliver: Boolean
     ): String = buildString {
-        appendLine("💉 BESLISSING")
+        val str = FclStrings.get(context)
+        appendLine("💉 ${str.beslissing}")
         appendLine("─────────────────────")
         if (shouldDeliver) {
             when {
                 bolusAmount > 0.0 && basalRate > 0.0 -> {
                     appendLine("• SMB:    ${"%.2f".format(bolusAmount)} U")
-                    append(    "• Basaal: ${"%.2f".format(basalRate)} U/h")
+                    append(    "• Basal: ${"%.2f".format(basalRate)} U/h")
                 }
                 bolusAmount > 0.0 -> append("• SMB: ${"%.2f".format(bolusAmount)} U")
                 basalRate > 0.0   -> append("• Basaal: ${"%.2f".format(basalRate)} U/h")
-                else              -> append("• Geen insuline deze cyclus")
+                else              -> append("• No insulin this cycle")
             }
         } else {
-            append("• Geen ingreep")
+            append("• ${str.geenIngreep}")
         }
     }
 
@@ -100,10 +88,11 @@ class FCLvNextStatusFormatter(
     private fun buildDosesSectie(
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
-        appendLine("📋 LAATSTE DOSES")
+        val str = FclStrings.get(context)
+        appendLine("📋 ${str.latsteDosisFcl}")
         appendLine("─────────────────────")
         if (history.isEmpty()) {
-            append("Geen recente afleveringen")
+            append(str.latsteDosisFclEmpty)
         } else {
             history.forEachIndexed { i, (ts, dose, isFcl) ->
                 val bron = if (isFcl) "🧠 FCLvNext" else "⚙️ AAPS"
@@ -116,6 +105,7 @@ class FCLvNextStatusFormatter(
     // ── Sectie 4: Algoritmeparameters ────────────────────────────────────────
 
     private fun buildAlgoritmeSectie(activeConfig: FCLvNextConfig? = null): String {
+        val str = FclStrings.get(context)
         val s = prefs.get(IntKey.fcl_vnext_sterkte)
         val t = prefs.get(IntKey.fcl_vnext_timing)
         val v = prefs.get(IntKey.fcl_vnext_volhoudendheid)
@@ -128,46 +118,49 @@ class FCLvNextStatusFormatter(
         }
 
         fun frontloadLabel(t: Int) = when {
-            t >= 115 -> "Sterk vroeg"
-            t >= 107 -> "Vroeg"
-            t >= 93  -> "Neutraal"
-            t >= 85  -> "Laat"
-            else     -> "Sterk laat"
+            t >= 115 -> str.frontloadSterkVroeg
+            t >= 107 -> str.frontloadVroeg
+            t >= 93  -> str.frontloadNeutraal
+            t >= 85  -> str.frontloadLaat
+            else     -> str.frontloadSterkLaat
         }
 
         fun sterkteLabel(s: Int) = when {
-            s >= 110 -> "Hoog"
-            s >= 102 -> "Iets boven standaard"
-            s >= 98  -> "Standaard"
-            s >= 90  -> "Iets onder standaard"
-            else     -> "Laag"
+            s >= 110 -> str.sterkteHoog
+            s >= 102 -> str.sterkteIetsBoven
+            s >= 98  -> str.sterkteStandaard
+            s >= 90  -> str.sterkteIetsOnder
+            else     -> str.sterkteLaagLabel
         }
 
         fun volhLabel(v: Int) = when {
-            v >= 110 -> "Vasthoudend"
-            v >= 102 -> "Iets vasthoudender"
-            v >= 98  -> "Standaard"
-            v >= 90  -> "Iets voorzichtiger"
-            else     -> "Voorzichtig"
+            v >= 110 -> str.volhVasthoudend
+            v >= 102 -> str.volhIetsVasthoudender
+            v >= 98  -> str.volhStandaard
+            v >= 90  -> str.volhIetsVoorzichtiger
+            else     -> str.volhVoorzichtig
         }
 
-        val nachtTov = "${100 - n}% rustiger dan dag"
+        val nachtTov = str.nachtRustigerDanDag.format(100 - n)
 
         return buildString {
-            appendLine("📊 ALGORITMEPARAMETERS")
+            appendLine("📊 ${str.algoritmeparameters}")
             appendLine("─────────────────────")
-            appendLine("• Sterkte  (S): ${s}%  ${indicator(s)}  ${sterkteLabel(s)}")
-            appendLine("• Timing   (T): ${t}%  ${indicator(t)}  ${frontloadLabel(t)}")
-            appendLine("• Volhoud. (V): ${v}%  ${indicator(v)}  ${volhLabel(v)}")
-            appendLine("• Nacht-N    : ${n}%  ($nachtTov)")
-            appendLine("• Nacht-respons:     ${nightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}")
-            append(    "• Insulineverdeling: ${doseDistributionLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}")
+            appendLine("• ${str.sterkte}: ${s}%  ${indicator(s)}  ${sterkteLabel(s)}")
+            appendLine("• ${str.timing}: ${t}%  ${indicator(t)}  ${frontloadLabel(t)}")
+            appendLine("• ${str.volhoudendheid}: ${v}%  ${indicator(v)}  ${volhLabel(v)}")
+            appendLine("• ${str.nachtN}    : ${n}%  ($nachtTov)")
+            appendLine("${str.nachtRespons}:     ${nightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}")
+            append(    "${str.insulineverdeling}: ${FclStrings.get(context).doseStyleLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}")
         }
     }
 
     // ── Sectie 5: Analyzer-gestuurde waarden ─────────────────────────────────
 
     private fun buildAnalyzerConfigSectie(activeConfig: FCLvNextConfig?): String {
+        val str = FclStrings.get(context)
+        val expertMode = context.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("expert_mode_active", false)
         if (activeConfig == null) return "🔧 ANALYZER-WAARDEN\n─────────────────────\nConfig nog niet beschikbaar (wacht op eerste FCLvNext cyclus)"
 
         val snapManual = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 0.0
@@ -180,32 +173,34 @@ class FCLvNextStatusFormatter(
 
         val mgdl = BgUnits.isMgdl(context)
         return buildString {
-            appendLine("🔧 ANALYZER-GESTUURDE WAARDEN (config)")
+            appendLine("🔧 ${str.analyzerConfigHeader}")
             appendLine("─────────────────────")
-            appendLine("• MaxSMB dag        : ${"%.2f".format(liveMaxSmb)} U")
+            appendLine("• ${str.maxSmbDagLabel}        : ${"%.2f".format(liveMaxSmb)} U")
             if (snapManual > 0.001 && kotlin.math.abs(liveMaxSmb - snapManual) > 0.01) {
-                val richting = if (liveMaxSmb < snapManual) "verlaagd" else "verhoogd"
-                appendLine("  ↳ handmatig: ${"%.2f".format(snapManual)} U ($richting door analyzer)")
+                val richting = if (liveMaxSmb < snapManual) str.maxSmbVerlaagd else str.maxSmbVerhoogd
+                appendLine("  ↳ manual: ${"%.2f".format(snapManual)} U ($richting by analyzer)")
             }
-            appendLine("• IOB-remdrempel    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
-            appendLine()
-            appendLine("⚙️  FIJNAFSTEMMING")
-            appendLine("─────────────────────")
-            appendLine("• iobStart          : ${"%.2f".format(activeConfig.iobStart)}")
-            appendLine("• commitCooldown    : ${activeConfig.commitCooldownMinutes} min")
-            appendLine("• peakPredThreshold : ${BgUnits.formatBg(activeConfig.peakPredictionThreshold, mgdl)}")
-            appendLine("• peakHorizon       : ${"%.1f".format(activeConfig.peakPredictionHorizonH)} h")
-            appendLine("• watchingFrac      : ${"%.2f".format(activeConfig.watchingFrontloadFrac)}")
-            appendLine("• watchingDeltaMin  : ${"%.2f".format(activeConfig.watchingMinDeltaToTarget)}")
-            appendLine("• earlyBoostFactor  : ${"%.2f".format(activeConfig.earlyBoostFactor)}")
-            appendLine("• earlyBoostMinConf : ${"%.2f".format(activeConfig.earlyBoostMinConfidence)}")
-            appendLine("• earlyBoostMaxCommits: ${activeConfig.earlyBoostMaxCommits}")
-            appendLine("• earlyRiseFracMin  : ${"%.2f".format(activeConfig.earlyRiseFracMin)}")
-            appendLine("• peakMaxSlopeWeight: ${"%.2f".format(activeConfig.peakMaxSlopeWeight)}")
-            appendLine("• lateDecayFactor   : ${"%.2f".format(activeConfig.lateCommitDecayFactor)}")
-            appendLine("• lateDecayThreshold: ${"%.2f".format(activeConfig.lateCommitDecayThreshold)}")
-            appendLine("• sustainedSlopeMin : ${"%.2f".format(activeConfig.sustainedRiseSlopeMin)}")
-            append(    "• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
+            appendLine("• ${str.iobRemdrempel}    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
+            if (expertMode) {
+                appendLine()
+                appendLine("⚙️  ${str.analyzerFijnafstemming}")
+                appendLine("─────────────────────")
+                appendLine("• iobStart          : ${"%.2f".format(activeConfig.iobStart)}")
+                appendLine("• commitCooldown    : ${activeConfig.commitCooldownMinutes} min")
+                appendLine("• peakPredThreshold : ${BgUnits.formatBg(activeConfig.peakPredictionThreshold, mgdl)}")
+                appendLine("• peakHorizon       : ${"%.1f".format(activeConfig.peakPredictionHorizonH)} h")
+                appendLine("• watchingFrac      : ${"%.2f".format(activeConfig.watchingFrontloadFrac)}")
+                appendLine("• watchingDeltaMin  : ${"%.2f".format(activeConfig.watchingMinDeltaToTarget)}")
+                appendLine("• earlyBoostFactor  : ${"%.2f".format(activeConfig.earlyBoostFactor)}")
+                appendLine("• earlyBoostMinConf : ${"%.2f".format(activeConfig.earlyBoostMinConfidence)}")
+                appendLine("• earlyBoostMaxCommits: ${activeConfig.earlyBoostMaxCommits}")
+                appendLine("• earlyRiseFracMin  : ${"%.2f".format(activeConfig.earlyRiseFracMin)}")
+                appendLine("• peakMaxSlopeWeight: ${"%.2f".format(activeConfig.peakMaxSlopeWeight)}")
+                appendLine("• lateDecayFactor   : ${"%.2f".format(activeConfig.lateCommitDecayFactor)}")
+                appendLine("• lateDecayThreshold: ${"%.2f".format(activeConfig.lateCommitDecayThreshold)}")
+                appendLine("• sustainedSlopeMin : ${"%.2f".format(activeConfig.sustainedRiseSlopeMin)}")
+                append(    "• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
+            }
         }
     }
 
@@ -224,8 +219,9 @@ class FCLvNextStatusFormatter(
         activeConfig: FCLvNextConfig? = null,
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
+        val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v1.8.2")
+        appendLine(" 🧠 FCL V6 v1.8.8")
         appendLine("════════════════════════")
         appendLine()
 
@@ -241,19 +237,19 @@ class FCLvNextStatusFormatter(
         appendLine(buildAlgoritmeSectie(activeConfig))
         appendLine()
 
-        appendLine("🏃 ACTIVITEIT")
+        appendLine("🏃 ${str.activiteit}")
         appendLine("─────────────────────")
-        appendLine(activityLog ?: "Geen activiteitdata")
+        appendLine(activityLog ?: str.geenActiviteitdata)
         appendLine()
 
-        appendLine("🧬 AUTO-SENS")
+        appendLine("🧬 ${str.autoSensHeader}")
         appendLine("─────────────────────")
-        appendLine(resistanceLog ?: "Geen resistentie-log")
+        appendLine(resistanceLog ?: str.geenResistentieLog)
         appendLine()
 
-        appendLine("📈 GLUCOSE STATISTIEKEN")
+        appendLine("📈 ${str.glucoseStatHeader}")
         appendLine("─────────────────────")
-        appendLine(metricsText ?: "Nog geen data")
+        appendLine(metricsText ?: str.nogGeenData)
         appendLine()
 
         append(buildAnalyzerConfigSectie(activeConfig))

@@ -70,6 +70,12 @@ data class EpisodeMetrics(
     // onduidelijk of maxSMB de limiterende factor was.
     val earlyBoostWasActive: Boolean = false,
 
+    // Gemiddelde voorspellingsfout per tijdvenster (pred - werkelijkePiek)
+    // Positief = overschatting, negatief = onderschatting
+    // null = geen data in dit venster
+    val predFout0_20:  Double? = null,   // 0-20 min: frontload fase
+    val predFout20_40: Double? = null,   // 20-40 min: watching fase
+
     // capReachedCycles: aantal cycli waarbij de finale dosis gecapped was door maxSMB.
     // Direct signaal dat maxSMB structureel te laag is — systeem wilde meer maar kon niet.
     val capReachedCycles: Int = 0,

@@ -1149,11 +1149,21 @@ private fun hypoProtection(
     // Situatie: BG 7.5+ na maaltijdpiek met bijna uitgewerkte IOB (iobRatio < 0.12).
     // FCLvNext was hier geblokkeerd terwijl AAPS kleine correcties gaf.
     // Veiligheid: rawProjection = bg - iob*isf > 2.0 garandeert geen hypo.
+    //
+    // Uitbreiding: de 5m-slope kan negatief zijn door een overgangsoscillatie
+    // (dalende maaltijdstaart + nieuwe stijging). Als de recentSlope (langere
+    // termijn) >= 3.0 mmol/h aangeeft dat de BG structureel stijgt, laten we
+    // de bypass ook toe bij negatieve 5m-slope.
     val rawNoInsulinProjection = ctx.input.bgNow - ctx.input.currentIOB * ctx.input.effectiveISF
+    val slopeOk = ctx.slope >= -0.5 || ctx.recentSlope >= 3.0
+    // iobRatio drempel verhoogd van 0.12 naar 0.18:
+    // Bij 0.12 was de bypass net te krap (0.14 overschreed de drempel na AAPS-bolus).
+    // 0.18 dekt ook de overgangszone waarbij externe bolussen de IOB kort verhogen.
+    // Veiligheid blijft gewaarborgd via rawNoInsulinProjection > 2.0.
     val lowIobHighBg =
         ctx.input.bgNow >= 7.5 &&
-            ctx.iobRatio < 0.12 &&
-            ctx.slope >= -0.5 &&
+            ctx.iobRatio < 0.18 &&
+            slopeOk &&
             rawNoInsulinProjection > 2.0
 
     if (lowIobHighBg) {

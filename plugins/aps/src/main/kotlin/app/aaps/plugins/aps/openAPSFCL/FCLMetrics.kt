@@ -43,7 +43,7 @@ class FCLMetrics @Inject constructor(
     }
 
 
-    fun getUserStatsString(isNight: Boolean): String {
+    fun getUserStatsString(isNight: Boolean, context: android.content.Context? = null): String {
         maybeUpdateUserStatsCache(isNight)
         return optimizationController.getUserStatsString(isNight)
     }
@@ -334,7 +334,8 @@ class FCLMetrics @Inject constructor(
 
         fun getUserStatsString(isNight: Boolean): String {
             maybeUpdateUserStatsCache(isNight)
-            val cache = userStatsCache ?: return "Statistieken worden verzameld…"
+            val str = if (context != null) app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.get(context) else null
+            val cache = userStatsCache ?: return str?.statistiekenWordenVerzameld ?: "Statistics are being collected…"
 
             val dq24 = cache.dataQuality24h
             val m24 = cache.metrics24h
@@ -344,37 +345,55 @@ class FCLMetrics @Inject constructor(
       //      ─────────────────────
 
 
+            val s = str
+            val tirLbl   = s?.tirLabel         ?: "TIR (3.9–10.0 mmol/L)"
+            val updLbl   = s?.updatesLabel     ?: "UPDATES"
+            val dqLbl    = s?.dataKwaliteitLabel ?: "DATA QUALITY - 24H"
+            val l24Lbl   = s?.laatste24uLabel  ?: "LAST 24 HOURS"
+            val l7Lbl    = s?.laatste7dLabel   ?: "LAST 7 DAYS"
+            val metLbl   = s?.metingen         ?: "Readings"
+            val compLbl  = s?.completeheid     ?: "Completeness"
+            val mphLbl   = s?.metingenPerUur   ?: "Readings per hour"
+            val tirS     = s?.timeInRange      ?: "Time in Range"
+            val tarS     = s?.timeAboveRange   ?: "Time Above Range"
+            val tbrS     = s?.timeBelowRange   ?: "Time Below Range"
+            val tbtS     = s?.timeBelowTarget  ?: "Time Below Target"
+            val avgS     = s?.gemiddeldeGlucose ?: "Average glucose"
+            val gmiS     = s?.gmiLabel         ?: "GMI (HbA1c)"
+            val cvS      = s?.variatieLabel    ?: "Variation (CV)"
+            val updS     = s?.laatsteUpdate    ?: "Last update"
+
             return """
 
-[ TIR (3.9–10.0 mmol/L) ]
-   • 24u: ${m24.timeInRange.toInt()}% 
+[ $tirLbl ]
+   • 24h: ${m24.timeInRange.toInt()}%
    • 7d : ${m7.timeInRange.toInt()}%
 
-[⏰ UPDATES]
-• Laatste update: ${cache.lastUpdated.toString("HH:mm")}
+[⏰ $updLbl]
+• $updS: ${cache.lastUpdated.toString("HH:mm")}
 
-[ DATA KWALITEIT - 24U ]
-• Metingen: ${dq24.totalReadings}/${dq24.expectedReadings}
-• Completeheid: ${dq24.dataCompleteness.toInt()}% ${if (!dq24.hasSufficientData) "⚠️" else "✅"}
-• Metingen per uur: ${m24.readingsPerHour.toInt()}/12 ${if (m24.readingsPerHour < 8) "⚠️" else "✅"}
+[ $dqLbl ]
+• $metLbl: ${dq24.totalReadings}/${dq24.expectedReadings}
+• $compLbl: ${dq24.dataCompleteness.toInt()}% ${if (!dq24.hasSufficientData) "⚠️" else "✅"}
+• $mphLbl: ${m24.readingsPerHour.toInt()}/12 ${if (m24.readingsPerHour < 8) "⚠️" else "✅"}
 
-[ LAATSTE 24 UUR ]
-• Time in Range: ${m24.timeInRange.toInt()}% 
-• Time Above Range: ${m24.timeAboveRange.toInt()}%
-• Time Below Range: ${m24.timeBelowRange.toInt()}%
-• Time Below Target: ${m24.timeBelowTarget.toInt()}%
-• Gemiddelde glucose: ${roundN(m24.averageGlucose, 1)} mmol/L
-• GMI (HbA1c): ${gmiPercentToMmolMol(m24.gmi)} (${roundN(m24.gmi, 1)}%)
-• Variatie (CV): ${m24.cv.toInt()}%
+[ $l24Lbl ]
+• $tirS: ${m24.timeInRange.toInt()}%
+• $tarS: ${m24.timeAboveRange.toInt()}%
+• $tbrS: ${m24.timeBelowRange.toInt()}%
+• $tbtS: ${m24.timeBelowTarget.toInt()}%
+• $avgS: ${roundN(m24.averageGlucose, 1)} mmol/L
+• $gmiS: ${gmiPercentToMmolMol(m24.gmi)} (${roundN(m24.gmi, 1)}%)
+• $cvS: ${m24.cv.toInt()}%
 
-[ LAATSTE 7 DAGEN ]
-• Time in Range: ${m7.timeInRange.toInt()}%
-• Time Above Range: ${m7.timeAboveRange.toInt()}%
-• Time Below Range: ${m7.timeBelowRange.toInt()}%
-• Time Below Target: ${m7.timeBelowTarget.toInt()}%
-• Gemiddelde glucose: ${roundN(m7.averageGlucose, 1)} mmol/L
-• GMI (HbA1c): ${gmiPercentToMmolMol(m7.gmi)} (${roundN(m7.gmi, 1)}%)
-• Variatie (CV): ${m7.cv.toInt()}%
+[ $l7Lbl ]
+• $tirS: ${m7.timeInRange.toInt()}%
+• $tarS: ${m7.timeAboveRange.toInt()}%
+• $tbrS: ${m7.timeBelowRange.toInt()}%
+• $tbtS: ${m7.timeBelowTarget.toInt()}%
+• $avgS: ${roundN(m7.averageGlucose, 1)} mmol/L
+• $gmiS: ${gmiPercentToMmolMol(m7.gmi)} (${roundN(m7.gmi, 1)}%)
+• $cvS: ${m7.cv.toInt()}%
 """.trimIndent()
         }
 
