@@ -54,6 +54,7 @@ fun OverviewChipsColumn(
     cobUiState: CobUiState,
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
+    onIobChipClick: () -> Unit,
     modifier: Modifier = Modifier,
     trailingContent: @Composable (RowScope.() -> Unit)? = null
 ) {
@@ -124,7 +125,7 @@ fun OverviewChipsColumn(
         IobCobChipsRow(
             iobUiState = iobUiState,
             cobUiState = cobUiState,
-            showCob = false // FCL: COB verborgen
+            onIobChipClick = onIobChipClick
         )
     }
 }
@@ -202,4 +203,3 @@ private fun NarrowChips(
         )
     }
 }
-

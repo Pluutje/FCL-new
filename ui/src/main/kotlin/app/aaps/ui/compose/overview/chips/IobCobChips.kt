@@ -1,5 +1,6 @@
 package app.aaps.ui.compose.overview.chips
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -11,12 +12,22 @@ import app.aaps.core.ui.compose.AapsSpacing
 fun IobCobChipsRow(
     iobUiState: IobUiState,
     cobUiState: CobUiState,
-    showCob: Boolean = true,
+    onIobChipClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // COB chip verborgen als cobValue == 0.0 (geen actieve koolhydraten).
+    // Als COB verborgen is: IOB chip staat gewoon links op eigen breedte,
+    // geen proportionele verdeling over de volle breedte.
+    val showCob = cobUiState.cobValue > 0.0
+
+    if (!showCob) {
+        IobChip(state = iobUiState, onClick = onIobChipClick, modifier = modifier)
+        return
+    }
+
     val spacingDp = AapsSpacing.small
     SubcomposeLayout(
-        modifier = modifier
+        modifier = modifier.fillMaxWidth()
     ) { constraints ->
         val spacingPx = spacingDp.roundToPx()
         val isWidthBounded = constraints.hasBoundedWidth
@@ -24,8 +35,8 @@ fun IobCobChipsRow(
 
         // First pass: measure intrinsic widths with icons
         val withIcons = subcompose("withIcons") {
-            IobChip(state = iobUiState, showIcon = true)
-            if (showCob) CobChip(state = cobUiState, showIcon = true)
+            IobChip(state = iobUiState, onClick = onIobChipClick, showIcon = true)
+            CobChip(state = cobUiState, showIcon = true)
         }
         val intrinsicsWithIcons = withIcons.map { it.minIntrinsicWidth(constraints.maxHeight) }
         val totalWithIcons = intrinsicsWithIcons.sum()
@@ -37,18 +48,17 @@ fun IobCobChipsRow(
             withIcons
         } else {
             subcompose("withoutIcons") {
-                IobChip(state = iobUiState, showIcon = false)
-                if (showCob) CobChip(state = cobUiState, showIcon = false)
+                IobChip(state = iobUiState, onClick = onIobChipClick, showIcon = false)
+                CobChip(state = cobUiState, showIcon = false)
             }
         }
 
         val intrinsics = measurables.map { it.minIntrinsicWidth(constraints.maxHeight) }
         val totalIntrinsic = intrinsics.sum()
 
-        // Meerdere chips: proportioneel schalen over beschikbare breedte.
-        // Één chip (COB verborgen bij FCL): gebruik intrinsieke breedte.
+        // Scale each chip proportionally so they fill 100% of available space
         val placeables = measurables.mapIndexed { i, measurable ->
-            val w = if (isWidthBounded && measurables.size > 1) {
+            val w = if (isWidthBounded) {
                 if (totalIntrinsic > 0)
                     (intrinsics[i].toLong() * availableWidth / totalIntrinsic).toInt()
                 else
@@ -60,8 +70,7 @@ fun IobCobChipsRow(
         }
 
         val height = if (placeables.isEmpty()) 0 else placeables.maxOf { it.height }
-        val layoutWidth = if (isWidthBounded && measurables.size > 1) constraints.maxWidth
-        else placeables.sumOf { it.width } + (if (placeables.size > 1) (placeables.size - 1) * spacingPx else 0)
+        val layoutWidth = if (isWidthBounded) constraints.maxWidth else placeables.sumOf { it.width } + (if (placeables.size > 1) (placeables.size - 1) * spacingPx else 0)
         layout(layoutWidth, height) {
             var x = 0
             placeables.forEachIndexed { i, placeable ->
@@ -78,7 +87,8 @@ private fun IobCobChipsRowPreview() {
     MaterialTheme {
         IobCobChipsRow(
             iobUiState = IobUiState(text = "1.25 U", iobTotal = 1.25),
-            cobUiState = CobUiState(text = "24g", cobValue = 24.0)
+            cobUiState = CobUiState(text = "24g", cobValue = 24.0),
+            onIobChipClick = {}
         )
     }
 }
@@ -89,7 +99,8 @@ private fun IobCobChipsRowCarbsReqPreview() {
     MaterialTheme {
         IobCobChipsRow(
             iobUiState = IobUiState(text = "1.25 U", iobTotal = 1.25),
-            cobUiState = CobUiState(text = "12g\n45 required", carbsReq = 45, cobValue = 12.0)
+            cobUiState = CobUiState(text = "12g\n45 required", carbsReq = 45, cobValue = 12.0),
+            onIobChipClick = {}
         )
     }
 }
