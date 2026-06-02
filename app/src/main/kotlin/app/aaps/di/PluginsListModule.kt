@@ -62,6 +62,7 @@ import dagger.multibindings.Multibinds
 import javax.inject.Qualifier
 
 import app.aaps.plugins.aps.openAPSFCL.OpenAPSFCLPlugin
+import app.aaps.plugins.calibration.SplineCalibrationPlugin
 
 @Suppress("unused")
 @Module
@@ -379,6 +380,12 @@ abstract class PluginsListModule {
     @IntoMap
     @IntKey(625)
     abstract fun bindLinearCalibrationPlugin(plugin: LinearCalibrationPlugin): PluginBase
+
+    @Binds
+    @AllConfigs
+    @IntoMap
+    @IntKey(630)
+    abstract fun bindSplineCalibrationPlugin(plugin: SplineCalibrationPlugin): PluginBase
 
     @Qualifier
     annotation class AllConfigs

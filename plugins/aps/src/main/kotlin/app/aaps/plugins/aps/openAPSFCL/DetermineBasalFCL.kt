@@ -83,7 +83,7 @@ class DetermineBasalFCL @Inject constructor(
     private val fclActivityModule = FCLActivityModule(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
     private val fclResistance = FCLResistance(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
 
-    private val bgHistoryProvider = FCLvNextBgHistoryProvider(persistenceLayer)
+    private val bgHistoryProvider = FCLvNextBgHistoryProvider(iobCobCalculator, dateUtil)
     private val basalProfileNightLogger =
         FclBasalProfileNightLogger(
             context = context,

@@ -27,4 +27,23 @@
     <string name="cal_remove_entry_title">Remove entry?</string>
     <string name="cal_remove_entry_message">This will invalidate the entry. The fit will be recalculated.</string>
     <string name="cal_chart_entry_readout">Entry %1$d/%2$d · %3$s · sensor %4$s → BG %5$s</string>
+
+    <!-- Plugin name / description (shown in AAPS plugin selector) -->
+    <string name="spline_calibration_name">Spline calibration</string>
+    <string name="spline_calibration_shortname">Spline cal</string>
+    <string name="description_spline_calibration">
+        Monotone piecewise-cubic (Fritsch–Carlson) calibration with a single
+        interior knot at 10 mmol/L (180 mg/dL). Corrects S-shaped sensor bias
+        that a linear fit cannot handle. Falls back to linear calibration when
+        fewer than 4 entries are available or the spline fit is rejected.
+    </string>
+
+    <!-- Status card messages -->
+    <string name="spline_cal_status_spline_active">Spline calibration applied</string>
+    <!-- %1$d = MIN_ENTRIES_FOR_SPLINE -->
+    <string name="spline_cal_status_linear_fallback">Linear fallback active (need %1$d entries for spline)</string>
+
+    <!-- Knot detail line in status card -->
+    <!-- %1$s = correction at knot formatted with unit, e.g. "+0,3" or "+5" -->
+    <string name="spline_cal_knot_detail">Knot correction at 10 mmol/L: %1$s</string>
 </resources>

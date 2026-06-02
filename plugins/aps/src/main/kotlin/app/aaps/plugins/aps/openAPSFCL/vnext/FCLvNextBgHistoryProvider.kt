@@ -1,8 +1,7 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext
 
-import app.aaps.core.data.time.T
-import app.aaps.core.interfaces.db.PersistenceLayer
-import app.aaps.plugins.aps.openAPSFCL.vnext.model.BGDataPoint
+import app.aaps.core.interfaces.iob.IobCobCalculator
+import app.aaps.core.interfaces.utils.DateUtil
 import org.joda.time.DateTime
 import kotlin.math.max
 
@@ -14,11 +13,21 @@ import kotlin.math.max
  * - FCLvNext input
  * - observatie-learning
  *
- * Alle waarden worden geleverd in mmol/L
- * en gesorteerd (oudste → nieuwste).
+ * Alle waarden worden geleverd in mmol/L en gesorteerd (oudste → nieuwste).
+ *
+ * Gebruikt iobCobCalculator.ads.getBucketedDataTableCopy() zodat de
+ * gecalibreerde en gesmoothe BG-waarden (.recalculated) worden gebruikt —
+ * identiek aan hoe OpenAPSSMB en OpenAPSAutoISF dat doen.
+ *
+ * PersistenceLayer BgReading.value bevat de RUWE sensorwaarde vóór
+ * calibratie en smoothing. Het gebruik daarvan veroorzaakte een verschil
+ * tussen de BG op het mainscreen (gecalibreerd) en de waarde die FCLvNext
+ * ontving (ongecalibreerd), met name zichtbaar als de LinearCalibrationPlugin
+ * actief is.
  */
 class FCLvNextBgHistoryProvider(
-    private val persistenceLayer: PersistenceLayer
+    private val iobCobCalculator: IobCobCalculator,
+    private val dateUtil: DateUtil
 ) {
 
     data class BgPoint(
@@ -27,49 +36,37 @@ class FCLvNextBgHistoryProvider(
     )
 
     /**
-     * Haal BG-data op tussen twee tijdstippen.
-     */
-    fun getBetween(
-        start: DateTime,
-        end: DateTime
-    ): List<BgPoint> {
-
-        val readings = kotlinx.coroutines.runBlocking {
-            persistenceLayer.getBgReadingsDataFromTimeToTime(
-                start.millis,
-                end.millis,
-                false
-            )
-        }
-
-        if (readings.isEmpty()) return emptyList()
-
-        val MGDL_TO_MMOL = 18.0
-
-        return readings
-            .sortedBy { it.timestamp }
-            .mapNotNull { r ->
-                val mmol = r.value / MGDL_TO_MMOL
-                if (mmol > 0.0) {
-                    BgPoint(
-                        time = DateTime(r.timestamp),
-                        bgMmol = mmol
-                    )
-                } else {
-                    null
-                }
-            }
-    }
-
-
-
-    /**
-     * Convenience: haal laatste N uren BG-data.
-     * (Exact wat je nu in determineBasal doet.)
+     * Haal BG-data op: de laatste [hoursBack] uren uit de bucketed data.
+     * Gefilterde/gevulde gaten (filledGap=true) worden overgeslagen.
+     * Resultaat gesorteerd oudste → nieuwste, in mmol/L.
      */
     fun getLastHours(hoursBack: Int): List<BgPoint> {
-        val now = DateTime.now()
-        val start = now.minusHours(max(1, hoursBack))
-        return getBetween(start, now)
+        val data = iobCobCalculator.ads.getBucketedDataTableCopy()
+            ?: return emptyList()
+
+        val cutoffMs = dateUtil.now() - max(1, hoursBack) * 60L * 60L * 1000L
+
+        return data
+            .filter { it.timestamp >= cutoffMs && !it.filledGap && it.recalculated > 39.0 }
+            .sortedBy { it.timestamp }
+            .map { BgPoint(time = DateTime(it.timestamp), bgMmol = it.recalculated / 18.0) }
+    }
+
+    /**
+     * Convenience: BG-data tussen twee tijdstippen.
+     */
+    fun getBetween(start: DateTime, end: DateTime): List<BgPoint> {
+        val data = iobCobCalculator.ads.getBucketedDataTableCopy()
+            ?: return emptyList()
+
+        return data
+            .filter {
+                it.timestamp >= start.millis &&
+                it.timestamp <= end.millis &&
+                !it.filledGap &&
+                it.recalculated > 39.0
+            }
+            .sortedBy { it.timestamp }
+            .map { BgPoint(time = DateTime(it.timestamp), bgMmol = it.recalculated / 18.0) }
     }
 }

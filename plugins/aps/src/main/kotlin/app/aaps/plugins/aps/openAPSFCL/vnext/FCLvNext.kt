@@ -1839,12 +1839,55 @@ private fun computeEarlyDoseDecision(
         ctx.slope >= 0.50 &&
         ctx.iobRatio < effectiveStage3IobMax &&
         ctx.recentSlope >= 3.0
+    // ── Commits budget: debt + hoge BG rise ──────────────────────────────────
+    // Berekend voor highBgContinuation (die er direct onder staat) en later
+    // ook voor boostActive. Afhankelijkheden: alleen ctx, peak, episodeHypoDebtU
+    // — allemaal al bekend op dit punt.
+    val extraCommitsFromDebt = if (episodeHypoDebtU > 0.01)
+        (episodeHypoDebtU / 0.30).toInt().coerceIn(0, 2)
+    else 0
+
+    val extraCommitsFromBgRise = if (
+        ctx.input.bgNow >= 12.0 &&
+        ctx.slope >= 2.0 &&
+        ctx.recentSlope >= 4.0 &&
+        ctx.input.bgNow > peak.predictedPeak - 1.0
+    ) {
+        ((ctx.input.bgNow - 12.0) / 2.0).toInt().coerceIn(0, 3)
+    } else 0
+
+    val effectiveMaxCommits = config.earlyBoostMaxCommits + extraCommitsFromDebt + extraCommitsFromBgRise
+
+    // ── High-BG continuation: hervatting van earlyBoost na stage3 ───────────
+    // Na stage3 is de earlyBoost normaal klaar (geen stage4+ gedefinieerd).
+    // Maar bij extreme maaltijden (BG >= 12.0 mmol en stijgend) is de
+    // gebruikelijke 3 commits onvoldoende.
+    //
+    // Hervatting toegestaan als:
+    //   1. stage3 al gevuurd (earlyDose.stage >= 3)
+    //   2. BG >= 12.0 mmol — expliciet hoge glycemie, niet een normale piek
+    //   3. slope >= 2.0 — stijging is nog actief en substantieel
+    //   4. iobRatio < 0.80 — enige ruimte voor meer insuline
+    //      (veilig: bij BG=12 heeft een extra commit van 2.45U nauwelijks
+    //       hypo-risico — maximale BG-daling 2.45×4.7=11.5 mmol over 90 min,
+    //       maar de bestaande iobRatio-penalty in de dosisberekening remt dit af)
+    //   5. Minimaal 8 min na de laatste commit (cooldown, iets langer dan normaal)
+    //   6. boostCommitCount < effectiveMaxCommits (de dynamische grens respecteren)
+    val highBgContinuation =
+        earlyDose.stage >= 3 &&
+        ctx.input.bgNow >= 12.0 &&
+        ctx.slope >= 2.0 &&
+        ctx.iobRatio < 0.80 &&
+        minutesSinceLastFire >= 8 &&
+        earlyDose.boostCommitCount < effectiveMaxCommits
+
     val stageToFire = when {
         earlyDose.stage == 0 && conf >= dynamicStage1Min -> 1
         earlyDose.stage == 1 && conf >= stage2Min &&
             minutesSinceLastFire >= 5 && allowLarge -> 2
         earlyDose.stage == 2 && conf >= stage2Min &&
             minutesSinceLastFire >= 5 && allowStage3 -> 3
+        highBgContinuation -> 3  // hergebruik stage3 factor voor vervolg-commits
         else -> 0
     }
     if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= 5 && !allowLarge) {
@@ -1889,23 +1932,6 @@ private fun computeEarlyDoseDecision(
         (config.maxSMB * minEarlyFrac)
             .coerceIn(0.20, config.maxSMB * 0.40)
 
-
-    // ── earlyBoostFactor: versterk vroege commits als config > 1.0 ──────────
-    // Alleen actief als:
-    //   1. conf >= earlyBoostMinConfidence (sterk signaal vereist)
-    //   2. boostCommitCount < effectiveMaxCommits (max aantal boosted commits)
-    //   3. earlyBoostFactor > 1.0 (anders is feature uit)
-    // Veiligheid: iobRoom-penalty beperkt al de dosis als IOB hoog is.
-    //
-    // Pre-meal dip extensie: als er een hypo-schuld is opgebouwd, worden
-    // extra commits toegestaan bovenop earlyBoostMaxCommits. Per 0.3U schuld
-    // één extra commit, maximaal 2 extra. Dit compenseert het patroon waarbij
-    // BG voor een maaltijd daalt naar een lage waarde en het systeem daarna
-    // meer commits nodig heeft om de stijging bij te houden.
-    val extraCommitsFromDebt = if (episodeHypoDebtU > 0.01)
-        (episodeHypoDebtU / 0.30).toInt().coerceIn(0, 2)
-    else 0
-    val effectiveMaxCommits = config.earlyBoostMaxCommits + extraCommitsFromDebt
 
     val boostActive =
         config.earlyBoostFactor > 1.0 + 1e-9 &&
