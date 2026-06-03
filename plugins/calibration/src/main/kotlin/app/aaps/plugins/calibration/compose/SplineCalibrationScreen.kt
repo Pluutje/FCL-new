@@ -1,6 +1,10 @@
 package app.aaps.plugins.calibration.compose
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,8 +14,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -25,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,6 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,13 +90,15 @@ internal fun SplineCalibrationScreen(
 
     val navigationRequest = LocalPluginNavigationRequest.current
     SplineCalibrationScreenContent(
-        state             = state,
-        formatDateTime    = viewModel.dateUtil::dateAndTimeString,
-        formatTime        = viewModel.dateUtil::timeString,
+        state              = state,
+        formatDateTime     = viewModel.dateUtil::dateAndTimeString,
+        formatTime         = viewModel.dateUtil::timeString,
         onMarkSensorChange = { navigationRequest(NavigationRequest.Element(ElementType.SENSOR_INSERT)) },
-        onAddCalibration  = { navigationRequest(NavigationRequest.Element(ElementType.CALIBRATION)) },
-        onSelectEntry     = viewModel::selectEntry,
-        onDeleteEntry     = viewModel::deleteEntry
+        onAddCalibration   = { navigationRequest(NavigationRequest.Element(ElementType.CALIBRATION)) },
+        onSelectEntry      = viewModel::selectEntry,
+        onDeleteEntry      = viewModel::deleteEntry,
+        onManualOffsetChange = viewModel::setManualOffset,
+        onManualOffsetReset  = viewModel::resetManualOffset
     )
 }
 
@@ -95,7 +110,9 @@ internal fun SplineCalibrationScreenContent(
     onMarkSensorChange: () -> Unit,
     onAddCalibration: () -> Unit,
     onSelectEntry: (Long) -> Unit,
-    onDeleteEntry: (Long) -> Unit
+    onDeleteEntry: (Long) -> Unit,
+    onManualOffsetChange: (Float) -> Unit,
+    onManualOffsetReset: () -> Unit
 ) {
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
@@ -126,7 +143,13 @@ internal fun SplineCalibrationScreenContent(
             }
         }
 
-        SplineChartCard(state = state, formatDateTime = formatDateTime, onSelectEntry = onSelectEntry)
+        SplineChartCard(
+            state          = state,
+            formatDateTime = formatDateTime,
+            onSelectEntry  = onSelectEntry,
+            onOffsetChange = onManualOffsetChange,
+            onOffsetReset  = onManualOffsetReset
+        )
 
         Text(
             text = stringResource(R.string.cal_entries_header, state.entries.size),
@@ -257,18 +280,34 @@ private fun SplineStatusCard(
 private fun SplineChartCard(
     state: SplineCalibrationUiState,
     formatDateTime: (Long) -> String,
-    onSelectEntry: (Long) -> Unit
+    onSelectEntry: (Long) -> Unit,
+    onOffsetChange: (Float) -> Unit,
+    onOffsetReset: () -> Unit
 ) {
     AapsCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(AapsSpacing.medium)) {
-            SplineScatterChart(
-                entries         = state.entries,
-                splineFit       = state.splineFit,
-                linearFit       = state.linearFit,
-                selectedEntryId = state.selectedEntryId,
-                now             = state.now,
-                glucoseUnit     = state.glucoseUnit
-            )
+            // Grafiek + verticale offset-slider naast elkaar
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.Top
+            ) {
+                SplineScatterChart(
+                    entries          = state.entries,
+                    splineFit        = state.splineFit,
+                    linearFit        = state.linearFit,
+                    selectedEntryId  = state.selectedEntryId,
+                    now              = state.now,
+                    glucoseUnit      = state.glucoseUnit,
+                    manualOffsetMmol = state.manualOffsetMmol,
+                    modifier         = Modifier.weight(1f).padding(end = 4.dp)
+                )
+                VerticalOffsetSlider(
+                    state          = state,
+                    onOffsetChange = onOffsetChange,
+                    onReset        = onOffsetReset,
+                    modifier       = Modifier.padding(start = AapsSpacing.small)
+                )
+            }
             if (state.entries.size >= 2) {
                 Spacer(Modifier.height(AapsSpacing.small))
                 SplineEntrySliderReadout(state = state, formatDateTime = formatDateTime)
@@ -434,4 +473,151 @@ private fun Double.formatBgDisplay(unit: GlucoseUnit, signed: Boolean = false): 
         else                               -> "%.1f"
     }
     return format.format(converted)
+}
+
+// ---------------------------------------------------------------------------
+// Manual offset card
+// ---------------------------------------------------------------------------
+
+/**
+ * Kaart met een schuif voor handmatige offset-correctie (±1,5 mmol/L).
+ * De offset wordt bovenop de spline (of lineaire fallback) opgeteld.
+ */
+
+
+
+// ---------------------------------------------------------------------------
+// Verticale offset-slider (rechts naast de grafiek)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verticale slider voor de handmatige offset, rechts naast de grafiek.
+ * Boven = +max, onder = -max. Waarde en reset-knop bovenaan.
+ */
+@Composable
+private fun VerticalOffsetSlider(
+    state: SplineCalibrationUiState,
+    onOffsetChange: (Float) -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val errorColor   = MaterialTheme.colorScheme.error
+    val surfaceVar   = MaterialTheme.colorScheme.surfaceVariant
+    val cardBg       = MaterialTheme.colorScheme.surfaceContainerHighest
+    val density      = LocalDensity.current
+
+    val thumbRadiusDp = 10.dp
+    val trackWidthDp  = 4.dp
+    val thumbRadiusPx = with(density) { thumbRadiusDp.toPx() }
+    val trackWidthPx  = with(density) { trackWidthDp.toPx() }
+    var trackHeightPx by remember { mutableStateOf(1f) }
+
+    val valueColor = when {
+        state.manualOffsetMmol > 0.05f  -> primaryColor
+        state.manualOffsetMmol < -0.05f -> errorColor
+        else                            -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    // Buitenste Column: kader (Surface) + "Offset" label eronder
+    Column(
+        modifier            = modifier.width(52.dp).fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        // Kader met afwijkende achtergrond
+        Surface(
+            modifier = Modifier
+                .width(52.dp)
+                .weight(1f),
+            shape = MaterialTheme.shapes.small,
+            color = cardBg,
+            tonalElevation = 2.dp
+        ) {
+            Column(
+                modifier            = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                // Waarde bovenaan in het kader
+                Text(
+                    text     = state.manualOffsetMmol.formatOffsetMmol(state.glucoseUnit),
+                    style    = MaterialTheme.typography.labelSmall,
+                    color    = valueColor,
+                    maxLines = 1
+                )
+
+                // Draggable track in het midden
+                Box(
+                    modifier = Modifier
+                        .width(thumbRadiusDp * 2)
+                        .weight(1f)
+                        .draggable(
+                            orientation = Orientation.Vertical,
+                            state = rememberDraggableState { delta ->
+                                val range  = MANUAL_OFFSET_MAX_MMOL * 2f
+                                val dMmol  = (-delta / (trackHeightPx - thumbRadiusPx * 2)) * range
+                                val newVal = (state.manualOffsetMmol + dMmol)
+                                    .coerceIn(-MANUAL_OFFSET_MAX_MMOL, MANUAL_OFFSET_MAX_MMOL)
+                                onOffsetChange(newVal)
+                            }
+                        )
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        trackHeightPx = size.height
+                        val cx     = size.width / 2f
+                        val topY   = thumbRadiusPx
+                        val botY   = size.height - thumbRadiusPx
+                        val trackH = botY - topY
+                        val fraction = ((state.manualOffsetMmol + MANUAL_OFFSET_MAX_MMOL) /
+                                        (MANUAL_OFFSET_MAX_MMOL * 2f)).coerceIn(0f, 1f)
+                        val thumbY = botY - fraction * trackH
+                        val midY   = botY - 0.5f * trackH
+
+                        drawLine(color = surfaceVar, start = Offset(cx, topY), end = Offset(cx, botY),
+                            strokeWidth = trackWidthPx, cap = StrokeCap.Round)
+                        drawLine(color = primaryColor.copy(alpha = 0.7f),
+                            start = Offset(cx, minOf(midY, thumbY)), end = Offset(cx, maxOf(midY, thumbY)),
+                            strokeWidth = trackWidthPx, cap = StrokeCap.Round)
+                        drawCircle(color = primaryColor, radius = thumbRadiusPx, center = Offset(cx, thumbY))
+                        drawLine(color = primaryColor.copy(alpha = 0.4f),
+                            start = Offset(cx - thumbRadiusPx, midY), end = Offset(cx + thumbRadiusPx, midY),
+                            strokeWidth = 1.5f)
+                    }
+                }
+
+                // Reset-knop onderaan in het kader
+                if (state.manualOffsetMmol != 0f) {
+                    TextButton(
+                        onClick        = onReset,
+                        contentPadding = PaddingValues(0.dp),
+                        modifier       = Modifier.width(48.dp)
+                    ) {
+                        Text(text = "0", style = MaterialTheme.typography.labelSmall)
+                    }
+                } else {
+                    Spacer(Modifier.height(28.dp))
+                }
+            }
+        }
+
+        // "Offset" label onder het kader, op de plek van de rode cirkel
+        Text(
+            text  = "Offset",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+
+private fun Float.formatOffsetMmol(unit: GlucoseUnit): String {
+    return if (unit == GlucoseUnit.MMOL) {
+        "%+.2f mmol/L".format(this)
+    } else {
+        "%+.0f mg/dL".format(this * 18.0182f)
+    }
 }

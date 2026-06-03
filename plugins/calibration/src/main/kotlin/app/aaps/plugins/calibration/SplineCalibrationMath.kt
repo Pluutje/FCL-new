@@ -11,17 +11,27 @@ import kotlin.math.sign
 
 /**
  * Minimum number of calibration entries needed to attempt a spline fit.
- * With fewer points the knot at [SPLINE_KNOT_MGDL] cannot be bracketed
- * on both sides, so we fall back to the linear fit.
+ * With the knot at [SPLINE_KNOT_MGDL] (6 mmol/L) almost every sensor session
+ * has data on both sides after 3 entries, so 3 is sufficient.
  */
-const val MIN_ENTRIES_FOR_SPLINE = 4
+const val MIN_ENTRIES_FOR_SPLINE = 3
 
 /**
- * Interior knot position (mg/dL).  Placed at 180 mg/dL (≈ 10 mmol/L) where
- * sensor S-curve behaviour typically inflects.  Data density above ~12 mmol/L
- * is too sparse to constrain a second knot reliably.
+ * Interior knot position (mg/dL).  Placed at 108 mg/dL (≈ 6 mmol/L).
+ *
+ * Rationale: the clinically most important zone is 3–8 mmol/L where dosing
+ * accuracy matters most.  Sensor S-curve bias (over-reading at low BG,
+ * under-reading at high BG) typically inflects around 5–7 mmol/L.
+ * Placing the knot at 6 mmol/L:
+ *   - Guarantees data on both sides in virtually every sensor session
+ *   - Captures the low-BG correction precisely where it matters most
+ *   - Leaves the high segment (6–13+ mmol/L) to a single well-constrained
+ *     piece that models trend/direction rather than absolute accuracy
+ *
+ * Previous value was 180 mg/dL (10 mmol/L) which was rarely bracketed
+ * because typical BG rarely exceeds 10 mmol/L for long.
  */
-const val SPLINE_KNOT_MGDL = 180.0
+const val SPLINE_KNOT_MGDL = 108.0   // 6 mmol/L × 18.0182
 
 /**
  * Maximum allowed correction (mg/dL) that the spline may apply at the knot.
@@ -75,12 +85,19 @@ data class SplineFit(
     /**
      * Apply the spline to a raw sensor value [sensorMgdl], returning the
      * calibrated value in mg/dL.
+     *
+     * [manualOffsetMgdl] is an additive user adjustment (positive = shift up,
+     * negative = shift down) applied on top of the fitted curve.  Pass 0.0
+     * to get the pure fitted value.
      */
-    fun apply(sensorMgdl: Double): Double = when {
-        sensorMgdl <= low_x0  -> low_y0 + low_m0 * (sensorMgdl - low_x0)          // linear extrapolation left
-        sensorMgdl >= high_x1 -> high_y1 + high_m1 * (sensorMgdl - high_x1)        // linear extrapolation right
-        sensorMgdl <= knotX   -> hermite(sensorMgdl, low_x0, low_y0, low_m0, low_x1, low_y1, low_m1)
-        else                  -> hermite(sensorMgdl, high_x0, high_y0, high_m0, high_x1, high_y1, high_m1)
+    fun apply(sensorMgdl: Double, manualOffsetMgdl: Double = 0.0): Double {
+        val fitted = when {
+            sensorMgdl <= low_x0  -> low_y0 + low_m0 * (sensorMgdl - low_x0)
+            sensorMgdl >= high_x1 -> high_y1 + high_m1 * (sensorMgdl - high_x1)
+            sensorMgdl <= knotX   -> hermite(sensorMgdl, low_x0, low_y0, low_m0, low_x1, low_y1, low_m1)
+            else                  -> hermite(sensorMgdl, high_x0, high_y0, high_m0, high_x1, high_y1, high_m1)
+        }
+        return fitted + manualOffsetMgdl
     }
 
     /**
@@ -314,9 +331,11 @@ private fun isMonotoneIncreasing(
 /**
  * Returns the best available calibrated value for [sensorMgdl]:
  * the [SplineFit] if non-null, otherwise the [CalibrationFit] linear fallback.
+ *
+ * [manualOffsetMgdl] is added on top of whichever fit is active.
  */
-fun applyBestFit(sensorMgdl: Double, spline: SplineFit?, linear: CalibrationFit?): Double? {
-    if (spline != null) return spline.apply(sensorMgdl)
-    if (linear != null && linear.isApplicable) return linear.slope * sensorMgdl + linear.offset
+fun applyBestFit(sensorMgdl: Double, spline: SplineFit?, linear: CalibrationFit?, manualOffsetMgdl: Double = 0.0): Double? {
+    if (spline != null) return spline.apply(sensorMgdl, manualOffsetMgdl)
+    if (linear != null && linear.isApplicable) return linear.slope * sensorMgdl + linear.offset + manualOffsetMgdl
     return null
 }

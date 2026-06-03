@@ -1,8 +1,8 @@
 package app.aaps.plugins.calibration.compose
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -32,17 +32,21 @@ private const val CHART_MIN_BG = 40f
 private const val CHART_MAX_BG = 400f
 private const val AXIS_PAD     = 20f
 private const val MIN_SPAN     = 80f
-private const val CURVE_STEPS  = 120   // number of segments used to draw the spline curve
+private const val CURVE_STEPS  = 200
+
+// Aantal kruisdraden per as (exclusief de assen zelf)
+private const val GRID_LINES   = 3
 
 private const val LONGEST_AXIS_LABEL_SAMPLE = "22.2"
 
 /**
- * Scatter chart that renders:
- *  - Identity line (dashed)
- *  - Linear fallback (dashed, secondary colour) when spline is active
- *  - Spline curve (solid, primary colour) — OR linear line when spline is null
- *  - Calibration data points (time-decay opacity)
- *  - Interior knot marker (small diamond) when spline is active
+ * Vierkante scatter-grafiek (aspect ratio 1:1) met:
+ *  - Identiteitslijn (gestippeld)
+ *  - Kruisdraden / gridlijnen
+ *  - Lineaire ghost (gestippeld, secundaire kleur) als spline actief is
+ *  - Spline-curve (vol, primaire kleur) verschoven met [manualOffsetMmol]
+ *  - Calibratiepunten (time-decay opacity)
+ *  - Knooppunt-diamantje
  */
 @Composable
 internal fun SplineScatterChart(
@@ -52,9 +56,11 @@ internal fun SplineScatterChart(
     selectedEntryId: Long?,
     now: Long,
     glucoseUnit: GlucoseUnit,
+    manualOffsetMmol: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     val axisColor         = MaterialTheme.colorScheme.onSurfaceVariant
+    val gridColor         = MaterialTheme.colorScheme.outlineVariant
     val identityColor     = MaterialTheme.colorScheme.outline
     val regressionColor   = MaterialTheme.colorScheme.primary
     val linearGhostColor  = MaterialTheme.colorScheme.secondary
@@ -65,10 +71,13 @@ internal fun SplineScatterChart(
     val labelArgb         = axisColor.toArgb()
     val density           = LocalDensity.current
 
+    // Manual offset in mg/dL voor gebruik in de curve-rendering
+    val manualOffsetMgdl = (manualOffsetMmol * 18.0182f)
+
     val labelPaint = remember(labelArgb, density) {
         android.graphics.Paint().apply {
-            color    = labelArgb
-            textSize = with(density) { 11.sp.toPx() }
+            color       = labelArgb
+            textSize    = with(density) { 11.sp.toPx() }
             isAntiAlias = true
         }
     }
@@ -85,16 +94,17 @@ internal fun SplineScatterChart(
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .aspectRatio(1f)   // vierkant — x-as even breed als y-as hoog
     ) {
         val topPad   = 8.dp.toPx()
-        val rightPad = 8.dp.toPx()
+        val rightPad = leftAxisWidthPx   // zelfde marge rechts als links zodat het plot zelf vierkant is
 
-        val plotOrigin = Offset(leftAxisWidthPx, topPad)
-        val plotSize   = Size(
-            width  = size.width - leftAxisWidthPx - rightPad,
+        val plotSize = Size(
+            width  = size.width  - leftAxisWidthPx - rightPad,
             height = size.height - topPad - bottomAxisHeightPx
         )
+        val plotOrigin = Offset(leftAxisWidthPx, topPad)
+
         if (plotSize.width <= 0f || plotSize.height <= 0f) return@Canvas
 
         val (axisMin, axisMax) = computeAxisRange(entries)
@@ -103,21 +113,22 @@ internal fun SplineScatterChart(
         fun xToPx(v: Float) = plotOrigin.x + ((v - axisMin) / span) * plotSize.width
         fun yToPx(v: Float) = plotOrigin.y + plotSize.height - ((v - axisMin) / span) * plotSize.height
 
+        // Achtergrond gridlijnen (kruisdraden)
+        drawGrid(plotOrigin, plotSize, axisMin, axisMax, gridColor)
+
         drawAxes(plotOrigin, plotSize, axisColor)
         drawAxisLabels(plotOrigin, plotSize, axisMin, axisMax, glucoseUnit, labelPaint, density)
         drawIdentityLine(::xToPx, ::yToPx, axisMin, axisMax, identityColor)
 
         if (splineFit != null) {
-            // Show linear as a ghost so the user can see the difference.
             linearFit?.takeIf { it.isApplicable }?.let {
-                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, linearGhostColor, dashed = true)
+                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, 0f, linearGhostColor, dashed = true)
             }
-            drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, regressionColor)
-            drawKnotMarker(::xToPx, ::yToPx, splineFit, knotColor, density)
+            drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, manualOffsetMgdl, regressionColor)
+            drawKnotMarker(::xToPx, ::yToPx, splineFit, manualOffsetMgdl, knotColor, density)
         } else {
-            // Spline not yet available — show linear fit directly.
             linearFit?.takeIf { it.isApplicable }?.let {
-                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, regressionColor, dashed = false)
+                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, manualOffsetMgdl, regressionColor, dashed = false)
             }
         }
 
@@ -143,11 +154,45 @@ private fun computeAxisRange(entries: List<CalibrationEntry>): Pair<Float, Float
     var axisMin = (lo - AXIS_PAD).coerceAtLeast(CHART_MIN_BG)
     var axisMax = (hi + AXIS_PAD).coerceAtMost(CHART_MAX_BG)
     if (axisMax - axisMin < MIN_SPAN) {
-        val mid  = (axisMax + axisMin) / 2f
-        axisMin  = (mid - MIN_SPAN / 2f).coerceAtLeast(CHART_MIN_BG)
-        axisMax  = (mid + MIN_SPAN / 2f).coerceAtMost(CHART_MAX_BG)
+        val mid = (axisMax + axisMin) / 2f
+        axisMin = (mid - MIN_SPAN / 2f).coerceAtLeast(CHART_MIN_BG)
+        axisMax = (mid + MIN_SPAN / 2f).coerceAtMost(CHART_MAX_BG)
     }
     return axisMin to axisMax
+}
+
+/**
+ * Lichte kruisdraden op regelmatige intervallen binnen het plotgebied.
+ */
+private fun DrawScope.drawGrid(
+    origin: Offset, plotSize: Size,
+    axisMin: Float, axisMax: Float,
+    color: Color
+) {
+    val sw    = 0.5.dp.toPx()
+    val alpha = 0.35f
+    val n     = GRID_LINES + 1  // aantal tussenruimten
+    for (i in 1..GRID_LINES) {
+        val frac = i.toFloat() / n
+        val v    = axisMin + frac * (axisMax - axisMin)
+
+        // Verticale kruisdraad (x = v)
+        val px = origin.x + frac * plotSize.width
+        drawLine(
+            color       = color.copy(alpha = alpha),
+            start       = Offset(px, origin.y),
+            end         = Offset(px, origin.y + plotSize.height),
+            strokeWidth = sw
+        )
+        // Horizontale kruisdraad (y = v)
+        val py = origin.y + plotSize.height - frac * plotSize.height
+        drawLine(
+            color       = color.copy(alpha = alpha),
+            start       = Offset(origin.x, py),
+            end         = Offset(origin.x + plotSize.width, py),
+            strokeWidth = sw
+        )
+    }
 }
 
 private fun DrawScope.drawAxes(origin: Offset, size: Size, color: Color) {
@@ -169,13 +214,30 @@ private fun DrawScope.drawAxisLabels(
     val cOff   = -(fm.ascent + fm.descent) / 2f
     val minL   = formatAxisLabel(axisMin, glucoseUnit)
     val maxL   = formatAxisLabel(axisMax, glucoseUnit)
+    val n      = GRID_LINES + 1
 
+    // Y-as labels: min, tussenliggende, max
     canvas.drawText(maxL, origin.x - paint.measureText(maxL) - gap, origin.y + cOff, paint)
     canvas.drawText(minL, origin.x - paint.measureText(minL) - gap, origin.y + size.height + cOff, paint)
+    for (i in 1..GRID_LINES) {
+        val frac = i.toFloat() / n
+        val v    = axisMin + frac * (axisMax - axisMin)
+        val lbl  = formatAxisLabel(v, glucoseUnit)
+        val py   = origin.y + size.height - frac * size.height
+        canvas.drawText(lbl, origin.x - paint.measureText(lbl) - gap, py + cOff, paint)
+    }
 
+    // X-as labels: min, tussenliggende, max
     val botBase = origin.y + size.height + gap - fm.ascent
     canvas.drawText(minL, origin.x - paint.measureText(minL) / 2f, botBase, paint)
     canvas.drawText(maxL, origin.x + size.width - paint.measureText(maxL) / 2f, botBase, paint)
+    for (i in 1..GRID_LINES) {
+        val frac = i.toFloat() / n
+        val v    = axisMin + frac * (axisMax - axisMin)
+        val lbl  = formatAxisLabel(v, glucoseUnit)
+        val px   = origin.x + frac * size.width
+        canvas.drawText(lbl, px - paint.measureText(lbl) / 2f, botBase, paint)
+    }
 }
 
 private fun formatAxisLabel(mgdl: Float, glucoseUnit: GlucoseUnit): String = when (glucoseUnit) {
@@ -189,11 +251,11 @@ private fun DrawScope.drawIdentityLine(
 ) {
     val dash = 8.dp.toPx()
     drawLine(
-        color        = color.copy(alpha = 0.5f),
-        start        = Offset(xToPx(axisMin), yToPx(axisMin)),
-        end          = Offset(xToPx(axisMax), yToPx(axisMax)),
-        strokeWidth  = 1.5.dp.toPx(),
-        pathEffect   = PathEffect.dashPathEffect(floatArrayOf(dash, dash))
+        color       = color.copy(alpha = 0.5f),
+        start       = Offset(xToPx(axisMin), yToPx(axisMin)),
+        end         = Offset(xToPx(axisMax), yToPx(axisMax)),
+        strokeWidth = 1.5.dp.toPx(),
+        pathEffect  = PathEffect.dashPathEffect(floatArrayOf(dash, dash))
     )
 }
 
@@ -201,15 +263,16 @@ private fun DrawScope.drawLinearLine(
     xToPx: (Float) -> Float, yToPx: (Float) -> Float,
     axisMin: Float, axisMax: Float,
     fit: CalibrationFit,
+    offsetMgdl: Float,
     color: Color,
     dashed: Boolean
 ) {
-    fun model(x: Float): Float = (fit.slope * x + fit.offset).toFloat()
+    fun model(x: Float): Float = (fit.slope * x + fit.offset + offsetMgdl).toFloat()
     var x1 = axisMin; var y1 = model(x1)
     var x2 = axisMax; var y2 = model(x2)
     if (fit.slope != 0.0) {
         val inv = 1.0 / fit.slope
-        fun xAtY(y: Double) = ((y - fit.offset) * inv).toFloat()
+        fun xAtY(y: Double) = ((y - fit.offset - offsetMgdl) * inv).toFloat()
         if (y1 < axisMin) { y1 = axisMin; x1 = xAtY(axisMin.toDouble()) }
         if (y1 > axisMax) { y1 = axisMax; x1 = xAtY(axisMax.toDouble()) }
         if (y2 < axisMin) { y2 = axisMin; x2 = xAtY(axisMin.toDouble()) }
@@ -226,41 +289,46 @@ private fun DrawScope.drawLinearLine(
     )
 }
 
-/*
- * Draw the spline as a polyline of [CURVE_STEPS] segments over [axisMin..axisMax].
- * Using a Path + drawPath gives smoother anti-aliasing than many individual drawLine calls.
+/**
+ * Teken de spline-curve inclusief de handmatige offset.
+ * De curve stopt zodra hij buiten het plotgebied komt (geen clamp langs de rand).
  */
 private fun DrawScope.drawSplineCurve(
     xToPx: (Float) -> Float, yToPx: (Float) -> Float,
     axisMin: Float, axisMax: Float,
     fit: SplineFit,
+    offsetMgdl: Float,
     color: Color
 ) {
     val path = Path()
     var first = true
     for (i in 0..CURVE_STEPS) {
         val sensorMgdl = axisMin + (axisMax - axisMin) * (i.toFloat() / CURVE_STEPS)
-        val calibrated = fit.apply(sensorMgdl.toDouble()).toFloat()
-        // Clip to axis range so the curve never draws outside the plot area.
-        val clampedY = calibrated.coerceIn(axisMin, axisMax)
+        val calibrated = fit.apply(sensorMgdl.toDouble()).toFloat() + offsetMgdl
+        if (calibrated < axisMin || calibrated > axisMax) {
+            first = true
+            continue
+        }
         val px = xToPx(sensorMgdl)
-        val py = yToPx(clampedY)
+        val py = yToPx(calibrated)
         if (first) { path.moveTo(px, py); first = false } else path.lineTo(px, py)
     }
     drawPath(path, color, style = Stroke(width = 2.5.dp.toPx()))
 }
 
 /**
- * Draw a small diamond at the interior knot to make it visible to the user.
+ * Knooppunt-diamantje, verschoven met de offset.
  */
 private fun DrawScope.drawKnotMarker(
     xToPx: (Float) -> Float, yToPx: (Float) -> Float,
     fit: SplineFit,
+    offsetMgdl: Float,
     color: Color,
     density: Density
 ) {
     val knotPx = xToPx(fit.knotX.toFloat())
-    val knotPy = yToPx(fit.knotY.toFloat().coerceIn(CHART_MIN_BG, CHART_MAX_BG))
+    val knotY  = (fit.knotY.toFloat() + offsetMgdl).coerceIn(CHART_MIN_BG, CHART_MAX_BG)
+    val knotPy = yToPx(knotY)
     val r      = with(density) { 4.dp.toPx() }
     val diamond = Path().apply {
         moveTo(knotPx, knotPy - r)

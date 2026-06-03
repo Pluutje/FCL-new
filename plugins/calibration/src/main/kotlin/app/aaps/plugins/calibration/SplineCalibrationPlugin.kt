@@ -10,7 +10,10 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.calibration.AddEntryResult
 import app.aaps.core.interfaces.calibration.Calibration
+import android.content.Context
 import app.aaps.core.interfaces.calibration.CalibrationContext
+import app.aaps.plugins.calibration.compose.PREF_MANUAL_OFFSET_MMOL
+import dagger.hilt.android.qualifiers.ApplicationContext
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -60,7 +63,8 @@ class SplineCalibrationPlugin @Inject constructor(
     private val repository: CalibrationRepository,
     private val glucoseStatusProvider: GlucoseStatusProvider,
     private val database: CalibrationDatabase,
-    private val rxBus: RxBus
+    private val rxBus: RxBus,
+    @ApplicationContext private val appContext: Context
 ) : PluginBase(
     PluginDescription()
         .mainType(PluginType.CALIBRATION)
@@ -100,11 +104,17 @@ class SplineCalibrationPlugin @Inject constructor(
         val spline = fitSplineCalibration(entries, now)
         val linear = spline?.linearFallback ?: fitLinearCalibration(entries, now)
 
+        // Manual offset (mmol/L → mg/dL), persisted by SplineCalibrationViewModel
+        val manualOffsetMgdl = appContext
+            .getSharedPreferences("fcl_spline_cal", Context.MODE_PRIVATE)
+            .getFloat(PREF_MANUAL_OFFSET_MMOL, 0f)
+            .toDouble() * 18.0182
+
         if (spline != null) {
-            // Spline fit succeeded — apply curve.
+            // Spline fit succeeded — apply curve + manual offset.
             for (entry in data) {
                 if (entry.timestamp >= sessionStart) {
-                    entry.calibrated = spline.apply(entry.value)
+                    entry.calibrated = spline.apply(entry.value, manualOffsetMgdl)
                 }
             }
             aapsLogger.debug(LTag.GLUCOSE) {
@@ -123,7 +133,7 @@ class SplineCalibrationPlugin @Inject constructor(
             }
             for (entry in data) {
                 if (entry.timestamp >= sessionStart) {
-                    entry.calibrated = linear.slope * entry.value + linear.offset
+                    entry.calibrated = linear.slope * entry.value + linear.offset + manualOffsetMgdl
                 }
             }
             aapsLogger.debug(LTag.GLUCOSE) {

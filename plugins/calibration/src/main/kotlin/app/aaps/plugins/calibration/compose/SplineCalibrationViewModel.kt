@@ -1,5 +1,6 @@
 package app.aaps.plugins.calibration.compose
 
+import android.content.Context
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +20,7 @@ import app.aaps.plugins.calibration.db.CalibrationRepository
 import app.aaps.plugins.calibration.fitLinearCalibration
 import app.aaps.plugins.calibration.fitSplineCalibration
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,13 +46,23 @@ class SplineCalibrationViewModel @Inject constructor(
     private val profileUtil: ProfileUtil,
     private val uel: UserEntryLogger,
     private val aapsLogger: AAPSLogger,
-    val dateUtil: DateUtil
+    val dateUtil: DateUtil,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private val prefs by lazy {
+        context.getSharedPreferences("fcl_spline_cal", Context.MODE_PRIVATE)
+    }
 
     private val _uiState = MutableStateFlow(SplineCalibrationUiState())
     val uiState: StateFlow<SplineCalibrationUiState> = _uiState.asStateFlow()
 
-    init { observeChanges() }
+    init {
+        // Laad opgeslagen offset direct bij initialisatie
+        val savedOffset = prefs.getFloat(PREF_MANUAL_OFFSET_MMOL, 0f)
+        _uiState.update { it.copy(manualOffsetMmol = savedOffset) }
+        observeChanges()
+    }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     private fun observeChanges() {
@@ -77,7 +89,7 @@ class SplineCalibrationViewModel @Inject constructor(
         _uiState.update { previous ->
             val stillPresent = previous.selectedEntryId != null &&
                 entries.any { it.id == previous.selectedEntryId }
-            SplineCalibrationUiState(
+            previous.copy(
                 sessionStart    = sessionStart,
                 warmUpEndsAt    = warmUpEndsAt,
                 isInWarmUp      = isInWarmUp,
@@ -87,9 +99,26 @@ class SplineCalibrationViewModel @Inject constructor(
                 now             = now,
                 selectedEntryId = if (stillPresent) previous.selectedEntryId else entries.lastOrNull()?.id,
                 glucoseUnit     = profileUtil.units
+                // manualOffsetMmol wordt NIET gereset bij herberekening — blijft zoals ingesteld
             )
         }
     }
+
+    /**
+     * Sla een nieuwe handmatige offset op (in mmol/L).
+     * Wordt direct in SharedPreferences gepersisteerd zodat de SplineCalibrationPlugin
+     * hem ook buiten de UI kan lezen.
+     */
+    fun setManualOffset(offsetMmol: Float) {
+        // Snap naar dichtstbijzijnde stap
+        val snapped = (offsetMmol / MANUAL_OFFSET_STEP_MMOL).toInt() * MANUAL_OFFSET_STEP_MMOL
+        val clamped = snapped.coerceIn(-MANUAL_OFFSET_MAX_MMOL, MANUAL_OFFSET_MAX_MMOL)
+        prefs.edit().putFloat(PREF_MANUAL_OFFSET_MMOL, clamped).apply()
+        _uiState.update { it.copy(manualOffsetMmol = clamped) }
+        aapsLogger.debug(LTag.GLUCOSE) { "SplineCalibration: manual offset set to $clamped mmol/L" }
+    }
+
+    fun resetManualOffset() = setManualOffset(0f)
 
     fun deleteEntry(id: Long) {
         viewModelScope.launch {
