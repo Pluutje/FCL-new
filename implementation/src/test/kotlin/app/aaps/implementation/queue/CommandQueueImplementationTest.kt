@@ -3,9 +3,12 @@ package app.aaps.implementation.queue
 import android.content.Context
 import android.os.Handler
 import android.os.PowerManager
+import androidx.work.ListenableWorker
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.WorkerFactory
+import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
 import app.aaps.core.data.model.BS
 import app.aaps.core.interfaces.alerts.LocalAlertUtils
@@ -24,6 +27,7 @@ import app.aaps.core.interfaces.queue.Command
 import app.aaps.core.interfaces.queue.CustomCommand
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventProfileChangeRequested
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
@@ -50,6 +54,8 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.times
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import java.util.Calendar
 import javax.inject.Provider
@@ -103,22 +109,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
 
         override fun notifyAboutNewCommand(): Boolean = true
 
-    }
-
-    init {
-        addInjector {
-            if (it is QueueWorker) {
-                it.aapsLogger = aapsLogger
-                it.queue = commandQueue
-                it.context = context
-                it.rxBus = rxBus
-                it.activePlugin = activePlugin
-                it.rh = rh
-                it.preferences = preferences
-                it.config = config
-                it.bolusProgressData = bolusProgressData
-            }
-        }
     }
 
     private lateinit var commandQueue: CommandQueueImplementation
@@ -184,7 +174,15 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             whenever(workManager.getWorkInfosForUniqueWork(anyOrNull())).thenReturn(infos)
             doAnswer { _: InvocationOnMock ->
                 CoroutineScope(Dispatchers.IO).launch {
-                    val work = TestListenableWorkerBuilder<QueueWorker>(context).build()
+                    val work = TestListenableWorkerBuilder<QueueWorker>(context)
+                        .setWorkerFactory(object : WorkerFactory() {
+                            override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters): ListenableWorker =
+                                QueueWorker(
+                                    appContext, workerParameters, aapsLogger, fabricPrivacy, commandQueue,
+                                    rxBus, activePlugin, rh, preferences, config, bolusProgressData
+                                )
+                        })
+                        .build()
                     work.doWorkAndLog()
                 }
                 null
@@ -238,6 +236,26 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         Thread.sleep(3000)
 
         assertThat(commandQueue.size()).isEqualTo(0)
+    }
+
+    @Test
+    fun profileChangeCollectorSurvivesException() = runTest {
+        // Regression: a throwable during one profile change must not permanently wedge the
+        // profile-change collector. Before hardening, the first failure cancelled the flow and every
+        // later ProfileSwitch was silently dropped (no pump push, no EffectiveProfileSwitch created,
+        // isProfileChangePending() stuck true). See onProfileChanged() try/catch + retryWhen backstop.
+
+        // First emission blows up inside onProfileChanged(); the second must still be processed.
+        whenever(profileFunction.getRequestedProfile())
+            .thenThrow(RuntimeException("induced failure"))
+            .thenReturn(profileSwitch)
+
+        rxBus.send(EventProfileChangeRequested())
+        rxBus.send(EventProfileChangeRequested())
+
+        // Collector reacted to BOTH events. With the old (unguarded) collector the first throw would
+        // have cancelled the flow and the second event would never reach getRequestedProfile() (== 1).
+        verify(profileFunction, times(2)).getRequestedProfile()
     }
 
     @Test
