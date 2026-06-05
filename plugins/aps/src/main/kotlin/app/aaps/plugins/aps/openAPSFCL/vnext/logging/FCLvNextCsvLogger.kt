@@ -166,6 +166,8 @@ data class FCLvNextCsvLogRow(
     // ── Peak benadering ──
     var peakIobBrakeActive: Boolean = false,
     var peakApproachFactor: Double = 1.0,
+    var afterloadFutureDrop60Scale: Double = 1.0,
+    var afterloadHighIobLateScale: Double = 1.0,
 
     // ── Suppress/lockout reden ──
     var suppressReason: String = "NONE",

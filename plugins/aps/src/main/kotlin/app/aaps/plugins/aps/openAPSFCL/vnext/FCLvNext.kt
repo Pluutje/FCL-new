@@ -4866,6 +4866,62 @@ class FCLvNext(
             }
         }
 
+        // ─────────────────────────────────────────────
+        // 🛡️ AFTERLOAD GUARD: begrens late/nafase dosering
+        //
+        // Twee lagen die onafhankelijk de dosis schalen:
+        //
+        // Laag 1 — futureDrop60Scale:
+        //   Als het algoritme al een grote IOB-gedreven daling voorspelt
+        //   (future_drop_60 > 15 mg/dL = 0.83 mmol), schaal de dosis naar beneden.
+        //   Gradueel: bij 15 mg/dL geen effect, bij 40+ max 70% reductie.
+        //   Beschermt NIET bij echte tweede gang want die heeft lage futureDrop.
+        //
+        // Laag 2 — highIobLateWaveScale:
+        //   Alleen actief als BEIDE condities gelden:
+        //   iob_ratio > 0.80 ÉN > 60 min na maaltijdstart.
+        //   Echte tweede gang begint eerder en bij lagere IOB → niet geraakt.
+        // ─────────────────────────────────────────────
+        if (commandedDose > 0.0) {
+
+            // Laag 1: futureDrop60 guard
+            val futureDrop60MgdL = peak.futureDrop60   // al in mg/dL in peak object
+            // Drempel verlaagd van 15 naar 10 mg/dL (= 0.56 mmol):
+            // eerder ingrijpen bij hoge future_drop, bereik 10-40 = 30 mg/dL span
+            val futureDrop60Scale: Double = if (futureDrop60MgdL > 10.0) {
+                val excess = (futureDrop60MgdL - 10.0) / 30.0  // 0..1 over bereik 10-40 mg/dL
+                1.0 - (excess * 0.70).coerceIn(0.0, 0.70)       // max 70% reductie
+            } else 1.0
+
+            // Laag 2: hoge IOB + late fase guard
+            val minutesSinceEpisode = mealEpisodeStartTime?.let {
+                org.joda.time.Minutes.minutesBetween(it, now).minutes
+            } ?: 0
+            // Tijdsgrens verlaagd van 60 naar 50 min: eerder remmen in late fase
+            val isLatePhase = minutesSinceEpisode > 50
+            val highIobLateWaveScale: Double = if (isLatePhase && ctx.iobRatio > 0.80) {
+                val excess = (ctx.iobRatio - 0.80) / 0.20   // 0..1 over bereik 0.80-1.00
+                1.0 - (excess * 0.60).coerceIn(0.0, 0.60)   // max 60% reductie
+            } else 1.0
+
+            val afterloadScale = futureDrop60Scale * highIobLateWaveScale
+            logRow.afterloadFutureDrop60Scale = futureDrop60Scale
+            logRow.afterloadHighIobLateScale  = highIobLateWaveScale
+
+            if (afterloadScale < 1.0 - 1e-9) {
+                val beforeAfterload = commandedDose
+                commandedDose *= afterloadScale
+                status.append(
+                    "AFTERLOAD GUARD: fd60=${"%.1f".format(futureDrop60MgdL)}mg/dL " +
+                        "fdScale=${"%.2f".format(futureDrop60Scale)} " +
+                        "iobR=${"%.2f".format(ctx.iobRatio)} " +
+                        "late=${isLatePhase}(${minutesSinceEpisode}min) " +
+                        "hiScale=${"%.2f".format(highIobLateWaveScale)} " +
+                        "→ dose ${"%.2f".format(beforeAfterload)}→${"%.2f".format(commandedDose)}U\n"
+                )
+            }
+        }
+
 
         // ─────────────────────────────────────────────
         // 🧯 DOWN-TREND FINAL DOSE GATE (last line of defense)

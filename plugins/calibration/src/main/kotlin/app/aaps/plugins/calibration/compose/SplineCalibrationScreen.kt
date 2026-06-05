@@ -297,6 +297,7 @@ private fun SplineChartCard(
     onOffsetChange: (Float) -> Unit,
     onOffsetReset: () -> Unit
 ) {
+    var zoomSegment by remember { mutableStateOf(ZoomSegment.FULL) }
     AapsCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(AapsSpacing.medium)) {
             // Grafiek + verticale offset-slider naast elkaar
@@ -312,6 +313,8 @@ private fun SplineChartCard(
                     now              = state.now,
                     glucoseUnit      = state.glucoseUnit,
                     manualOffsetMmol = state.manualOffsetMmol,
+                    zoomSegment      = zoomSegment,
+                    onZoomChange     = { zoomSegment = it },
                     modifier         = Modifier.weight(1f).padding(end = 4.dp)
                 )
                 VerticalOffsetSlider(
@@ -328,6 +331,20 @@ private fun SplineChartCard(
             } else if (state.entries.size == 1) {
                 Spacer(Modifier.height(AapsSpacing.small))
                 SplineEntrySliderReadout(state = state, formatDateTime = formatDateTime)
+                // Zoom-indicator: toon actief segment + instructie
+                if (zoomSegment != ZoomSegment.FULL) {
+                    Text(
+                        text  = when (zoomSegment) {
+                            ZoomSegment.LOW  -> "↙ Zoomed: low segment (< 6 mmol)  •  tap to cycle"
+                            ZoomSegment.MID  -> "↔ Zoomed: mid segment (6–11 mmol)  •  tap to cycle"
+                            ZoomSegment.HIGH -> "↗ Zoomed: high segment (> 11 mmol)  •  tap to cycle"
+                            ZoomSegment.FULL -> ""
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
     }
@@ -465,7 +482,7 @@ private fun SplineEntryRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     EntryValueChip(
-                        label = "prik",
+                        label = "stick",
                         value = entry.fingerstickMgdl.formatBgDisplay(glucoseUnit),
                         delta = null,
                         accentColor = MaterialTheme.colorScheme.primary
@@ -480,7 +497,7 @@ private fun SplineEntryRow(
                     if (calibrated != null) {
                         val calDelta = entry.fingerstickMgdl - calibrated
                         EntryValueChip(
-                            label = "gecal",
+                            label = "cal",
                             value = calibrated.formatBgDisplay(glucoseUnit),
                             delta = calDelta.formatBgDisplay(glucoseUnit, signed = true),
                             accentColor = when {

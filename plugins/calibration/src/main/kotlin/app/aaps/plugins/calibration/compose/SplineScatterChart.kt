@@ -1,12 +1,18 @@
 package app.aaps.plugins.calibration.compose
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -40,6 +46,15 @@ private const val GRID_LINES   = 3
 private const val LONGEST_AXIS_LABEL_SAMPLE = "22.2"
 
 /**
+ * Zoomstatus voor de spline grafiek.
+ * FULL = volledig overzicht
+ * LOW  = laag segment (onder knot1 = 6 mmol)
+ * MID  = midden segment (6-11 mmol, alleen actief bij twee knooppunten)
+ * HIGH = hoog segment (boven knot1/knot2)
+ */
+internal enum class ZoomSegment { FULL, LOW, MID, HIGH }
+
+/**
  * Vierkante scatter-grafiek (aspect ratio 1:1) met:
  *  - Identiteitslijn (gestippeld)
  *  - Kruisdraden / gridlijnen
@@ -57,8 +72,11 @@ internal fun SplineScatterChart(
     now: Long,
     glucoseUnit: GlucoseUnit,
     manualOffsetMmol: Float = 0f,
+    zoomSegment: ZoomSegment = ZoomSegment.FULL,
+    onZoomChange: (ZoomSegment) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+
     val axisColor         = MaterialTheme.colorScheme.onSurfaceVariant
     val gridColor         = MaterialTheme.colorScheme.outlineVariant
     val identityColor     = MaterialTheme.colorScheme.outline
@@ -93,10 +111,27 @@ internal fun SplineScatterChart(
         gap + (fm.descent - fm.ascent) + gap
     }
 
-    Canvas(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(1f)   // vierkant — x-as even breed als y-as hoog
+            .aspectRatio(1f)
+    ) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .pointerInput(splineFit, zoomSegment) {
+                detectTapGestures {
+                    val hasTwoKnots = splineFit?.hasTwoKnots == true
+                    val next = when (zoomSegment) {
+                        ZoomSegment.FULL -> ZoomSegment.LOW
+                        ZoomSegment.LOW  -> if (hasTwoKnots) ZoomSegment.MID else ZoomSegment.HIGH
+                        ZoomSegment.MID  -> ZoomSegment.HIGH
+                        ZoomSegment.HIGH -> ZoomSegment.FULL
+                    }
+                    onZoomChange(next)
+                }
+            }
     ) {
         val topPad   = 8.dp.toPx()
         val rightPad = leftAxisWidthPx   // zelfde marge rechts als links zodat het plot zelf vierkant is
@@ -109,8 +144,15 @@ internal fun SplineScatterChart(
 
         if (plotSize.width <= 0f || plotSize.height <= 0f) return@Canvas
 
-        val (axisMin, axisMax) = computeAxisRange(entries)
+        // Bepaal as-bereik op basis van zoomstatus
+        val (fullMin, fullMax) = computeAxisRange(entries)
+        val (axisMin, axisMax) = computeZoomedRange(
+            fullMin, fullMax, zoomSegment, splineFit
+        )
         val span = axisMax - axisMin
+
+        // Toon zoom-indicator als ingezoomd
+        val isZoomed = zoomSegment != ZoomSegment.FULL
 
         fun xToPx(v: Float) = plotOrigin.x + ((v - axisMin) / span) * plotSize.width
         fun yToPx(v: Float) = plotOrigin.y + plotSize.height - ((v - axisMin) / span) * plotSize.height
@@ -144,11 +186,53 @@ internal fun SplineScatterChart(
             splineFit, linearFit, manualOffsetMgdl, residualAbove, residualBelow
         )
     }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Drawing helpers
+
 // ---------------------------------------------------------------------------
+
+/**
+ * Berekent het ingezoomde as-bereik voor een specifiek segment.
+ * Zoomfactor: ±40% van het knooppunt als centrum — groot genoeg voor detail,
+ * klein genoeg om context te bewaren (naburige punten nog zichtbaar).
+ */
+private fun computeZoomedRange(
+    fullMin: Float, fullMax: Float,
+    zoom: ZoomSegment,
+    spline: SplineFit?
+): Pair<Float, Float> {
+    if (zoom == ZoomSegment.FULL || spline == null) return fullMin to fullMax
+
+    val knot1 = spline.knotX.toFloat()   // 108 mg/dL = 6 mmol
+    val knot2 = spline.knot2X?.toFloat() ?: (198f) // 198 mg/dL = 11 mmol
+
+    // Zoom-venster: centred op het knooppunt of segment, halve breedte = 45 mg/dL (= 2.5 mmol)
+    // Per segment direct min/max berekenen ipv center ± halfSpan
+    // zodat clamping aan CHART_MIN/MAX nooit de span verkleint tot onder MIN_SPAN
+    val pad = 18f  // ± 1 mmol marge buiten het segment
+    return when (zoom) {
+        ZoomSegment.LOW -> {
+            val zMin = (fullMin - pad).coerceAtLeast(CHART_MIN_BG)
+            val zMax = (knot1 + pad).coerceAtMost(CHART_MAX_BG)
+            if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
+        }
+        ZoomSegment.MID -> {
+            val zMin = (knot1 - pad).coerceAtLeast(CHART_MIN_BG)
+            val zMax = (knot2 + pad).coerceAtMost(CHART_MAX_BG)
+            if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
+        }
+        ZoomSegment.HIGH -> {
+            val boundary = if (spline.hasTwoKnots) knot2 else knot1
+            val zMin = (boundary - pad).coerceAtLeast(CHART_MIN_BG)
+            val zMax = (fullMax + pad).coerceAtMost(CHART_MAX_BG)
+            if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
+        }
+        ZoomSegment.FULL -> fullMin to fullMax
+    }
+}
 
 private fun computeAxisRange(entries: List<CalibrationEntry>): Pair<Float, Float> {
     if (entries.isEmpty()) return 40f to 200f

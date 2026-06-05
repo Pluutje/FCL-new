@@ -153,7 +153,9 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
 
     // PEAK BENADERING
     peakIobBrakeActive     = peakIobBrakeActive,
-    peakApproachFactor     = peakApproachFactor,
+    peakApproachFactor          = peakApproachFactor,
+    afterloadFutureDrop60Scale  = afterloadFutureDrop60Scale,
+    afterloadHighIobLateScale   = afterloadHighIobLateScale,
 
     // SUPPRESS / LOCKOUT
     suppressReason         = suppressReason,

@@ -55,6 +55,8 @@ data class LogRow(
 
     val peakIobBrakeActive: Boolean,
     val peakApproachFactor: Double,
+    val afterloadFutureDrop60Scale: Double = 1.0,
+    val afterloadHighIobLateScale: Double = 1.0,
     val suppressForPeak: Boolean,
     val peakState: String,
 

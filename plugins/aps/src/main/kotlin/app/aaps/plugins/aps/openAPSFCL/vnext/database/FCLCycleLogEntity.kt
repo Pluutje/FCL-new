@@ -171,6 +171,8 @@ data class FCLCycleLogEntity(
     // ── PEAK BENADERING ───────────────────────────────────────────────────
     val peakIobBrakeActive: Boolean,
     val peakApproachFactor: Double,
+    val afterloadFutureDrop60Scale: Double,
+    val afterloadHighIobLateScale: Double,
 
     // ── SUPPRESS / LOCKOUT ────────────────────────────────────────────────
     val suppressReason: String,
