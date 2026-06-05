@@ -162,6 +162,7 @@ internal fun SplineCalibrationScreenContent(
         } else {
             SplineEntriesList(
                 entries         = state.entries,
+                state           = state,
                 selectedEntryId = state.selectedEntryId,
                 glucoseUnit     = state.glucoseUnit,
                 listState       = listState,
@@ -242,6 +243,18 @@ private fun SplineStatusCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Tweede knooppunt actief indicator
+                if (spline.hasTwoKnots && spline.knot2X != null && spline.knot2Y != null) {
+                    val corr2 = spline.knot2Y!! - spline.knot2X!!
+                    val corr2Str = if (state.glucoseUnit == app.aaps.core.data.model.GlucoseUnit.MMOL)
+                        "${"%.1f".format(corr2 / 18.0182)} mmol"
+                    else "${"%.0f".format(corr2)} mg/dL"
+                    Text(
+                        text  = "Knot 2 bij 11 mmol: $corr2Str  ✓ 2-segment actief",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
             }
 
             // Linear fallback detail line (always shown when available)
@@ -328,6 +341,10 @@ private fun SplineEntrySliderReadout(
     val selectedIndex = state.entries.indexOfFirst { it.id == state.selectedEntryId }
     if (selectedIndex < 0) return
     val entry = state.entries[selectedIndex]
+    val calibrated = state.calibratedValue(entry.sensorMgdlAtPairing)
+    val calStr = if (calibrated != null)
+        " → gecal ${calibrated.formatBgDisplay(state.glucoseUnit)}"
+    else ""
     Text(
         text  = stringResource(
             R.string.cal_chart_entry_readout,
@@ -336,7 +353,7 @@ private fun SplineEntrySliderReadout(
             formatDateTime(entry.timestamp),
             entry.sensorMgdlAtPairing.formatBgDisplay(state.glucoseUnit),
             entry.fingerstickMgdl.formatBgDisplay(state.glucoseUnit)
-        ),
+        ) + calStr,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -385,6 +402,7 @@ private fun SplineEmptyEntries() {
 @Composable
 private fun SplineEntriesList(
     entries: List<CalibrationEntry>,
+    state: SplineCalibrationUiState,
     selectedEntryId: Long?,
     glucoseUnit: GlucoseUnit,
     listState: LazyListState,
@@ -402,6 +420,7 @@ private fun SplineEntriesList(
         items(items = entries, key = { it.id }) { entry ->
             SplineEntryRow(
                 entry       = entry,
+                state       = state,
                 selected    = entry.id == selectedEntryId,
                 glucoseUnit = glucoseUnit,
                 formatTime  = formatTime,
@@ -415,6 +434,7 @@ private fun SplineEntriesList(
 @Composable
 private fun SplineEntryRow(
     entry: CalibrationEntry,
+    state: SplineCalibrationUiState,
     selected: Boolean,
     glucoseUnit: GlucoseUnit,
     formatTime: (Long) -> String,
@@ -433,21 +453,44 @@ private fun SplineEntryRow(
                 .padding(horizontal = AapsSpacing.medium, vertical = AapsSpacing.small),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val calibrated = state.calibratedValue(entry.sensorMgdlAtPairing)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text  = formatTime(entry.timestamp),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text  = stringResource(
-                        R.string.cal_entry_pair,
-                        entry.fingerstickMgdl.formatBgDisplay(glucoseUnit),
-                        entry.sensorMgdlAtPairing.formatBgDisplay(glucoseUnit),
-                        (entry.fingerstickMgdl - entry.sensorMgdlAtPairing).formatBgDisplay(glucoseUnit, signed = true)
-                    ),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    EntryValueChip(
+                        label = "prik",
+                        value = entry.fingerstickMgdl.formatBgDisplay(glucoseUnit),
+                        delta = null,
+                        accentColor = MaterialTheme.colorScheme.primary
+                    )
+                    EntryValueChip(
+                        label = "sensor",
+                        value = entry.sensorMgdlAtPairing.formatBgDisplay(glucoseUnit),
+                        delta = (entry.fingerstickMgdl - entry.sensorMgdlAtPairing)
+                                    .formatBgDisplay(glucoseUnit, signed = true),
+                        accentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (calibrated != null) {
+                        val calDelta = entry.fingerstickMgdl - calibrated
+                        EntryValueChip(
+                            label = "gecal",
+                            value = calibrated.formatBgDisplay(glucoseUnit),
+                            delta = calDelta.formatBgDisplay(glucoseUnit, signed = true),
+                            accentColor = when {
+                                kotlin.math.abs(calDelta) <= (if (glucoseUnit == GlucoseUnit.MMOL) 0.5 else 9.0)
+                                    -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                    }
+                }
             }
             IconButton(onClick = { onDelete(entry.id) }) {
                 Icon(
@@ -484,6 +527,45 @@ private fun Double.formatBgDisplay(unit: GlucoseUnit, signed: Boolean = false): 
  * De offset wordt bovenop de spline (of lineaire fallback) opgeteld.
  */
 
+
+
+
+// ---------------------------------------------------------------------------
+// Compacte waarde-chip voor de entry-lijst
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun EntryValueChip(
+    label: String,
+    value: String,
+    delta: String?,
+    accentColor: androidx.compose.ui.graphics.Color
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text  = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+        )
+        Text(
+            text  = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = accentColor,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+        )
+        if (delta != null) {
+            Text(
+                text  = "($delta)",
+                style = MaterialTheme.typography.labelSmall,
+                color = accentColor.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
 
 
 // ---------------------------------------------------------------------------

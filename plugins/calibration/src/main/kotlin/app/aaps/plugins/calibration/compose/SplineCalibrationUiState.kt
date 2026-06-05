@@ -39,4 +39,16 @@ data class SplineCalibrationUiState(
 
     /** Manual offset converted to mg/dL for use in fit calculations. */
     val manualOffsetMgdl: Double get() = manualOffsetMmol * 18.0182
+
+    /**
+     * Gecalibreerde waarde voor een ruwe sensorwaarde (mg/dL), inclusief manual offset.
+     * Gebruikt spline als actief, anders lineair. Geeft null als geen fit beschikbaar.
+     */
+    fun calibratedValue(sensorMgdl: Double): Double? {
+        val offset = manualOffsetMgdl
+        if (splineFit != null) return splineFit.apply(sensorMgdl, offset)
+        if (linearFit != null && linearFit.isApplicable)
+            return linearFit.slope * sensorMgdl + linearFit.offset + offset
+        return null
+    }
 }

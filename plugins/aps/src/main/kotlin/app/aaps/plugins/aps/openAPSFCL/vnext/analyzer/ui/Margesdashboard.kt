@@ -264,8 +264,9 @@ private fun MargeGrafiek(
     values: List<Pair<Int?, Double>>,
     yRange: Pair<Double, Double>
 ) {
-    val ChartBg2 = MaterialTheme.colorScheme.surfaceContainer
-    val GridC    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val ChartBg2  = MaterialTheme.colorScheme.surfaceContainer
+    val GridC     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val valid = values.filter { (min, v) -> min != null && min >= 0 }
     if (valid.isEmpty()) return
 
@@ -305,7 +306,7 @@ private fun MargeGrafiek(
             // Nul-lijn (de drempel zelf)
             val yZero = yOf(0.0)
             drawLine(
-                color = Color(0x88FFFFFF),
+                color = onSurface.copy(alpha = 0.53f),
                 start = Offset(lPad, yZero),
                 end = Offset(lPad + plotW, yZero),
                 strokeWidth = 1.0f
@@ -343,13 +344,13 @@ private fun MargeGrafiek(
             }
             drawPath(
                 linePath,
-                color = Color(0xCCFFFFFF),
+                color = onSurface.copy(alpha = 0.80f),
                 style = Stroke(width = 1.5f)
             )
 
             // Min/max labels
             val paint = android.graphics.Paint().apply {
-                color = Color(0x88FFFFFF).toArgb(); textSize = 20f; isAntiAlias = true
+                color = onSurface.copy(alpha = 0.53f).toArgb(); textSize = 20f; isAntiAlias = true
             }
             drawContext.canvas.nativeCanvas.drawText(
                 "%.1f".format(yMax), lPad, tPad + 14f, paint
@@ -365,8 +366,9 @@ private fun MargeGrafiek(
 private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val mgdl = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
-    val ChartBg2 = MaterialTheme.colorScheme.surfaceContainer
-    val GridC    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val ChartBg2  = MaterialTheme.colorScheme.surfaceContainer
+    val GridC     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val onSurface = MaterialTheme.colorScheme.onSurface
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -403,7 +405,7 @@ private fun VoorspellingsKwaliteitKaart(rows: List<LogRow>, actualPeak: Double) 
             }
 
             fun foutKleur(f: Double?): Color = when {
-                f == null -> Color(0xCCFFFFFF)
+                f == null -> onSurface.copy(alpha = 0.65f)
                 abs(f) <= 0.5 -> MargePositief
                 abs(f) <= 1.2 -> MargeKrap
                 else -> MargeActief

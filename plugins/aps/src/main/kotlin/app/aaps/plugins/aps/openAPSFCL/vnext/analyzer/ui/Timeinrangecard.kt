@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -318,15 +319,19 @@ private fun DailyRangeChart(
         val gridColor = onSurface.copy(alpha = 0.08f)
         val emptyBarColor = onSurface.copy(alpha = 0.07f)
 
+        // Adaptive tekst: donker in light mode, licht in dark mode
+        val onSurfaceArgb = onSurface.copy(alpha = 0.85f).toArgb()
+        val onSurfaceLightArgb = onSurface.copy(alpha = 0.65f).toArgb()
+
         val topValuePaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(190, 255, 255, 255)
+            color = onSurfaceArgb
             textSize = 24f
             textAlign = android.graphics.Paint.Align.CENTER
             isFakeBoldText = true
         }
 
         val bottomLabelPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(170, 255, 255, 255)
+            color = onSurfaceLightArgb
             textSize = 24f
             textAlign = android.graphics.Paint.Align.CENTER
         }

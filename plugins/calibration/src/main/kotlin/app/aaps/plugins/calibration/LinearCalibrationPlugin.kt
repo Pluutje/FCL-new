@@ -66,10 +66,6 @@ class LinearCalibrationPlugin @Inject constructor(
         val sessionStart = context.sensorSessionStart
             ?: persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)?.timestamp
 
-        if (sessionStart != null && now - sessionStart < T.hours(WARM_UP_HOURS).msecs()) {
-            aapsLogger.debug(LTag.GLUCOSE) { "LinearCalibration: in warm-up window, identity" }
-            return data
-        }
 
         detectAndNotifyGap(data, sessionStart)
 
@@ -115,8 +111,6 @@ class LinearCalibrationPlugin @Inject constructor(
     private suspend fun checkPreconditionsAt(timestamp: Long): AddEntryResult {
         val sessionStart = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)?.timestamp
             ?: return AddEntryResult.Rejected.NoSession
-        val warmUpEndsAt = sessionStart + T.hours(WARM_UP_HOURS).msecs()
-        if (timestamp < warmUpEndsAt) return AddEntryResult.Rejected.InWarmUp(warmUpEndsAt)
         val delta = glucoseStatusProvider.glucoseStatusData?.shortAvgDelta
         if (delta != null) {
             // shortAvgDelta is computed on .recalculated (calibrated) values once an applicable
@@ -218,7 +212,6 @@ class LinearCalibrationPlugin @Inject constructor(
     private companion object {
 
         const val GAP_THRESHOLD_MIN = 30L
-        const val WARM_UP_HOURS = 2L
 
         // GlucoseStatus.shortAvgDelta is mg/dL per 5 min — match the unit here. 5 mg/dL / 5 min
         // ≈ 1 mg/dL / min, the conventional "stable enough to calibrate" threshold across CGM apps.

@@ -66,6 +66,8 @@ import app.aaps.plugins.sync.nsclientV3.extensions.toNSExtendedBolus
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSFood
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSOfflineEvent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSProfileSwitch
+import app.aaps.core.interfaces.iob.IobCobCalculator
+import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSSvgV3
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSTemporaryBasal
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSTemporaryTarget
@@ -86,6 +88,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.runBlocking
@@ -113,7 +116,8 @@ class NSClientV3Plugin @Inject constructor(
     private val l: L,
     private val nsClientRepository: NSClientRepository,
     private val uel: UserEntryLogger,
-    private val profileRepository: ProfileRepository
+    private val profileRepository: ProfileRepository,
+    private val iobCobCalculator: IobCobCalculator
 ) : NsClient, Sync, PluginBaseWithPreferences(
     PluginDescription()
         .mainType(PluginType.SYNC)
@@ -479,7 +483,56 @@ class NSClientV3Plugin @Inject constructor(
             Operation.UPDATE -> nsAndroidClient?.let { return@let it::updateSvg }
         }
         try {
-            val data = dataPair.value.toNSSvgV3()
+            // Zoek de gecalibreerde + gesmoothe waarde op uit de in-memory bucketed data.
+            // getBucketedDataTableCopy() bevat InMemoryGlucoseValue met .recalculated
+            // (= na LinearCalibration + UKF smoothing) — dezelfde waarde die FCLvNext gebruikt.
+            // Als de waarde niet gevonden wordt (bijv. bij oudere entries) valt terug op GV.value.
+            // Zoek de gecalibreerde+gesmoothe waarde op uit de in-memory bucketed data.
+            // Probleem: NS-sync triggert direct op DB_CHANGED(GV), maar IobCobCalculator
+            // verwerkt de nieuwe GV asynchroon. Voor recente entries (< 90s oud) wachten
+            // we tot 8 seconden op de bucketed data — daarna fallback naar raw.
+            val recalculatedMgdl: Double = run {
+                val ts = dataPair.value.timestamp
+                val toleranceMs = 150_000L  // ±2.5 minuten: dekt alle xDrip-intervals
+                val isRecentEntry = (System.currentTimeMillis() - ts) < 90_000L
+                val maxWaitMs = if (isRecentEntry) 8_000L else 0L
+                val pollIntervalMs = 500L
+                var waited = 0L
+                var result: Double? = null
+                while (result == null && waited <= maxWaitMs) {
+                    val bucketed = iobCobCalculator.ads.getBucketedDataTableCopy()
+                    if (!bucketed.isNullOrEmpty()) {
+                        val best = bucketed.minByOrNull { kotlin.math.abs(it.timestamp - ts) }
+                        val delta = if (best != null) kotlin.math.abs(best.timestamp - ts) else Long.MAX_VALUE
+                        if (best != null && delta <= toleranceMs && best.recalculated > 39.0) {
+                            aapsLogger.debug(LTag.NSCLIENT, "recalculated lookup: ts=$ts match=${best.timestamp} delta=${delta}ms recalc=${best.recalculated} waited=${waited}ms")
+                            result = best.recalculated
+                        }
+                    }
+                    if (result == null && waited < maxWaitMs) {
+                        kotlinx.coroutines.delay(pollIntervalMs)
+                        waited += pollIntervalMs
+                    } else break
+                }
+                if (result == null) {
+                    aapsLogger.debug(LTag.NSCLIENT, "recalculated lookup: geen match na ${waited}ms, fallback naar raw=${dataPair.value.value}")
+                }
+                result ?: dataPair.value.value
+            }
+            val baseData = dataPair.value.toNSSvgV3()
+            val data = NSSgvV3(
+                isValid    = baseData.isValid,
+                date       = baseData.date,
+                utcOffset  = baseData.utcOffset,
+                filtered   = baseData.filtered,
+                unfiltered = dataPair.value.value,   // ruwe sensorwaarde als unfiltered
+                sgv        = recalculatedMgdl,       // gecalibreerd + gesmooth
+                units      = baseData.units,
+                direction  = baseData.direction,
+                noise      = baseData.noise,
+                device     = baseData.device,
+                identifier = baseData.identifier
+            )
             val id = dataPair.value.ids.nightscoutId
             nsClientRepository.addLog(
                 when (operation) {

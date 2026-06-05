@@ -86,10 +86,6 @@ class SplineCalibrationPlugin @Inject constructor(
         val sessionStart = context.sensorSessionStart
             ?: persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)?.timestamp
 
-        if (sessionStart != null && now - sessionStart < T.hours(WARM_UP_HOURS).msecs()) {
-            aapsLogger.debug(LTag.GLUCOSE) { "SplineCalibration: in warm-up window, identity" }
-            return data
-        }
 
         detectAndNotifyGap(data, sessionStart)
 
@@ -151,8 +147,6 @@ class SplineCalibrationPlugin @Inject constructor(
     private suspend fun checkPreconditionsAt(timestamp: Long): AddEntryResult {
         val sessionStart = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)?.timestamp
             ?: return AddEntryResult.Rejected.NoSession
-        val warmUpEndsAt = sessionStart + T.hours(WARM_UP_HOURS).msecs()
-        if (timestamp < warmUpEndsAt) return AddEntryResult.Rejected.InWarmUp(warmUpEndsAt)
         val delta = glucoseStatusProvider.glucoseStatusData?.shortAvgDelta
         if (delta != null) {
             val activeFit = fitLinearCalibration(repository.getSince(sessionStart), timestamp)
@@ -245,7 +239,6 @@ class SplineCalibrationPlugin @Inject constructor(
 
     private companion object {
         const val GAP_THRESHOLD_MIN         = 30L
-        const val WARM_UP_HOURS             = 2L
         const val DELTA_GATE_MGDL_PER_5MIN  = 5.0
         const val SENSOR_CHANGE_PROXIMITY_MS = 60L * 60L * 1000L
         const val PAIR_LOOKBACK_MS           = 10L * 60L * 1000L

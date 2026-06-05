@@ -68,6 +68,8 @@ internal fun SplineScatterChart(
     val selectedColor     = MaterialTheme.colorScheme.primary
     val selectedHaloColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
     val knotColor         = MaterialTheme.colorScheme.tertiary
+    val residualAbove     = MaterialTheme.colorScheme.error.copy(alpha = 0.45f)   // sensor te hoog
+    val residualBelow     = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f) // sensor te laag
     val labelArgb         = axisColor.toArgb()
     val density           = LocalDensity.current
 
@@ -126,6 +128,10 @@ internal fun SplineScatterChart(
             }
             drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, manualOffsetMgdl, regressionColor)
             drawKnotMarker(::xToPx, ::yToPx, splineFit, manualOffsetMgdl, knotColor, density)
+            // Tweede knooppunt marker als actief
+            if (splineFit.hasTwoKnots && splineFit.knot2X != null && splineFit.knot2Y != null) {
+                drawKnot2Marker(::xToPx, ::yToPx, splineFit.knot2X, splineFit.knot2Y, manualOffsetMgdl, knotColor, density)
+            }
         } else {
             linearFit?.takeIf { it.isApplicable }?.let {
                 drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, manualOffsetMgdl, regressionColor, dashed = false)
@@ -134,7 +140,8 @@ internal fun SplineScatterChart(
 
         drawEntries(
             entries, selectedEntryId, now, ::xToPx, ::yToPx,
-            dotColor, selectedColor, selectedHaloColor, density
+            dotColor, selectedColor, selectedHaloColor, density,
+            splineFit, linearFit, manualOffsetMgdl, residualAbove, residualBelow
         )
     }
 }
@@ -341,6 +348,23 @@ private fun DrawScope.drawKnotMarker(
     drawPath(diamond, color, style = Stroke(width = 1.dp.toPx()))
 }
 
+/**
+ * Tweede knooppunt marker — kleinere cirkel om onderscheid te maken van het eerste.
+ */
+private fun DrawScope.drawKnot2Marker(
+    xToPx: (Float) -> Float, yToPx: (Float) -> Float,
+    knot2X: Double, knot2Y: Double,
+    offsetMgdl: Float,
+    color: Color,
+    density: Density
+) {
+    val kx = xToPx(knot2X.toFloat())
+    val ky = yToPx((knot2Y.toFloat() + offsetMgdl).coerceIn(CHART_MIN_BG, CHART_MAX_BG))
+    val r  = with(density) { 3.dp.toPx() }  // iets kleiner dan knot1
+    drawCircle(color = color.copy(alpha = 0.7f), radius = r, center = Offset(kx, ky))
+    drawCircle(color = color, radius = r, center = Offset(kx, ky), style = Stroke(width = with(density) { 1.dp.toPx() }))
+}
+
 private fun DrawScope.drawEntries(
     entries: List<CalibrationEntry>,
     selectedEntryId: Long?,
@@ -350,21 +374,50 @@ private fun DrawScope.drawEntries(
     dotColor: Color,
     selectedColor: Color,
     haloColor: Color,
-    density: Density
+    density: Density,
+    splineFit: SplineFit? = null,
+    linearFit: CalibrationFit? = null,
+    manualOffsetMgdl: Float = 0f,
+    residualAbove: Color = Color.Transparent,
+    residualBelow: Color = Color.Transparent
 ) {
     val normalRadius   = with(density) { 3.5.dp.toPx() }
     val selectedRadius = with(density) { 6.dp.toPx() }
     val haloRadius     = with(density) { 11.dp.toPx() }
     val selectedStroke = with(density) { 1.5.dp.toPx() }
 
+    // Bepaal de actieve fit voor residual-lijnen
+    val activeFit: ((Double) -> Double)? = when {
+        splineFit != null -> { s -> splineFit.apply(s) + manualOffsetMgdl }
+        linearFit != null && linearFit.isApplicable -> { s -> linearFit.slope * s + linearFit.offset + manualOffsetMgdl }
+        else -> null
+    }
+
     for (e in entries) {
         if (e.id == selectedEntryId) continue
         val w     = weightFor(e.timestamp, now).toFloat()
         val alpha = (0.2f + 0.8f * w).coerceIn(0.2f, 1f)
+        val sx = xToPx(e.sensorMgdlAtPairing.toFloat())
+        val fy = yToPx(e.fingerstickMgdl.toFloat())
+        // Residual-lijn: van het punt naar de spline/lineaire fit
+        if (activeFit != null) {
+            val fittedY = yToPx(activeFit(e.sensorMgdlAtPairing).toFloat())
+            val residualColor = if (e.fingerstickMgdl > activeFit(e.sensorMgdlAtPairing))
+                residualBelow.copy(alpha = residualBelow.alpha * alpha)  // sensor te laag: prik hoger dan fit
+                else residualAbove.copy(alpha = residualAbove.alpha * alpha)
+            drawLine(
+                color       = residualColor,
+                start       = Offset(sx, fy),
+                end         = Offset(sx, fittedY),
+                strokeWidth = with(density) { 1.5.dp.toPx() }
+            )
+        }
+        // Puntgrootte schaalt ook mee met tijdgewicht: oudere punten kleiner
+        val scaledRadius = normalRadius * (0.5f + 0.5f * w)
         drawCircle(
             color  = dotColor.copy(alpha = alpha),
-            radius = normalRadius,
-            center = Offset(xToPx(e.sensorMgdlAtPairing.toFloat()), yToPx(e.fingerstickMgdl.toFloat()))
+            radius = scaledRadius,
+            center = Offset(sx, fy)
         )
     }
     entries.firstOrNull { it.id == selectedEntryId }?.let { e ->
