@@ -516,29 +516,12 @@ private fun autonomyClassLabel(value: MealAutonomyClass): String = when (value) 
     MealAutonomyClass.UNCLEAR -> "Nog onduidelijk"
 }
 // ── MealTypeCard ──────────────────────────────────────────────────────────────
+// Toont slope-informatie per episode (maaltijdtype-onderscheid verwijderd)
 
 @Composable
 private fun MealTypeCard(entity: EpisodeEntity) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val nachtFactor = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
-        .readActiveParams().nachtFactor
-
-    val type = entity.mealType
-    val (typeLabel, typeKleur) = when (type) {
-        "SNEL"  -> "⚡ Snel"    to Color(0xFFFF9800)
-        "TRAAG" -> "🐢 Traag"   to Color(0xFF4CAF50)
-        else    -> "🔀 Gemengd" to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val mgdlM = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(androidx.compose.ui.platform.LocalContext.current)
-    val mealTypeEnum = when (type) {
-        "SNEL"  -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.SNEL
-        "TRAAG" -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.TRAAG
-        else    -> app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge.MealType.GEMENGD
-    }
-    val d   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getDForType(context, mealTypeEnum)
-    val f   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getFForType(context, mealTypeEnum)
-    val stv = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.toStvMap(d, f, nachtFactor)
+    val mgdlM = app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.isMgdl(
+        androidx.compose.ui.platform.LocalContext.current)
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -548,45 +531,27 @@ private fun MealTypeCard(entity: EpisodeEntity) {
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "🍽️ Maaltijdtype",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(typeLabel, style = MaterialTheme.typography.labelMedium,
-                     color = typeKleur, fontWeight = FontWeight.Bold)
-            }
+            Text(
+                "📈 Stijgingspatroon",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+            )
             Divider()
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                DetectieRij("Slope 0-15 min",  app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(entity.mealTypeSlope0_15, mgdlM))
-                DetectieRij("Slope 15-30 min", app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(entity.mealTypeSlope15_30, mgdlM))
-            }
-
-            Text("Parameters voor dit type:",
-                 style = MaterialTheme.typography.labelSmall,
-                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                DetectieRij("D", "%.3f".format(d))
-                DetectieRij("F", "%.3f".format(f))
-                DetectieRij("S", "${stv["sterkte"]}%")
-                DetectieRij("T", "${stv["timing"]}%")
-                DetectieRij("V", "${stv["volhoudendheid"]}%")
+                DetectieRij("Slope 0-15 min",
+                    app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
+                        entity.mealTypeSlope0_15, mgdlM))
+                DetectieRij("Slope 15-30 min",
+                    app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
+                        entity.mealTypeSlope15_30, mgdlM))
             }
         }
     }
 }
+
 
 @Composable
 private fun DetectieRij(label: String, waarde: String) {

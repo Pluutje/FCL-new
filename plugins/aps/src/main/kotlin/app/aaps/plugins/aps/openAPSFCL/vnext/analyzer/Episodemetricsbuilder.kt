@@ -62,7 +62,7 @@ object EpisodeMetricsBuilder {
                 rows.count { it.deliveredTotal > 0.10 && it.timestamp > bigCommitTs }
             else 0
 
-            // ── MaxSmbLearner signaalvelden ──────────────────────────────
+            // ── Dosisanalyse velden ──────────────────────────────────────
             // brakeActiveCycles: cycli waarbij iobRatio >= 0.70
             val brakeActiveCycles = rows.count { it.iobRatio >= 0.70 }
 
@@ -167,7 +167,7 @@ private fun computeAdvisorWeight(
 
     /**
      * Minimale insulinedrempel voor een episode om mee te tellen in het leerproces.
-     * Uitgedrukt als fractie van maxBolus (manualMaxSmbDay).
+     * Uitgedrukt als fractie van maxBolus (manualMaxBolus).
      * Default fallback als maxBolus niet beschikbaar: 1.0U absoluut minimum.
      *
      * Voorbeelden bij maxBolus = 2.5U:

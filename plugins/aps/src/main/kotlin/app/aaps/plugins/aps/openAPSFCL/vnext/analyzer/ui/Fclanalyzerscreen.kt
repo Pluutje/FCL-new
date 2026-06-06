@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
-import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
@@ -93,7 +92,7 @@ fun FclAnalyzerScreen(
             }
 
             val detected = EpisodeDetector.detect(allRows!!)
-            val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25
+            val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
 
             // Filter nutteloze episodes: toon en sla alleen episodes op waarbij
             // FCLvNext minimaal 1 keer een echte maaltijdbolus heeft gegeven
@@ -144,53 +143,11 @@ fun FclAnalyzerScreen(
                         r.timestamp >= episode.start && r.timestamp <= episode.end
                     }?.sortedBy { it.timestamp } ?: emptyList()
 
-                    // Verbeterde type-detectie: zoek het EERSTE venster van echte stijging
-                    // (2+ opeenvolgende cycli met slope > 0.2 mmol/5min)
-                    // Reden: episode kan starten terwijl BG nog daalt van vorige dosis.
-                    // De eerste stijgingsfase bepaalt het karakter van de maaltijd.
-                    val stijgingsVensterIdx = run {
-                        val slopes = epRows.map { it.slope }
-                        var idx = -1
-                        for (j in 0 until slopes.size - 1) {
-                            if (slopes[j] > 0.20 && slopes[j + 1] > 0.20) {
-                                idx = j
-                                break
-                            }
-                        }
-                        idx
-                    }
-
-                    val avgSlopeVenster: Double
-                    val avgSlope0_15: Double
-                    val avgSlope15_30: Double
-
-                    if (stijgingsVensterIdx >= 0) {
-                        // Gebruik het stijgingsvenster voor type-detectie
-                        val vensterRows = epRows.drop(stijgingsVensterIdx).take(4)
-                        avgSlopeVenster = vensterRows.map { it.slope }
-                            .average().takeIf { !it.isNaN() } ?: 0.0
-                        // Bewaar ook originele 0-15 / 15-30 voor weergave
-                        avgSlope0_15 = epRows.take(3).map { it.slope }
-                            .average().takeIf { !it.isNaN() } ?: 0.0
-                        avgSlope15_30 = epRows.drop(3).take(3).map { it.slope }
-                            .average().takeIf { !it.isNaN() } ?: 0.0
-                    } else {
-                        // Geen stijging gevonden → TRAAG
-                        avgSlopeVenster = 0.0
-                        avgSlope0_15 = epRows.take(3).map { it.slope }
-                            .average().takeIf { !it.isNaN() } ?: 0.0
-                        avgSlope15_30 = epRows.drop(3).take(3).map { it.slope }
-                            .average().takeIf { !it.isNaN() } ?: 0.0
-                    }
-
-                    // Vereenvoudigd: alleen SNEL of TRAAG, geen GEMENGD meer.
-                    // SNEL: stijgingsvenster gemiddeld ≥ 0.35 mmol/5min
-                    // TRAAG: al het overige (langzame stijging of geen stijging)
-                    val detectedType = when {
-                        stijgingsVensterIdx < 0          -> "TRAAG"   // geen stijging
-                        avgSlopeVenster >= 0.35          -> "SNEL"    // snelle stijging
-                        else                             -> "TRAAG"   // trage stijging
-                    }
+                    // mealType niet meer actief gebruikt (maaltijdtype-onderscheid verwijderd)
+                    val avgSlope0_15 = epRows.take(3).map { it.slope }
+                        .average().takeIf { !it.isNaN() } ?: 0.0
+                    val avgSlope15_30 = epRows.drop(3).take(3).map { it.slope }
+                        .average().takeIf { !it.isNaN() } ?: 0.0
                     EpisodeEntity(
                         startTs              = episode.start.toString(),
                         endTs                = episode.end.toString(),
@@ -222,7 +179,7 @@ fun FclAnalyzerScreen(
                         rescueArmedSlope     = prev?.rescueArmedSlope ?: 0.0,
                         rescueArmedBg        = prev?.rescueArmedBg ?: 0.0,
                         rescueArmedMinAfterPeak = prev?.rescueArmedMinAfterPeak ?: 0,
-                        mealType             = detectedType,
+                        mealType             = "",
                         mealTypeSlope0_15    = avgSlope0_15,
                         mealTypeSlope15_30   = avgSlope15_30
                     )
@@ -438,22 +395,7 @@ fun FclAnalyzerScreen(
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
-                        onApplyParams = null,
-                        onApplyMaxSmb = { newMaxSmb, newIobBrake ->
-                            val d = DFLearner.getD(context)
-                            val f = DFLearner.getF(context)
-                            val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
-                            ConfigOverrideWriter.writeWithStvAndParams(
-                                stvMap           = DFMapping.toStvMap(d, f, nachtFactor,
-                                    aggLevel = DFLearner.getAggressiveness(context)),
-                                paramOverrides   = DFMapping.toParamOverrides(d, f,
-                                    aggLevel = DFLearner.getAggressiveness(context)),
-                                reason           = "Handmatig MaxSMB: maxSMB=${"%.2f".format(newMaxSmb)}U brake=${"%.3f".format(newIobBrake)}",
-                                episodeCount     = episodes?.size ?: 0,
-                                maxSmbDayLearned = newMaxSmb,
-                                iobBrakeLearned  = newIobBrake
-                            )
-                        }
+                        onApplyParams = null
                     )
                 } ?: run {
                     currentScreen = Screen.DASHBOARD
@@ -733,91 +675,27 @@ private suspend fun runAdvisorFlow(
             ?: episodes.lastOrNull()
 
         if (latestMetrics != null) {
-            // Bepaal maaltijdtype: eerst uit opgeslagen entity, dan herberekenen
-            val latestMealType: MealTypeBridge.MealType = run {
-                val entity = latestCompletedEpisode?.let { ep ->
-                    storedEpisodesByStart[ep.start.toString()]
-                }
-                when {
-                    entity?.mealType == "SNEL"   -> MealTypeBridge.MealType.SNEL
-                    entity?.mealType == "TRAAG"  -> MealTypeBridge.MealType.TRAAG
-                    entity?.mealType == "GEMENGD" -> MealTypeBridge.MealType.GEMENGD
-                    latestCompletedEpisode != null -> {
-                        // Koppel via tijdstip, niet via mealEpisodeId
-                        val epRows = allRows.filter { r ->
-                            r.timestamp >= latestCompletedEpisode.start &&
-                                r.timestamp <= latestCompletedEpisode.end
-                        }.sortedBy { it.timestamp }
-                        // Zelfde stijgingsvenster-logica als bij episode-insert
-                        val vensterIdx = run {
-                            val slopes = epRows.map { it.slope }
-                            var idx = -1
-                            for (j in 0 until slopes.size - 1) {
-                                if (slopes[j] > 0.20 && slopes[j + 1] > 0.20) { idx = j; break }
-                            }
-                            idx
-                        }
-                        val avgVenster = if (vensterIdx >= 0)
-                            epRows.drop(vensterIdx).take(4).map { it.slope }.average().takeIf { !it.isNaN() } ?: 0.0
-                        else 0.0
-                        when {
-                            vensterIdx < 0       -> MealTypeBridge.MealType.TRAAG
-                            avgVenster >= 0.35   -> MealTypeBridge.MealType.SNEL
-                            else                 -> MealTypeBridge.MealType.TRAAG
-                        }
-                    }
-                    else -> MealTypeBridge.MealType.TRAAG   // veilige fallback
-                }
-            }
-
-            // Update MealTypeBridge active overrides voor komende FCLvNext cycli
-            if (latestMealType != MealTypeBridge.MealType.GEMENGD &&
-                latestMealType != MealTypeBridge.MealType.ONBEKEND) {
-                MealTypeBridge.activeTypeDOverride = DFLearner.getDForType(context, latestMealType)
-                MealTypeBridge.activeTypeFOverride = DFLearner.getFForType(context, latestMealType)
-            }
-
             // Type-specifieke leer-stap
-            val step = DFLearner.evaluateForType(context, latestMetrics, latestMealType)
-            val smbResult = MaxSmbLearner.evaluate(
-                context,
-                latestMetrics,
-                manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay
-                    ?: MaxSmbLearner.MAX_SMB_DEFAULT
-            )
+            val step = DFLearner.evaluate(context, latestMetrics)
+            // MaxSmbLearner.evaluate verwijderd — maxSMB volgt S%
 
             // Frontload timing leren — alle bruikbare episodes meegeven
             val frontloadResult = FrontloadLearner.evaluate(context, episodeMetrics)
             val dfChanged = step != null && step.hasChange
-            val smbChanged = smbResult != null && smbResult.hasChange
 
-            if (dfChanged || smbChanged) {
+            if (dfChanged) {
                 // Gebruik type-specifieke D/F als er een type-aanpassing was,
                 // anders de algemene D/F.
-                // Reden: evaluateForType past KEY_D_SNEL/KEY_F_SNEL aan maar
-                // getD/getF levert de ALGEMENE waarden → T zou nooit bewegen voor Snel.
-                val newD = if (dfChanged && latestMealType != MealTypeBridge.MealType.ONBEKEND)
-                    DFLearner.getDForType(context, latestMealType)
-                else
-                    DFLearner.getD(context)
-
-                val newF = if (dfChanged && latestMealType != MealTypeBridge.MealType.ONBEKEND)
-                    DFLearner.getFForType(context, latestMealType)
-                else
-                    DFLearner.getF(context)
+                val newD = DFLearner.getD(context)
+                val newF = DFLearner.getF(context)
                 val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
                 ConfigOverrideWriter.writeWithStvAndParams(
-                    stvMap           = DFMapping.toStvMap(newD, newF, nachtFactor,
+                    stvMap         = DFMapping.toStvMap(newD, newF, nachtFactor,
                         aggLevel = DFLearner.getAggressiveness(context)),
-                    paramOverrides   = DFMapping.toParamOverrides(newD, newF,
+                    paramOverrides = DFMapping.toParamOverrides(newD, newF,
                         aggLevel = DFLearner.getAggressiveness(context)),
-                    reason           = buildString {
-                        if (dfChanged)  append("D/F: ${step!!.reason} ")
-                        if (smbChanged) append("MaxSMB: ${smbResult!!.reason}")
-                    }.trim(),
-                    episodeCount     = filteredMetrics.size,
-                    maxSmbDayLearned = if (smbChanged) smbResult!!.newMaxSmb else null,
-                    iobBrakeLearned  = if (smbChanged) smbResult!!.newIobBrake else null
+                    reason         = "D/F: ${step!!.reason}",
+                    episodeCount   = filteredMetrics.size
                 )
             }
         }

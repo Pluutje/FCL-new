@@ -39,8 +39,7 @@ object FCLvNextConfigOverride {
 
         // MaxSmbLearner geleerde veiligheidsmarges.
         // null = gebruik handmatige prefs (max_bolus_day / fcl_vnext_peak_iob_brake_suppress)
-        val maxSmbDayLearned: Double? = null,  // 0.75–2.00 U
-        val iobBrakeLearned:  Double? = null   // 0.35–0.55
+            val iobBrakeLearned:  Double? = null   // 0.35–0.55
     )
 
     /**
@@ -99,8 +98,7 @@ object FCLvNextConfigOverride {
                 reason          = extractString(json, "reason"),
                 paramOverrides  = paramOverBlock?.let { parseParamOverrides(it) },
 
-                maxSmbDayLearned = stvBlock?.let { extractDouble(it, "max_smb_day_learned") },
-                iobBrakeLearned  = stvBlock?.let { extractDouble(it, "iob_brake_learned") }
+                            iobBrakeLearned  = stvBlock?.let { extractDouble(it, "iob_brake_learned") }
             )
         } catch (_: Exception) {
             null

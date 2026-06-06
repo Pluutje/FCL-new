@@ -60,13 +60,13 @@ data class EpisodeMetrics(
     // 0  = alleen één bolus → onzeker of die te groot was.
     val followUpCommitCount: Int = 0,
 
-    // ── MaxSmbLearner signaalvelden ──────────────────────────────────────
+    // ── Dosisanalyse velden ──────────────────────────────────────────────
     // brakeActiveCycles: aantal cycli waarbij iobRatio >= 0.70 (rem actief).
     // Hoge waarde = systeem wilde meer doseren maar werd geblokkeerd door maxSMB.
     val brakeActiveCycles: Int = 0,
 
     // earlyBoostWasActive: was earlyBoostFactor > 1.0 actief in deze episode?
-    // MaxSmbLearner verhoogt maxSMB alleen als dit true is — anders is het
+    // Indicator dat de maxSMB cap actief was in deze cyclus
     // onduidelijk of maxSMB de limiterende factor was.
     val earlyBoostWasActive: Boolean = false,
 

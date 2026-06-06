@@ -681,7 +681,7 @@ private fun detectMealSignal(ctx: FCLvNextContext, config: FCLvNextConfig): Meal
             .coerceIn(0.0, 1.0)
 
     // state
-    val state = when {
+    val baseState = when {
         rising && accelerating && aboveTarget && confidence >= config.mealConfirmConfidence ->
             MealState.CONFIRMED
 
@@ -691,7 +691,41 @@ private fun detectMealSignal(ctx: FCLvNextContext, config: FCLvNextConfig): Meal
         else -> MealState.NONE
     }
 
-    val reason = "MealSignal=$state conf=${"%.2f".format(confidence)}"
+    // Aanhoudende stijging detector: pakt trage-start koolhydraatrijke maaltijden
+    // op die de normale slope/accel detector missen.
+    // Criteria (gebaseerd op 30-daagse xDrip data analyse):
+    //   - 3 opeenvolgende stijgende BG-punten
+    //   - Minstens 2 van die 3 deltas > 0.3 mmol per 5 min
+    //   - Totale stijging > 0.6 mmol over 15 min
+    //   - BG huidig > 5.5 mmol
+    // Filtert snoepjes eruit: typisch max 0.3-0.4 mmol/5min,
+    // nooit 3 opeenvolgende stijgingen boven 0.3 mmol.
+    val sustainedRiseConfirmed: Boolean = run {
+        val hist = ctx.input.bgHistory
+        if (hist.size < 4 || ctx.input.bgNow < 5.5) return@run false
+        val sorted = hist.sortedByDescending { it.first.millis }.take(4)
+        val bg0 = sorted[0].second
+        val bg1 = sorted[1].second
+        val bg2 = sorted[2].second
+        val bg3 = sorted[3].second
+        val d1 = bg0 - bg1
+        val d2 = bg1 - bg2
+        val d3 = bg2 - bg3
+        val allRising = d1 > 0.0 && d2 > 0.0 && d3 > 0.0
+        val strongCount = listOf(d1, d2, d3).count { it > 0.3 }
+        val totalRise = bg0 - bg3
+        allRising && strongCount >= 2 && totalRise > 0.6
+    }
+
+    val state = when {
+        baseState == MealState.CONFIRMED || sustainedRiseConfirmed ->
+            MealState.CONFIRMED
+        baseState == MealState.UNCERTAIN -> MealState.UNCERTAIN
+        else -> MealState.NONE
+    }
+    val srTag = if (sustainedRiseConfirmed && baseState != MealState.CONFIRMED) " +SR" else ""
+
+    val reason = "MealSignal=$state$srTag conf=${"%.2f".format(confidence)}"
     return MealSignal(state, confidence, reason)
 }
 
@@ -2820,8 +2854,7 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
-            MealTypeBridge.resetEpisode()
-        }
+            }
         if (peakEstimator.active && !episodeShouldBeActive) {
             // Originele exit: duidelijke daling of BG dicht bij target
             val fallingClearly = ctx.slope <= -0.6 && ctx.consistency >= config.episodeMinConsistency
@@ -3313,8 +3346,7 @@ class FCLvNext(
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
 
-            MealTypeBridge.resetEpisode()  // ← reset maaltijdtype bij nieuwe episode
-            status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
+                status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
         }
 
 // EINDE episode
@@ -3322,8 +3354,7 @@ class FCLvNext(
 
             status.append("MEAL EPISODE END id=$activeMealEpisodeId\n")
 
-            MealTypeBridge.resetEpisode()  // ← reset ook bij einde
-            activeMealEpisodeId = -1
+                activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
             episodeCommitCount = 0
@@ -3334,7 +3365,6 @@ class FCLvNext(
         // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
         if (activeMealEpisodeId != -1L && mealEpisodeStartTime != null) {
             val minSinceStart = org.joda.time.Minutes.minutesBetween(mealEpisodeStartTime, now).minutes
-            MealTypeBridge.updateMealType(minSinceStart, ctx.slope)
         }
 
         // ─────────────────────────────────────────────

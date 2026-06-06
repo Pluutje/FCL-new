@@ -8,7 +8,6 @@ import kotlin.Double
 import kotlin.math.roundToInt
 import kotlin.math.abs
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
-import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
 
@@ -323,17 +322,7 @@ fun loadFCLvNextConfig(
         po.sustainedRiseMinTarget?.let        { prefs.put(IntKey.fcl_vnext_sustained_rise_min_target, it) }
     }
 
-    // ── MaxSmbLearner waarden persistent opslaan ──────────────────────────
-    // Zodat ze actief blijven na consume_after_use (zelfde patroon als S/T/V)
-    if (override?.maxSmbDayLearned != null) {
-        // Gebruik dynamische grenzen gebaseerd op handmatige max_bolus_day instelling
-        val manualMax = prefs.get(DoubleKey.max_bolus_day)
-        val smbMin = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner.dynamicMin(manualMax)
-        val smbMax = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner.dynamicMax(manualMax)
-        val v = override.maxSmbDayLearned.coerceIn(smbMin, smbMax)
-        if (abs(v - prefs.get(DoubleKey.fcl_vnext_max_smb_day_learned)) > 0.001)
-            prefs.put(DoubleKey.fcl_vnext_max_smb_day_learned, v)
-    }
+    // MaxSmbLearner uitgeschakeld — maxSMB volgt S% direct
     if (override?.iobBrakeLearned != null) {
         val v = override.iobBrakeLearned.coerceIn(0.35, 0.55)
         if (abs(v - prefs.get(DoubleKey.fcl_vnext_iob_brake_learned)) > 0.001)
@@ -346,27 +335,23 @@ fun loadFCLvNextConfig(
     val n = nachtFactor.toDouble() / 100.0
     val gain = if (isNight) (s * n) else s
 
+    // MaxSMB koppeling aan S%:
+    // maxSMB = manualMaxSmb × (S% / 100). Bij S=100% → maxSMB = handmatige instelling.
+    // Bij S=115% → 15% meer cap. MaxSmbLearner is uitgeschakeld.
+    // De frontload-override (watching/earlyBoost) blijft intact en kan deze cap overstijgen.
     val maxSMB =
         if (isNight) prefs.get(DoubleKey.max_bolus_night)
         else {
-            // MaxSmbLearner: gebruik geleerde waarde als aanwezig in override,
-            // anders de prefs-waarde (geleerde persistent opgeslagen),
-            // anders de handmatige instelling.
-            run {
-                // Dynamische grenzen gebaseerd op handmatige max_bolus_day instelling
-                val manualMax = prefs.get(DoubleKey.max_bolus_day)
-                val smbMin = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner.dynamicMin(manualMax)
-                val smbMax = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner.dynamicMax(manualMax)
-                override?.maxSmbDayLearned?.coerceIn(smbMin, smbMax)
-                    ?: prefs.get(DoubleKey.fcl_vnext_max_smb_day_learned).let {
-                        if (it > 0.001) it.coerceIn(smbMin, smbMax) else manualMax
-                    }
-            }
+            val manualMax = prefs.get(DoubleKey.max_bolus_day)
+            (manualMax * (sterkte.toDouble() / 100.0))
+                .coerceIn(
+                    manualMax * 0.50,  // vloer: nooit minder dan 50% van handmatig
+                    manualMax * 1.50   // plafond: nooit meer dan 150% van handmatig
+                )
         }
 
-    // IobBrake override van MaxSmbLearner — overschrijft de DFMapping-waarde
-    // die via param_overrides in po.peakIobBrakeSuppressThreshold zit.
-    // Prioriteit: maxSmbLearner override > DFMapping param_override > prefs default
+    // IobBrake override — overschrijft de DFMapping waarde voor peakIobBrakeSuppressThreshold
+    // Prioriteit: geleerde persistent waarde > DFMapping param_override > prefs default
     val iobBrakeOverride: Double? = override?.iobBrakeLearned?.coerceIn(0.35, 0.55)
         ?: prefs.get(DoubleKey.fcl_vnext_iob_brake_learned).let {
             if (it > 0.001) it else null
@@ -542,17 +527,6 @@ fun loadFCLvNextConfig(
         .let { applyDoseDistributionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
         .let { applyParamOverrides(it, override?.paramOverrides) }
-        .let { cfg ->
-            // Maaltijdtype-specifieke parameter override (alleen overdag, tijdens episode)
-            if (!isNight) {
-                val typeOverride = MealTypeBridge.getParamOverridesForCurrentType(
-                    baseD = DFMapping.D_START,
-                    baseF = DFMapping.F_START
-                )
-                if (typeOverride != null) applyParamOverridesFromWriter(cfg, typeOverride)
-                else cfg
-            } else cfg
-        }
         .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nachtFactor) }
 }
 
@@ -705,7 +679,7 @@ private fun applyDoseDistributionStyle(
  */
 /**
  * Variant van applyParamOverrides die ConfigOverrideWriter.ParamOverrides accepteert.
- * Gebruikt voor maaltijdtype-specifieke D/F overrides via MealTypeBridge.
+ * Gebruikt voor D/F parameter overrides vanuit de analyzer.
  */
 private fun applyParamOverridesFromWriter(
     cfg: FCLvNextConfig,

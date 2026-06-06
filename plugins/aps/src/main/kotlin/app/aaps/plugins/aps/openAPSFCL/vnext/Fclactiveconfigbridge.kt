@@ -9,18 +9,18 @@ import java.util.concurrent.atomic.AtomicReference
  * FCLvNextActiveParamsWriter.writeIfChanged() roept snapshot() aan na elke
  * cyclus (alleen als de config veranderd is). De Analyzer leest via get().
  *
- * manualMaxSmbDay = prefs.get(DoubleKey.max_bolus_day) — de handmatige instelling
+ * manualMaxBolus = prefs.get(DoubleKey.max_bolus_day) — de handmatige instelling
  * die als referentie dient voor de dynamische grenzen van MaxSmbLearner.
  */
 object FclActiveConfigBridge {
 
     data class Snapshot(
-        val config:          FCLvNextConfig,
-        val sterkte:         Int,
-        val timing:          Int,
-        val volhoudendheid:  Int,
-        val nachtFactor:     Int,
-        val manualMaxSmbDay: Double  // prefs max_bolus_day — referentie voor MaxSmbLearner
+        val config:         FCLvNextConfig,
+        val sterkte:        Int,
+        val timing:         Int,
+        val volhoudendheid: Int,
+        val nachtFactor:    Int,
+        val manualMaxBolus: Double  // prefs max_bolus_day — handmatige MaxSMB instelling
     )
 
     private val current = AtomicReference<Snapshot?>(null)
@@ -32,9 +32,9 @@ object FclActiveConfigBridge {
         timing:          Int,
         volhoudendheid:  Int,
         nachtFactor:     Int,
-        manualMaxSmbDay: Double
+        manualMaxBolus: Double
     ) {
-        current.set(Snapshot(config, sterkte, timing, volhoudendheid, nachtFactor, manualMaxSmbDay))
+        current.set(Snapshot(config, sterkte, timing, volhoudendheid, nachtFactor, manualMaxBolus))
     }
 
     /** Aanroepen vanuit de Analyzer i.p.v. readActiveParams() */

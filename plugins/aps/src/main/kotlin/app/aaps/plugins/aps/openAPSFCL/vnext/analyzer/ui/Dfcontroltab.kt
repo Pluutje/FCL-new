@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
-import app.aaps.plugins.aps.openAPSFCL.vnext.MealTypeBridge
 import androidx.compose.ui.graphics.Color
 import java.time.Instant
 import java.time.ZoneId
@@ -59,16 +58,15 @@ fun DFControlTab(
 
     // ── Maaltijdtype selector ─────────────────────────────────────────────
     // Vereenvoudigd: alleen SNEL en TRAAG, geen GEMENGD meer
-    var geselecteerdType by remember { mutableStateOf(MealTypeBridge.MealType.SNEL) }
 
     // ── D/F/vExtra state per type ─────────────────────────────────────────
-    fun dVoorType()      = DFLearner.getDForType(context, geselecteerdType)
-    fun fVoorType()      = DFLearner.getFForType(context, geselecteerdType)
-    fun vExtraVoorType() = DFLearner.getVExtraForType(context, geselecteerdType)
+    fun dVoorType()      = DFLearner.getD(context)
+    fun fVoorType()      = DFLearner.getF(context)
 
-    var d      by remember(geselecteerdType) { mutableStateOf(dVoorType()) }
-    var f      by remember(geselecteerdType) { mutableStateOf(fVoorType()) }
-    var vExtra by remember(geselecteerdType) { mutableStateOf(vExtraVoorType()) }
+    // Huidige D/F/vExtra voor weergave en berekeningen
+    val d      = dVoorType()
+    val f      = fVoorType()
+    val vExtra = DFLearner.getVExtra(context)
 
     // Algemene state
     var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
@@ -112,12 +110,9 @@ fun DFControlTab(
     fun vNaarVExtra(v: Int) = ((v.toDouble() - vBasisViaDOnly) / 30.0).coerceIn(-0.5, 0.5)
 
     fun slaTypeOp(nieuweD: Double, nieuweF: Double = f) {
-        DFLearner.setDForType(context, geselecteerdType, nieuweD)
-        if (nieuweF != f) DFLearner.setFForType(context, geselecteerdType, nieuweF)
     }
 
     fun slaVExtraOp(nieuweVExtra: Double) {
-        DFLearner.setVExtraForType(context, geselecteerdType, nieuweVExtra)
     }
 
     // Frontload timing omrekening: REF_WMD → begrijpelijk label
@@ -213,9 +208,9 @@ fun DFControlTab(
         if (onApplyToAaps != null) {
             Button(
                 onClick = {
-                    val dApply = DFLearner.getDForType(context, MealTypeBridge.MealType.SNEL)
-                    val fApply = DFLearner.getFForType(context, MealTypeBridge.MealType.SNEL)
-                    val veApply = DFLearner.getVExtraForType(context, MealTypeBridge.MealType.SNEL)
+                    val dApply = DFLearner.getD(context)
+                    val fApply = DFLearner.getF(context)
+                    val veApply = DFLearner.getVExtra(context)
                     val po = DFMapping.toParamOverrides(dApply, fApply, DFLearner.getRefWmd(context),
                         DFLearner.getRefWff(context), DFLearner.getRefEb(context), veApply,
                         aggLevel = aggressiveness)
@@ -286,9 +281,8 @@ fun DFControlTab(
 
         // ── 4. Compacte leer-status ───────────────────────────────────────
         // Toont hoeveel maaltijden het systeem heeft geleerd zonder details
-        val snelCount = DFLearner.getCountForType(context, MealTypeBridge.MealType.SNEL)
-        val traagCount = DFLearner.getCountForType(context, MealTypeBridge.MealType.TRAAG)
-        if (snelCount + traagCount > 0) {
+        val episodeCount = DFLearner.getEpisodeCount(context)
+        if (episodeCount > 0) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -300,10 +294,7 @@ fun DFControlTab(
                          fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        buildString {
-                            if (snelCount > 0) append("⚡ $snelCount snelle maaltijden  ")
-                            if (traagCount > 0) append("🐢 $traagCount trage maaltijden")
-                        }.trim(),
+                        "$episodeCount maaltijden geleerd",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -327,7 +318,7 @@ fun DFControlTab(
                         val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
                         val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
                         val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
-                        val typeEmoji = when (step.mealType) { "SNEL" -> "⚡"; "TRAAG" -> "🐢"; else -> "🔀" }
+                        val typeEmoji = "📊"
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -390,62 +381,8 @@ fun DFControlTab(
     }
 }
 
-// ── MaaltijdTypeSelector ──────────────────────────────────────────────────────
+// MaaltijdTypeSelector verwijderd — maaltijdtype-onderscheid niet meer actief
 
-@Composable
-private fun MaaltijdTypeSelector(
-    geselecteerd: MealTypeBridge.MealType,
-    onSelect: (MealTypeBridge.MealType) -> Unit
-) {
-    val types = listOf(
-        Triple(MealTypeBridge.MealType.SNEL,    "⚡", "Snel"),
-        Triple(MealTypeBridge.MealType.TRAAG,   "🐢", "Traag")
-    )
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Maaltijdtype", style = MaterialTheme.typography.titleSmall,
-                 fontWeight = FontWeight.SemiBold)
-            Text("Stel per maaltijdtype aparte waarden in — het systeem herkent het type automatisch.",
-                 style = MaterialTheme.typography.bodySmall,
-                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                types.forEach { (type, emoji, label) ->
-                    val geselecteerdKleur = when (type) {
-                        MealTypeBridge.MealType.SNEL  -> Color(0xFFFF9800)
-                        MealTypeBridge.MealType.TRAAG -> Color(0xFF4CAF50)
-                        else -> MaterialTheme.colorScheme.primary
-                    }
-                    val isGeselecteerd = geselecteerd == type
-                    Surface(
-                        onClick = { onSelect(type) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isGeselecteerd) geselecteerdKleur.copy(alpha = 0.15f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isGeselecteerd)
-                            androidx.compose.foundation.BorderStroke(1.5.dp, geselecteerdKleur)
-                        else null
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(emoji, fontSize = 16.sp)
-                            Text(label, style = MaterialTheme.typography.labelSmall,
-                                 color = if (isGeselecteerd) geselecteerdKleur
-                                 else MaterialTheme.colorScheme.onSurfaceVariant,
-                                 fontWeight = if (isGeselecteerd) FontWeight.Bold else FontWeight.Normal)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 // ── FrontloadKaart ────────────────────────────────────────────────────────────
 
@@ -1059,138 +996,58 @@ private fun KalibratieParm(
 // ── MaaltijdTypeOverzicht ─────────────────────────────────────────────────────
 // Tabel met huidige D/F/S/T/V per type + drie aparte verloopgrafieken.
 
+
 @Composable
 private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
     val context = androidx.compose.ui.platform.LocalContext.current
-
-    data class TypeRij(
-        val label: String,
-        val emoji: String,
-        val type: MealTypeBridge.MealType,
-        val kleur: Color
-    )
-
-    val types = listOf(
-        TypeRij("Snel",    "⚡", MealTypeBridge.MealType.SNEL,    Color(0xFFFF9800)),
-        TypeRij("Traag",   "🐢", MealTypeBridge.MealType.TRAAG,   Color(0xFF4CAF50))
-    )
+    val d      = DFLearner.getD(context)
+    val f      = DFLearner.getF(context)
+    val ve     = DFLearner.getVExtra(context)
+    val stv    = DFMapping.toStvMap(d, f, nachtFactor, ve)
+    val hist   = DFLearner.getHistory(context)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
             Text(
-                "📊 S/T/V per maaltijdtype",
+                "📊 Huidige S/T/V",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
-
-            // ── Tabel ─────────────────────────────────────────────────────
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Header
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text("Type", modifier = Modifier.weight(2.5f),
-                         style = MaterialTheme.typography.labelSmall,
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("S", style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    for (h in listOf("S", "T", "V*")) {
-                        Text(h, modifier = Modifier.weight(1f),
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                             textAlign = androidx.compose.ui.text.style.TextAlign.End)
-                    }
+                    Text("${stv["sterkte"]}%", style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold)
                 }
-                Text(
-                    "* V is onafhankelijk van S — aparte instelling per maaltijdtype",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 9.sp
-                )
-                Divider()
-
-                // Rijen
-                types.forEach { tr ->
-                    val d   = DFLearner.getDForType(context, tr.type)
-                    val f   = DFLearner.getFForType(context, tr.type)
-                    val ve  = DFLearner.getVExtraForType(context, tr.type)
-                    val stv = DFMapping.toStvMap(d, f, nachtFactor, ve)
-                    val cnt = when (tr.type) {
-                        MealTypeBridge.MealType.SNEL  ->
-                            context.getSharedPreferences("df_learner_prefs", 0)
-                                .getInt("df_count_snel", 0)
-                        MealTypeBridge.MealType.TRAAG ->
-                            context.getSharedPreferences("df_learner_prefs", 0)
-                                .getInt("df_count_traag", 0)
-                        else -> null
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(2.5f),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(tr.emoji, fontSize = 11.sp)
-                            Text(tr.label, style = MaterialTheme.typography.labelSmall,
-                                 color = tr.kleur, fontWeight = FontWeight.SemiBold)
-                            cnt?.let {
-                                Text("($it)", style = MaterialTheme.typography.labelSmall,
-                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                     fontSize = 9.sp)
-                            }
-                        }
-                        for (w in listOf(
-                            "${stv["sterkte"]}%",
-                            "${stv["timing"]}%",
-                            "${stv["volhoudendheid"]}%"
-                        )) {
-                            Text(w, modifier = Modifier.weight(1f),
-                                 style = MaterialTheme.typography.labelSmall,
-                                 textAlign = androidx.compose.ui.text.style.TextAlign.End)
-                        }
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("T", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${stv["timing"]}%", style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("V", style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${stv["volhoudendheid"]}%", style = MaterialTheme.typography.labelMedium,
+                         fontWeight = FontWeight.SemiBold)
                 }
             }
-
-            // ── Drie grafieken ────────────────────────────────────────────
-            types.forEach { tr ->
-                val hist   = DFLearner.getHistoryForType(context, tr.type)
-                val veType = DFLearner.getVExtraForType(context, tr.type)
-                if (hist.size >= 2) {
-                    STVVerloopGrafiekKlein(
-                        history     = hist,
-                        nachtFactor = nachtFactor,
-                        titel       = "${tr.emoji} ${tr.label}",
-                        accentKleur = tr.kleur,
-                        vExtra      = veType
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("${tr.emoji} ${tr.label}",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = tr.kleur, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Nog te weinig data (min. 2 aanpassingen)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+            if (hist.size >= 2) {
+                STVVerloopGrafiekKlein(
+                    history     = hist,
+                    nachtFactor = nachtFactor,
+                    titel       = "📊 D/F verloop",
+                    accentKleur = MaterialTheme.colorScheme.primary,
+                    vExtra      = ve
+                )
             }
         }
     }
 }
-
-// ── STVVerloopGrafiekKlein ────────────────────────────────────────────────────
-// Compacte variant van STVVerloopGrafiek voor per-type weergave.
 
 @Composable
 private fun STVVerloopGrafiekKlein(

@@ -66,8 +66,6 @@ fun AdvisorScreen(
     onApplyDFToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
     nachtFactor: Int = 85,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)? = null,
-    // MaxSmbLearner: (newMaxSmbDay, newIobBrake) -> succes
-    onApplyMaxSmb: ((Double, Double) -> Boolean)? = null
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
@@ -97,14 +95,8 @@ fun AdvisorScreen(
                     )
                 },
 
-                // ── 2. MaxSMB: veiligheidsmarges leren ────────────────────
-                InfoTabPage(s.maxSmb) {
-                    MaxSmbTab(
-                        metrics      = metrics,
-                        manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 1.25,
-                        onApplyToAaps = onApplyMaxSmb
-                    )
-                },
+                // MaxSMB tab verwijderd: maxSMB volgt nu direct S% (sterkte)
+                // MaxSmbLearner is uitgeschakeld. Zie FCLvNextConfig.
 
                 // ── 3. Parameters: handmatige fijnafstelling ──────────────
                 InfoTabPage(s.parameters) {

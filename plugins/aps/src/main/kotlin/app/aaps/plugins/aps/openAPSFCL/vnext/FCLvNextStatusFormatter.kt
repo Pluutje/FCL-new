@@ -7,7 +7,6 @@ import android.content.Context
 import org.joda.time.DateTime
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
-import app.aaps.core.keys.IntKey
 
 data class FclUiSnapshot(
     val bgNow: Double,
@@ -102,59 +101,6 @@ class FCLvNextStatusFormatter(
         }
     }
 
-    // ── Sectie 4: Algoritmeparameters ────────────────────────────────────────
-
-    private fun buildAlgoritmeSectie(activeConfig: FCLvNextConfig? = null): String {
-        val str = FclStrings.get(context)
-        val s = prefs.get(IntKey.fcl_vnext_sterkte)
-        val t = prefs.get(IntKey.fcl_vnext_timing)
-        val v = prefs.get(IntKey.fcl_vnext_volhoudendheid)
-        val n = prefs.get(IntKey.fcl_vnext_nacht_factor)
-
-        fun indicator(waarde: Int, neutraal: Int = 100) = when {
-            waarde > neutraal + 4 -> "↑"
-            waarde < neutraal - 4 -> "↓"
-            else                  -> "="
-        }
-
-        fun frontloadLabel(t: Int) = when {
-            t >= 115 -> str.frontloadSterkVroeg
-            t >= 107 -> str.frontloadVroeg
-            t >= 93  -> str.frontloadNeutraal
-            t >= 85  -> str.frontloadLaat
-            else     -> str.frontloadSterkLaat
-        }
-
-        fun sterkteLabel(s: Int) = when {
-            s >= 110 -> str.sterkteHoog
-            s >= 102 -> str.sterkteIetsBoven
-            s >= 98  -> str.sterkteStandaard
-            s >= 90  -> str.sterkteIetsOnder
-            else     -> str.sterkteLaagLabel
-        }
-
-        fun volhLabel(v: Int) = when {
-            v >= 110 -> str.volhVasthoudend
-            v >= 102 -> str.volhIetsVasthoudender
-            v >= 98  -> str.volhStandaard
-            v >= 90  -> str.volhIetsVoorzichtiger
-            else     -> str.volhVoorzichtig
-        }
-
-        val nachtTov = str.nachtRustigerDanDag.format(100 - n)
-
-        return buildString {
-            appendLine("📊 ${str.algoritmeparameters}")
-            appendLine("─────────────────────")
-            appendLine("• ${str.sterkte}: ${s}%  ${indicator(s)}  ${sterkteLabel(s)}")
-            appendLine("• ${str.timing}: ${t}%  ${indicator(t)}  ${frontloadLabel(t)}")
-            appendLine("• ${str.volhoudendheid}: ${v}%  ${indicator(v)}  ${volhLabel(v)}")
-            appendLine("• ${str.nachtN}    : ${n}%  ($nachtTov)")
-            appendLine("${str.nachtRespons}:     ${nightResponsLabel(prefs.get(StringKey.fcl_vnext_night_response_style))}")
-            append(    "${str.insulineverdeling}: ${FclStrings.get(context).doseStyleLabel(prefs.get(StringKey.fcl_vnext_dose_distribution_style))}")
-        }
-    }
-
     // ── Sectie 5: Analyzer-gestuurde waarden ─────────────────────────────────
 
     private fun buildAnalyzerConfigSectie(activeConfig: FCLvNextConfig?): String {
@@ -163,23 +109,14 @@ class FCLvNextStatusFormatter(
             .getBoolean("expert_mode_active", false)
         if (activeConfig == null) return "🔧 ANALYZER-WAARDEN\n─────────────────────\nConfig nog niet beschikbaar (wacht op eerste FCLvNext cyclus)"
 
-        val snapManual = FclActiveConfigBridge.get()?.manualMaxSmbDay ?: 0.0
-        // Gebruik de live berekende maxSMB via MaxSmbLearner (geleerde fractie
-        // x huidige manualMaxSmb). Identiek aan wat het MaxSMB-tabblad toont.
-        val liveMaxSmb = if (snapManual > 0.001)
-            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.MaxSmbLearner
-                .getMaxSmbDay(context, snapManual)
-        else activeConfig.maxSMB
+        // maxSMB volgt direct S% — geen aparte liveMaxSmb berekening nodig
+        val liveMaxSmb = activeConfig.maxSMB
 
         val mgdl = BgUnits.isMgdl(context)
         return buildString {
             appendLine("🔧 ${str.analyzerConfigHeader}")
             appendLine("─────────────────────")
-            appendLine("• ${str.maxSmbDagLabel}        : ${"%.2f".format(liveMaxSmb)} U")
-            if (snapManual > 0.001 && kotlin.math.abs(liveMaxSmb - snapManual) > 0.01) {
-                val richting = if (liveMaxSmb < snapManual) str.maxSmbVerlaagd else str.maxSmbVerhoogd
-                appendLine("  ↳ manual: ${"%.2f".format(snapManual)} U ($richting by analyzer)")
-            }
+            appendLine("• ${str.maxSmbDagLabel}        : ${"%.2f".format(liveMaxSmb)} U  (S% × handmatig)")
             appendLine("• ${str.iobRemdrempel}    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
             if (expertMode) {
                 appendLine()
@@ -221,12 +158,12 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v2.2.0")
+        appendLine(" 🧠 FCL V6 v2.2.3a")
         appendLine("════════════════════════")
         appendLine()
 
         appendLine(buildSituatieSectie(isNight, ui, advice))
-        appendLine()
+    //    appendLine()
 
         appendLine(buildBeslissingSectie(bolusAmount, basalRate, shouldDeliver))
         appendLine()
@@ -234,18 +171,15 @@ class FCLvNextStatusFormatter(
         appendLine(buildDosesSectie(history))
         appendLine()
 
-        appendLine(buildAlgoritmeSectie(activeConfig))
-        appendLine()
-
         appendLine("🏃 ${str.activiteit}")
         appendLine("─────────────────────")
         appendLine(activityLog ?: str.geenActiviteitdata)
-        appendLine()
+      //  appendLine()
 
         appendLine("🧬 ${str.autoSensHeader}")
         appendLine("─────────────────────")
         appendLine(resistanceLog ?: str.geenResistentieLog)
-        appendLine()
+    //    appendLine()
 
         appendLine("📈 ${str.glucoseStatHeader}")
         appendLine("─────────────────────")

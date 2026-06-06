@@ -148,12 +148,10 @@ object ConfigOverrideWriter {
         paramOverrides: ParamOverrides,
         reason: String,
         episodeCount: Int,
-        maxSmbDayLearned: Double? = null,
-        iobBrakeLearned: Double? = null
+            iobBrakeLearned: Double? = null
     ): Boolean {
         val stvWithSmb = stvMap.toMutableMap()
-        maxSmbDayLearned?.let { stvWithSmb["max_smb_day_learned_x100"] = (it * 100).toInt() }
-        iobBrakeLearned?.let  { stvWithSmb["iob_brake_learned_x1000"]  = (it * 1000).toInt() }
+            iobBrakeLearned?.let  { stvWithSmb["iob_brake_learned_x1000"]  = (it * 1000).toInt() }
         return postToBridge(stvWithSmb, reason, episodeCount, paramOverrides)
     }
 
@@ -197,7 +195,6 @@ object ConfigOverrideWriter {
         val timing         = stv["timing"]         ?: StvDefaults.TIMING
         val volhoudendheid = stv["volhoudendheid"] ?: StvDefaults.VOLHOUDENDHEID
         val nachtFactor    = stv["nacht_factor"]
-        val maxSmbRaw      = stv["max_smb_day_learned_x100"]
         val iobBrakeRaw    = stv["iob_brake_learned_x1000"]
 
         val override = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride.Override(
@@ -229,7 +226,6 @@ object ConfigOverrideWriter {
                         sustainedRiseMinTarget        = p.sustainedRiseMinTarget
                     )
             },
-            maxSmbDayLearned = maxSmbRaw?.let  { it.toDouble() / 100.0 },
             iobBrakeLearned  = iobBrakeRaw?.let { it.toDouble() / 1000.0 }
         )
         app.aaps.plugins.aps.openAPSFCL.vnext.FclOverrideBridge.post(override)

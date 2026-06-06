@@ -71,14 +71,14 @@ object FCLvNextActiveParamsWriter {
 
         // Snapshot altijd bijwerken — ook als config ongewijzigd is.
         // max_bolus_day kan veranderd zijn terwijl de rest van de config gelijk blijft.
-        val manualMaxSmbDay = prefs?.get(DoubleKey.max_bolus_day) ?: 1.25
+        val manualMaxBolus = prefs?.get(DoubleKey.max_bolus_day) ?: 1.25
         FclActiveConfigBridge.snapshot(
             config          = config,
             sterkte         = sterkte,
             timing          = timing,
             volhoudendheid  = volhoudendheid,
             nachtFactor     = nachtFactor,
-            manualMaxSmbDay = manualMaxSmbDay
+            manualMaxBolus = manualMaxBolus
         )
 
         // Cache-check: sla bestandsschrijving over als niets veranderd is
