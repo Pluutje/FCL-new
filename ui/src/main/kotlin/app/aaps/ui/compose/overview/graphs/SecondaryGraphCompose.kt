@@ -34,7 +34,7 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianLayerRangeProvider
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianValueFormatter
-import com.patrykandpatrick.vico.compose.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
 import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
@@ -317,12 +317,14 @@ fun SecondaryGraphCompose(
         processedActivityOverlay,
         maxX
     ) {
-        if (!hasRealTimeRange) return@LaunchedEffect
-
+        // Always populate the model — even with no data / no real time range — so the chart frame
+        // (axes, grid, now-line) renders the empty-state normalizer series instead of staying blank.
+        // (Matches TreatmentBeltGraphCompose.) When data is absent the processed* lists are empty,
+        // so only the normalizer is emitted; the primary range provider anchors an empty 0..1 axis.
         val slots = mutableListOf<SeriesSlot>()
         modelProducer.runTransaction {
             // Primary line layer data
-            lineSeries {
+            lineModel {
                 // Deviation lines (per-type step lines with gradient) — rendered first so other series draw on top
                 if (processedDeviationLines != null) {
                     for ((type, yValues) in processedDeviationLines.series) {
@@ -405,7 +407,7 @@ fun SecondaryGraphCompose(
 
             // Block 2 → Basal layer (end axis, flipped) OR secondary series layer (end axis)
             if (hasBasalLayer) {
-                lineSeries {
+                lineModel {
                     if (processedBasalActual.size >= 2) {
                         series(x = processedBasalActual.map { it.first }, y = processedBasalActual.map { it.second })
                     } else {
@@ -418,7 +420,7 @@ fun SecondaryGraphCompose(
                     }
                 }
             } else if (isDualAxis) {
-                lineSeries {
+                lineModel {
                     if (processedSecondary.isNotEmpty()) {
                         series(x = processedSecondary.map { it.first }, y = processedSecondary.map { it.second })
                     } else {
@@ -544,12 +546,18 @@ fun SecondaryGraphCompose(
         alignZeros(primaryY.min(), primaryY.max(), secondaryY.min(), secondaryY.max())
     }
 
-    val primaryRangeProvider = remember(maxX, primaryYMax, dualAxisRanges) {
+    // Empty graph (only the normalizer series at y=0) would auto-range to a degenerate [0,0]
+    // Y-axis and render an invisible frame. Anchor a default 0..1 range so the axis/grid/now-line
+    // still draw, matching the BG graph's empty frame (BG is anchored by its in-range belt).
+    val hasPrimaryData = activeSlots.isNotEmpty()
+    val primaryRangeProvider = remember(maxX, primaryYMax, dualAxisRanges, hasPrimaryData) {
         when {
             // Basal overlay case takes precedence (reserves top 25% of axis for basal)
             primaryYMax != null    -> CartesianLayerRangeProvider.fixed(minX = 0.0, maxX = maxX, minY = primaryYMax.first, maxY = primaryYMax.second)
             // Dual-axis: use zero-aligned primary range so zeros line up with secondary axis
             dualAxisRanges != null -> CartesianLayerRangeProvider.fixed(minX = 0.0, maxX = maxX, minY = dualAxisRanges.aMin, maxY = dualAxisRanges.aMax)
+            // No data: anchor a default range so the empty frame is visible
+            !hasPrimaryData        -> CartesianLayerRangeProvider.fixed(minX = 0.0, maxX = maxX, minY = 0.0, maxY = 1.0)
             else                   -> CartesianLayerRangeProvider.fixed(minX = 0.0, maxX = maxX)
         }
     }
@@ -611,7 +619,7 @@ fun SecondaryGraphCompose(
             chart = rememberCartesianChart(
                 primaryLayer, basalLayer,
                 startAxis = startAxis,
-                bottomAxis = bottomAxis, decorations = decorations, getXStep = { 1.0 }
+                bottomAxis = bottomAxis, decorations = decorations, getXStep = { _, _, _ -> 1.0 }
             ),
             modelProducer = modelProducer,
             modifier = modifier.fillMaxWidth(),
@@ -627,7 +635,7 @@ fun SecondaryGraphCompose(
             chart = rememberCartesianChart(
                 primaryLayer, secondaryLayer,
                 startAxis = startAxis,
-                bottomAxis = bottomAxis, decorations = decorations, getXStep = { 1.0 }
+                bottomAxis = bottomAxis, decorations = decorations, getXStep = { _, _, _ -> 1.0 }
             ),
             modelProducer = modelProducer,
             modifier = modifier.fillMaxWidth(),
@@ -638,7 +646,7 @@ fun SecondaryGraphCompose(
             chart = rememberCartesianChart(
                 primaryLayer,
                 startAxis = startAxis,
-                bottomAxis = bottomAxis, decorations = decorations, getXStep = { 1.0 }
+                bottomAxis = bottomAxis, decorations = decorations, getXStep = { _, _, _ -> 1.0 }
             ),
             modelProducer = modelProducer,
             modifier = modifier.fillMaxWidth(),
