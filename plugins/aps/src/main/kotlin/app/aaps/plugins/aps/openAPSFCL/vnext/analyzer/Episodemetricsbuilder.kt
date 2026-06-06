@@ -69,6 +69,14 @@ object EpisodeMetricsBuilder {
             // earlyBoostWasActive: was earlyBoost ooit actief in deze episode?
             val earlyBoostWasActive = rows.any { it.earlyBoostActive && it.earlyBoostFactor > 1.01 }
 
+            // afterloadWasActive: heeft de afterload guard ingegrepen tijdens deze episode?
+            // fd60Scale < 0.99: futureDrop60 guard actief (grote verwachte daling)
+            // highIobScale < 0.99: hoge IOB in late fase guard actief
+            // Minimaal 2 cycli actief om ruis te filteren.
+            val afterloadWasActive = rows.count {
+                it.afterloadFutureDrop60Scale < 0.99 || it.afterloadHighIobLateScale < 0.99
+            } >= 2
+
             // Gemiddelde voorspellingsfout per tijdvenster
             // predFout = gemiddelde(predictedPeak) - werkelijke piek
             // Positief = overschatting, negatief = onderschatting
@@ -151,8 +159,9 @@ object EpisodeMetricsBuilder {
                 capReachedCycles = capReachedCycles,
                 currentSterkte = currentSterkte,
                 firstFrontloadMinutes = firstFrontloadMinutes,
-                predFout0_20  = predFout0_20,
-                predFout20_40 = predFout20_40
+                predFout0_20       = predFout0_20,
+                predFout20_40      = predFout20_40,
+                afterloadWasActive = afterloadWasActive
             )
         }
     }

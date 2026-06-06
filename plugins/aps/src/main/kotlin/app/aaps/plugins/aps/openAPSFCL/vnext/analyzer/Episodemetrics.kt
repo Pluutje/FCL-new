@@ -87,5 +87,9 @@ data class EpisodeMetrics(
     // ── Frontload timing ─────────────────────────────────────────────────
     // firstFrontloadMinutes: minuten na episodestart van de EERSTE frontload-trigger.
     // -1 = geen frontload getriggerd in deze episode.
-    val firstFrontloadMinutes: Int = -1
+    val firstFrontloadMinutes: Int = -1,
+    // True als afterload guard (fd60 of highIob) actief was tijdens deze episode.
+    // Gebruikt door DFLearner: als episode goed afliep MET afterload, remmen we
+    // verdere D-daling — het guard deed het werk, niet een te lage D.
+    val afterloadWasActive: Boolean = false
 )

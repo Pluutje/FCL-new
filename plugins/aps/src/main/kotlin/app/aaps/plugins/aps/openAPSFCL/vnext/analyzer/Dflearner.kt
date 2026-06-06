@@ -348,11 +348,15 @@ object DFLearner {
             }
 
             // ── HYPO zonder frontload als oorzaak ────────────────────────────────
-            // Follow-ups kwamen WEL maar hypo trad toch op → D te hoog was oorzaak
+            // Follow-ups kwamen WEL maar hypo trad toch op → D te hoog was oorzaak.
+            // Als afterload actief was: de guard deed zijn best maar kon het niet
+            // voorkomen → D stap normaal maar niet vergroot.
             hypoStraf > 0.0 && fracHoog && safeFollowUp -> {
-                rawDeltaD = -tp.betaHypo * hypoStraf
-                rawDeltaF = 0.0   // F neutraal: follow-ups kwamen, budget was teruggehaald
-                diagnose  = "HYPO_D_PROBLEEM"
+                // Halfeer de stap als afterload al actief was (guard remde al)
+                val afterloadDemper = if (metrics.afterloadWasActive) 0.5 else 1.0
+                rawDeltaD = -tp.betaHypo * hypoStraf * afterloadDemper
+                rawDeltaF = 0.0
+                diagnose  = if (metrics.afterloadWasActive) "HYPO_D_DEMPED" else "HYPO_D_PROBLEEM"
             }
             // Gewone hypo met lage frontload → ook niet F schuld
             hypoStraf > 0.0 -> {
@@ -416,6 +420,20 @@ object DFLearner {
                 rawDeltaD = 0.0
                 rawDeltaF = +tp.gammaIobr * 1.2 * spreadStrength
                 diagnose  = "IOB_SPREAD_TE_LAAT"
+            }
+
+            // ── AFTERLOAD GUARD ACTIEF, EPISODE GOED AFGELOPEN ──────────────────
+            // De afterload guard heeft insuline teruggehouden en er was geen hypo/hyper.
+            // Dit betekent: S is nu defensief door eerdere hypo's, maar het guard
+            // doet zijn werk. Voorkom verdere D-daling; laat D neutraal.
+            // Als er géén afterload actief was en de episode was goed → S mag omhoog.
+            !peekHoog && !peekLaag && hypoStraf == 0.0 && metrics.afterloadWasActive -> {
+                // Guard was actief en hield de piek laag — goed resultaat.
+                // Beloon voorzichtig: kleine D-stap omhoog zodat S langzaam
+                // terugkeert naar het niveau zonder guard-afhankelijkheid.
+                rawDeltaD = +tp.alphaPiek * 0.3   // klein positief signaal
+                rawDeltaF = 0.0
+                diagnose  = "AFTERLOAD_GUARD_OK"
             }
 
             else -> {
