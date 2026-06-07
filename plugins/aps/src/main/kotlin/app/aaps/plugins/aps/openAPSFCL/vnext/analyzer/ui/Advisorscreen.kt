@@ -81,42 +81,39 @@ fun AdvisorScreen(
 
         Text(s.advisorAnalyse, style = MaterialTheme.typography.headlineMedium)
 
-        InfoTabPager(
-            modifier = Modifier,
-            pages = listOf(
+        val expertMode = androidx.compose.ui.platform.LocalContext.current
+            .getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("expert_mode_active", false)
 
-                // ── 1. Automaat: D/F zelflerend systeem (startblad) ───────
-                InfoTabPage(s.automaat) {
-                    DFControlTab(
-                        episodes    = episodes,
-                        metrics     = metrics,
-                        nachtFactor = nachtFactor,
-                        onApplyToAaps = onApplyDFToAaps
-                    )
-                },
+        val advisorPages = buildList {
+            // ── 1. Automaat: D/F zelflerend systeem (startblad) ──────────
+            add(InfoTabPage(s.automaat) {
+                DFControlTab(
+                    episodes    = episodes,
+                    metrics     = metrics,
+                    nachtFactor = nachtFactor,
+                    onApplyToAaps = onApplyDFToAaps
+                )
+            })
 
-                // MaxSMB tab verwijderd: maxSMB volgt nu direct S% (sterkte)
-                // MaxSmbLearner is uitgeschakeld. Zie FCLvNextConfig.
+            // ── 2. Nacht N: nachtfactor instelling ───────────────────────
+            add(InfoTabPage(s.nachtNLabel) {
+                NachtTab(
+                    currentNachtFactor = activeParams.nachtFactor,
+                    nightWindows = nightWindows,
+                    onApplyNacht = onApplyNacht
+                )
+            })
 
-                // ── 3. Parameters: handmatige fijnafstelling ──────────────
-                InfoTabPage(s.parameters) {
+            // ── Expert: Parameters en Analyse tabs ───────────────────────
+            if (expertMode) {
+                add(InfoTabPage(s.parameters) {
                     HandmatigParametersTab(
                         activeParams  = activeParams,
                         onApplyParams = onApplyParams
                     )
-                },
-
-                // ── 3. Nacht N: nachtfactor instelling ────────────────────
-                InfoTabPage(s.nachtNLabel) {
-                    NachtTab(
-                        currentNachtFactor = activeParams.nachtFactor,
-                        nightWindows = nightWindows,
-                        onApplyNacht = onApplyNacht
-                    )
-                },
-
-                // ── 4. Analyse: patroon + voorstel (achtergrond info) ──────
-                InfoTabPage(s.analyse) {
+                })
+                add(InfoTabPage(s.analyse) {
                     AdvisorOverviewCard(recommendation)
                     AdvisorSummaryCard(recommendation)
                     Spacer(Modifier.height(4.dp))
@@ -131,8 +128,13 @@ fun AdvisorScreen(
                     AdvisorSelectionCard(recommendation)
                     AdvisorAxisEvidenceCard(recommendation)
                     AdvisorPatternScoresCard(recommendation)
-                }
-            )
+                })
+            }
+        }
+
+        InfoTabPager(
+            modifier = Modifier,
+            pages = advisorPages
         )
     }
 }

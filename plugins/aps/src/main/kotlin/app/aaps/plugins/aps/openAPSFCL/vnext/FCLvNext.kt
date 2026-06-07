@@ -387,6 +387,7 @@ private var lastSegmentAt: DateTime? = null
 private var lastSmallCorrectionAt: DateTime? = null
 
 private var earlyConfirmDone: Boolean = false
+private var lastEpisodeExitAt: org.joda.time.DateTime? = null  // voor grace-period herstart
 
 // ── SensorBlip persistentie-teller ───────────────────────────────────────
 // Telt hoeveel opeenvolgende cycli de blip-conditie (slowFalling+fastRising)
@@ -2777,8 +2778,23 @@ class FCLvNext(
                         )
                     )
 
+        // ── Grace period herstart ───────────────────────────────────────
+        // Als de episode recent (< 10 min) is geëxiteerd terwijl BG nog
+        // boven target staat en slope positief is, mag de episode direct
+        // hervatten zonder de volledige startconditie.
+        // Voorkomt dat een korte slope-dip (1 cyclus) de episode reset.
+        val minutesSinceLastExit = lastEpisodeExitAt?.let {
+            org.joda.time.Minutes.minutesBetween(it, now).minutes
+        } ?: Int.MAX_VALUE
+        val graceRestart =
+            !peakEstimator.active &&
+            minutesSinceLastExit <= 10 &&
+            ctx.deltaToTarget >= 0.5 &&
+            ctx.slope >= 0.0 &&
+            ctx.iobRatio < 0.60
+
         // ── episode init/reset ──
-        if (!peakEstimator.active && episodeShouldBeActive) {
+        if (!peakEstimator.active && (episodeShouldBeActive || graceRestart)) {
             peakEstimator.active = true
             peakEstimator.startedAt = now
             peakEstimator.startBg = ctx.input.bgNow
@@ -2841,6 +2857,7 @@ class FCLvNext(
             ctx.iobRatio < 0.30
 
         if (iobBasedExit || stableExhaustedExit || staleEpisode) {
+            lastEpisodeExitAt = now  // bewaar voor grace-period herstart
             peakEstimator.active = false
             peakEstimator.state = PeakPredictionState.IDLE
             peakEstimator.confirmCounter = 0

@@ -88,8 +88,8 @@ object FclStrings_NL : FclStrings {
 
     // ── Analyzer — episode overzicht ──────────────────────────────────────
     override val overzicht              = "Overzicht"
-    override val piekAnalyse            = "Piek analyse"
-    override val marges                 = "Marges"
+    override val piekAnalyse            = "Piek & voorspelling"
+    override val marges                 = "Remactivaties"
     override val samenvatting           = "Samenvatting"
     override val insulineLabel          = "Insuline"
     override val iobAtPiek              = "IOB@piek"
@@ -153,9 +153,9 @@ object FclStrings_NL : FclStrings {
     override val advisorOverzicht   = "Analyse-overzicht"
     override val automaat           = "Automaat"
     override val maxSmb             = "MaxSMB"
-    override val parameters         = "Parameters"
+    override val parameters         = "Fijnafstelling"
     override val nachtNLabel        = "Nacht N"
-    override val analyse            = "Analyse"
+    override val analyse            = "Patroonanalyse"
     override val confidence         = "Confidence"
     override val gebruikt           = "Gebruikt"
     override val uitgesloten        = "Uitgesloten"

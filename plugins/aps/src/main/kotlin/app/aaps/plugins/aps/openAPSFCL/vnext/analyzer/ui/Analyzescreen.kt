@@ -107,24 +107,31 @@ fun AnalyzeScreen(
         )
 
         if (episode != null && metrics != null && classification != null && autonomy != null) {
+            val expertMode = androidx.compose.ui.platform.LocalContext.current
+                .getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+                .getBoolean("expert_mode_active", false)
+
+            val pages = buildList {
+                add(InfoTabPage(s.overzicht) {
+                    EpisodeOverviewCard(
+                        episode = episode,
+                        metrics = metrics,
+                        classification = classification,
+                        currentAxisState = currentAxisState
+                    )
+                })
+                if (expertMode) {
+                    add(InfoTabPage(s.piekAnalyse) {
+                        PeakAnalyseCard(episode)
+                    })
+                    add(InfoTabPage(s.marges) {
+                        MargesDashboardCard(episode)
+                    })
+                }
+            }
             InfoTabPager(
                 modifier = Modifier,
-                pages = listOf(
-                    InfoTabPage(s.overzicht) {
-                        EpisodeOverviewCard(
-                            episode = episode,
-                            metrics = metrics,
-                            classification = classification,
-                            currentAxisState = currentAxisState
-                        )
-                    },
-                    InfoTabPage(s.piekAnalyse) {
-                        PeakAnalyseCard(episode)
-                    },
-                    InfoTabPage(s.marges) {
-                        MargesDashboardCard(episode)
-                    }
-                )
+                pages = pages
             )
         }
     }
