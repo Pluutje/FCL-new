@@ -91,5 +91,13 @@ data class EpisodeMetrics(
     // True als afterload guard (fd60 of highIob) actief was tijdens deze episode.
     // Gebruikt door DFLearner: als episode goed afliep MET afterload, remmen we
     // verdere D-daling — het guard deed het werk, niet een te lage D.
-    val afterloadWasActive: Boolean = false
+    val afterloadWasActive: Boolean = false,
+
+    // ── EarlyBoost verdeling ─────────────────────────────────────────────
+    // earlyBoostDeliveredU: totale insuline in earlyBoost stages (1+2+3).
+    // earlyBoostFrac: earlyBoostDeliveredU / totalInsulinDelivered.
+    // Budget-neutraal leren: frac te laag → earlyBoostFactor omhoog,
+    // watchingFrontloadFrac evenredig omlaag zodat totaal gelijk blijft.
+    val earlyBoostDeliveredU: Double = 0.0,
+    val earlyBoostFrac: Double = 0.0
 )

@@ -148,11 +148,12 @@ object ConfigOverrideWriter {
         paramOverrides: ParamOverrides,
         reason: String,
         episodeCount: Int,
-            iobBrakeLearned: Double? = null
+        iobBrakeLearned: Double? = null,
+        context: android.content.Context? = null
     ): Boolean {
         val stvWithSmb = stvMap.toMutableMap()
-            iobBrakeLearned?.let  { stvWithSmb["iob_brake_learned_x1000"]  = (it * 1000).toInt() }
-        return postToBridge(stvWithSmb, reason, episodeCount, paramOverrides)
+        iobBrakeLearned?.let { stvWithSmb["iob_brake_learned_x1000"] = (it * 1000).toInt() }
+        return postToBridge(stvWithSmb, reason, episodeCount, paramOverrides, context)
     }
 
     /**
@@ -189,7 +190,8 @@ object ConfigOverrideWriter {
         stv: Map<String, Int>,
         reason: String,
         episodeCount: Int,
-        paramOverrides: ParamOverrides?
+        paramOverrides: ParamOverrides?,
+        context: android.content.Context? = null
     ): Boolean {
         val sterkte        = stv["sterkte"]        ?: StvDefaults.STERKTE
         val timing         = stv["timing"]         ?: StvDefaults.TIMING
@@ -209,13 +211,18 @@ object ConfigOverrideWriter {
                 if (p.isEmpty()) null else
                     app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride.ParamOverrides(
                         peakPredictionThreshold       = p.peakPredictionThreshold,
-                        watchingFrontloadFrac         = p.watchingFrontloadFrac,
+                        // watchingFrontloadFrac: gebruik geleerde waarde uit DFLearner
+                        watchingFrontloadFrac = p.watchingFrontloadFrac
+                            ?: context?.let { DFLearner.getWatchingFrac(it) },
                         watchingMinDeltaToTarget      = p.watchingMinDeltaToTarget,
                         commitCooldownMinutes         = p.commitCooldownMinutes,
                         peakPredictionHorizonH        = p.peakPredictionHorizonH,
                         iobStart                      = p.iobStart,
                         peakIobBrakeSuppressThreshold = p.peakIobBrakeSuppressThreshold,
-                        earlyBoostFactor              = p.earlyBoostFactor,
+                        // earlyBoostFactor: gebruik geleerde waarde uit DFLearner
+                        // als paramOverrides die niet expliciet zet.
+                        earlyBoostFactor = p.earlyBoostFactor
+                            ?: context?.let { DFLearner.getEarlyBoostFactor(it) },
                         earlyBoostMinConfidence       = p.earlyBoostMinConfidence,
                         earlyBoostMaxCommits          = p.earlyBoostMaxCommits,
                         earlyRiseFracMin              = p.earlyRiseFracMin,
@@ -230,5 +237,38 @@ object ConfigOverrideWriter {
         )
         app.aaps.plugins.aps.openAPSFCL.vnext.FclOverrideBridge.post(override)
         return true
+    }
+
+    /**
+     * Budget-neutrale verschuiving van insuline naar voren of achteren.
+     * earlyBoostFactor groter → watchingFrontloadFrac evenredig kleiner.
+     * Totale insuline per episode blijft hierdoor gelijk.
+     *
+     * @param direction  +1 = frontload groter (insuline naar voren)
+     *                   -1 = frontload kleiner (insuline naar achteren, bij hypo)
+     * @param stepFrac   relatieve stapgrootte per episode, standaard 3%
+     */
+    fun applyEarlyBoostShift(
+        currentOverrides: ParamOverrides,
+        stvMap: Map<String, Int>,
+        direction: Int,
+        reason: String,
+        episodeCount: Int,
+        stepFrac: Double = 0.03
+    ): Boolean {
+        val oldBoost    = currentOverrides.earlyBoostFactor    ?: Defaults.EARLY_BOOST_FACTOR
+        val oldWatching = currentOverrides.watchingFrontloadFrac ?: Defaults.WATCHING_FRONTLOAD_FRAC
+
+        val newBoost = (oldBoost * (1.0 + direction * stepFrac)).coerceIn(1.30, 2.20)
+        // Budget-neutraal: newWatching * newBoost = oldWatching * oldBoost
+        val newWatching = if (newBoost > 0.01)
+            (oldWatching * oldBoost / newBoost).coerceIn(0.45, 0.85)
+        else oldWatching
+
+        val updated = currentOverrides.copy(
+            earlyBoostFactor      = newBoost,
+            watchingFrontloadFrac = newWatching
+        )
+        return writeWithStvAndParams(stvMap, updated, reason, episodeCount)
     }
 }

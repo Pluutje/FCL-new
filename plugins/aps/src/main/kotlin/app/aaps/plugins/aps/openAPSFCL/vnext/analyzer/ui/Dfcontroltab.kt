@@ -303,7 +303,14 @@ fun DFControlTab(
         }
 
         // ── 5. Laatste aanpassingen door automaat ─────────────────────────
-        if (history.isNotEmpty()) {
+        val ebLastSig = DFLearner.getEbLastSignal(context)
+        val ebBoostNow = DFLearner.getEarlyBoostFactor(context)
+        val ebWatchNow = DFLearner.getWatchingFrac(context)
+        val ebStepNow  = DFLearner.getEbStepSize(context)
+        val ebDefault  = 1.69
+        val ebGewijzigd = kotlin.math.abs(ebBoostNow - ebDefault) > 0.005
+
+        if (history.isNotEmpty() || ebGewijzigd) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -312,6 +319,8 @@ fun DFControlTab(
                     Text("Laatste aanpassingen door automaat",
                          style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Divider()
+
+                    // S/T/V leerstappen
                     history.takeLast(5).reversed().forEach { step ->
                         val oldStv = DFMapping.toStvMap(step.oldD, step.oldF, 85)
                         val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
@@ -330,15 +339,56 @@ fun DFControlTab(
                                 Text(step.reason.take(60), style = MaterialTheme.typography.labelSmall,
                                      color = when {
                                          step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
-                                         step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") -> MaterialTheme.colorScheme.primary
+                                         step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") ->
+                                             MaterialTheme.colorScheme.primary
                                          else -> MaterialTheme.colorScheme.onSurfaceVariant
                                      })
                             }
                             Text(fmtTs(step.tsUtc), style = MaterialTheme.typography.labelSmall,
                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (step != history.takeLast(5).reversed().last())
+                        if (step != history.takeLast(5).reversed().last() || ebGewijzigd)
                             Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    }
+
+                    // ── EarlyBoost timing verschuiving ──────────────────────
+                    if (ebGewijzigd) {
+                        val ebRichtingTekst = when {
+                            ebBoostNow > ebDefault + 0.10 -> "Frontload sterk naar voren verschoven"
+                            ebBoostNow > ebDefault + 0.03 -> "Frontload licht naar voren verschoven"
+                            ebBoostNow < ebDefault - 0.10 -> "Frontload sterk teruggenomen"
+                            ebBoostNow < ebDefault - 0.03 -> "Frontload licht teruggenomen"
+                            else                          -> "Frontload nabij standaard"
+                        }
+                        val sigKleur = when (ebLastSig) {
+                            "BACK"    -> MaterialTheme.colorScheme.error
+                            "FORWARD" -> MaterialTheme.colorScheme.primary
+                            else      -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        val sigEmoji = when (ebLastSig) {
+                            "BACK"    -> "⬅"
+                            "FORWARD" -> "➡"
+                            else      -> "⏸"
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🚀", fontSize = 11.sp)
+                                    Text(ebRichtingTekst,
+                                         style = MaterialTheme.typography.bodySmall,
+                                         fontWeight = FontWeight.Medium)
+                                }
+                                Text("$sigEmoji Laatste signaal: $ebLastSig  ·  stap %.2fU".format(ebStepNow),
+                                     style = MaterialTheme.typography.labelSmall,
+                                     color = sigKleur)
+                            }
+                            Text("boost %.3f\nwatch %.3f".format(ebBoostNow, ebWatchNow),
+                                 style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                 textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
                     }
                 }
             }

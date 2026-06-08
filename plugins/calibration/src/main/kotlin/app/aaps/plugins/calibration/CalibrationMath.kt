@@ -72,7 +72,9 @@ data class CalibrationFit(
 internal fun weightFor(timestamp: Long, now: Long): Double {
     if (timestamp >= now) return 1.0
     val tauMs = T.days(TIME_DECAY_TAU_DAYS).msecs().toDouble()
-    return exp(-(now - timestamp) / tauMs)
+    // Minimumgewicht 0.10: oude punten wegen minder maar vallen nooit
+    // volledig weg. Voorkomt terugval van spline naar lineair puur door veroudering.
+    return exp(-(now - timestamp) / tauMs).coerceAtLeast(0.10)
 }
 
 /**

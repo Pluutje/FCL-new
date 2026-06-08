@@ -37,6 +37,32 @@ object DFLearner {
     private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
     private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
 
+    // ── EarlyBoost timing leren ──────────────────────────────────────────
+    // Budget-neutraal: earlyBoostFactor groter → watchingFrontloadFrac kleiner.
+    // Totale insuline per episode blijft hierdoor gelijk.
+    private const val KEY_EB_BOOST    = "eb_factor"        // earlyBoostFactor
+    private const val KEY_EB_WATCHING = "eb_watching_frac" // watchingFrontloadFrac
+    private const val KEY_EB_STEP     = "eb_step_size"     // adaptieve stapgrootte
+    private const val KEY_EB_LAST_SIG = "eb_last_signal"   // FORWARD / BACK / NONE
+    private const val KEY_EB_PREV_SIG = "eb_prev_signal"   // signaal daarvoor
+    private const val KEY_EB_FWD_STREAK = "eb_fwd_streak" // opeenvolgende FORWARD signalen
+
+    // Na convergentie: als EB_RESTART_AFTER opeenvolgende FORWARD signalen
+    // → maak één sprong van streak/3 stappen en reset streak.
+    // Zo blijft het systeem monitoren zonder volledig te stoppen.
+    private const val EB_RESTART_AFTER = 6  // 6 FORWARD signalen → kleine heropleving
+
+    private const val EB_BOOST_DEFAULT    = 1.69f
+    private const val EB_WATCHING_DEFAULT = 0.64f
+    // step is in absolute U (insuline), niet in %
+    private const val EB_STEP_DEFAULT     = 0.15f  // 0.15U per stap
+    private const val EB_BOOST_MIN        = 1.30
+    private const val EB_BOOST_MAX        = 2.20
+    private const val EB_WATCHING_MIN     = 0.45
+    private const val EB_WATCHING_MAX     = 0.85
+    private const val EB_STEP_MIN         = 0.02   // minimum 0.02U per stap
+    private const val EB_STEP_MAX         = 0.30   // maximum 0.30U per stap
+
     // Agressiviteitsschaal (1-9). Stap 1: opgeslagen maar nog niet
     // gekoppeld aan params (dat gebeurt in Stap 2).
     // 1=voorzichtig, 5=standaard, 9=agressief
@@ -422,6 +448,21 @@ object DFLearner {
                 diagnose  = "IOB_SPREAD_TE_LAAT"
             }
 
+            // ── EARLYBOOST TE KLEIN: frontload naar voren schuiven ────────────
+            // earlyBoostFrac < 0.45: minder dan 45% van de insuline zat in de
+            // earlyBoost stages. De rest was watching-commits die later kwamen.
+            // Budget-neutraal signaal: earlyBoostFactor groter, watching kleiner.
+            // Alleen bij piek > 9.5 (het lukt de stijging niet te remmen) en
+            // safeFollowUp (er waren follow-ups, dus de eerste commit was niet te groot).
+            !peekHoog && !peekLaag && metrics.earlyBoostFrac in 0.01..0.44
+                && !metrics.hypoDetected && safeFollowUp -> {
+                rawDeltaD = 0.0
+                rawDeltaF = 0.0
+                // earlyBoostFactor: klein stapje omhoog (3% per episode)
+                // Bijbehorende watchingFrontloadFrac stap omlaag (budget-neutraal)
+                diagnose = "EARLYBOOST_TE_KLEIN"
+            }
+
             // ── AFTERLOAD GUARD ACTIEF, EPISODE GOED AFGELOPEN ──────────────────
             // De afterload guard heeft insuline teruggehouden en er was geen hypo/hyper.
             // Dit betekent: S is nu defensief door eerdere hypo's, maar het guard
@@ -533,6 +574,14 @@ object DFLearner {
         )
 
         appendHistory(context, step, skip = skipHistory)
+
+        // ── EarlyBoost timing leren ──────────────────────────────────
+        // Pas earlyBoostFactor en watchingFrontloadFrac aan op basis van
+        // hoe goed de frontload-timing was in deze episode.
+        if (!skipSideEffects) {
+            evaluateEarlyBoost(context, metrics)
+        }
+
         return step
     }
 
@@ -614,5 +663,141 @@ object DFLearner {
                 mealType   = if (p.size > 10) p[10] else "GEMENGD"
             )
         } catch (_: Exception) { null }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // EarlyBoost timing leren
+    // Budget-neutraal: earlyBoostFactor groter → watchingFrontloadFrac kleiner.
+    // Totale insuline per episode onveranderd.
+    // ─────────────────────────────────────────────────────────────────────
+
+    fun getEarlyBoostFactor(context: android.content.Context): Double =
+        prefs(context).getFloat(KEY_EB_BOOST, EB_BOOST_DEFAULT).toDouble()
+
+    fun getWatchingFrac(context: android.content.Context): Double =
+        prefs(context).getFloat(KEY_EB_WATCHING, EB_WATCHING_DEFAULT).toDouble()
+
+    fun getEbStepSize(context: android.content.Context): Double =
+        prefs(context).getFloat(KEY_EB_STEP, EB_STEP_DEFAULT).toDouble()
+
+    /** Laatste earlyBoost leersignaal: "FORWARD", "BACK" of "NONE". */
+    fun getEbLastSignal(context: android.content.Context): String =
+        prefs(context).getString(KEY_EB_LAST_SIG, "NONE") ?: "NONE"
+
+    /**
+     * Evalueer één episode en pas earlyBoostFactor/watchingFrac aan.
+     *
+     * FORWARD: earlyBoostFrac < 0.55 en piek > 9.5 en geen hypo
+     *          → kleine stap naar voren (+stepSize)
+     * BACK:    hypo én earlyBoostWasActive én geen externe bolus
+     *          → 3 stappen terug (3 × stepSize)
+     *          → als vorige signaal FORWARD was: stepSize halveren (oscillatiepunt)
+     * NONE:    geen aanpassing
+     */
+    fun evaluateEarlyBoost(
+        context: android.content.Context,
+        metrics: EpisodeMetrics
+    ): String? {
+        if (metrics.hasManualCorrection) return null
+        if (metrics.totalInsulinDelivered < 1.0) return null
+
+        val p = prefs(context)
+        val oldBoost    = p.getFloat(KEY_EB_BOOST,    EB_BOOST_DEFAULT).toDouble()
+        val oldWatching = p.getFloat(KEY_EB_WATCHING, EB_WATCHING_DEFAULT).toDouble()
+        var step        = p.getFloat(KEY_EB_STEP,     EB_STEP_DEFAULT).toDouble()
+        val lastSig     = p.getString(KEY_EB_LAST_SIG, "NONE") ?: "NONE"
+
+        // Absolute budget-neutraliteit:
+        // earlyBoostDeliveredU en watchingDeliveredU zijn gemeten per episode.
+        // stepU = vaste absolute stap in eenheden insuline.
+        // earlyBoostFactor aanpassing: factor zodat +stepU in earlyBoost output.
+        // watchingFrac aanpassing: -stepU / (maxSMB × watchingCommits).
+        // Zo stijgt earlyBoost met precies stepU en daalt watching met precies stepU.
+        val ebDeliveredU = metrics.earlyBoostDeliveredU
+        val watchCommits = metrics.followUpCommitCount.coerceAtLeast(1)
+        val maxSmb = metrics.totalInsulinDelivered.let {
+            // Schat maxSMB: earlyBoostDeliveredU / earlyBoostFactor / ~3 stages
+            if (oldBoost > 0) (ebDeliveredU / oldBoost / 2.5).coerceIn(1.5, 4.0)
+            else 2.46
+        }
+
+        // ── Bepaal signaal ──────────────────────────────────────────────
+        val hypoOorzaakFrontload =
+            metrics.hypoDetected &&
+            metrics.earlyBoostWasActive &&
+            !metrics.hasManualCorrection
+
+        val frontloadTeKlein =
+            !metrics.hypoDetected &&
+            metrics.earlyBoostFrac in 0.01..0.54 &&
+            metrics.peakBg > 9.5 &&
+            metrics.followUpCommitCount >= 1
+
+        val signal = when {
+            hypoOorzaakFrontload -> "BACK"
+            frontloadTeKlein     -> "FORWARD"
+            else                 -> "NONE"
+        }
+
+        if (signal == "NONE") {
+            p.edit().putString(KEY_EB_PREV_SIG, lastSig)
+                    .putString(KEY_EB_LAST_SIG, "NONE").apply()
+            return null
+        }
+
+        // ── Oscillatie: FORWARD gevolgd door BACK → halveer stapgrootte ─
+        if (signal == "BACK" && lastSig == "FORWARD") {
+            step = (step / 2.0).coerceAtLeast(EB_STEP_MIN)
+        }
+
+        // Convergentie: stapgrootte op minimum → verlaagde intensiteit, nooit volledig stop.
+        // Tel opeenvolgende FORWARD signalen; na EB_RESTART_AFTER stappen
+        // maak één sprong van streak/3 en reset zodat het systeem blijft monitoren.
+        val fwdStreak = p.getInt(KEY_EB_FWD_STREAK, 0)
+        if (step <= EB_STEP_MIN && signal == "FORWARD") {
+            val newStreak = fwdStreak + 1
+            if (newStreak < EB_RESTART_AFTER) {
+                // Nog niet genoeg opeenvolgende FORWARD → sla op, wacht
+                p.edit().putInt(KEY_EB_FWD_STREAK, newStreak).apply()
+                return "EARLYBOOST: convergentie monitoring ($newStreak/${EB_RESTART_AFTER})"
+            } else {
+                // Genoeg opeenvolgende FORWARD: maak één sprong van streak/3 stappen
+                step = (EB_STEP_MIN * (newStreak / 3.0)).coerceAtMost(EB_STEP_MAX / 2)
+                p.edit().putInt(KEY_EB_FWD_STREAK, 0).apply()  // reset streak
+            }
+        } else {
+            // Niet-FORWARD signaal: reset streak
+            if (fwdStreak > 0) p.edit().putInt(KEY_EB_FWD_STREAK, 0).apply()
+        }
+
+        // ── Nieuwe waarden (absoluut budget-neutraal) ───────────────────
+        // stepU = absolute insuline-stap (bijv. 0.15U).
+        // Bij BACK: 3× stepU terug zodat asymmetrie voorzichtigheid borgt.
+        val stepU = step  // step is nu in U, niet in %
+        val absStep = if (signal == "FORWARD") stepU else 3.0 * stepU
+        val direction = if (signal == "FORWARD") 1.0 else -1.0
+
+        // earlyBoostFactor: pas aan zodat earlyBoostDeliveredU met absStep verandert
+        val boostDeltaFrac = if (ebDeliveredU > 0.1)
+            direction * absStep / ebDeliveredU else direction * 0.03
+        val newBoost = (oldBoost * (1.0 + boostDeltaFrac)).coerceIn(EB_BOOST_MIN, EB_BOOST_MAX)
+
+        // watchingFrontloadFrac: pas aan zodat watchingDeliveredU met -absStep verandert
+        val watchDeltaFrac = -direction * absStep / (maxSmb * watchCommits)
+        val newWatching = (oldWatching + watchDeltaFrac).coerceIn(EB_WATCHING_MIN, EB_WATCHING_MAX)
+
+        p.edit()
+            .putFloat(KEY_EB_BOOST,    newBoost.toFloat())
+            .putFloat(KEY_EB_WATCHING, newWatching.toFloat())
+            .putFloat(KEY_EB_STEP,     step.toFloat())
+            .putString(KEY_EB_PREV_SIG, lastSig)
+            .putString(KEY_EB_LAST_SIG, signal)
+            .apply()
+
+
+        val richting = if (signal == "FORWARD") "→ voren" else "← terug"
+        return "EARLYBOOST $richting: boost ${"%.3f".format(oldBoost)}" +
+            "→${"%.3f".format(newBoost)} watch ${"%.3f".format(oldWatching)}" +
+            "→${"%.3f".format(newWatching)} step=${"%.4f".format(step)} [$signal]"
     }
 }

@@ -42,11 +42,18 @@ class FCLvNextStatusFormatter(
             val sign = if (d >= 0) "+" else ""
             " ($sign${BgUnits.formatBgValue(d, mgdl)}/5m)"
         } ?: ""
+        // Piek-lijn: alleen tonen als er een actieve stijgingsfase is.
+        // peakState "IDLE" = geen actieve episode → lijn weglaten.
+        // Hiermee wordt voorkomen dat "Sterke stijging actief" staat
+        // terwijl de BG aan het dalen is na een maaltijdepisode.
+        val peakStateStr = advice?.peakState ?: "IDLE"
+        val peakIsActive = peakStateStr == "WATCHING" || peakStateStr == "CONFIRMED"
         val peakLine = when {
             advice == null -> ""
-            advice.predictedPeak != null && advice.predictedPeak > 0 ->
+            peakIsActive && advice.predictedPeak != null && advice.predictedPeak > 0 ->
                 "${str.fclPiekSterkeStijging}  →  ${str.verwacht} ${BgUnits.formatBg(advice.predictedPeak, mgdl)}"
-            else -> str.fclPiekGeen
+            peakIsActive -> str.fclPiekWatching
+            else -> ""  // IDLE: geen piek-lijn tonen
         }
         return buildString {
             appendLine("🏃 $header  $timeStr")
@@ -158,7 +165,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v2.2.8")
+        appendLine(" 🧠 FCL V6 v2.3.2")
         appendLine("════════════════════════")
         appendLine()
 

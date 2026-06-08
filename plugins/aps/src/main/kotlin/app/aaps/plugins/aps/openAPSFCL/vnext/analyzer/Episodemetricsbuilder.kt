@@ -77,6 +77,13 @@ object EpisodeMetricsBuilder {
                 it.afterloadFutureDrop60Scale < 0.99 || it.afterloadHighIobLateScale < 0.99
             } >= 2
 
+            // EarlyBoost verdeling: som van doses gegeven als earlyBoost-stage
+            val earlyBoostDeliveredU = rows
+                .filter { it.earlyBoostActive }
+                .sumOf { it.deliveredTotal }
+            val earlyBoostFrac = if (totalInsulinDelivered > 0.1)
+                earlyBoostDeliveredU / totalInsulinDelivered else 0.0
+
             // Gemiddelde voorspellingsfout per tijdvenster
             // predFout = gemiddelde(predictedPeak) - werkelijke piek
             // Positief = overschatting, negatief = onderschatting
@@ -161,7 +168,9 @@ object EpisodeMetricsBuilder {
                 firstFrontloadMinutes = firstFrontloadMinutes,
                 predFout0_20       = predFout0_20,
                 predFout20_40      = predFout20_40,
-                afterloadWasActive = afterloadWasActive
+                afterloadWasActive = afterloadWasActive,
+                earlyBoostDeliveredU = earlyBoostDeliveredU,
+                earlyBoostFrac = earlyBoostFrac
             )
         }
     }

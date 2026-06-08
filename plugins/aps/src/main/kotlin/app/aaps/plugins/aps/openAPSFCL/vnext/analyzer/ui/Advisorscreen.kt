@@ -894,10 +894,61 @@ private fun HandmatigParametersTab(
             ParameterLeesRij("IOB-remdrempel piek", "%.2f".format(activeParams.peakIobBrakeSuppressThreshold),     D.PEAK_IOB_BRAKE_SUPPRESS)
         }
 
+        val ctx3 = androidx.compose.ui.platform.LocalContext.current
+        val ebBoost   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEarlyBoostFactor(ctx3)
+        val ebWatch   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getWatchingFrac(ctx3)
+        val ebStep    = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEbStepSize(ctx3)
+        val ebDefault = 1.69
+        val ebGeleerd = kotlin.math.abs(ebBoost - ebDefault) > 0.005
+
+        // Leesbare richting gebaseerd op afwijking t.o.v. standaard
+        val ebRichting = when {
+            !ebGeleerd                -> "Standaard — nog geen aanpassing"
+            ebBoost > ebDefault + 0.10 -> "Sterk naar voren verschoven"
+            ebBoost > ebDefault + 0.03 -> "Licht naar voren verschoven"
+            ebBoost < ebDefault - 0.10 -> "Sterk naar achteren bijgesteld"
+            ebBoost < ebDefault - 0.03 -> "Licht naar achteren bijgesteld"
+            else                      -> "Dicht bij standaard"
+        }
+        // Zoekstap: hoe fijn zoekt het systeem momenteel?
+        val ebStapUitleg = when {
+            ebStep >= 0.10 -> "Grofzoeken (%.2fU stap)".format(ebStep)
+            ebStep >= 0.04 -> "Normaal zoeken (%.2fU stap)".format(ebStep)
+            else           -> "Fijnzoeken — nabij optimum (%.2fU stap)".format(ebStep)
+        }
+
         ParameterLeesCategorie("🚀 Early Boost") {
             ParameterLeesRij("Boostfactor",          "%.2f ×".format(activeParams.earlyBoostFactor),            D.EARLY_BOOST_FACTOR)
             ParameterLeesRij("Min. betrouwbaarheid", "%.2f".format(activeParams.earlyBoostMinConfidence),       D.EARLY_BOOST_MIN_CONFIDENCE)
             ParameterLeesRij("Max. boost-commits",   "${activeParams.earlyBoostMaxCommits}",                    D.EARLY_BOOST_MAX_COMMITS.toDouble(), activeParams.earlyBoostMaxCommits.toDouble())
+            if (ebGeleerd || true) {
+                Spacer(Modifier.height(4.dp))
+                // Geleerde timing stand
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Geleerde timingverschuiving",
+                             style = MaterialTheme.typography.bodySmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(ebRichting,
+                             style = MaterialTheme.typography.bodySmall,
+                             fontWeight = FontWeight.Medium,
+                             color = when {
+                                 ebBoost > ebDefault + 0.03 -> MaterialTheme.colorScheme.primary
+                                 ebBoost < ebDefault - 0.03 -> MaterialTheme.colorScheme.error
+                                 else -> MaterialTheme.colorScheme.onSurface
+                             })
+                        Text(ebStapUitleg,
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text("boost %.3f\nwatch %.3f".format(ebBoost, ebWatch),
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                         textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                }
+            }
         }
 
         ParameterLeesCategorie("🔀 Frontload-shift") {

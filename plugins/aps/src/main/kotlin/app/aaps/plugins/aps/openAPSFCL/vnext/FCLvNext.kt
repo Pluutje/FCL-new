@@ -1834,7 +1834,12 @@ private fun computeEarlyDoseDecision(
     // Alleen als BG nog stijgt (slope >= 0.50) en IOB nog niet te hoog.
     // iobRatio drempel: 0.55 normaal, maar 0.65 bij pred_peak >= 11.5
     // want de piek-voorspelling geeft extra zekerheid dat de dosis nodig is.
-    val stage3IobMax = if (peak.predictedPeak >= 11.5) 0.65 else 0.55
+    // stage3IobMax: verhoogd van 0.55 naar 0.65 (normaal) en 0.73 (hoge piek).
+    // Reden: na stage2 schoot iobRatio naar 0.62-0.67, waardoor stage3 36 min
+    // werd uitgesteld. Stage3 is de derde pre-bolus commit — die hoort in de
+    // stijgingsfase, niet op de piek. Veilig: de absoluteUcap (maxSMB*1.5)
+    // en de iobPenalty in de dosis-berekening remmen bij hoge IOB vanzelf af.
+    val stage3IobMax = if (peak.predictedPeak >= 11.5) 0.73 else 0.65
 
     // ── Second Boost Window: versoepel stage3 na een grote stage2 ────────────
     // Probleem: na een grote stage2 commit (bijv. 3.5U) schiet iobRatio direct
@@ -4050,7 +4055,17 @@ class FCLvNext(
         val watchingSlopeOk = (ctx.slope >= config.watchingMinSlope)
         val watchingDeltaOk = (ctx.deltaToTarget >= config.watchingMinDeltaToTarget)
         val watchingPeakRiseOk = (peak.riseSinceStart >= config.watchingMinPeakRise)
-        val watchingIobOk = (ctx.iobRatio <= config.watchingMaxIobRatio)
+        // watchingMaxIobRatio wordt verlaagd als futureDrop60 hoog is:
+        // Als het algoritme al weet dat er een grote IOB-gedreven daling verwacht wordt,
+        // moet watching eerder stoppen om te voorkomen dat er te veel insuline
+        // gegeven wordt terwijl de daling al gebakken zit in de huidige IOB.
+        // futureDrop60 in mmol: bij 0.56 mmol geen effect, bij 1.36 mmol max -0.15 verlaging.
+        val fd60ForWatching = peak.futureDrop60  // mmol
+        val watchingIobAdjustment = if (fd60ForWatching > 0.56) {
+            ((fd60ForWatching - 0.56) / 0.80).coerceIn(0.0, 1.0) * 0.15
+        } else 0.0
+        val effectiveWatchingMaxIobRatio = config.watchingMaxIobRatio - watchingIobAdjustment
+        val watchingIobOk = (ctx.iobRatio <= effectiveWatchingMaxIobRatio)
 
         val watchingContextOk =
             (peak.state == PeakPredictionState.WATCHING) &&
@@ -4919,35 +4934,60 @@ class FCLvNext(
         // Twee lagen die onafhankelijk de dosis schalen:
         //
         // Laag 1 — futureDrop60Scale:
-        //   Als het algoritme al een grote IOB-gedreven daling voorspelt
-        //   (future_drop_60 > 15 mg/dL = 0.83 mmol), schaal de dosis naar beneden.
-        //   Gradueel: bij 15 mg/dL geen effect, bij 40+ max 70% reductie.
-        //   Beschermt NIET bij echte tweede gang want die heeft lage futureDrop.
+        //   futureDrop60 in mmol (= deltaIob × effectiveISF). Drempel 0.56 mmol.
+        //   Bereik 0.56-1.36 mmol, max 80% reductie. Normale frontload heeft
+        //   fd60 < 0.10 mmol → guard volledig inactief.
         //
         // Laag 2 — highIobLateWaveScale:
-        //   Alleen actief als BEIDE condities gelden:
-        //   iob_ratio > 0.80 ÉN > 60 min na maaltijdstart.
-        //   Echte tweede gang begint eerder en bij lagere IOB → niet geraakt.
+        //   Actief als iob_ratio > 0.70 ÉN > 40 min na maaltijdstart.
+        //   Bereik 0.70-1.00, max 60% reductie.
+        //
+        // Laag 3 — watchingMaxIobRatio verlaging:
+        //   Watching stopt eerder als fd60 hoog is — blokkeert grote doses
+        //   voordat de afterload guard ze hoeft te schalen.
         // ─────────────────────────────────────────────
         if (commandedDose > 0.0) {
 
             // Laag 1: futureDrop60 guard
-            val futureDrop60MgdL = peak.futureDrop60   // al in mg/dL in peak object
-            // Drempel verlaagd van 15 naar 10 mg/dL (= 0.56 mmol):
-            // eerder ingrijpen bij hoge future_drop, bereik 10-40 = 30 mg/dL span
-            val futureDrop60Scale: Double = if (futureDrop60MgdL > 10.0) {
-                val excess = (futureDrop60MgdL - 10.0) / 30.0  // 0..1 over bereik 10-40 mg/dL
-                1.0 - (excess * 0.70).coerceIn(0.0, 0.70)       // max 70% reductie
-            } else 1.0
+            // futureDrop60 is in mmol/L (deltaIob * effectiveISF).
+            // Drempel: 0.56 mmol (= 10 mg/dL equivalent).
+            // Bereik: 0.80 mmol span (0.56-1.36 mmol) met max 80% reductie.
+            // Steile curve: bij fd60=0.99 mmol (typische piek) al 57% reductie.
+            // Vloer 20%: nooit meer dan 80% reductie zodat er altijd een kleine
+            // correctiedosis mogelijk blijft bij echte tweede gang.
+            // Normale frontload heeft fd60 < 0.10 mmol → guard volledig inactief.
+            val futureDrop60Mmol = peak.futureDrop60   // in mmol/L
+            // iob_ratio bepaalt hoe sterk de fd60 guard actief is:
+            //   iob_r < 0.50: frontload nog volop nodig → guard inactief
+            //   iob_r 0.50-0.65: overgang → guard gradueel actief
+            //   iob_r > 0.65: genoeg insuline aan boord → guard volledig actief
+            // Dit onderscheidt correctie: bij episode 1 (iob_r 0.62-0.83)
+            // remt de guard terecht, bij episode 2 met lage iob_r (0.47-0.56)
+            // laat de guard de frontload vrij.
+            val fd60IobFactor: Double = when {
+                ctx.iobRatio < 0.50 -> 0.0
+                ctx.iobRatio <= 0.65 -> (ctx.iobRatio - 0.50) / 0.15
+                else -> 1.0
+            }
+            val futureDrop60Scale: Double = if (futureDrop60Mmol <= 8.0 || fd60IobFactor == 0.0) {
+                1.0
+            } else {
+                val baseReductie = when {
+                    futureDrop60Mmol <= 12.0 -> ((futureDrop60Mmol - 8.0) / 4.0) * 0.40
+                    else -> (0.40 + ((futureDrop60Mmol - 12.0) / 8.0) * 0.40).coerceAtMost(0.80)
+                }
+                (1.0 - baseReductie * fd60IobFactor).coerceAtLeast(0.20)
+            }
 
             // Laag 2: hoge IOB + late fase guard
             val minutesSinceEpisode = mealEpisodeStartTime?.let {
                 org.joda.time.Minutes.minutesBetween(it, now).minutes
             } ?: 0
-            // Tijdsgrens verlaagd van 60 naar 50 min: eerder remmen in late fase
-            val isLatePhase = minutesSinceEpisode > 50
-            val highIobLateWaveScale: Double = if (isLatePhase && ctx.iobRatio > 0.80) {
-                val excess = (ctx.iobRatio - 0.80) / 0.20   // 0..1 over bereik 0.80-1.00
+            // Tijdsgrens 40 min: remmen zodra maaltijdcurve begint af te vlakken
+            val isLatePhase = minutesSinceEpisode > 40
+            // Drempel 0.70: ook bij iob_ratio 0.70-0.79 al licht remmen
+            val highIobLateWaveScale: Double = if (isLatePhase && ctx.iobRatio > 0.70) {
+                val excess = (ctx.iobRatio - 0.70) / 0.30   // 0..1 over bereik 0.70-1.00
                 1.0 - (excess * 0.60).coerceIn(0.0, 0.60)   // max 60% reductie
             } else 1.0
 
@@ -4959,7 +4999,7 @@ class FCLvNext(
                 val beforeAfterload = commandedDose
                 commandedDose *= afterloadScale
                 status.append(
-                    "AFTERLOAD GUARD: fd60=${"%.1f".format(futureDrop60MgdL)}mg/dL " +
+                    "AFTERLOAD GUARD: fd60=${"%.2f".format(futureDrop60Mmol)}mmol " +
                         "fdScale=${"%.2f".format(futureDrop60Scale)} " +
                         "iobR=${"%.2f".format(ctx.iobRatio)} " +
                         "late=${isLatePhase}(${minutesSinceEpisode}min) " +

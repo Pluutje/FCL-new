@@ -138,7 +138,11 @@ fun fitSplineCalibration(entries: List<CalibrationEntry>, now: Long): SplineFit?
     val useTwoKnots = mid.size >= MIN_POINTS_MID_SEGMENT && high.size >= MIN_POINTS_HIGH_SEGMENT
 
     return if (useTwoKnots) {
+        // Probeer twee-knooppunt spline; val terug op één knooppunt als die faalt.
+        // Dit voorkomt dat de spline volledig wegvalt als het HIGH segment te smal is
+        // (bijv. als alle HIGH punten net boven KNOT2 zitten).
         fitTwoKnotSpline(entries, low, mid, high, linear, now)
+            ?: fitOneKnotSpline(entries, low, mid + high, linear, now)
     } else {
         fitOneKnotSpline(entries, low, mid + high, linear, now)
     }

@@ -36,7 +36,7 @@ object FclStrings_NL : FclStrings {
     override val fclPiekWatching            = "Watching actief"
     override val verwacht                   = "verwacht"
     override val beslissing                 = "BESLISSING"
-    override val geenIngreep                = "Geen ingreep"
+    override val geenIngreep                = "Geen ingreep deze cyclus"
     override val latsteDosisFcl             = "LAATSTE DOSES"
     override val latsteDosisFclEmpty        = "Geen recente afleveringen"
     override val algoritmeparameters        = "ALGORITMEPARAMETERS"
