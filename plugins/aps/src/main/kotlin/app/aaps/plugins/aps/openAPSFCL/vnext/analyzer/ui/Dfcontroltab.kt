@@ -201,6 +201,45 @@ fun DFControlTab(
                          style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+
+                // ── EarlyBoost compacte status (altijd zichtbaar) ──────────
+                val ebBoostCard = DFLearner.getEarlyBoostFactor(context)
+                val ebWatchCard = DFLearner.getWatchingFrac(context)
+                val ebSigCard   = DFLearner.getEbLastSignal(context)
+                val ebTsCard    = DFLearner.getEbLastSignalTs(context)
+                val ebDefaultCard = 1.69
+                val ebStatusTekst = when {
+                    kotlin.math.abs(ebBoostCard - ebDefaultCard) <= 0.005 -> "🚀 Frontload-timing: standaard"
+                    ebBoostCard > ebDefaultCard + 0.10 -> "🚀 Frontload-timing: sterk naar voren"
+                    ebBoostCard > ebDefaultCard + 0.03 -> "🚀 Frontload-timing: licht naar voren"
+                    ebBoostCard < ebDefaultCard - 0.10 -> "🚀 Frontload-timing: sterk teruggenomen"
+                    ebBoostCard < ebDefaultCard - 0.03 -> "🚀 Frontload-timing: licht teruggenomen"
+                    else                               -> "🚀 Frontload-timing: nabij standaard"
+                }
+                val ebStatusKleur = when {
+                    ebBoostCard > ebDefaultCard + 0.03 -> MaterialTheme.colorScheme.primary
+                    ebBoostCard < ebDefaultCard - 0.03 -> MaterialTheme.colorScheme.error
+                    else                               -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                val ebTsFormatted = if (ebTsCard > 0L) {
+                    try {
+                        java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+                            .withZone(java.time.ZoneId.systemDefault())
+                            .format(java.time.Instant.ofEpochMilli(ebTsCard))
+                    } catch (_: Exception) { "" }
+                } else ""
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(ebStatusTekst,
+                         style = MaterialTheme.typography.labelSmall,
+                         color = ebStatusKleur)
+                    if (ebTsFormatted.isNotEmpty()) {
+                        Text(ebTsFormatted,
+                             style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    }
+                }
             }
         }
 
@@ -307,10 +346,13 @@ fun DFControlTab(
         val ebBoostNow = DFLearner.getEarlyBoostFactor(context)
         val ebWatchNow = DFLearner.getWatchingFrac(context)
         val ebStepNow  = DFLearner.getEbStepSize(context)
+        val ebLastTs   = DFLearner.getEbLastSignalTs(context)
         val ebDefault  = 1.69
         val ebGewijzigd = kotlin.math.abs(ebBoostNow - ebDefault) > 0.005
+        // Toon EB-sectie zodra er ooit een evaluatie was (ts > 0) of als er een aanpassing is
+        val ebSectieZichtbaar = ebGewijzigd || ebLastTs > 0L
 
-        if (history.isNotEmpty() || ebGewijzigd) {
+        if (history.isNotEmpty() || ebSectieZichtbaar) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -347,18 +389,19 @@ fun DFControlTab(
                             Text(fmtTs(step.tsUtc), style = MaterialTheme.typography.labelSmall,
                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (step != history.takeLast(5).reversed().last() || ebGewijzigd)
+                        if (step != history.takeLast(5).reversed().last() || ebSectieZichtbaar)
                             Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
                     }
 
                     // ── EarlyBoost timing verschuiving ──────────────────────
-                    if (ebGewijzigd) {
+                    if (ebSectieZichtbaar) {
                         val ebRichtingTekst = when {
                             ebBoostNow > ebDefault + 0.10 -> "Frontload sterk naar voren verschoven"
                             ebBoostNow > ebDefault + 0.03 -> "Frontload licht naar voren verschoven"
                             ebBoostNow < ebDefault - 0.10 -> "Frontload sterk teruggenomen"
                             ebBoostNow < ebDefault - 0.03 -> "Frontload licht teruggenomen"
-                            else                          -> "Frontload nabij standaard"
+                            ebGewijzigd                   -> "Frontload nabij standaard"
+                            else                          -> "Frontload-timing: standaard (nog geen aanpassing)"
                         }
                         val sigKleur = when (ebLastSig) {
                             "BACK"    -> MaterialTheme.colorScheme.error
@@ -370,6 +413,13 @@ fun DFControlTab(
                             "FORWARD" -> "➡"
                             else      -> "⏸"
                         }
+                        val ebTsFormatted = if (ebLastTs > 0L) {
+                            try {
+                                java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+                                    .withZone(java.time.ZoneId.systemDefault())
+                                    .format(java.time.Instant.ofEpochMilli(ebLastTs))
+                            } catch (_: Exception) { "" }
+                        } else ""
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -384,10 +434,18 @@ fun DFControlTab(
                                      style = MaterialTheme.typography.labelSmall,
                                      color = sigKleur)
                             }
-                            Text("boost %.3f\nwatch %.3f".format(ebBoostNow, ebWatchNow),
-                                 style = MaterialTheme.typography.labelSmall,
-                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                 textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("boost %.3f\nwatch %.3f".format(ebBoostNow, ebWatchNow),
+                                     style = MaterialTheme.typography.labelSmall,
+                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                     textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                                if (ebTsFormatted.isNotEmpty()) {
+                                    Text(ebTsFormatted,
+                                         style = MaterialTheme.typography.labelSmall,
+                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                         fontSize = 9.sp)
+                                }
+                            }
                         }
                     }
                 }

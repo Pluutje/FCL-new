@@ -898,6 +898,8 @@ private fun HandmatigParametersTab(
         val ebBoost   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEarlyBoostFactor(ctx3)
         val ebWatch   = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getWatchingFrac(ctx3)
         val ebStep    = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEbStepSize(ctx3)
+        val ebLastSig3 = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEbLastSignal(ctx3)
+        val ebLastTs3  = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEbLastSignalTs(ctx3)
         val ebDefault = 1.69
         val ebGeleerd = kotlin.math.abs(ebBoost - ebDefault) > 0.005
 
@@ -915,6 +917,18 @@ private fun HandmatigParametersTab(
             ebStep >= 0.10 -> "Grofzoeken (%.2fU stap)".format(ebStep)
             ebStep >= 0.04 -> "Normaal zoeken (%.2fU stap)".format(ebStep)
             else           -> "Fijnzoeken — nabij optimum (%.2fU stap)".format(ebStep)
+        }
+        val ebTsFormatted3 = if (ebLastTs3 > 0L) {
+            try {
+                java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+                    .withZone(java.time.ZoneId.systemDefault())
+                    .format(java.time.Instant.ofEpochMilli(ebLastTs3))
+            } catch (_: Exception) { "" }
+        } else ""
+        val ebSigEmoji3 = when (ebLastSig3) {
+            "FORWARD" -> "➡"
+            "BACK"    -> "⬅"
+            else      -> "⏸"
         }
 
         ParameterLeesCategorie("🚀 Early Boost") {
@@ -942,6 +956,23 @@ private fun HandmatigParametersTab(
                         Text(ebStapUitleg,
                              style = MaterialTheme.typography.labelSmall,
                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Laatste evaluatie + signaal
+                        if (ebTsFormatted3.isNotEmpty()) {
+                            Spacer(Modifier.height(2.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("$ebSigEmoji3 Laatste evaluatie: $ebLastSig3",
+                                     style = MaterialTheme.typography.labelSmall,
+                                     color = when (ebLastSig3) {
+                                         "FORWARD" -> MaterialTheme.colorScheme.primary
+                                         "BACK"    -> MaterialTheme.colorScheme.error
+                                         else      -> MaterialTheme.colorScheme.onSurfaceVariant
+                                     })
+                                Text("·  $ebTsFormatted3",
+                                     style = MaterialTheme.typography.labelSmall,
+                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                            }
+                        }
                     }
                     Text("boost %.3f\nwatch %.3f".format(ebBoost, ebWatch),
                          style = MaterialTheme.typography.labelSmall,

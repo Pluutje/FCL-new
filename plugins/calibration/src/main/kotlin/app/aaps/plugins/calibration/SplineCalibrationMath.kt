@@ -17,7 +17,7 @@ const val SPLINE_KNOT1_MGDL = 108.0
 /** Tweede knooppunt: 11 mmol/L = 198 mg/dL */
 const val SPLINE_KNOT2_MGDL = 198.0
 
-const val SPLINE_MAX_CORRECTION_AT_KNOT = 40.0
+const val SPLINE_MAX_CORRECTION_AT_KNOT = 50.0
 const val SPLINE_MAX_DELTA_FROM_LINEAR  = 25.0
 
 // ---------------------------------------------------------------------------

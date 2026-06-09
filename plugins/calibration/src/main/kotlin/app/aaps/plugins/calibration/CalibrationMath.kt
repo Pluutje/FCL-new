@@ -16,8 +16,8 @@ const val SLOPE_MAX = 1.6
 // Picked as a typical mid-range BG so the clamp value below maps directly to
 // "the most this calibration can shift the sensor at typical BG".
 const val CENTER_MGDL = 100.0
-const val CORRECTION_AT_CENTER_MIN = -30.0
-const val CORRECTION_AT_CENTER_MAX = 30.0
+const val CORRECTION_AT_CENTER_MIN = -45.0
+const val CORRECTION_AT_CENTER_MAX = 45.0
 
 const val MIN_ENTRIES_FOR_FIT = 2
 

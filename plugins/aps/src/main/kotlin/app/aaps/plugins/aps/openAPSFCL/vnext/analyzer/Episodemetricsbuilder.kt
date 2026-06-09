@@ -77,9 +77,15 @@ object EpisodeMetricsBuilder {
                 it.afterloadFutureDrop60Scale < 0.99 || it.afterloadHighIobLateScale < 0.99
             } >= 2
 
-            // EarlyBoost verdeling: som van doses gegeven als earlyBoost-stage
+            // EarlyBoost verdeling: som van doses gegeven als earlyBoost-stage.
+            // Alleen commits 1–3 tellen als "echte" vroege commits.
+            // highBgContinuation-commits (episodeCommitNr > 3, earlyBoostActive=true
+            // bij BG >= 12.0) worden bewust uitgesloten: zij zijn een noodmaatregel
+            // bij extreme maaltijden, geen maatstaf voor frontload-timing.
+            // Zonder deze correctie blaast één highBgContinuation-commit de frac
+            // kunstmatig op zodat de learner ten onrechte NONE geeft.
             val earlyBoostDeliveredU = rows
-                .filter { it.earlyBoostActive }
+                .filter { it.earlyBoostActive && it.episodeCommitNr <= 3 }
                 .sumOf { it.deliveredTotal }
             val earlyBoostFrac = if (totalInsulinDelivered > 0.1)
                 earlyBoostDeliveredU / totalInsulinDelivered else 0.0

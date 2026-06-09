@@ -46,6 +46,7 @@ object DFLearner {
     private const val KEY_EB_LAST_SIG = "eb_last_signal"   // FORWARD / BACK / NONE
     private const val KEY_EB_PREV_SIG = "eb_prev_signal"   // signaal daarvoor
     private const val KEY_EB_FWD_STREAK = "eb_fwd_streak" // opeenvolgende FORWARD signalen
+    private const val KEY_EB_LAST_TS    = "eb_last_ts"    // tijdstempel laatste EB-evaluatie (ms)
 
     // Na convergentie: als EB_RESTART_AFTER opeenvolgende FORWARD signalen
     // → maak één sprong van streak/3 stappen en reset streak.
@@ -684,6 +685,9 @@ object DFLearner {
     fun getEbLastSignal(context: android.content.Context): String =
         prefs(context).getString(KEY_EB_LAST_SIG, "NONE") ?: "NONE"
 
+    fun getEbLastSignalTs(context: android.content.Context): Long =
+        prefs(context).getLong(KEY_EB_LAST_TS, 0L)
+
     /**
      * Evalueer één episode en pas earlyBoostFactor/watchingFrac aan.
      *
@@ -727,21 +731,42 @@ object DFLearner {
             metrics.earlyBoostWasActive &&
             !metrics.hasManualCorrection
 
+        // Tier 1: klassiek — te weinig insuline vroeg terwijl piek hoog was
         val frontloadTeKlein =
             !metrics.hypoDetected &&
             metrics.earlyBoostFrac in 0.01..0.54 &&
             metrics.peakBg > 9.5 &&
             metrics.followUpCommitCount >= 1
 
+        // Tier 2: hoge piek ondanks actieve earlyBoost — timing te laat of
+        // te weinig gewicht op de vroege commits t.o.v. het watching-deel.
+        // earlyBoostFrac < 0.80 garandeert dat er nog ruimte was in het budget.
+        // Vuurt met halve stapgrootte (voorzichtiger: we weten alleen dat het
+        // eerder moest, niet hoeveel eerder).
+        val frontloadTeLaatHogePiek =
+            !metrics.hypoDetected &&
+            !frontloadTeKlein &&
+            metrics.peakBg > 12.0 &&
+            metrics.earlyBoostFrac < 0.80 &&
+            metrics.earlyBoostWasActive &&
+            metrics.followUpCommitCount >= 1
+
         val signal = when {
-            hypoOorzaakFrontload -> "BACK"
-            frontloadTeKlein     -> "FORWARD"
-            else                 -> "NONE"
+            hypoOorzaakFrontload   -> "BACK"
+            frontloadTeKlein       -> "FORWARD"
+            frontloadTeLaatHogePiek -> "FORWARD"
+            else                   -> "NONE"
         }
+
+        // Halve stap bij tier-2: piek was hoog maar frac was niet extreem laag,
+        // dus de correctiebehoefte is onzekerder dan bij tier-1.
+        val stapHalveerVoorTier2 = frontloadTeLaatHogePiek && !frontloadTeKlein
 
         if (signal == "NONE") {
             p.edit().putString(KEY_EB_PREV_SIG, lastSig)
-                    .putString(KEY_EB_LAST_SIG, "NONE").apply()
+                    .putString(KEY_EB_LAST_SIG, "NONE")
+                    .putLong(KEY_EB_LAST_TS, System.currentTimeMillis())
+                    .apply()
             return null
         }
 
@@ -773,7 +798,9 @@ object DFLearner {
         // ── Nieuwe waarden (absoluut budget-neutraal) ───────────────────
         // stepU = absolute insuline-stap (bijv. 0.15U).
         // Bij BACK: 3× stepU terug zodat asymmetrie voorzichtigheid borgt.
-        val stepU = step  // step is nu in U, niet in %
+        // Bij tier-2 FORWARD: gebruik halve stap (onzekerder signaal).
+        val effectiveStep = if (stapHalveerVoorTier2) step / 2.0 else step
+        val stepU = effectiveStep
         val absStep = if (signal == "FORWARD") stepU else 3.0 * stepU
         val direction = if (signal == "FORWARD") 1.0 else -1.0
 
@@ -792,12 +819,14 @@ object DFLearner {
             .putFloat(KEY_EB_STEP,     step.toFloat())
             .putString(KEY_EB_PREV_SIG, lastSig)
             .putString(KEY_EB_LAST_SIG, signal)
+            .putLong(KEY_EB_LAST_TS, System.currentTimeMillis())
             .apply()
 
 
+        val tier = if (stapHalveerVoorTier2) "T2" else "T1"
         val richting = if (signal == "FORWARD") "→ voren" else "← terug"
-        return "EARLYBOOST $richting: boost ${"%.3f".format(oldBoost)}" +
+        return "EARLYBOOST[$tier] $richting: boost ${"%.3f".format(oldBoost)}" +
             "→${"%.3f".format(newBoost)} watch ${"%.3f".format(oldWatching)}" +
-            "→${"%.3f".format(newWatching)} step=${"%.4f".format(step)} [$signal]"
+            "→${"%.3f".format(newWatching)} step=${"%.4f".format(effectiveStep)} [$signal]"
     }
 }

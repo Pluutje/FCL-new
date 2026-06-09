@@ -36,7 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private val WARM_UP_DURATION_MS = T.hours(2).msecs()
+private val WARM_UP_DURATION_MS = T.hours(1).msecs()
 
 @HiltViewModel
 @Stable
