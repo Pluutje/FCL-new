@@ -243,18 +243,12 @@ private fun SplineStatusCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                // Tweede knooppunt actief indicator
-                if (spline.hasTwoKnots && spline.knot2X != null && spline.knot2Y != null) {
-                    val corr2 = spline.knot2Y!! - spline.knot2X!!
-                    val corr2Str = if (state.glucoseUnit == app.aaps.core.data.model.GlucoseUnit.MMOL)
-                        "${"%.1f".format(corr2 / 18.0182)} mmol"
-                    else "${"%.0f".format(corr2)} mg/dL"
-                    Text(
-                        text  = "Knot 2 bij 11 mmol: $corr2Str  ✓ 2-segment actief",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
-                }
+                // Segment slopes tonen (vervangt twee-knooppunt indicator)
+                Text(
+                    text  = "Laag %.2f × / Hoog %.2f ×".format(spline.slope_low, spline.slope_high),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
             }
 
             // Linear fallback detail line (always shown when available)

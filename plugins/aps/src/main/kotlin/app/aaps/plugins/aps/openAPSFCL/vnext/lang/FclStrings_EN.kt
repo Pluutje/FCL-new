@@ -43,6 +43,10 @@ object FclStrings_EN : FclStrings {
     override val sterkte                    = "Strength (S)"
     override val timing                     = "Timing   (T)"
     override val volhoudendheid             = "Persist.  (V)"
+    override val frontloadTimingTitel       = "Frontload timing"
+    override val sterkteTitel                = "Strength"
+    override val timingTitel                 = "Timing"
+    override val vasthoudendheidTitel        = "Persistence"
     override val nachtN                     = "Night-N"
     override val nachtRespons               = "Night response"
     override val insulineverdeling          = "Insulin distribution"
@@ -236,6 +240,86 @@ object FclStrings_EN : FclStrings {
         "NORMAL" -> "Normal"
         "STRONG" -> "Strong"
         else     -> key
+    }
+
+    // ── Advisor: learning explanation per axis ──────────────────────────────
+    override fun diagnoseTekst(diagnose: String) = when (diagnose) {
+        "OK" ->
+            "Result within expectation, no adjustment needed"
+        "HYPO" ->
+            "BG too low after the meal — dose reduced"
+        "HYPO_D_PROBLEEM" ->
+            "BG too low despite normal buildup — strength reduced"
+        "HYPO_D_DEMPED" ->
+            "BG too low, partly dampened by afterload — strength slightly reduced"
+        "HYPO_FRONTLOAD" ->
+            "BG too low after an oversized first dose — strength and timing reduced"
+        "TE_VROEG_SOLO" ->
+            "First dose too large with no follow-up doses — timing pulled back"
+        "MEER_DOSIS" ->
+            "Peak too high — strength increased"
+        "MEER_DOSIS_VROEG_ONDERSCHAT" ->
+            "Peak too high due to underestimation early in the meal — strength increased"
+        "TE_WEINIG" ->
+            "Peak too low — strength reduced"
+        "TIMING_SPREAD" ->
+            "Peak too high and dose spread too late — timing shifted earlier"
+        "TIMING_SPREAD_VROEG" ->
+            "Peak too high despite an early start — timing shifted further earlier"
+        "FRONTLOAD_LAG" ->
+            "First dose was slow to start — timing shifted earlier"
+        "FRONTLOAD_LAG_VROEG" ->
+            "First dose was slow to start despite an early start — timing shifted further earlier"
+        "IOB_SPREAD_TE_LAAT" ->
+            "Built-up insulin took effect too late — timing adjusted"
+        "RESCUE_OVERPOWERED" ->
+            "Rescue dose needed despite normal buildup — strength reduced"
+        "EARLYBOOST_TE_KLEIN" ->
+            "Early boost was too small to dampen the peak — frontload increased"
+        "AFTERLOAD_GUARD_OK" ->
+            "Afterload guard worked as intended, no adjustment"
+        "AUTO_DISABLED" ->
+            "Automaton is off — no adjustments applied"
+        "COOLDOWN" ->
+            "Recently adjusted — waiting for cooldown"
+        "GEEN_EPISODE", "SKIP_GEEN_EPISODE" ->
+            "No suitable episode found to learn from"
+        else -> diagnose
+    }
+
+    override fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int) = when (richting) {
+        "EERDER" ->
+            "Peak occurred $gemiddeldeMargeMin min late on average — timing shifted earlier"
+        "LATER" ->
+            "Peak occurred ${-gemiddeldeMargeMin} min early on average — timing shifted later"
+        "GOED" ->
+            "Peak timing within margin, no adjustment needed"
+        else -> richting
+    }
+
+    override fun vSignaalTekst(signal: String) = when (signal) {
+        "FORWARD" ->
+            "Persistent correction didn't help enough — persistence increased"
+        "BACK" ->
+            "Persistent correction overshot — persistence decreased"
+        "NONE" ->
+            "Persistent corrections are working as expected"
+        else -> signal
+    }
+
+    override fun frontloadStatusTekst(key: String) = when (key) {
+        "STANDAARD"    -> "standard"
+        "LICHT_VOOR"   -> "slightly earlier"
+        "STERK_VOOR"   -> "much earlier"
+        "LICHT_TERUG"  -> "slightly later"
+        "STERK_TERUG"  -> "much later"
+        else           -> key
+    }
+
+    override fun relatieveToelichting(deltaPct: Int) = when {
+        deltaPct == 0 -> "At standard level"
+        deltaPct > 0  -> "$deltaPct% higher than standard"
+        else          -> "${-deltaPct}% lower than standard"
     }
 
     // ── Day/night labels ──────────────────────────────────────────────────

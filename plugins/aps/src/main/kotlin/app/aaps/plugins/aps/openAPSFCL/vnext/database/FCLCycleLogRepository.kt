@@ -2,6 +2,13 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.database
 
 import android.content.Context
 import android.os.Environment
+import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeDetector
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetricsBuilder
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.toLogRow
+import app.aaps.plugins.aps.openAPSFCL.vnext.persist.VLearner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,13 +28,34 @@ class FCLCycleLogRepository @Inject constructor(
     private val dao by lazy { db.cycleLogDao() }
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    private val persistDb by lazy {
+        app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistDatabase.getInstance(context)
+    }
+    private val persistDao by lazy { persistDb.persistEventDao() }
+
     private var lastCsvExportHour: Int = -1
+    private var lastLearnerRunHour: Int = -1
 
     fun insert(entity: FCLCycleLogEntity) {
         scope.launch {
             dao.insert(entity)
             pruneOldData()
             maybeExportCsv()
+            maybeRunLearners()
+        }
+    }
+
+    /**
+     * Log één cyclus van PersistentCorrectionController waarin active==true.
+     * Aangeroepen direct vanuit FCLvNext.kt, los van de hoofd-CSV-insert,
+     * zodat dit een eigen, klein leerbestand blijft (zie FCLPersistDatabase).
+     */
+    fun logPersistEvent(entity: app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistEventEntity) {
+        scope.launch {
+            persistDao.insert(entity)
+            persistDao.deleteOlderThan(
+                app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistDatabase.cutoffMs()
+            )
         }
     }
 
@@ -40,6 +68,97 @@ class FCLCycleLogRepository @Inject constructor(
         if (currentHour == lastCsvExportHour) return
         lastCsvExportHour = currentHour
         exportCsvLast7Days()
+    }
+
+    /**
+     * Autonoom leerproces — draait eens per uur na de CSV-export.
+     *
+     * Volgt exact hetzelfde patroon als maybeExportCsv():
+     * geen UI, geen user-interactie vereist, werkt volledig op de Room-database.
+     *
+     * Pipeline:
+     *   1. Lees alle LogRows uit de DB (zelfde bron als de Analyzer-screen)
+     *   2. EpisodeDetector.detect() — zelfde logica als in de UI
+     *   3. EpisodeMetricsBuilder.build() — zelfde logica als in de UI
+     *   4. DFLearner.evaluate() — D/F aanpassen + loggen naar FclLearnerLogger
+     *   5. FrontloadLearner.evaluate() — REF_WMD aanpassen + loggen
+     *      (earlyBoost wordt aangeroepen vanuit DFLearner.evaluate())
+     *
+     * De learner-cooldowns (minHours, 48u) en weekgrens zorgen ervoor dat
+     * de aanpassingen niet te frequent zijn, ook al draait dit elk uur.
+     *
+     * Bewuste vereenvoudigingen t.o.v. de UI-pipeline:
+     * - Geen enrichMetricsWithAdviceState: advice-status is niet relevant voor leren
+     * - Geen rescue-classificatie override: rescueConfirmed blijft false
+     *   (gebruiker kan rescue-vinkjes zetten via UI; dit beïnvloedt de volgende run)
+     * - Geen episode-upsert naar EpisodeDao: dat doet de UI al bij openen
+     * - Filter: alleen afgesloten episodes (isComplete=true via EpisodeDetector)
+     */
+    private suspend fun maybeRunLearners() {
+        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (currentHour == lastLearnerRunHour) return
+        lastLearnerRunHour = currentHour
+
+        // Kleine vertraging zodat de learner nooit synchroon met een insert() loopt.
+        // Dit voorkomt dat de zware getAll-query de Room-threadpool blokkeert
+        // terwijl AAPS zijn 5-minuten berekeningscyclus start.
+        kotlinx.coroutines.delay(5_000L)
+
+        runLearners()
+    }
+
+    private suspend fun runLearners() {
+        // ── Stap 1: lees alleen de laatste 7 dagen (niet getAll) ──────────
+        // getSince() is dezelfde query als exportCsvLast7Days gebruikt —
+        // beperkt tot ~2000 rows ipv potentieel veel meer bij getAll().
+        val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L
+        val entities = dao.getSince(sevenDaysAgo)
+        if (entities.size < 10) return
+
+        val allRows = entities.map { it.toLogRow() }
+
+        // ── Stap 2: episode-detectie ──────────────────────────────────────
+        val detected = EpisodeDetector.detect(allRows)
+
+        // Verwijder de eerste (mogelijk onvolledige) episode en filter
+        // episodes die geen significante dosis bevatten — identiek aan de UI.
+        val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
+        val significantDoseThreshold = manualMaxSmb * 0.80
+
+        val allCleaned = if (detected.size > 1) detected.drop(1) else emptyList()
+        if (allCleaned.isEmpty()) return
+
+        // Alleen afgesloten episodes voor het leerproces
+        val completedEpisodes = allCleaned.filter { it.isComplete }
+        if (completedEpisodes.isEmpty()) return
+
+        // ── Stap 3: metrics bouwen ────────────────────────────────────────
+        val episodeMetrics = EpisodeMetricsBuilder.build(completedEpisodes, manualMaxSmb)
+
+        // ── Stap 4: DFLearner ─────────────────────────────────────────────
+        // evaluate() logt altijd (ook bij AUTO_DISABLED/COOLDOWN/etc) via
+        // FclLearnerLogger, en past D/F alleen toe als isAutoEnabled=true.
+        val latestMetrics = episodeMetrics.lastOrNull()
+        if (latestMetrics != null) {
+            DFLearner.evaluate(context, latestMetrics)
+        }
+
+        // ── Stap 5: FrontloadLearner ───────────────────────────────────────
+        // Onafhankelijk van DFLearner.isAutoEnabled — logt altijd via
+        // FclLearnerLogger (ook bij GOED).
+        FrontloadLearner.evaluate(context, episodeMetrics)
+
+        // ── Stap 6: VLearner (Volhoudendheid) ──────────────────────────────
+        // Volledig onafhankelijk van episodes — werkt op PERSIST-clusters
+        // uit de aparte FCLPersistDatabase. Dekt zowel postprandiale
+        // plateaus als nachtelijke persistente hoge BG bij lage IOB.
+        val persistEvents = persistDao.getSince(sevenDaysAgo)
+        VLearner.evaluate(context, persistEvents)
+    }
+
+    // ── Publieke methode voor manuele trigger (bijv. vanuit UI bij debug) ──
+    fun triggerLearnersNow() {
+        scope.launch { runLearners() }
     }
 
     private suspend fun exportCsvLast7Days() {

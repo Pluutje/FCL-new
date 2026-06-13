@@ -122,10 +122,9 @@ internal fun SplineScatterChart(
             .aspectRatio(1f)
             .pointerInput(splineFit, zoomSegment) {
                 detectTapGestures {
-                    val hasTwoKnots = splineFit?.hasTwoKnots == true
                     val next = when (zoomSegment) {
                         ZoomSegment.FULL -> ZoomSegment.LOW
-                        ZoomSegment.LOW  -> if (hasTwoKnots) ZoomSegment.MID else ZoomSegment.HIGH
+                        ZoomSegment.LOW  -> ZoomSegment.HIGH
                         ZoomSegment.MID  -> ZoomSegment.HIGH
                         ZoomSegment.HIGH -> ZoomSegment.FULL
                     }
@@ -170,10 +169,7 @@ internal fun SplineScatterChart(
             }
             drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, manualOffsetMgdl, regressionColor)
             drawKnotMarker(::xToPx, ::yToPx, splineFit, manualOffsetMgdl, knotColor, density)
-            // Tweede knooppunt marker als actief
-            if (splineFit.hasTwoKnots && splineFit.knot2X != null && splineFit.knot2Y != null) {
-                drawKnot2Marker(::xToPx, ::yToPx, splineFit.knot2X, splineFit.knot2Y, manualOffsetMgdl, knotColor, density)
-            }
+            // Enkelvoudige Hermite — geen tweede knooppunt marker
         } else {
             linearFit?.takeIf { it.isApplicable }?.let {
                 drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, manualOffsetMgdl, regressionColor, dashed = false)
@@ -206,27 +202,17 @@ private fun computeZoomedRange(
 ): Pair<Float, Float> {
     if (zoom == ZoomSegment.FULL || spline == null) return fullMin to fullMax
 
-    val knot1 = spline.knotX.toFloat()   // 108 mg/dL = 6 mmol
-    val knot2 = spline.knot2X?.toFloat() ?: (198f) // 198 mg/dL = 11 mmol
-
-    // Zoom-venster: centred op het knooppunt of segment, halve breedte = 45 mg/dL (= 2.5 mmol)
-    // Per segment direct min/max berekenen ipv center ± halfSpan
-    // zodat clamping aan CHART_MIN/MAX nooit de span verkleint tot onder MIN_SPAN
+    val split = spline.knotX.toFloat()  // splitspunt = SPLINE_SPLIT_MGDL
     val pad = 18f  // ± 1 mmol marge buiten het segment
     return when (zoom) {
         ZoomSegment.LOW -> {
             val zMin = (fullMin - pad).coerceAtLeast(CHART_MIN_BG)
-            val zMax = (knot1 + pad).coerceAtMost(CHART_MAX_BG)
+            val zMax = (split + pad).coerceAtMost(CHART_MAX_BG)
             if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
         }
-        ZoomSegment.MID -> {
-            val zMin = (knot1 - pad).coerceAtLeast(CHART_MIN_BG)
-            val zMax = (knot2 + pad).coerceAtMost(CHART_MAX_BG)
-            if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
-        }
+        ZoomSegment.MID  -> fullMin to fullMax  // niet gebruikt, val terug op FULL
         ZoomSegment.HIGH -> {
-            val boundary = if (spline.hasTwoKnots) knot2 else knot1
-            val zMin = (boundary - pad).coerceAtLeast(CHART_MIN_BG)
+            val zMin = (split - pad).coerceAtLeast(CHART_MIN_BG)
             val zMax = (fullMax + pad).coerceAtMost(CHART_MAX_BG)
             if (zMax - zMin < MIN_SPAN) fullMin to fullMax else zMin to zMax
         }
@@ -430,23 +416,6 @@ private fun DrawScope.drawKnotMarker(
     }
     drawPath(diamond, color.copy(alpha = 0.85f))
     drawPath(diamond, color, style = Stroke(width = 1.dp.toPx()))
-}
-
-/**
- * Tweede knooppunt marker — kleinere cirkel om onderscheid te maken van het eerste.
- */
-private fun DrawScope.drawKnot2Marker(
-    xToPx: (Float) -> Float, yToPx: (Float) -> Float,
-    knot2X: Double, knot2Y: Double,
-    offsetMgdl: Float,
-    color: Color,
-    density: Density
-) {
-    val kx = xToPx(knot2X.toFloat())
-    val ky = yToPx((knot2Y.toFloat() + offsetMgdl).coerceIn(CHART_MIN_BG, CHART_MAX_BG))
-    val r  = with(density) { 3.dp.toPx() }  // iets kleiner dan knot1
-    drawCircle(color = color.copy(alpha = 0.7f), radius = r, center = Offset(kx, ky))
-    drawCircle(color = color, radius = r, center = Offset(kx, ky), style = Stroke(width = with(density) { 1.dp.toPx() }))
 }
 
 private fun DrawScope.drawEntries(

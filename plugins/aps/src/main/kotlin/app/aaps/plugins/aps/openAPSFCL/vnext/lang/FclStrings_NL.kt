@@ -43,6 +43,10 @@ object FclStrings_NL : FclStrings {
     override val sterkte                    = "Sterkte  (S)"
     override val timing                     = "Timing   (T)"
     override val volhoudendheid             = "Volhoud. (V)"
+    override val frontloadTimingTitel       = "Frontload-timing"
+    override val sterkteTitel                = "Sterkte"
+    override val timingTitel                 = "Timing"
+    override val vasthoudendheidTitel        = "Vasthoudendheid"
     override val nachtN                     = "Nacht-N"
     override val nachtRespons               = "Nacht-respons"
     override val insulineverdeling          = "Insulineverdeling"
@@ -236,6 +240,86 @@ object FclStrings_NL : FclStrings {
         "NORMAL" -> "Normaal"
         "STRONG" -> "Sterk"
         else     -> key
+    }
+
+    // ── Advisor: leertoelichting per as ─────────────────────────────────────
+    override fun diagnoseTekst(diagnose: String) = when (diagnose) {
+        "OK" ->
+            "Resultaat binnen verwachting, geen aanpassing nodig"
+        "HYPO" ->
+            "Te lage BG na de maaltijd — dosis verlaagd"
+        "HYPO_D_PROBLEEM" ->
+            "Te lage BG ondanks normale opbouw — sterkte verlaagd"
+        "HYPO_D_DEMPED" ->
+            "Te lage BG, deels gedempt door afterload — sterkte licht verlaagd"
+        "HYPO_FRONTLOAD" ->
+            "Te lage BG na een te grote eerste dosis — sterkte en timing verlaagd"
+        "TE_VROEG_SOLO" ->
+            "Eerste dosis te groot zonder vervolgdoses — timing teruggenomen"
+        "MEER_DOSIS" ->
+            "Piek te hoog — sterkte verhoogd"
+        "MEER_DOSIS_VROEG_ONDERSCHAT" ->
+            "Piek te hoog door onderschatting vroeg in de maaltijd — sterkte verhoogd"
+        "TE_WEINIG" ->
+            "Piek te laag — sterkte verlaagd"
+        "TIMING_SPREAD" ->
+            "Piek te hoog en dosis te laat verdeeld — timing naar voren bijgesteld"
+        "TIMING_SPREAD_VROEG" ->
+            "Piek te hoog ondanks vroege start — timing verder naar voren bijgesteld"
+        "FRONTLOAD_LAG" ->
+            "Eerste dosis kwam te laat op gang — timing naar voren bijgesteld"
+        "FRONTLOAD_LAG_VROEG" ->
+            "Eerste dosis kwam ondanks vroege start te laat op gang — timing verder naar voren bijgesteld"
+        "IOB_SPREAD_TE_LAAT" ->
+            "Opgebouwde insuline werkte te laat door — timing bijgesteld"
+        "RESCUE_OVERPOWERED" ->
+            "Reddingsdosis nodig ondanks normale opbouw — sterkte verlaagd"
+        "EARLYBOOST_TE_KLEIN" ->
+            "Vroege boost was te klein om de piek te dempen — frontload verhoogd"
+        "AFTERLOAD_GUARD_OK" ->
+            "Afterload-grens werkte zoals bedoeld, geen aanpassing"
+        "AUTO_DISABLED" ->
+            "Automaat staat uit — geen aanpassingen toegepast"
+        "COOLDOWN" ->
+            "Recent al aangepast — wacht op afkoelperiode"
+        "GEEN_EPISODE", "SKIP_GEEN_EPISODE" ->
+            "Geen geschikte episode gevonden om van te leren"
+        else -> diagnose
+    }
+
+    override fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int) = when (richting) {
+        "EERDER" ->
+            "Piek viel gemiddeld $gemiddeldeMargeMin min te laat — timing naar voren bijgesteld"
+        "LATER" ->
+            "Piek viel gemiddeld ${-gemiddeldeMargeMin} min te vroeg — timing naar achteren bijgesteld"
+        "GOED" ->
+            "Piektiming binnen marge, geen aanpassing nodig"
+        else -> richting
+    }
+
+    override fun vSignaalTekst(signal: String) = when (signal) {
+        "FORWARD" ->
+            "Persistente correctie hielp niet genoeg — vasthoudendheid verhoogd"
+        "BACK" ->
+            "Persistente correctie werkte te sterk door — vasthoudendheid verlaagd"
+        "NONE" ->
+            "Persistente correcties werken naar verwachting"
+        else -> signal
+    }
+
+    override fun frontloadStatusTekst(key: String) = when (key) {
+        "STANDAARD"    -> "standaard"
+        "LICHT_VOOR"   -> "licht naar voren"
+        "STERK_VOOR"   -> "sterk naar voren"
+        "LICHT_TERUG"  -> "licht teruggenomen"
+        "STERK_TERUG"  -> "sterk teruggenomen"
+        else           -> key
+    }
+
+    override fun relatieveToelichting(deltaPct: Int) = when {
+        deltaPct == 0 -> "Op standaardniveau"
+        deltaPct > 0  -> "$deltaPct% hoger dan standaard"
+        else          -> "${-deltaPct}% lager dan standaard"
     }
 
     // ── Dag/nacht labels ──────────────────────────────────────────────────

@@ -65,6 +65,15 @@ object FrontloadLearner {
         return raw.split("\n").mapNotNull { parseStep(it) }
     }
 
+    /** Historie beperkt tot de laatste [days] dagen, voor de 14-dagen lijngrafiek. */
+    fun getHistorySince(context: Context, days: Int): List<FrontloadLearningStep> {
+        val cutoff = java.time.Instant.now().minus(days.toLong(), java.time.temporal.ChronoUnit.DAYS)
+        return getHistory(context).filter { step ->
+            try { java.time.Instant.parse(step.tsUtc).isAfter(cutoff) }
+            catch (_: Exception) { false }
+        }
+    }
+
     fun getGemiddeldeMarge(context: Context): Int =
         prefs(context).getInt(KEY_AVG_MARGE, -1)
 
@@ -119,7 +128,16 @@ object FrontloadLearner {
             else                        -> "GOED"
         }
 
-        if (richting == "GOED") return null
+        if (richting == "GOED") {
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logFrontload(
+                richting       = "GOED",
+                gemMarge       = gemiddeldeMarge,
+                oudeWmd        = huidigWmd,
+                nieuweWmd      = huidigWmd,
+                bruikbaarCount = bruikbaar.size
+            )
+            return null
+        }
 
         // Bereken stapgrootte: proportioneel aan afwijking, max STAP
         val afwijking = abs(gemiddeldeMarge - MARGE_IDEAAL).toDouble()
@@ -148,6 +166,15 @@ object FrontloadLearner {
         )
 
         appendHistory(context, step)
+
+        app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logFrontload(
+            richting       = richting,
+            gemMarge       = gemiddeldeMarge,
+            oudeWmd        = huidigWmd,
+            nieuweWmd      = nieuwWmd,
+            bruikbaarCount = bruikbaar.size
+        )
+
         return step
     }
 

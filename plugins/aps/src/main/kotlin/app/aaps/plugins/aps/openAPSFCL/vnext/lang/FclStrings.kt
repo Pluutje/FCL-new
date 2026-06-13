@@ -60,6 +60,12 @@ interface FclStrings {
     val sterkte: String
     val timing: String
     val volhoudendheid: String
+    val frontloadTimingTitel: String
+
+    /** Volledige asnamen zonder (S)/(T)/(V)-afkorting, voor de Advisor-kaarten. */
+    val sterkteTitel: String
+    val timingTitel: String
+    val vasthoudendheidTitel: String
     val nachtN: String
     val nachtRespons: String
     val insulineverdeling: String
@@ -217,6 +223,32 @@ interface FclStrings {
     fun autosensGedragLabel(key: String): String
     fun autosensStabiliteitLabel(key: String): String
     fun activiteitLabel(key: String): String
+
+    // ── Advisor: leertoelichting per as ─────────────────────────────────────
+    // Vertaalt interne diagnose-/signaalcodes van de learners naar korte
+    // toelichtingszinnen voor de Advisor-kaarten (Sterkte/Timing/
+    // Vasthoudendheid/Frontload-timing). Bron van de codes:
+    //   - DFLearner.LearningStep.diagnose      → diagnoseTekst()
+    //   - FrontloadLearner.FrontloadLearningStep.richting → frontloadTekst()
+    //   - VLearner.VHistoryPoint.signal        → vSignaalTekst()
+    // Onbekende codes vallen terug op de ruwe code (else -> key), zodat een
+    // ontbrekende vertaling zichtbaar is i.p.v. stil te verdwijnen.
+    fun diagnoseTekst(diagnose: String): String
+    fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int): String
+    fun vSignaalTekst(signal: String): String
+
+    /**
+     * Korte statusfrase voor de Frontload-timing kaart, op basis van hoe
+     * ver de huidige WMD afwijkt van de standaardwaarde.
+     * key ∈ {"STANDAARD","LICHT_VOOR","STERK_VOOR","LICHT_TERUG","STERK_TERUG"}
+     */
+    fun frontloadStatusTekst(key: String): String
+
+    /**
+     * Relatieve toelichting t.o.v. standaard (100%) voor de Sterkte/Timing/
+     * Vasthoudendheid-kaarten: "17% lager dan standaard" / "op standaardniveau".
+     */
+    fun relatieveToelichting(deltaPct: Int): String
 
     // ── Dag/nacht labels ──────────────────────────────────────────────────
     // ── StatusFormatter inline labels ────────────────

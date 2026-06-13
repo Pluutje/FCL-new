@@ -28,7 +28,9 @@ class PersistentCorrectionController(
         val fired: Boolean,
         val doseU: Double,
         val cooldownLeft: Int,
-        val reason: String
+        val reason: String,
+        val persistentCounter: Int = 0,
+        val escalationFactor: Double = 1.0
     )
 
     fun tickAndMaybeFire(
@@ -61,7 +63,8 @@ class PersistentCorrectionController(
                 fired = false,
                 doseU = 0.0,
                 cooldownLeft = cooldownLeft,
-                reason = "PERSIST: cooldown ($cooldownLeft left)"
+                reason = "PERSIST: cooldown ($cooldownLeft left)",
+                persistentCounter = persistentCounter
             )
         }
 
@@ -131,7 +134,9 @@ class PersistentCorrectionController(
             doseU = dose,
             cooldownLeft = cooldownLeft,
             reason = "PERSIST: fire dose=${"%.2f".format(dose)}U delta=${"%.2f".format(deltaToTarget)} " +
-                "iobR=${"%.2f".format(iobRatio)} esc=${"%+.0f".format((escalationFactor - 1.0) * 100)}%"
+                "iobR=${"%.2f".format(iobRatio)} esc=${"%+.0f".format((escalationFactor - 1.0) * 100)}%",
+            persistentCounter = persistentCounter,
+            escalationFactor = escalationFactor
         )
     }
 }

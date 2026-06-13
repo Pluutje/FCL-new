@@ -72,6 +72,7 @@ fun DFControlTab(
     var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
     var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
     var aggressiveness by remember { mutableStateOf(DFLearner.getAggressiveness(context)) }
+    var lastAppliedAggressiveness by remember { mutableStateOf(DFLearner.getLastAppliedAggressiveness(context)) }
     var history by remember { mutableStateOf(DFLearner.getHistory(context)) }
     var showGeavanceerd by remember { mutableStateOf(false) }
     var applyResult by remember { mutableStateOf<String?>(null) }
@@ -129,124 +130,16 @@ fun DFControlTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // ── 1. Agressiviteitsschaal ────────────────────────────────────────
+        // ── 1. Agressiviteitsschaal + Toepassen in AAPS ────────────────────
         AggressiviteitsKaart(
             niveau = aggressiveness,
+            niveauToegepast = lastAppliedAggressiveness,
             onChanged = { nieuw ->
                 aggressiveness = nieuw
                 DFLearner.setAggressiveness(context, nieuw)
-            }
-        )
-
-                // Actieve S/T/V samenvatting
-        // Effectieve waarden incl. agressiviteitsmultiplier -- consistent met StatusFormatter
-        val stvEffectief = DFMapping.toStvMap(d, f, nachtFactor, vExtra, aggLevel = aggressiveness)
-        val sEff = stvEffectief["sterkte"] ?: sViaD
-        val tEff = stvEffectief["timing"] ?: tNu
-        val vEff = stvEffectief["volhoudendheid"] ?: vNu
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-            )
-        ) {
-            Column(modifier = Modifier.padding(14.dp),
-                   verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(s.actuelParams,
-                         style = MaterialTheme.typography.labelMedium,
-                         fontWeight = FontWeight.SemiBold,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (aggressiveness != 5) {
-                        Text("agressiviteit $aggressiveness",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("💊 Sterkte",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${sEff}%",
-                             style = MaterialTheme.typography.titleMedium,
-                             fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("⏱ Timing",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${tEff}%",
-                             style = MaterialTheme.typography.titleMedium,
-                             fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🔁 Vasthoudend",
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${vEff}%",
-                             style = MaterialTheme.typography.titleMedium,
-                             fontWeight = FontWeight.Bold)
-                    }
-                }
-                if (aggressiveness != 5) {
-                    Text("Geleerde basis: S=${sViaD}% T=${tNu}% V=${vNu}%",
-                         style = MaterialTheme.typography.labelSmall,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
-                // ── EarlyBoost compacte status (altijd zichtbaar) ──────────
-                val ebBoostCard = DFLearner.getEarlyBoostFactor(context)
-                val ebWatchCard = DFLearner.getWatchingFrac(context)
-                val ebSigCard   = DFLearner.getEbLastSignal(context)
-                val ebTsCard    = DFLearner.getEbLastSignalTs(context)
-                val ebDefaultCard = 1.69
-                val ebStatusTekst = when {
-                    kotlin.math.abs(ebBoostCard - ebDefaultCard) <= 0.005 -> "🚀 Frontload-timing: standaard"
-                    ebBoostCard > ebDefaultCard + 0.10 -> "🚀 Frontload-timing: sterk naar voren"
-                    ebBoostCard > ebDefaultCard + 0.03 -> "🚀 Frontload-timing: licht naar voren"
-                    ebBoostCard < ebDefaultCard - 0.10 -> "🚀 Frontload-timing: sterk teruggenomen"
-                    ebBoostCard < ebDefaultCard - 0.03 -> "🚀 Frontload-timing: licht teruggenomen"
-                    else                               -> "🚀 Frontload-timing: nabij standaard"
-                }
-                val ebStatusKleur = when {
-                    ebBoostCard > ebDefaultCard + 0.03 -> MaterialTheme.colorScheme.primary
-                    ebBoostCard < ebDefaultCard - 0.03 -> MaterialTheme.colorScheme.error
-                    else                               -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                val ebTsFormatted = if (ebTsCard > 0L) {
-                    try {
-                        java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
-                            .withZone(java.time.ZoneId.systemDefault())
-                            .format(java.time.Instant.ofEpochMilli(ebTsCard))
-                    } catch (_: Exception) { "" }
-                } else ""
-                Row(modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text(ebStatusTekst,
-                         style = MaterialTheme.typography.labelSmall,
-                         color = ebStatusKleur)
-                    if (ebTsFormatted.isNotEmpty()) {
-                        Text(ebTsFormatted,
-                             style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                    }
-                }
-            }
-        }
-
-// ── 2. Toepassen in AAPS ──────────────────────────────────────────
-        if (onApplyToAaps != null) {
-            Button(
-                onClick = {
+            },
+            onToepassen = if (onApplyToAaps != null) {
+                {
                     val dApply = DFLearner.getD(context)
                     val fApply = DFLearner.getF(context)
                     val veApply = DFLearner.getVExtra(context)
@@ -256,25 +149,31 @@ fun DFControlTab(
                     val stvMap = DFMapping.toStvMap(dApply, fApply, nachtFactor, veApply,
                         aggLevel = aggressiveness)
                     val ok = onApplyToAaps(po, stvMap)
+                    if (ok) {
+                        DFLearner.setLastAppliedAggressiveness(context, aggressiveness)
+                        lastAppliedAggressiveness = aggressiveness
+                    }
                     applyResult = if (ok) "Toegepast" else "Fout"
                     applyTs = System.currentTimeMillis()
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Text(s.dfControlToepassen, style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold)
-            }
-            val msg = applyResult
-            if (msg != null && System.currentTimeMillis() - applyTs < 4000) {
-                Text(msg, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp))
-            }
-        }
+                }
+            } else null,
+            applyResult = applyResult,
+            applyTs = applyTs
+        )
 
-        // ── 3. Automaat leert ─────────────────────────────────────────────
+        // ── Advisor-assenkaarten: Sterkte, Timing, Vasthoudendheid, Frontload-timing ──
+        // Vervangt het oude "Actuele parameters"-blok (percentages + losse
+        // earlyBoost-statusregel) door vier kaarten met 14-dagen sparkline,
+        // relatieve toelichting en de laatst gevonden leerdiagnose per as.
+        AdvisorAssenKaarten(
+            d = d,
+            f = f,
+            nachtFactor = nachtFactor,
+            vExtra = vExtra,
+            aggressiveness = aggressiveness
+        )
+
+        // ── 2. Automaat leert ─────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -1280,7 +1179,11 @@ private fun fmtTs(tsUtc: String): String = try {
 @androidx.compose.runtime.Composable
 private fun AggressiviteitsKaart(
     niveau: Int,
-    onChanged: (Int) -> Unit
+    niveauToegepast: Int,
+    onChanged: (Int) -> Unit,
+    onToepassen: (() -> Unit)?,
+    applyResult: String?,
+    applyTs: Long
 ) {
     val labels = mapOf(
         1 to "Zeer voorzichtig",
@@ -1352,6 +1255,37 @@ private fun AggressiviteitsKaart(
                 style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                 color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
+
+            // Toepassen-knop: alleen zichtbaar als de slider afwijkt van het
+            // laatst toegepaste niveau. Klein en binnen dit kaartje, omdat
+            // dit de enige instelling is die hier handmatig wordt beheerd —
+            // de S/T/V-basiswaarden zelf worden autonoom door de learners
+            // bijgewerkt en hebben geen knop nodig.
+            if (onToepassen != null && niveau != niveauToegepast) {
+                androidx.compose.material3.Button(
+                    onClick = onToepassen,
+                    modifier = androidx.compose.ui.Modifier
+                        .fillMaxWidth()
+                        .height(36.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = accentKleur
+                    )
+                ) {
+                    androidx.compose.material3.Text(
+                        "Toepassen in AAPS",
+                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                    )
+                }
+                if (applyResult != null && System.currentTimeMillis() - applyTs < 4000) {
+                    androidx.compose.material3.Text(
+                        applyResult,
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

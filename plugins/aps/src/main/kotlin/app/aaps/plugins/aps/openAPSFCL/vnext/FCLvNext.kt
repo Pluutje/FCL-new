@@ -3956,6 +3956,32 @@ class FCLvNext(
             iobRatioHardStop = 0.45
         )
 
+        // ── V-learner input: log elke cyclus binnen een persistent-cluster ──
+        // (active==true), zowel fired als cooldown-cycli. Aparte database
+        // (FCLPersistDatabase) zodat dit onafhankelijk van de hoofd-CSV
+        // geïtereerd kan worden zonder de 7-dagen cyclus-log te raken.
+        if (persistResult.active) {
+            cycleLogRepository.logPersistEvent(
+                app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistEventEntity(
+                    timestampMs       = now.millis,
+                    bgMmol            = ctx.input.bgNow,
+                    targetMmol        = ctx.input.targetBG,
+                    deltaToTarget     = ctx.deltaToTarget,
+                    slope             = ctx.slope,
+                    iobRatio          = ctx.iobRatio,
+                    fired             = persistResult.fired,
+                    doseU             = persistResult.doseU,
+                    cooldownLeft      = persistResult.cooldownLeft,
+                    persistentCounter = persistResult.persistentCounter,
+                    escalationFactor  = persistResult.escalationFactor,
+                    effectiveMinDelta = effectiveMinDelta,
+                    stableSlopeAbs    = config.persistentSlopeAbs,
+                    vExtraAtFire      = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
+                        .getVExtra(context)
+                )
+            )
+        }
+
 
         if (persistResult.active ) {
             status.append("PERSIST: ${persistResult.reason}\n")

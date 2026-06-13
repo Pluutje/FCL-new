@@ -68,6 +68,7 @@ object DFLearner {
     // gekoppeld aan params (dat gebeurt in Stap 2).
     // 1=voorzichtig, 5=standaard, 9=agressief
     private const val KEY_AGGRESSIVENESS = "df_aggressiveness"
+    private const val KEY_AGGRESSIVENESS_APPLIED = "df_aggressiveness_applied"
     const val AGGRESSIVENESS_DEFAULT = 5
     const val AGGRESSIVENESS_MIN = 1
     const val AGGRESSIVENESS_MAX = 9
@@ -225,12 +226,44 @@ object DFLearner {
             .apply()
     }
 
+    /**
+     * Het agressiviteitsniveau zoals dat het laatst via "Toepassen in AAPS"
+     * (ConfigOverrideWriter) actief is gemaakt. Verschilt dit van
+     * getAggressiveness(), dan staat de slider op een niveau dat nog niet
+     * is doorgevoerd — de Advisor-UI toont dan de toepassen-knop.
+     *
+     * Default = AGGRESSIVENESS_DEFAULT (5): bij een schone start is er nog
+     * geen override actief, dus "niets toegepast" == "niveau 5".
+     */
+    fun getLastAppliedAggressiveness(context: Context): Int =
+        prefs(context).getInt(KEY_AGGRESSIVENESS_APPLIED, AGGRESSIVENESS_DEFAULT)
+
+    fun setLastAppliedAggressiveness(context: Context, level: Int) {
+        prefs(context).edit()
+            .putInt(KEY_AGGRESSIVENESS_APPLIED, level.coerceIn(AGGRESSIVENESS_MIN, AGGRESSIVENESS_MAX))
+            .apply()
+    }
+
     // Leergeschiedenis tellers (voor de status-indicator in de UI)
 
     fun getHistory(context: Context): List<LearningStep> {
         val raw = prefs(context).getString(KEY_HISTORY, "") ?: ""
         if (raw.isBlank()) return emptyList()
         return raw.split("\n").mapNotNull { parseStep(it) }
+    }
+
+    /**
+     * Historie beperkt tot de laatste [days] dagen, voor de 14-dagen
+     * lijngrafiek per as. Gebruikt dezelfde opgeslagen reeks als
+     * getHistory(); de aantal-limiet (19) blijft als achtervang voor
+     * periodes met zeer frequente aanpassingen.
+     */
+    fun getHistorySince(context: Context, days: Int): List<LearningStep> {
+        val cutoff = java.time.Instant.now().minus(days.toLong(), java.time.temporal.ChronoUnit.DAYS)
+        return getHistory(context).filter { step ->
+            try { java.time.Instant.parse(step.tsUtc).isAfter(cutoff) }
+            catch (_: Exception) { false }
+        }
     }
 
     /** Totaal aantal geleerde episodes (alle types samen). */
@@ -255,10 +288,26 @@ object DFLearner {
         skipHistory: Boolean = false,
         skipSideEffects: Boolean = false   // true = sla KEY_LAST_TS en weekDelta niet op
     ): LearningStep? {
-        if (!isAutoEnabled(context)) return null
-
         val tempo = getTempo(context)
         val tp    = tempoMap[tempo] ?: return null
+
+        if (!isAutoEnabled(context)) {
+            // Automaat staat uit: geen aanpassingen, maar WEL loggen zodat
+            // zichtbaar is wat de learner zou hebben gediagnosticeerd.
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = "AUTO_DISABLED",
+                rawDeltaD    = 0.0,
+                rawDeltaF    = 0.0,
+                accumDVoor   = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble(),
+                accumFVoor   = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble(),
+                epCountVoor  = prefs(context).getInt(KEY_EP_COUNT, 0),
+                weekDVoor    = prefs(context).getFloat("df_week_delta_d", 0f).toDouble(),
+                weekFVoor    = prefs(context).getFloat("df_week_delta_f", 0f).toDouble(),
+                blokkade     = "AUTO_DISABLED"
+            )
+            return null
+        }
 
         // Veiligheidsslot: geen aanpassing bij hoge TBR
         // (gecontroleerd door aanroeper via allRows)
@@ -266,7 +315,21 @@ object DFLearner {
         // Cooldown: min X uur sinds laatste aanpassing
         val lastTs = prefs(context).getLong(KEY_LAST_TS, 0L)
         val hoursSinceLast = (System.currentTimeMillis() - lastTs) / 3_600_000L
-        if (lastTs > 0 && hoursSinceLast < tp.minHours) return null
+        if (lastTs > 0 && hoursSinceLast < tp.minHours) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = "COOLDOWN",
+                rawDeltaD    = 0.0,
+                rawDeltaF    = 0.0,
+                accumDVoor   = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble(),
+                accumFVoor   = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble(),
+                epCountVoor  = prefs(context).getInt(KEY_EP_COUNT, 0),
+                weekDVoor    = prefs(context).getFloat("df_week_delta_d", 0f).toDouble(),
+                weekFVoor    = prefs(context).getFloat("df_week_delta_f", 0f).toDouble(),
+                blokkade     = "COOLDOWN(${hoursSinceLast}/${tp.minHours}u)"
+            )
+            return null
+        }
 
         // ── Bereken signaal van deze episode ───────────────────────────
         //
@@ -483,15 +546,32 @@ object DFLearner {
             }
         }
 
-        if (diagnose == "SKIP_GEEN_EPISODE") return null
+        if (diagnose == "SKIP_GEEN_EPISODE") {
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = diagnose,
+                rawDeltaD    = 0.0,
+                rawDeltaF    = 0.0,
+                accumDVoor   = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble(),
+                accumFVoor   = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble(),
+                epCountVoor  = prefs(context).getInt(KEY_EP_COUNT, 0),
+                weekDVoor    = prefs(context).getFloat("df_week_delta_d", 0f).toDouble(),
+                weekFVoor    = prefs(context).getFloat("df_week_delta_f", 0f).toDouble(),
+                blokkade     = "GEEN_EPISODE"
+            )
+            return null
+        }
 
         // ── Accumuleer signaal ──────────────────────────────────────────
-        // Elke wachtepisode telt mee. Consistente richting → groter gecombineerd effect.
-        // Wisselende richting → gedeeltelijke of volledige opheffing → kleine stap.
-        val accumD = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble() + rawDeltaD
-        val accumF = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble() + rawDeltaF
+        val accumDVoor = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble()
+        val accumFVoor = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble()
+        val epCountVoor = prefs(context).getInt(KEY_EP_COUNT, 0)
+        val weekDVoor   = prefs(context).getFloat("df_week_delta_d", 0f).toDouble()
+        val weekFVoor   = prefs(context).getFloat("df_week_delta_f", 0f).toDouble()
 
-        val epCount = prefs(context).getInt(KEY_EP_COUNT, 0) + 1
+        val accumD = accumDVoor + rawDeltaD
+        val accumF = accumFVoor + rawDeltaF
+        val epCount = epCountVoor + 1
 
         // Accumulatie opslaan, nog geen aanpassing
         prefs(context).edit()
@@ -500,7 +580,22 @@ object DFLearner {
             .putInt(KEY_EP_COUNT, epCount)
             .apply()
 
-        if (epCount < tp.minEpisodes) return null
+        if (epCount < tp.minEpisodes) {
+            // Nog niet genoeg episodes — log wel zodat de accumulatie zichtbaar is
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = diagnose,
+                rawDeltaD    = rawDeltaD,
+                rawDeltaF    = rawDeltaF,
+                accumDVoor   = accumDVoor,
+                accumFVoor   = accumFVoor,
+                epCountVoor  = epCountVoor,
+                weekDVoor    = weekDVoor,
+                weekFVoor    = weekFVoor,
+                blokkade     = "MIN_EPISODES($epCount/${tp.minEpisodes})"
+            )
+            return null
+        }
 
         // ── Genoeg episodes: bereken gecombineerde stap ────────────────
         val deltaD = accumD.coerceIn(-tp.maxStep, tp.maxStep)
@@ -525,6 +620,19 @@ object DFLearner {
                 .putFloat(KEY_ACCUM_F, 0f)
                 .putInt(KEY_EP_COUNT, 0)
                 .apply()
+            // Log de blokkade zodat zichtbaar is waarom er niet geleerd werd
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = diagnose,
+                rawDeltaD    = rawDeltaD,
+                rawDeltaF    = rawDeltaF,
+                accumDVoor   = accumDVoor,
+                accumFVoor   = accumFVoor,
+                epCountVoor  = epCountVoor,
+                weekDVoor    = weekDVoor,
+                weekFVoor    = weekFVoor,
+                blokkade     = "WEEK_CAP(D=${weekDVoor+deltaD},F=${weekFVoor+deltaF})"
+            )
             return null
         }
 
@@ -572,6 +680,24 @@ object DFLearner {
             diagnose = diagnose,
             tsUtc = java.time.Instant.ofEpochMilli(now).toString(),
             mealType = "GEMENGD"
+        )
+
+        // Log de aanpassing met volledige context
+        app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+            metrics      = metrics,
+            diagnose     = diagnose,
+            rawDeltaD    = rawDeltaD,
+            rawDeltaF    = rawDeltaF,
+            accumDVoor   = accumDVoor,
+            accumFVoor   = accumFVoor,
+            epCountVoor  = epCountVoor,
+            weekDVoor    = weekDVoor,
+            weekFVoor    = weekFVoor,
+            blokkade     = "",
+            oldD         = d,
+            oldF         = f,
+            newD         = newD,
+            newF         = newF
         )
 
         appendHistory(context, step, skip = skipHistory)
@@ -767,6 +893,16 @@ object DFLearner {
                     .putString(KEY_EB_LAST_SIG, "NONE")
                     .putLong(KEY_EB_LAST_TS, System.currentTimeMillis())
                     .apply()
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEarlyBoost(
+                metrics     = metrics,
+                signal      = "NONE",
+                tier        = "",
+                oldBoost    = oldBoost,
+                newBoost    = oldBoost,
+                oldWatching = oldWatching,
+                newWatching = oldWatching,
+                step        = step
+            )
             return null
         }
 
@@ -825,6 +961,18 @@ object DFLearner {
 
         val tier = if (stapHalveerVoorTier2) "T2" else "T1"
         val richting = if (signal == "FORWARD") "→ voren" else "← terug"
+
+        app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEarlyBoost(
+            metrics     = metrics,
+            signal      = signal,
+            tier        = tier,
+            oldBoost    = oldBoost,
+            newBoost    = newBoost,
+            oldWatching = oldWatching,
+            newWatching = newWatching,
+            step        = effectiveStep
+        )
+
         return "EARLYBOOST[$tier] $richting: boost ${"%.3f".format(oldBoost)}" +
             "→${"%.3f".format(newBoost)} watch ${"%.3f".format(oldWatching)}" +
             "→${"%.3f".format(newWatching)} step=${"%.4f".format(effectiveStep)} [$signal]"
