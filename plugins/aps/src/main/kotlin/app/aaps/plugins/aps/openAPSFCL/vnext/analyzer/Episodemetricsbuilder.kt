@@ -62,6 +62,30 @@ object EpisodeMetricsBuilder {
                 rows.count { it.deliveredTotal > 0.10 && it.timestamp > bigCommitTs }
             else 0
 
+            // ── Staart-analyse ────────────────────────────────────────────────
+            // Drempel: een commit is "significant" als hij zowel > 0.30U is ALS
+            // > 15% van de totale insuline in de episode beslaat. Dit filtert
+            // de kleine correctiedoses eruit maar houdt echte bolussen over.
+            val significantThresholdU   = 0.30
+            val significantThresholdFrac = 0.15
+            val significantCommits = rows
+                .filter { row ->
+                    row.deliveredTotal > significantThresholdU &&
+                    (totalInsulinDelivered <= 0.1 || row.deliveredTotal / totalInsulinDelivered > significantThresholdFrac)
+                }
+                .sortedBy { it.timestamp }
+
+            // Laatste significante commit (gesorteerd op tijd)
+            val lastSigCommit = significantCommits.lastOrNull()
+            val lastSignificantCommitFrac = if (lastSigCommit != null && totalInsulinDelivered > 0.1)
+                lastSigCommit.deliveredTotal / totalInsulinDelivered else 0.0
+
+            // Hoe ver voor (of na) de piek viel die laatste significante commit?
+            // Negatief = NA de piek — dit is het kritieke geval dat we willen herkennen.
+            val lastSignificantCommitMinutesBeforePeak: Int? = if (lastSigCommit != null && peakRow != null) {
+                Duration.between(lastSigCommit.timestamp, peakRow.timestamp).toMinutes().toInt()
+            } else null
+
             // ── Dosisanalyse velden ──────────────────────────────────────
             // brakeActiveCycles: cycli waarbij iobRatio >= 0.70
             val brakeActiveCycles = rows.count { it.iobRatio >= 0.70 }
@@ -167,6 +191,8 @@ object EpisodeMetricsBuilder {
                 iobRatioAt15min = iobRatioAt15min,
                 firstBigCommitFrac = firstBigCommitFrac,
                 followUpCommitCount = followUpCommitCount,
+                lastSignificantCommitFrac = lastSignificantCommitFrac,
+                lastSignificantCommitMinutesBeforePeak = lastSignificantCommitMinutesBeforePeak,
                 brakeActiveCycles = brakeActiveCycles,
                 earlyBoostWasActive = earlyBoostWasActive,
                 capReachedCycles = capReachedCycles,

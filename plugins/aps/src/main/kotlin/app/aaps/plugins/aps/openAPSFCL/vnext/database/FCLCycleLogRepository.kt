@@ -153,7 +153,7 @@ class FCLCycleLogRepository @Inject constructor(
         // uit de aparte FCLPersistDatabase. Dekt zowel postprandiale
         // plateaus als nachtelijke persistente hoge BG bij lage IOB.
         val persistEvents = persistDao.getSince(sevenDaysAgo)
-        VLearner.evaluate(context, persistEvents)
+        VLearner.evaluate(context, persistEvents, episodeMetrics)
     }
 
     // ── Publieke methode voor manuele trigger (bijv. vanuit UI bij debug) ──

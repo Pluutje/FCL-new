@@ -131,7 +131,11 @@ object VLearner {
      *
      * @param events Events gesorteerd op timestampMs ASC, uit FCLPersistEventDao.getSince().
      */
-    fun evaluate(context: Context, events: List<FCLPersistEventEntity>): String? {
+    fun evaluate(
+        context: Context,
+        events: List<FCLPersistEventEntity>,
+        episodeMetrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()
+    ): String? {
         if (events.isEmpty()) return null
 
         val p = prefs(context)
@@ -295,6 +299,35 @@ object VLearner {
             vExtra = newVExtra,
             signal = clusterSignal
         ))
+
+        // ── Aanvullend episodematig tbt-signaal ─────────────────────────────
+        // Als de afterload-guard goed werkt, zijn er minder PERSIST-fires maar
+        // kan de BG toch iets langer boven target blijven (tbt zonder hypo).
+        // V kijkt daar normaal niet naar — aanvulling: als recente episodes
+        // structureel tbtDetected=true zonder hypo, een zwak extra FORWARD-
+        // signaal toevoegen (halve stap, geen oscillatie-check).
+        if (episodeMetrics.isNotEmpty()) {
+            val cutoff14 = java.time.Instant.now().minusSeconds(14L * 24 * 3600)
+            val recentEpisodes = episodeMetrics.filter { m ->
+                try { m.start.isAfter(cutoff14) } catch (_: Exception) { false }
+            }
+            val tbtEpisodes = recentEpisodes.count { it.tbtDetected && !it.hypoDetected }
+            val tbtFrac = if (recentEpisodes.isNotEmpty())
+                tbtEpisodes.toDouble() / recentEpisodes.size else 0.0
+
+            // Meer dan 40% van de episodes had tbt zonder hypo → zwak FORWARD
+            if (tbtFrac > 0.40 && recentEpisodes.size >= 3) {
+                val currentV = DFLearner.getVExtra(context)
+                val tbtStep  = (getStepSize(context) * 0.50).coerceAtLeast(STEP_MIN)
+                val tbtV = (currentV + tbtStep).coerceIn(VEXTRA_MIN, VEXTRA_MAX)
+                DFLearner.setVExtra(context, tbtV)
+                appendHistory(context, VHistoryPoint(
+                    tsUtc  = java.time.Instant.now().toString(),
+                    vExtra = tbtV,
+                    signal = "FORWARD"
+                ))
+            }
+        }
 
         val richting = if (clusterSignal == "FORWARD") "→ hoger" else "← lager"
         return "VLEARNER $richting: vExtra ${"%.3f".format(oldVExtra)}" +

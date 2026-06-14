@@ -60,6 +60,18 @@ data class EpisodeMetrics(
     // 0  = alleen één bolus → onzeker of die te groot was.
     val followUpCommitCount: Int = 0,
 
+    // ── Staart-analyse: hoe groot was de laatste significante commit ────────
+    // lastSignificantCommitFrac: de laatste commit die groter was dan
+    // SIGNIFICANT_COMMIT_THRESHOLD (0.3U EN > 15% van totaal) als fractie van
+    // totale insuline. Hoog (> 0.25) betekent dat er veel insuline in de
+    // "staart" zat die eigenlijk eerder had kunnen worden gegeven.
+    val lastSignificantCommitFrac: Double = 0.0,
+
+    // lastSignificantCommitMinutesBeforePeak: hoeveel minuten VOOR de piek
+    // de laatste significante commit viel. Negatief = NA de piek (probleem).
+    // null = geen significante commit gevonden of piek onbekend.
+    val lastSignificantCommitMinutesBeforePeak: Int? = null,
+
     // ── Dosisanalyse velden ──────────────────────────────────────────────
     // brakeActiveCycles: aantal cycli waarbij iobRatio >= 0.70 (rem actief).
     // Hoge waarde = systeem wilde meer doseren maar werd geblokkeerd door maxSMB.

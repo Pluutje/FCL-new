@@ -93,42 +93,69 @@ object FrontloadLearner {
         val hoursSinceLast = (System.currentTimeMillis() - lastTs) / 3_600_000L
         if (lastTs > 0 && hoursSinceLast < COOLDOWN_HOURS) return null
 
-        // Selecteer bruikbare episodes:
-        // - Frontload is getriggerd (firstFrontloadMinutes >= 0)
-        // - Piek-tijdstip bekend
-        // - Geen rescue carbs (dat verstoort het signaal)
         val bruikbaar = metrics.filter { m ->
             m.firstFrontloadMinutes >= 0 &&
                 m.timeToPeakMinutes != null &&
                 m.timeToPeakMinutes > 0 &&
                 !m.rescueConfirmed &&
-                m.firstFrontloadMinutes < m.timeToPeakMinutes  // FL voor de piek
+                m.firstFrontloadMinutes < m.timeToPeakMinutes
         }
 
         if (bruikbaar.size < MIN_EPISODES) return null
 
-        // Bereken marge per episode: hoe ver voor de piek triggerde de frontload
         val marges = bruikbaar.map { m ->
             (m.timeToPeakMinutes!! - m.firstFrontloadMinutes).toInt()
         }
         val gemiddeldeMarge = marges.average().toInt()
 
-        // Sla gemiddelde op voor weergave in UI
         prefs(context).edit()
             .putInt(KEY_AVG_MARGE, gemiddeldeMarge)
             .putInt(KEY_EVAL_COUNT, bruikbaar.size)
             .apply()
 
         val huidigWmd = DFLearner.getRefWmd(context)
+        val huidigWff = DFLearner.getRefWff(context)
 
-        // Bepaal richting
+        // ── REF_WMD: wanneer triggeren ──────────────────────────────────────
         val richting = when {
-            gemiddeldeMarge < MARGE_MIN -> "EERDER"   // Te laat → drempel verlagen
-            gemiddeldeMarge > MARGE_MAX -> "LATER"    // Te vroeg → drempel verhogen
+            gemiddeldeMarge < MARGE_MIN -> "EERDER"
+            gemiddeldeMarge > MARGE_MAX -> "LATER"
             else                        -> "GOED"
         }
 
-        if (richting == "GOED") {
+        val afwijking = abs(gemiddeldeMarge - MARGE_IDEAAL).toDouble()
+        val stapFractie = (afwijking / 30.0).coerceIn(0.5, 1.0)
+        val stapWmd = STAP * stapFractie
+
+        val nieuwWmd = when (richting) {
+            "EERDER" -> (huidigWmd - stapWmd).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
+            "LATER"  -> (huidigWmd + stapWmd).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
+            else     -> huidigWmd
+        }
+
+        // ── REF_WFF: hoe groot de frontload-commit ──────────────────────────
+        // lastSignificantCommitFrac geeft aan hoeveel van de insuline in de
+        // "staart" zat (< 15 min voor piek). Als dat structureel hoog is
+        // (gemiddeld > 0.20), moeten de vroege commits groter worden: WFF omhoog.
+        // Omgekeerd: als de frontload al groot was maar de piek te vroeg viel
+        // (gemiddeldeMarge > MARGE_MAX), WFF licht omlaag.
+        val gemiddeldeStaartFrac = bruikbaar
+            .map { it.lastSignificantCommitFrac }
+            .average()
+        val stapWff = 0.03  // voorzichtige stap voor WFF
+
+        val nieuwWff = when {
+            gemiddeldeStaartFrac > 0.20 ->
+                (huidigWff + stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
+            gemiddeldeStaartFrac < 0.08 && richting == "LATER" ->
+                (huidigWff - stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
+            else -> huidigWff
+        }
+
+        val wmdVeranderd = abs(nieuwWmd - huidigWmd) >= 0.001
+        val wffVeranderd = abs(nieuwWff - huidigWff) >= 0.001
+
+        if (!wmdVeranderd && !wffVeranderd && richting == "GOED") {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logFrontload(
                 richting       = "GOED",
                 gemMarge       = gemiddeldeMarge,
@@ -139,22 +166,12 @@ object FrontloadLearner {
             return null
         }
 
-        // Bereken stapgrootte: proportioneel aan afwijking, max STAP
-        val afwijking = abs(gemiddeldeMarge - MARGE_IDEAAL).toDouble()
-        val stapFractie = (afwijking / 30.0).coerceIn(0.5, 1.0)  // 30 min = max afwijking
-        val stap = STAP * stapFractie
-
-        val nieuwWmd = when (richting) {
-            "EERDER" -> (huidigWmd - stap).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
-            "LATER"  -> (huidigWmd + stap).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
-            else     -> return null
-        }
-
-        if (abs(nieuwWmd - huidigWmd) < 0.001) return null  // Al op grens
-
-        // Sla op
-        DFLearner.setRefWmd(context, nieuwWmd)
+        if (wmdVeranderd) DFLearner.setRefWmd(context, nieuwWmd)
+        if (wffVeranderd) DFLearner.setRefWff(context, nieuwWff)
         prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
+
+        val effectiefRichting = if (richting != "GOED") richting
+            else if (gemiddeldeStaartFrac > 0.20) "EERDER" else "GOED"
 
         val step = FrontloadLearningStep(
             tsUtc            = java.time.Instant.now().toString(),
@@ -162,13 +179,13 @@ object FrontloadLearner {
             nieuweWmd        = nieuwWmd,
             gemiddeldeMarge  = gemiddeldeMarge,
             aantalEpisodes   = bruikbaar.size,
-            richting         = richting
+            richting         = effectiefRichting
         )
 
         appendHistory(context, step)
 
         app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logFrontload(
-            richting       = richting,
+            richting       = effectiefRichting,
             gemMarge       = gemiddeldeMarge,
             oudeWmd        = huidigWmd,
             nieuweWmd      = nieuwWmd,

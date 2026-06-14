@@ -5017,9 +5017,34 @@ class FCLvNext(
                 1.0 - (excess * 0.60).coerceIn(0.0, 0.60)   // max 60% reductie
             } else 1.0
 
-            val afterloadScale = futureDrop60Scale * highIobLateWaveScale
+            // Laag 2b: late tweede golf — onafhankelijk van actuele iobRatio
+            //
+            // Achtergrond (12/06-episode): na een eerste piek+daling kan de
+            // IOB tussentijds uitwerken (iob_ratio terug naar ~0.10) terwijl
+            // de BG vervolgens een TWEEDE keer stijgt door dezelfde
+            // (vetrijke) maaltijd. Laag 2 grijpt dan niet in omdat
+            // iobRatio > 0.70 niet gehaald wordt — het systeem "ziet" een
+            // frisse episode en geeft een volle frontload-dosis, die samen
+            // met de net-uitgewerkte IOB-rest overshoot en een late hypo
+            // veroorzaakt.
+            //
+            // Laag 2b kijkt daarom alleen naar minutesSinceEpisode, los van
+            // iobRatio: hoe langer de episode al loopt, hoe meer een nieuwe
+            // forse dosis wordt teruggeschaald. Tussen 90-180 min loopt de
+            // reductie lineair op tot max 60%; binnen 90 min (normale
+            // episodes) is deze laag volledig inactief.
+            val lateSecondWaveScale: Double = if (minutesSinceEpisode > 90) {
+                val frac = ((minutesSinceEpisode - 90).toDouble() / 90.0).coerceAtMost(1.0)
+                1.0 - frac * 0.60
+            } else 1.0
+
+            val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale
             logRow.afterloadFutureDrop60Scale = futureDrop60Scale
             logRow.afterloadHighIobLateScale  = highIobLateWaveScale
+            // lateSecondWaveScale is bewust niet toegevoegd aan LogRow/Entity:
+            // dat zou een Room schema-bump vereisen die (met de huidige
+            // fallbackToDestructiveMigration) de 7-dagen cyclus-log wist.
+            // De waarde is zichtbaar via de status-regel hieronder.
 
             if (afterloadScale < 1.0 - 1e-9) {
                 val beforeAfterload = commandedDose
@@ -5030,6 +5055,7 @@ class FCLvNext(
                         "iobR=${"%.2f".format(ctx.iobRatio)} " +
                         "late=${isLatePhase}(${minutesSinceEpisode}min) " +
                         "hiScale=${"%.2f".format(highIobLateWaveScale)} " +
+                        "lateWaveScale=${"%.2f".format(lateSecondWaveScale)} " +
                         "→ dose ${"%.2f".format(beforeAfterload)}→${"%.2f".format(commandedDose)}U\n"
                 )
             }

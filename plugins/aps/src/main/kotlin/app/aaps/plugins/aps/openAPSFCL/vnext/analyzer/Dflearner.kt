@@ -357,6 +357,29 @@ object DFLearner {
         val nadirBg   = metrics.minBgInWindow
         val hypoStraf = max(0.0, (HYPO_THRESHOLD - nadirBg) * HYPO_WEIGHT)
 
+        // ── Episodevertrouwen: hoe betrouwbaar is deze episode als leersignaal ──
+        // Cap- en rem-cycli betekenen dat externe limieten de uitkomst vervormd
+        // hebben — de gemeten piek/nadir is dan minder representatief.
+        // advisorWeight is al een gecombineerd gewicht (leeftijd, IOB, handmatige correctie).
+        // Samen geven ze een moderator 0.30-1.0 die alle rawDelta-waarden schaalt.
+        val cyclesTotaal = (metrics.durationMinutes / 5.0).coerceAtLeast(1.0)
+        val capPenalty   = (metrics.capReachedCycles / cyclesTotaal).coerceIn(0.0, 0.40)
+        val brakePenalty = (metrics.brakeActiveCycles / cyclesTotaal).coerceIn(0.0, 0.25)
+        val episodeVertrouwen = ((metrics.advisorWeight - capPenalty - brakePenalty)
+            .coerceIn(0.30, 1.0))
+
+        // ── TBT-gewicht: onderscheidt langdurig-laag van kort-laag ───────────
+        // hypoStraf kijkt alleen naar diepte; tbtMinutes voegt duur toe.
+        // Langdurig onder target (tbt > 30min) zonder echte hypo = structureel
+        // D iets te hoog, maar dan wel zonder de scherpte van een echte hypo.
+        val tbtModifier: Double = when {
+            metrics.hypoDetected && metrics.tbtMinutes > 30 -> 1.25  // langdurige hypo: grotere D-stap
+            metrics.hypoDetected                            -> 1.00  // korte hypo: normale stap
+            metrics.tbtDetected && metrics.tbtMinutes > 30  -> 0.40  // langdurig onder target, geen hypo
+            metrics.tbtDetected                             -> 0.20  // kort onder target, geen hypo
+            else                                            -> 0.00
+        }
+
         // Vroege voorspellingssignaal
         // predFout0_20 = gemiddelde(predictedPeak) - werkelijkePiek in 0-20 min venster
         // Negatief = onderschatting = algoritme dacht piek lager = frontload te klein
@@ -391,6 +414,25 @@ object DFLearner {
         val fracHoog  = frac > TARGET_FIRST_FRAC + DEAD_ZONE_FRAC   // > 0.55
         val safeFollowUp = metrics.followUpCommitCount >= 2
         val soloCommit   = metrics.followUpCommitCount <= 1
+
+        // ── iobRatioAt15min: onderscheidt "te laat getriggerd" van "te verspreid" ─
+        // Laag bij t+15min (< 0.20): weinig insuline actief in de eerste 15 min
+        //   → systeem reageerde te laat → timing-probleem → F meer naar voren
+        // Hoog bij t+15min (> 0.35): al flink insuline actief maar toch lage frac
+        //   → vroeg gedoseerd maar te verspreid → spread-probleem (al gedekt door IOB_SPREAD)
+        val iobAt15min = metrics.iobRatioAt15min
+        val teTraagGestart = iobAt15min < 0.20 && fracLaag  // weinig IOB EN kleine eerste commit
+
+        // ── Staart-signaal: was de laatste significante commit te groot/te laat ──
+        // lastSignificantCommitFrac > 0.20: meer dan 20% van de insuline zat
+        //   in de staart — die had vroeger gegeven kunnen worden.
+        // lastSignificantCommitMinutesBeforePeak < 15: viel te dicht bij (of na)
+        //   de piek — weinig effectief voor piék-remming, wel risico voor nadir.
+        val lastSigFrac = metrics.lastSignificantCommitFrac
+        val lastSigMins = metrics.lastSignificantCommitMinutesBeforePeak
+        val staartTeGroot = lastSigFrac > 0.20 &&
+            lastSigMins != null && lastSigMins < 15 &&
+            !metrics.hypoDetected  // als er wel een hypo was, behandelt hypoStraf het al
 
         // Terugschroef-conditie: eerste commit was groot, geen follow-up kon
         // het "geleende" budget terugpakken, EN nadir daalde te ver.
@@ -438,21 +480,26 @@ object DFLearner {
             }
 
             // ── HYPO zonder frontload als oorzaak ────────────────────────────────
-            // Follow-ups kwamen WEL maar hypo trad toch op → D te hoog was oorzaak.
-            // Als afterload actief was: de guard deed zijn best maar kon het niet
-            // voorkomen → D stap normaal maar niet vergroot.
             hypoStraf > 0.0 && fracHoog && safeFollowUp -> {
-                // Halfeer de stap als afterload al actief was (guard remde al)
                 val afterloadDemper = if (metrics.afterloadWasActive) 0.5 else 1.0
-                rawDeltaD = -tp.betaHypo * hypoStraf * afterloadDemper
+                rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier * afterloadDemper
                 rawDeltaF = 0.0
                 diagnose  = if (metrics.afterloadWasActive) "HYPO_D_DEMPED" else "HYPO_D_PROBLEEM"
             }
-            // Gewone hypo met lage frontload → ook niet F schuld
             hypoStraf > 0.0 -> {
-                rawDeltaD = -tp.betaHypo * hypoStraf
-                rawDeltaF = 0.0   // F neutraal: frontload was niet de oorzaak
+                rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier
+                rawDeltaF = 0.0
                 diagnose  = "HYPO"
+            }
+
+            // ── TBT zonder hypo: BG lang onder target maar niet hypo ─────────────
+            // Zwak negatief D-signaal: het systeem doseerde iets te veel maar
+            // niet zo veel dat er een echte hypo optrad.
+            // tbtModifier > 0 maar hypoStraf = 0 → aparte kleine stap.
+            tbtModifier > 0.0 && hypoStraf == 0.0 && metrics.tbtDetected -> {
+                rawDeltaD = -tp.alphaPiek * 0.3 * tbtModifier
+                rawDeltaF = 0.0
+                diagnose  = "HYPO"  // zelfde diagnose-bucket, maar kleine stap
             }
 
             // ── PIEK HOOG ─────────────────────────────────────────────────────────
@@ -484,19 +531,33 @@ object DFLearner {
                 diagnose  = "TE_WEINIG"
             }
 
-            // ── PIEK OK, VERDELING SLECHT ─────────────────────────────────────────
-            // Piek was OK maar eerste commit was klein aandeel van totaal.
-            // Er waren genoeg follow-ups → veilig bewijs: F omhoog.
-            fracLaag && safeFollowUp -> {
-                val eb = if (earlyPredTeLaag) 1.0 + earlyPredStrength * 0.5 else 1.0
+            // ── STAART TE GROOT: laatste significante commit te laat/te groot ────
+            // Piek was OK (geen hyper), geen hypo, maar > 20% van de insuline zat
+            // in een commit die < 15 min voor (of na) de piek viel.
+            // Signaal: de vroege commits waren te klein — F omhoog zodat volgende
+            // keer meer insuline vroeger wordt gegeven (kleinere staart).
+            // D neutraal: het totaal was niet het probleem, alleen de verdeling.
+            staartTeGroot && !peekHoog && !peekLaag -> {
                 rawDeltaD = 0.0
-                rawDeltaF = +tp.gammaIobr * 1.5 * abs(frac - TARGET_FIRST_FRAC) * eb
+                rawDeltaF = +tp.gammaIobr * 1.8 * lastSigFrac
+                diagnose  = "FRONTLOAD_LAG"   // zelfde bucket: staart → timing
+            }
+
+            // ── PIEK OK, VERDELING SLECHT ─────────────────────────────────────────
+            // teTraagGestart (laag iobAt15min + lage frac) → sterker F-signaal
+            // omdat het bewijs is dat het systeem laat én klein startte.
+            fracLaag && safeFollowUp -> {
+                val earlyBoost = if (earlyPredTeLaag) 1.0 + earlyPredStrength else 1.0
+                val traagBoost = if (teTraagGestart) 1.40 else 1.0
+                rawDeltaD = 0.0
+                rawDeltaF = +tp.gammaIobr * 1.5 * abs(frac - TARGET_FIRST_FRAC) * earlyBoost * traagBoost
                 diagnose  = if (earlyPredTeLaag) "FRONTLOAD_LAG_VROEG" else "FRONTLOAD_LAG"
             }
             fracLaag -> {
                 val eb = if (earlyPredTeLaag) 1.0 + earlyPredStrength * 0.3 else 1.0
+                val traagBoost = if (teTraagGestart) 1.30 else 1.0
                 rawDeltaD = 0.0
-                rawDeltaF = +tp.gammaIobr * 0.6 * abs(frac - TARGET_FIRST_FRAC) * eb
+                rawDeltaF = +tp.gammaIobr * 0.6 * abs(frac - TARGET_FIRST_FRAC) * eb * traagBoost
                 diagnose  = if (earlyPredTeLaag) "FRONTLOAD_LAG_VROEG" else "FRONTLOAD_LAG"
             }
 
@@ -546,6 +607,12 @@ object DFLearner {
             }
         }
 
+        // ── Schaal rawDelta met episodeVertrouwen ───────────────────────────
+        // Episodes met veel cap/rem-cycli of laag advisorWeight tellen minder
+        // zwaar mee — hun uitkomst was mede bepaald door externe limieten.
+        val scaledRawDeltaD = rawDeltaD * episodeVertrouwen
+        val scaledRawDeltaF = rawDeltaF * episodeVertrouwen
+
         if (diagnose == "SKIP_GEEN_EPISODE") {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
                 metrics      = metrics,
@@ -569,8 +636,8 @@ object DFLearner {
         val weekDVoor   = prefs(context).getFloat("df_week_delta_d", 0f).toDouble()
         val weekFVoor   = prefs(context).getFloat("df_week_delta_f", 0f).toDouble()
 
-        val accumD = accumDVoor + rawDeltaD
-        val accumF = accumFVoor + rawDeltaF
+        val accumD = accumDVoor + scaledRawDeltaD
+        val accumF = accumFVoor + scaledRawDeltaF
         val epCount = epCountVoor + 1
 
         // Accumulatie opslaan, nog geen aanpassing
@@ -585,8 +652,8 @@ object DFLearner {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
                 metrics      = metrics,
                 diagnose     = diagnose,
-                rawDeltaD    = rawDeltaD,
-                rawDeltaF    = rawDeltaF,
+                rawDeltaD    = scaledRawDeltaD,
+                rawDeltaF    = scaledRawDeltaF,
                 accumDVoor   = accumDVoor,
                 accumFVoor   = accumFVoor,
                 epCountVoor  = epCountVoor,
@@ -624,8 +691,8 @@ object DFLearner {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
                 metrics      = metrics,
                 diagnose     = diagnose,
-                rawDeltaD    = rawDeltaD,
-                rawDeltaF    = rawDeltaF,
+                rawDeltaD    = scaledRawDeltaD,
+                rawDeltaF    = scaledRawDeltaF,
                 accumDVoor   = accumDVoor,
                 accumFVoor   = accumFVoor,
                 epCountVoor  = epCountVoor,
@@ -686,8 +753,8 @@ object DFLearner {
         app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
             metrics      = metrics,
             diagnose     = diagnose,
-            rawDeltaD    = rawDeltaD,
-            rawDeltaF    = rawDeltaF,
+            rawDeltaD    = scaledRawDeltaD,
+            rawDeltaF    = scaledRawDeltaF,
             accumDVoor   = accumDVoor,
             accumFVoor   = accumFVoor,
             epCountVoor  = epCountVoor,
