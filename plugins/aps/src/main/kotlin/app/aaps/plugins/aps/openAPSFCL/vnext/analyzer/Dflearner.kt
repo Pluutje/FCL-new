@@ -89,6 +89,7 @@ object DFLearner {
 
     // ── Doelzone ──────────────────────────────────────────────────────────
     private const val TARGET_PEAK_BG    = 9.0    // mmol ideale piek
+    private const val AFTERLOAD_MAX_PEAK = 8.0   // mmol plafond voor D-ophogen bij guard-actief episode
     private const val TARGET_IOBR_PEAK  = 0.45   // ideale IOBratio op piek
     private const val HYPO_THRESHOLD    = 4.5    // onder dit → hypo-straf
     private const val HYPO_WEIGHT       = 2.0    // straf multiplier
@@ -288,8 +289,11 @@ object DFLearner {
         skipHistory: Boolean = false,
         skipSideEffects: Boolean = false   // true = sla KEY_LAST_TS en weekDelta niet op
     ): LearningStep? {
-        val tempo = getTempo(context)
-        val tp    = tempoMap[tempo] ?: return null
+        // Tempo: de Langzaam/Normaal/Snel-keuze is verwijderd uit de UI.
+        // Het systeem gebruikt altijd NORMAAL als basis; de effectieve stap-
+        // grootte wordt dynamisch bepaald door episodeVertrouwen en tbtModifier.
+        // getTempo/setTempo blijven beschikbaar voor migratie van opgeslagen data.
+        val tp = tempoMap[Tempo.NORMAAL]!!
 
         if (!isAutoEnabled(context)) {
             // Automaat staat uit: geen aanpassingen, maar WEL loggen zodat
@@ -499,7 +503,7 @@ object DFLearner {
             tbtModifier > 0.0 && hypoStraf == 0.0 && metrics.tbtDetected -> {
                 rawDeltaD = -tp.alphaPiek * 0.3 * tbtModifier
                 rawDeltaF = 0.0
-                diagnose  = "HYPO"  // zelfde diagnose-bucket, maar kleine stap
+                diagnose  = "TBT"  // onderscheid van echte HYPO: geen BG onder drempel
             }
 
             // ── PIEK HOOG ─────────────────────────────────────────────────────────
@@ -590,20 +594,46 @@ object DFLearner {
 
             // ── AFTERLOAD GUARD ACTIEF, EPISODE GOED AFGELOPEN ──────────────────
             // De afterload guard heeft insuline teruggehouden en er was geen hypo/hyper.
-            // Dit betekent: S is nu defensief door eerdere hypo's, maar het guard
-            // doet zijn werk. Voorkom verdere D-daling; laat D neutraal.
-            // Als er géén afterload actief was en de episode was goed → S mag omhoog.
+            //
+            // D mag licht omhoog zolang de piek structureel onder het plafond blijft
+            // (AFTERLOAD_MAX_PEAK = 8.0 mmol). Als de piek al laag genoeg is, verhogen
+            // we niet verder — anders riskeert de leerloop dat D blijft stijgen totdat
+            // de guard het telkens afvangt, en uiteindelijk de hypo toch optreedt.
+            //
+            // Logica:
+            //   piek < 8.0 mmol → D licht omhoog (guard werkt, piek laag genoeg, ruimte voor meer)
+            //   piek 8.0-9.0    → D neutraal (acceptabel resultaat, niet verder ophogen)
+            //
+            // Het plafond is bewust lager dan TARGET_PEAK_BG (9.0): als de guard
+            // structureel nodig is, is de echte "vrije" piek zonder guard mogelijk
+            // hoger. We willen niet D verhogen totdat de piek zonder guard ook 9.0 haalt.
             !peekHoog && !peekLaag && hypoStraf == 0.0 && metrics.afterloadWasActive -> {
-                // Guard was actief en hield de piek laag — goed resultaat.
-                // Beloon voorzichtig: kleine D-stap omhoog zodat S langzaam
-                // terugkeert naar het niveau zonder guard-afhankelijkheid.
-                rawDeltaD = +tp.alphaPiek * 0.3   // klein positief signaal
-                rawDeltaF = 0.0
-                diagnose  = "AFTERLOAD_GUARD_OK"
+                if (metrics.peakBg < AFTERLOAD_MAX_PEAK) {
+                    // Piek laag genoeg: D licht omhoog — het systeem kan meer aan
+                    rawDeltaD = +tp.alphaPiek * 0.25   // voorzichtiger dan zonder guard
+                    rawDeltaF = 0.0
+                    diagnose  = "AFTERLOAD_GUARD_OK"
+                } else {
+                    // Piek binnen acceptabele marge maar niet meer verhogen
+                    rawDeltaD = 0.0
+                    rawDeltaF = 0.0
+                    diagnose  = "AFTERLOAD_GUARD_OK"
+                }
             }
 
+            // ── SCHONE EPISODE: goed afgelopen zonder guard ──────────────────────
+            // Geen piek-fout, geen hypo, geen tbt, guard niet nodig.
+            // Dit is het sterkste bewijs dat D correct staat of iets mag ophogen.
+            // Kleine positieve stap — de piek moet ook hier onder het plafond blijven.
             else -> {
-                rawDeltaD = 0.0; rawDeltaF = 0.0; diagnose = "OK"
+                if (hypoStraf == 0.0 && !metrics.afterloadWasActive &&
+                    metrics.peakBg < AFTERLOAD_MAX_PEAK && metrics.totalInsulinDelivered >= 1.0) {
+                    rawDeltaD = +tp.alphaPiek * 0.15   // klein positief: alles prima
+                    rawDeltaF = 0.0
+                    diagnose  = "OK"
+                } else {
+                    rawDeltaD = 0.0; rawDeltaF = 0.0; diagnose = "OK"
+                }
             }
         }
 
@@ -717,7 +747,7 @@ object DFLearner {
             }
             if (abs(iobrFout) > 0.05) append("IOBpiek ${if (iobrFout > 0) "+" else ""}${String.format("%.2f", iobrFout)} ")
             if (hypoStraf > 0.1) append("hypo_straf=${String.format("%.2f", hypoStraf)} ")
-            append("[tempo=$tempo]")
+            append("[diagnose=$diagnose]")
         }
 
         // ── Opslaan ─────────────────────────────────────────────────────
@@ -805,22 +835,50 @@ object DFLearner {
      * Gebruik dit na een verbetering van de type-detectielogica zodat het systeem
      * opnieuw kan leren zonder vervuilde historische data.
      */
+    /** Reset D en F naar basiswaarden, wis aanpassingshistorie */
     fun resetTypeData(context: Context) {
-        // Resetwaarden: 1 stap agressiever dan de neutrale standaard.
-        // D=0.968 -> S~92%, F=0.775 -> T~117%, V~93%.
-        // Dit is de basisinstelling voor een ervaren gebruiker van Lyumjev U200.
-        val resetD = 0.968f
-        val resetF = 0.775f
+        val resetD = 0.968f; val resetF = 0.775f
         prefs(context).edit()
-            // Algemene D/F resetten naar verhoogde basiswaarden
-            .putFloat(KEY_D, resetD)
-            .putFloat(KEY_F, resetF)
-            // Type-specifieke D/F terug naar algemene waarden
-            // Onafhankelijke V-offset resetten naar nul
-            // Episode-tellers resetten
-            // Alle history wissen zodat 'Laatste aanpassingen' leeg is na reset
-            .remove(KEY_HISTORY)
+            .putFloat(KEY_D, resetD).putFloat(KEY_F, resetF)
+            .remove(KEY_HISTORY).apply()
+    }
+
+    /** Reset accumulatie (tussentijdse gespaarde deltas) */
+    fun resetAccum(context: Context) {
+        prefs(context).edit()
+            .putFloat(KEY_ACCUM_D, 0f).putFloat(KEY_ACCUM_F, 0f).apply()
+    }
+
+    /** Reset V (vasthoudendheid) naar standaard nul-offset */
+    fun resetV(context: Context) {
+        prefs(context).edit().putFloat("df_v_extra", 0f).apply()
+    }
+
+    /** Reset frontload-leerparameters naar fabrieksinstellingen */
+    fun resetFrontload(context: Context) {
+        prefs(context).edit()
+            .putFloat(KEY_REF_WMD, DFMapping.REF_WMD_DEFAULT.toFloat())
+            .putFloat(KEY_REF_WFF, DFMapping.REF_WFF_DEFAULT.toFloat())
+            .putFloat(KEY_REF_EB,  DFMapping.REF_EB_DEFAULT.toFloat())
             .apply()
+    }
+
+    /** Reset EarlyBoost-learner naar defaults */
+    fun resetEarlyBoost(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_EB_BOOST).remove(KEY_EB_WATCHING).remove(KEY_EB_STEP)
+            .remove(KEY_EB_LAST_SIG).remove(KEY_EB_PREV_SIG)
+            .remove(KEY_EB_FWD_STREAK).remove(KEY_EB_LAST_TS).apply()
+    }
+
+    /** Reset alles: D/F, V, frontload, earlyboost, accum, history, VLearner, FrontloadLearner */
+    fun resetAll(context: Context) {
+        resetTypeData(context); resetAccum(context); resetV(context)
+        resetFrontload(context); resetEarlyBoost(context)
+        context.getSharedPreferences("v_learner_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().clear().apply()
+        context.getSharedPreferences("fl_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().clear().apply()
     }
 
     // ── Intern ────────────────────────────────────────────────────────────
@@ -1015,6 +1073,19 @@ object DFLearner {
         // watchingFrontloadFrac: pas aan zodat watchingDeliveredU met -absStep verandert
         val watchDeltaFrac = -direction * absStep / (maxSmb * watchCommits)
         val newWatching = (oldWatching + watchDeltaFrac).coerceIn(EB_WATCHING_MIN, EB_WATCHING_MAX)
+
+        // refEb: pas de structurele "ondergrond" van de early boost aan.
+        // refEb bepaalt het basisniveau dat toParamOverrides() gebruikt voor de
+        // volgende leerronde, ongeacht de eb_factor-aanpassing hierboven.
+        // Kleinere stap dan eb_factor: refEb is een persistente parameter die
+        // langzamer beweegt (voorzichtiger dan de directe eb_factor stap).
+        // FORWARD: refEb omhoog — systematisch meer gewicht op vroege commits.
+        // BACK:    refEb omlaag — systematisch minder vroeg gewicht.
+        val oldRefEb = getRefEb(context)
+        val refEbStap = effectiveStep * 0.15  // 15% van de eb_factor stap
+        val newRefEb = (oldRefEb + direction * refEbStap)
+            .coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX)
+        setRefEb(context, newRefEb)
 
         p.edit()
             .putFloat(KEY_EB_BOOST,    newBoost.toFloat())

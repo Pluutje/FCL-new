@@ -234,6 +234,13 @@ interface FclStrings {
     // Onbekende codes vallen terug op de ruwe code (else -> key), zodat een
     // ontbrekende vertaling zichtbaar is i.p.v. stil te verdwijnen.
     fun diagnoseTekst(diagnose: String): String
+
+    /**
+     * Timing-gerichte toelichting bij een episode-diagnose, voor onder
+     * de Timing-kaart. Toont alleen als er daadwerkelijk een F-aanpassing was.
+     * Beschrijft WAT er met de timing is gedaan, niet de D-aanpassing.
+     */
+    fun timingDiagnoseTekst(diagnose: String): String
     fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int): String
     fun vSignaalTekst(signal: String): String
 

@@ -248,6 +248,8 @@ object FclStrings_EN : FclStrings {
             "Result within expectation, no adjustment needed"
         "HYPO" ->
             "BG too low after the meal — dose reduced"
+        "TBT" ->
+            "BG stayed below target for a prolonged time without a true hypo — dose slightly reduced"
         "HYPO_D_PROBLEEM" ->
             "BG too low despite normal buildup — strength reduced"
         "HYPO_D_DEMPED" ->
@@ -285,6 +287,22 @@ object FclStrings_EN : FclStrings {
         "GEEN_EPISODE", "SKIP_GEEN_EPISODE" ->
             "No suitable episode found to learn from"
         else -> diagnose
+    }
+
+    override fun timingDiagnoseTekst(diagnose: String) = when (diagnose) {
+        "HYPO_FRONTLOAD" ->
+            "Timing pulled back — first dose was too large for the meal speed"
+        "TE_VROEG_SOLO"  ->
+            "Timing pulled back — first commit too dominant without follow-up doses"
+        "TIMING_SPREAD", "TIMING_SPREAD_VROEG" ->
+            "Timing shifted earlier — insulin was distributed too late"
+        "FRONTLOAD_LAG", "FRONTLOAD_LAG_VROEG" ->
+            "Timing shifted earlier — first large dose was slow to start"
+        "IOB_SPREAD_TE_LAAT" ->
+            "Timing shifted earlier — accumulated insulin took effect too late"
+        "MEER_DOSIS_VROEG_ONDERSCHAT" ->
+            "Timing shifted earlier — system underestimated the rise early in the meal"
+        else -> ""
     }
 
     override fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int) = when (richting) {

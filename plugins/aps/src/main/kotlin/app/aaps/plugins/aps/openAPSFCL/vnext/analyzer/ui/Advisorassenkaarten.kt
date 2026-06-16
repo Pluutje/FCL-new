@@ -97,7 +97,8 @@ private fun SterkteKaart(
         toelichting = toelichting,
         punten = punten,
         eenheid = "%",
-        diagnoseRegel = laatsteDiagnose
+        diagnoseRegel = laatsteDiagnose,
+        lastAanpassingTs = history.lastOrNull()?.tsUtc
     )
 }
 
@@ -121,8 +122,16 @@ private fun TimingKaart(
     } + listOf(Instant.now() to huidig.toDouble())
 
     val toelichting = s.relatieveToelichting(huidig - 100)
-    val laatsteDiagnose = history.lastOrNull()?.diagnose?.takeIf { it.isNotBlank() }
-        ?.let { s.diagnoseTekst(it) }
+
+    // Alleen tonen als de laatste stap ook daadwerkelijk F heeft aangepast.
+    // De diagnose is een episode-diagnose die primair D beschrijft —
+    // zonder F-aanpassing is die tekst misleidend onder de Timing-kaart.
+    val laatsteStapMetFwijziging = history.lastOrNull { step ->
+        kotlin.math.abs(step.newF - step.oldF) > 0.001
+    }
+    val diagnoseRegel = laatsteStapMetFwijziging?.diagnose?.takeIf { it.isNotBlank() }
+        ?.let { s.timingDiagnoseTekst(it) }
+    val tsVoorDiagnose = laatsteStapMetFwijziging?.tsUtc
 
     AsKaart(
         icoon = "⏱",
@@ -131,7 +140,8 @@ private fun TimingKaart(
         toelichting = toelichting,
         punten = punten,
         eenheid = "%",
-        diagnoseRegel = laatsteDiagnose
+        diagnoseRegel = diagnoseRegel,
+        lastAanpassingTs = tsVoorDiagnose ?: history.lastOrNull()?.tsUtc
     )
 }
 
@@ -172,7 +182,8 @@ private fun VasthoudendheidKaart(
         toelichting = toelichting,
         punten = punten,
         eenheid = "%",
-        diagnoseRegel = diagnoseRegel
+        diagnoseRegel = diagnoseRegel,
+        lastAanpassingTs = recent.lastOrNull { it.signal != "NONE" }?.tsUtc
     )
 }
 
@@ -209,7 +220,8 @@ private fun FrontloadTimingKaart(s: FclStrings) {
         punten = punten,
         eenheid = "mmol",
         diagnoseRegel = diagnoseRegel,
-        omgekeerdeAs = true   // lager = naar voren, hoger = naar achteren
+        lastAanpassingTs = laatsteStap?.tsUtc,
+        omgekeerdeAs = true
     )
 }
 
@@ -223,6 +235,13 @@ private fun frontloadStatusKey(wmd: Double): String {
         else                  -> "STANDAARD"
     }
 }
+
+private fun fmtTs(tsUtc: String): String = try {
+    val instant = java.time.Instant.parse(tsUtc)
+    java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(instant)
+} catch (_: Exception) { tsUtc.take(10) }
 
 // ── Gedeelde toelichting ────────────────────────────────────────────────
 
@@ -239,6 +258,7 @@ private fun AsKaart(
     punten: List<Pair<Instant, Double>>,
     eenheid: String,
     diagnoseRegel: String?,
+    lastAanpassingTs: String? = null,
     omgekeerdeAs: Boolean = false
 ) {
     Card(
@@ -282,11 +302,25 @@ private fun AsKaart(
             )
 
             if (diagnoseRegel != null) {
-                Text(
-                    diagnoseRegel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        diagnoseRegel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (lastAanpassingTs != null) {
+                        Text(
+                            fmtTs(lastAanpassingTs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.50f)
+                        )
+                    }
+                }
             }
         }
     }

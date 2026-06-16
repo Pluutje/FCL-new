@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
-private enum class Screen { DASHBOARD, ANALYZE, ADVISOR }
+private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, RESET }
 
 /**
  * Entrypoint van de geïntegreerde FCL Analyzer.
@@ -308,8 +308,11 @@ fun FclAnalyzerScreen(
                             }
                         }
                     }
-                }
+                },
+                onOpenReset = { currentScreen = Screen.RESET }
             )
+
+            Screen.RESET -> FclResetScreen(onBack = { currentScreen = Screen.DASHBOARD })
 
             Screen.ANALYZE -> AnalyzeScreen(
                 allRows = allRows!!,
@@ -325,7 +328,6 @@ fun FclAnalyzerScreen(
                                 .episodeDao()
                                 .updateRescueUserConfirmed(startTs, confirmed)
                         }
-                        // Herlaad entities zodat de UI direct de nieuwe staat toont
                         episodeEntities = withContext(Dispatchers.IO) {
                             FCLAnalyzerDatabase.getInstance(context)
                                 .episodeDao()
@@ -418,95 +420,192 @@ private fun DashboardScreen(
     onBack: () -> Unit,
     onRefreshData: () -> Unit,
     onOpenEpisodes: () -> Unit,
-    onOpenAdvisor: () -> Unit
+    onOpenAdvisor: () -> Unit,
+    onOpenReset: () -> Unit
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val metricCount = metrics?.size ?: 0
     val advisorEnabled = episodes?.isNotEmpty() == true && metrics?.isNotEmpty() == true
+    val hasData2 = hasData && (allRows?.isNotEmpty() == true)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // ── Titelrij ──────────────────────────────────────────────────────
+        // ── Titelbalk met accentkleur ──────────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                s.analyzerTabLabel,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // ── Inhoudelijke knoppen ──────────────────────────────────────
+            NavActieKaart(
+                emoji   = "🧠",
+                label   = s.advisor,
+                badge   = if (metricCount > 0) "$metricCount" else null,
+                enabled = advisorEnabled,
+                toelichting = "Bekijk hoe de vier leerassen (Sterkte, Timing, " +
+                    "Vasthoudendheid en Frontload-timing) zijn bijgesteld op basis " +
+                    "van de laatste maaltijdepisodes. Hier stel je ook de agressiviteit in.",
+                knoopTekst = s.advisor,
+                onClick = onOpenAdvisor
+            )
+            NavActieKaart(
+                emoji   = "📊",
+                label   = s.episodes,
+                badge   = if (episodeCount > 0) "$episodeCount" else null,
+                enabled = hasData2,
+                toelichting = "Bekijk en analyseer individuele maaltijdepisodes. " +
+                    "Per episode zie je de BG-curve, insulineverdeling en de diagnose " +
+                    "die de automaat heeft gesteld.",
+                knoopTekst = s.episodes,
+                onClick = onOpenEpisodes
+            )
+
+            // Ruimte gereserveerd voor eventuele derde inhoudelijke knop
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // ── Scheidingslijn: inhoud / beheer ───────────────────────────
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                thickness = 1.dp
+            )
+
+            // ── Beheerfuncties: Ververs + Reset ───────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Ververs
+                OutlinedButton(
+                    onClick = onRefreshData,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(s.vernieuwen)
+                }
+                // Reset
+                OutlinedButton(
+                    onClick = onOpenReset,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Reset...")
+                }
+            }
+
+            // Data-info onderaan
+            Text(
+                text = if (allRows != null)
+                    "${allRows.size} cycli • data direct uit AAPS database"
+                else "Laden…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavActieKaart(
+    emoji: String,
+    label: String,
+    badge: String?,
+    enabled: Boolean,
+    toelichting: String,
+    knoopTekst: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            IconButton(onClick = onBack) {
-                androidx.compose.material3.Icon(
-                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = s.terug
+            // Links: grote knop met emoji + tekst
+            Button(
+                onClick = { if (enabled) onClick() },
+                enabled = enabled,
+                modifier = Modifier.width(96.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor   = MaterialTheme.colorScheme.onSecondaryContainer,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContentColor   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )
-            }
-            Text(s.analyzerTabLabel, style = MaterialTheme.typography.titleLarge)
-            // Spacer zodat titel gecentreerd lijkt
-            androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
-        }
-
-        TimeInRangeCard(
-            rows = allRows ?: emptyList(),
-            lastSyncTs = lastSyncTs
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            NavTile(
-                emoji = "📊",
-                label = s.episodes,
-                badge = if (episodeCount > 0) "$episodeCount" else null,
-                enabled = hasData,
-                onClick = onOpenEpisodes,
-                modifier = Modifier.weight(1f)
-            )
-            NavTile(
-                emoji = "🧠",
-                label = s.advisor,
-                badge = if (metricCount > 0) "$metricCount" else null,
-                enabled = advisorEnabled,
-                onClick = onOpenAdvisor,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(s.gegevens, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = if (allRows != null)
-                            "${allRows.size} cycli • data direct uit AAPS database"
-                        else
-                            "Laden…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(emoji, style = MaterialTheme.typography.titleLarge)
+                    Text(knoopTekst,
+                         style = MaterialTheme.typography.labelSmall,
+                         maxLines = 1)
+                    if (badge != null) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = if (enabled)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                badge,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                 }
-                TextButton(onClick = onRefreshData) {
-                    Text(s.vernieuwen)
-                }
+            }
+            // Rechts: titel + toelichting
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                )
+                Text(
+                    toelichting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
+
 
 // ── NavTile ───────────────────────────────────────────────────────────────
 

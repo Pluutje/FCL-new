@@ -69,7 +69,6 @@ fun DFControlTab(
     val vExtra = DFLearner.getVExtra(context)
 
     // Algemene state
-    var tempo by remember { mutableStateOf(DFLearner.getTempo(context)) }
     var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
     var aggressiveness by remember { mutableStateOf(DFLearner.getAggressiveness(context)) }
     var lastAppliedAggressiveness by remember { mutableStateOf(DFLearner.getLastAppliedAggressiveness(context)) }
@@ -198,24 +197,12 @@ fun DFControlTab(
                         autoEnabled = it; DFLearner.setAutoEnabled(context, it)
                     })
                 }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    DFLearner.Tempo.entries.forEach { t ->
-                        FilterChip(
-                            selected = t == tempo,
-                            onClick = { tempo = t; DFLearner.setTempo(context, t) },
-                            label = {
-                                Text(when (t) {
-                                         DFLearner.Tempo.LANGZAAM -> "Langzaam"
-                                         DFLearner.Tempo.NORMAAL  -> s.normaal
-                                         DFLearner.Tempo.SNEL     -> "Snel"
-                                     }, style = MaterialTheme.typography.labelSmall)
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
             }
         }
+
+        // ── 3. CGP Scorekaart — 14-daagse prestatie-indicatoren ────────────
+        // CGP Score staat nu op het Statistics-tabblad
+        // CgpScoreKaart(context = context) — verplaatst
 
         // ── 4. Compacte leer-status ───────────────────────────────────────
         // Toont hoeveel maaltijden het systeem heeft geleerd zonder details
@@ -239,152 +226,7 @@ fun DFControlTab(
                 }
             }
         }
-
-        // ── 5. Laatste aanpassingen door automaat ─────────────────────────
-        val ebLastSig = DFLearner.getEbLastSignal(context)
-        val ebBoostNow = DFLearner.getEarlyBoostFactor(context)
-        val ebWatchNow = DFLearner.getWatchingFrac(context)
-        val ebStepNow  = DFLearner.getEbStepSize(context)
-        val ebLastTs   = DFLearner.getEbLastSignalTs(context)
-        val ebDefault  = 1.69
-        val ebGewijzigd = kotlin.math.abs(ebBoostNow - ebDefault) > 0.005
-        // Toon EB-sectie zodra er ooit een evaluatie was (ts > 0) of als er een aanpassing is
-        val ebSectieZichtbaar = ebGewijzigd || ebLastTs > 0L
-
-        if (history.isNotEmpty() || ebSectieZichtbaar) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Laatste aanpassingen door automaat",
-                         style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Divider()
-
-                    // S/T/V leerstappen
-                    history.takeLast(5).reversed().forEach { step ->
-                        val oldStv = DFMapping.toStvMap(step.oldD, step.oldF, 85)
-                        val newStv = DFMapping.toStvMap(step.newD, step.newF, 85)
-                        val sStr = if (newStv["sterkte"] != oldStv["sterkte"]) "S: ${oldStv["sterkte"]}→${newStv["sterkte"]}%  " else ""
-                        val tStr = if (newStv["timing"] != oldStv["timing"]) "T: ${oldStv["timing"]}→${newStv["timing"]}%  " else ""
-                        val vStr = if (newStv["volhoudendheid"] != oldStv["volhoudendheid"]) "V: ${oldStv["volhoudendheid"]}→${newStv["volhoudendheid"]}%" else ""
-                        val typeEmoji = "📊"
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Text(typeEmoji, fontSize = 11.sp)
-                                    Text("$sStr$tStr$vStr".trim().ifBlank { "Geen wijziging" },
-                                         style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                                }
-                                Text(step.reason.take(60), style = MaterialTheme.typography.labelSmall,
-                                     color = when {
-                                         step.diagnose.contains("HYPO") -> MaterialTheme.colorScheme.error
-                                         step.diagnose.contains("TIMING") || step.diagnose.contains("FRONTLOAD") ->
-                                             MaterialTheme.colorScheme.primary
-                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                     })
-                            }
-                            Text(fmtTs(step.tsUtc), style = MaterialTheme.typography.labelSmall,
-                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (step != history.takeLast(5).reversed().last() || ebSectieZichtbaar)
-                            Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                    }
-
-                    // ── EarlyBoost timing verschuiving ──────────────────────
-                    if (ebSectieZichtbaar) {
-                        val ebRichtingTekst = when {
-                            ebBoostNow > ebDefault + 0.10 -> "Frontload sterk naar voren verschoven"
-                            ebBoostNow > ebDefault + 0.03 -> "Frontload licht naar voren verschoven"
-                            ebBoostNow < ebDefault - 0.10 -> "Frontload sterk teruggenomen"
-                            ebBoostNow < ebDefault - 0.03 -> "Frontload licht teruggenomen"
-                            ebGewijzigd                   -> "Frontload nabij standaard"
-                            else                          -> "Frontload-timing: standaard (nog geen aanpassing)"
-                        }
-                        val sigKleur = when (ebLastSig) {
-                            "BACK"    -> MaterialTheme.colorScheme.error
-                            "FORWARD" -> MaterialTheme.colorScheme.primary
-                            else      -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                        val sigEmoji = when (ebLastSig) {
-                            "BACK"    -> "⬅"
-                            "FORWARD" -> "➡"
-                            else      -> "⏸"
-                        }
-                        val ebTsFormatted = if (ebLastTs > 0L) {
-                            try {
-                                java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
-                                    .withZone(java.time.ZoneId.systemDefault())
-                                    .format(java.time.Instant.ofEpochMilli(ebLastTs))
-                            } catch (_: Exception) { "" }
-                        } else ""
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🚀", fontSize = 11.sp)
-                                    Text(ebRichtingTekst,
-                                         style = MaterialTheme.typography.bodySmall,
-                                         fontWeight = FontWeight.Medium)
-                                }
-                                Text("$sigEmoji Laatste signaal: $ebLastSig  ·  stap %.2fU".format(ebStepNow),
-                                     style = MaterialTheme.typography.labelSmall,
-                                     color = sigKleur)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("boost %.3f\nwatch %.3f".format(ebBoostNow, ebWatchNow),
-                                     style = MaterialTheme.typography.labelSmall,
-                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                     textAlign = androidx.compose.ui.text.style.TextAlign.End)
-                                if (ebTsFormatted.isNotEmpty()) {
-                                    Text(ebTsFormatted,
-                                         style = MaterialTheme.typography.labelSmall,
-                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                         fontSize = 9.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── 6. Reset (onopvallend onderaan) ───────────────────────────────
-        var showResetBevestiging by remember { mutableStateOf(false) }
-        if (!showResetBevestiging) {
-            androidx.compose.material3.TextButton(
-                onClick = { showResetBevestiging = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Leerdata wissen en opnieuw beginnen",
-                     style = MaterialTheme.typography.labelSmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-            }
-        } else {
-            Card(modifier = Modifier.fillMaxWidth(),
-                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Weet je het zeker? Alle geleerde waarden worden gewist.",
-                         style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                DFLearner.resetTypeData(context)
-                                history = DFLearner.getHistory(context)
-                                showResetBevestiging = false
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error)
-                        ) { Text("Wissen") }
-                        OutlinedButton(onClick = { showResetBevestiging = false }) {
-                            Text("Annuleren")
-                        }
-                    }
-                }
-            }
-        }
+        // Reset-functie is verplaatst naar het Reset-scherm in de Analyzer.
     }
 }
 

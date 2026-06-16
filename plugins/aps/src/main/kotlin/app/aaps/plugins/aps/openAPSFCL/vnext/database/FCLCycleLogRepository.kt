@@ -35,6 +35,7 @@ class FCLCycleLogRepository @Inject constructor(
 
     private var lastCsvExportHour: Int = -1
     private var lastLearnerRunHour: Int = -1
+    private var lastCgpCalcHour: Int = -1   // berekening elke 2 uur
 
     fun insert(entity: FCLCycleLogEntity) {
         scope.launch {
@@ -42,6 +43,7 @@ class FCLCycleLogRepository @Inject constructor(
             pruneOldData()
             maybeExportCsv()
             maybeRunLearners()
+            maybeCgpCalc()
         }
     }
 
@@ -154,9 +156,159 @@ class FCLCycleLogRepository @Inject constructor(
         // plateaus als nachtelijke persistente hoge BG bij lage IOB.
         val persistEvents = persistDao.getSince(sevenDaysAgo)
         VLearner.evaluate(context, persistEvents, episodeMetrics)
+
+        // ── Stap 7: Automatisch toepassen van alle geleerde waarden ────────
+        // D/F/refWmd/refWff/refEb worden na elke leerronde direct via
+        // ConfigOverrideWriter actief gemaakt — zonder dat de gebruiker
+        // op "Toepassen in AAPS" hoeft te drukken voor de leer-assen.
+        // Dit dicht het architecturele gat waarbij evaluateEarlyBoost()
+        // refEb bijwerkt maar die waarde nooit in loadFCLvNextConfig()
+        // terechtkwam. De "Toepassen in AAPS"-knop blijft alleen voor
+        // de agressiviteits-override.
+        if (DFLearner.isAutoEnabled(context)) {
+            val d      = DFLearner.getD(context)
+            val f      = DFLearner.getF(context)
+            val vExtra = DFLearner.getVExtra(context)
+            val refWmd = DFLearner.getRefWmd(context)
+            val refWff = DFLearner.getRefWff(context)
+            val refEb  = DFLearner.getRefEb(context)
+            val agg    = DFLearner.getAggressiveness(context)
+
+            val po = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
+                .toParamOverrides(d, f, refWmd, refWff, refEb, vExtra, agg)
+            val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
+                .toStvMap(d, f, 85, vExtra, aggLevel = agg)
+
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
+                .writeWithStvAndParams(
+                    stvMap         = stvMap,
+                    paramOverrides = po,
+                    reason         = "auto-learner: D=${"%.3f".format(d)} " +
+                        "F=${"%.3f".format(f)} " +
+                        "wmd=${"%.2f".format(refWmd)} " +
+                        "wff=${"%.2f".format(refWff)} " +
+                        "eb=${"%.2f".format(refEb)}",
+                    episodeCount   = episodeMetrics.size
+                )
+        }
     }
 
-    // ── Publieke methode voor manuele trigger (bijv. vanuit UI bij debug) ──
+    /**
+     * Bereken de CGP/PGR-score elke 2 uur over een 14-daags schuifvenster.
+     * Het dagpunt van vandaag wordt telkens ververst (upsert).
+     * Consistent met de backfill: alle punten zijn 14-daagse vensters.
+     */
+    /**
+     * Bereken elke 2 uur twee reeksen:
+     * - 14d-reeks: PGR over 14-daags schuifvenster → lijn + bovenste blok
+     * - 24h-reeks: PGR over alleen de afgelopen 24 uur → stippen in grafiek
+     */
+    private suspend fun maybeCgpCalc() {
+        val currentHour = java.util.Calendar.getInstance()
+            .get(java.util.Calendar.HOUR_OF_DAY)
+        if (currentHour == lastCgpCalcHour) return
+
+        val today = java.time.LocalDate.now().toString()
+        val existing14d = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpHistory
+            .get14dScores(context)
+        val heeftVandaag14d = existing14d.any { s ->
+            try {
+                java.time.Instant.parse(s.tsUtc)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalDate().toString() == today
+            } catch (_: Exception) { false }
+        }
+
+        val isEvenHour = currentHour % 2 == 0
+        if (!isEvenHour && heeftVandaag14d) return
+        lastCgpCalcHour = currentHour
+
+        // Backfill als er nog weinig punten zijn
+        if (existing14d.size < 3) backfillCgpHistory()
+
+        val now = System.currentTimeMillis()
+        val tsNow = java.time.Instant.now().toString()
+
+        // ── 14-daags schuifvenster ────────────────────────────────────────
+        val rows14d = dao.getSince(now - 14L * 24 * 60 * 60 * 1000L)
+        val bg14d = rows14d.map { it.bg }.filter { it > 0.0 }
+        if (bg14d.size >= 48) {
+            val score14d = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
+                .calculateFromBg(bg14d, tsNow)
+            if (score14d != null) {
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpHistory
+                    .upsert14dScore(context, score14d)
+            }
+        }
+
+        // ── 24-uurs dagpunt ───────────────────────────────────────────────
+        val rows24h = dao.getSince(now - 24L * 60 * 60 * 1000L)
+        val bg24h = rows24h.map { it.bg }.filter { it > 0.0 }
+        if (bg24h.size >= 24) {
+            val score24h = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
+                .calculateFromBg(bg24h, tsNow)
+            if (score24h != null) {
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpHistory
+                    .upsert24hScore(context, score24h)
+            }
+        }
+    }
+
+    /**
+     * Backfill: per kalenderdag zowel het 14d-venster als het 24u-dagpunt.
+     */
+    private suspend fun backfillCgpHistory() {
+        val allRows = dao.getAll()
+        if (allRows.isEmpty()) return
+
+        val msPerDay = 24L * 60 * 60 * 1000L
+        val windowMs14d = 14L * msPerDay
+
+        val days = allRows
+            .map { row ->
+                java.time.Instant.ofEpochMilli(row.timestampMs)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalDate()
+            }
+            .distinct().sorted()
+
+        days.forEach { date ->
+            val dayEndMs = date.plusDays(1)
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant().toEpochMilli()
+            val dayStartMs = dayEndMs - msPerDay
+            val ts = date.atTime(23, 59, 59)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toInstant().toString()
+
+            // 14d-venster
+            val bg14d = allRows
+                .filter { it.timestampMs in (dayEndMs - windowMs14d) until dayEndMs }
+                .map { it.bg }.filter { it > 0.0 }
+            if (bg14d.size >= 48) {
+                val s14d = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
+                    .calculateFromBg(bg14d, ts)
+                if (s14d != null)
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpHistory
+                        .upsert14dScore(context, s14d)
+            }
+
+            // 24u-dagpunt
+            val bg24h = allRows
+                .filter { it.timestampMs in dayStartMs until dayEndMs }
+                .map { it.bg }.filter { it > 0.0 }
+            if (bg24h.size >= 24) {
+                val s24h = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
+                    .calculateFromBg(bg24h, ts)
+                if (s24h != null)
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpHistory
+                        .upsert24hScore(context, s24h)
+            }
+        }
+    }
+
+
+
     fun triggerLearnersNow() {
         scope.launch { runLearners() }
     }

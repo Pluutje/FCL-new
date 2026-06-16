@@ -25,6 +25,7 @@ import app.aaps.plugins.aps.compose.OpenAPSScreen
 import app.aaps.plugins.aps.compose.OpenAPSViewModel
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclAnalyzerScreen
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclStatisticsScreen
 
 class FCLComposeContent(
     private val apsPlugin: APS,
@@ -64,12 +65,17 @@ class FCLComposeContent(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("📊 Analyzer") }
+                    text = { Text("Analyzer") }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("⚙️ Instellingen") }
+                    text = { Text("Statistics") }
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("Settings") }
                 )
             }
 
@@ -79,7 +85,8 @@ class FCLComposeContent(
                     onRefresh = viewModel::onRefresh
                 )
                 1 -> FclAnalyzerScreen(onDismiss = { selectedTab = 0 })
-                2 -> FCLSettingsScreen(preferences = preferences, sp = sp)
+                2 -> FclStatisticsScreen()
+                3 -> FCLSettingsScreen(preferences = preferences, sp = sp)
             }
         }
     }
