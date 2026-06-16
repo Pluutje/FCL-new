@@ -43,16 +43,20 @@ import kotlin.math.sin
 fun CgpScoreKaart(context: Context) {
     val scores14d  = remember { CgpHistory.get14dScores(context) }
     val scores24h  = remember { CgpHistory.get24hScores(context) }
-    val rollingAvg = remember { CgpHistory.getRollingAverage14d(context) }
 
-    // Bovenste blok toont het 14-daags voortschrijdend gemiddelde
-    // (laatste waarde van de rollingAvg-reeks) — consistent met de lijn
-    // in de grafiek en vergelijkbaar met AAPS Statistics.
-    // De parametertabel en het pentagon zijn gebaseerd op het gemiddelde
-    // van de laatste 14 dagpunten.
+    // Lijn = voortschrijdend gemiddelde van de 24h-stippen zelf.
+    // Het laatste lijnpunt = gemiddelde van alle 14 zichtbare stippen;
+    // verder terug in de tijd het gemiddelde van minder stippen.
+    // Deze reeks is parallel aan scores24h (niet aan scores14d).
+    val lijnReeks: List<Double?> = remember {
+        CgpHistory.getRollingAverageOfDots(context)
+    }
+
+    // Bovenste blok toont het meest recente 14-daagse venster — dat is
+    // het officiële 14-daags gemiddelde, consistent met AAPS Statistics.
     val window14 = scores14d.takeLast(14)
-    val pgr14d   = rollingAvg.lastOrNull() ?: scores14d.lastOrNull()?.pgr
-    val prev14d  = rollingAvg.dropLast(1).lastOrNull()
+    val pgr14d   = scores14d.lastOrNull()?.pgr
+    val prev14d  = scores14d.dropLast(1).lastOrNull()?.pgr
 
     // Synthetische CgpScore op basis van 14-daags gemiddelde parameters
     val display: CgpScore? = if (window14.isNotEmpty() && pgr14d != null) {
@@ -280,7 +284,7 @@ fun CgpScoreKaart(context: Context) {
                 PgrTrendlijn(
                     scores14d  = scores14d,
                     scores24h  = scores24h,
-                    rollingAvg = rollingAvg,
+                    lijnReeks  = lijnReeks,
                     modifier   = Modifier.fillMaxWidth().height(80.dp)
                 )
             }
@@ -405,17 +409,16 @@ private fun DrawScope.drawDataPentagon(
 private fun PgrTrendlijn(
     scores14d: List<CgpScore>,
     scores24h: List<CgpScore>,
-    rollingAvg: List<Double?>,
+    lijnReeks: List<Double?>,
     modifier: Modifier = Modifier
 ) {
     val lijnKleur    = MaterialTheme.colorScheme.secondary
     val gridKleur    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
     val labelKleur   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-    // Lijn gebruikt 14d-reeks als x-as referentie voor uitlijning
-    // Stippen zijn 24h-reeks (puur die dag), uitgelijnd op dezelfde x-as
+    // X-as wordt bepaald door de 14d-reeks (één punt per kalenderdag)
     val scores14     = scores14d.map { it.pgr }
-    // 24h-stippen: uitlijnen op datum zodat ze op de juiste positie vallen
-    // Bouw een map van datum → 24h PGR
+
+    // 24h-stippen: uitlijnen op datum zodat ze op de juiste x-positie vallen
     val pgr24hByDate = scores24h.associate { s ->
         try {
             java.time.Instant.parse(s.tsUtc)
@@ -423,13 +426,31 @@ private fun PgrTrendlijn(
                 .toLocalDate().toString() to s.pgr
         } catch (_: Exception) { "" to s.pgr }
     }
-    // Match 24h-stippen op de x-posities van de 14d-reeks
     val stippen = scores14d.map { s ->
         try {
             val date = java.time.Instant.parse(s.tsUtc)
                 .atZone(java.time.ZoneId.systemDefault())
                 .toLocalDate().toString()
             pgr24hByDate[date]
+        } catch (_: Exception) { null }
+    }
+
+    // Lijn (voortschrijdend gemiddelde van de stippen): lijnReeks is parallel
+    // aan scores24h, dus ook via datum matchen op de scores14d-x-as.
+    val lijnByDate = scores24h.indices.associate { i ->
+        try {
+            val date = java.time.Instant.parse(scores24h[i].tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+            date to lijnReeks.getOrNull(i)
+        } catch (_: Exception) { "" to null }
+    }
+    val lijnOpXas = scores14d.map { s ->
+        try {
+            val date = java.time.Instant.parse(s.tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+            lijnByDate[date]
         } catch (_: Exception) { null }
     }
     val textMeasurer = rememberTextMeasurer()
@@ -441,7 +462,7 @@ private fun PgrTrendlijn(
         val n = scores14.size
         val yMin = 1.0
         // Y-schaal op basis van beide reeksen
-        val allPgr = scores14 + stippen.filterNotNull()
+        val allPgr = stippen.filterNotNull() + lijnOpXas.filterNotNull()
         val rawMax = allPgr.maxOrNull() ?: 3.0
         val yMax = kotlin.math.ceil(rawMax).coerceAtLeast(2.0)
 
@@ -492,9 +513,9 @@ private fun PgrTrendlijn(
                 style = labelStyle)
         }
 
-        // 14-daags voortschrijdend gemiddelde als lijn
+        // 14-daags schuifvenster als lijn — elk punt is al een 14d-PGR
         val maPath = Path(); var firstMa = true
-        rollingAvg.forEachIndexed { i, ma ->
+        lijnOpXas.forEachIndexed { i, ma ->
             if (ma != null) {
                 val x = xOf(i); val y = yOf(ma)
                 if (firstMa) { maPath.moveTo(x, y); firstMa = false }

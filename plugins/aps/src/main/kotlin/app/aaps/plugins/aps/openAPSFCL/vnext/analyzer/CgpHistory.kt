@@ -54,14 +54,18 @@ object CgpHistory {
     // ── Afgeleide waarden voor de UI ──────────────────────────────────────
 
     /**
-     * 14-daags voortschrijdend gemiddelde per 14d-dagpunt.
-     * Retourneert lijst parallel aan get14dScores().
+     * Voortschrijdend gemiddelde van de 24h-PGR-stippen (scores24h).
+     * Voor punt i: gemiddelde van scores24h[max(0,i-13)..i].
+     * Dit is het gemiddelde van de ZICHTBARE STIPPEN tot dat punt —
+     * dus het laatste punt = gemiddelde van alle 14 zichtbare stippen,
+     * en verder terug in de tijd het gemiddelde van minder stippen.
+     * Retourneert een lijst parallel aan get24hScores().
      */
-    fun getRollingAverage14d(context: Context): List<Double?> {
-        val scores = get14dScores(context)
-        return scores.indices.map { i ->
+    fun getRollingAverageOfDots(context: Context): List<Double?> {
+        val dots = get24hScores(context)
+        return dots.indices.map { i ->
             val van = maxOf(0, i - 13)
-            val window = scores.subList(van, i + 1).map { it.pgr }
+            val window = dots.subList(van, i + 1).map { it.pgr }
             if (window.isNotEmpty()) window.average() else null
         }
     }
