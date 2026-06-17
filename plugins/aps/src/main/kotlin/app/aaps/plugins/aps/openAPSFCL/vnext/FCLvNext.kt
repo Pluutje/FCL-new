@@ -300,6 +300,14 @@ private val peakEstimator = PeakEstimatorContext()
 private var lastCommitAt: DateTime? = null
 private var lastCommitDose: Double = 0.0
 private var lastCommitReason: String = ""
+// Aparte tracking t.b.v. de post-big-commit afterload-laag: bewust los van
+// lastCommitAt/lastCommitDose, want die laatste twee worden ook door kleine
+// vervolgcommits (>= effectiveMinCommitDose, vaak 0.30U) overschreven —
+// een kleine correctiedosis zou anders de herinnering aan een net-gegeven
+// grote dosis (>= 1.5U) kunnen wissen, precies op het moment dat de extra
+// rem het hardst nodig is. Wordt alleen bijgewerkt bij commits >= 1.5U.
+private var lastBigCommitAt: DateTime? = null
+private var lastBigCommitDose: Double = 0.0
 // Tijdstip van de laatste earlyBoost-fire (stage2/3)
 // Gebruikt om de 1-2 cycli daarna een verhoogde TBR mee te geven
 // zodat de bedoelde dosis ook daadwerkelijk geleverd wordt.
@@ -2741,6 +2749,13 @@ class FCLvNext(
     private var episodeCommitCount: Int = 0    // volgnummer commit (1=eerste)
     private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
 
+    // ── Snelle-afremming guard (zie updateRapidDecelGate) ──────────────────
+    // Houdt de hoogste recentSlope sinds episode-start bij, om een relatieve
+    // terugval te kunnen detecteren los van de absolute downtrend-drempels.
+    private var episodePeakRecentSlope: Double = 0.0
+    private var rapidDecelLocked: Boolean = false
+    private var rapidDecelConfirm: Int = 0
+
     // ── Hypo-debt tracking ────────────────────────────────────────────────
     // Bijhoudt hoeveel insuline in de vroege fase van deze episode is
     // achtergehouden door hypo-bescherming. Dit wordt verrekend als een
@@ -2894,6 +2909,9 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
+            episodePeakRecentSlope = 0.0
+            rapidDecelLocked = false
+            rapidDecelConfirm = 0
             }
         if (peakEstimator.active && !episodeShouldBeActive) {
             // Originele exit: duidelijke daling of BG dicht bij target
@@ -3206,6 +3224,14 @@ class FCLvNext(
         reserveActionThisCycle = "NONE"
         reserveDeltaThisCycle = 0.0
 
+        // Snapshot vóór deze cyclus' eigen commit-beslissing: de post-big-
+        // commit afterload-laag (zie hieronder) moet reageren op de VORIGE
+        // grote commit, niet op een commit die deze cyclus zelf zojuist
+        // heeft gezet — anders zou elke grote eerste bolus zichzelf
+        // onmiddellijk afremmen.
+        val lastBigCommitAtSnapshot = lastBigCommitAt
+        val lastBigCommitDoseSnapshot = lastBigCommitDose
+
         val now = DateTime.now()
         val logRow = FCLvNextCsvLogRow(
             ts = now,
@@ -3385,6 +3411,9 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
+            episodePeakRecentSlope = 0.0
+            rapidDecelLocked = false
+            rapidDecelConfirm = 0
 
                 status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
         }
@@ -3400,6 +3429,9 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodeHypoDebtU = 0.0
+            episodePeakRecentSlope = 0.0
+            rapidDecelLocked = false
+            rapidDecelConfirm = 0
         }
 
         // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
@@ -3860,6 +3892,11 @@ class FCLvNext(
         var earlyFiredThisCycle = false  // wordt true als early floor deze cyclus vuurt
 // Apply early floor AFTER dampers (maar vóór cap/commit)
 // ✅ NIET toepassen als we al aan het afremmen zijn (accel < 0)
+        // Snapshot vóór deze cyclus' eigen boost-budget-update: de geboost
+        // maxSMB-cap hieronder moet reageren op het budget dat AL was
+        // opgebouwd door eerdere fires in deze episode, niet op het budget
+        // inclusief de fire die nu net wordt berekend (kip-ei).
+        val episodeBoostBudgetUSnapshot = episodeBoostBudgetU
         if (
             early.active &&
             early.targetU > 0.0 &&
@@ -4069,13 +4106,36 @@ class FCLvNext(
         // Zonder deze uitzondering heeft earlyBoostFactor nul effect — de ongebooste
         // target zit al dicht bij maxSMB en de cap pakt de verhoging er direct af.
         // Veiligheidsgrens: nooit meer dan maxSMB × 1.8, en alleen als iobRatio < 0.35.
+        //
+        // Budget-afbouw (17/06-incident): zonder correctie kreeg een TWEEDE
+        // fire binnen dezelfde episode (13:50 en 14:15, 25 min uit elkaar)
+        // opnieuw de volle 1.8× ruimte, ook al was de eerste fire net
+        // gegeven. Bij een korte, niet-aanhoudende stijging (snoep/drop)
+        // stapelde dit tot een te grote totale dosis. De eerste fire in een
+        // episode behoudt de volle 1.8× (episodeBoostBudgetUSnapshot=0);
+        // naarmate er binnen de episode al meer boost-budget is opgebouwd
+        // (via eerdere fires), boogt de extra ruimte geleidelijk af richting
+        // de normale maxSMB. Bij budget >= 0.5×maxSMB is de escape dicht.
+        //
+        // LET OP — bewuste afweging, geen garantie: vergelijkbare episodes
+        // met meerdere grote, legitieme boost-fires komen wel degelijk voor
+        // (bv. 11/06 14:00, vrijwel identieke curve/uitkomst als het 17/06-
+        // incident, zonder gemeld probleem). Deze taper raakt zulke
+        // episodes ook — dat is een geaccepteerd risico, geen blinde vlek.
+        // Divisor 0.5× (i.p.v. een agressievere 0.3×) is bewust gekozen om
+        // de impact op de eerste 1-2 vervolgfires te beperken; de eerste
+        // fire in elke episode blijft altijd volledig ongewijzigd.
+        val boostBudgetTaper =
+            (1.0 - episodeBoostBudgetUSnapshot / (config.maxSMB.coerceAtLeast(0.01) * 0.5)).coerceIn(0.0, 1.0)
         val effectiveMaxSmb = if (
             early.boostActive &&
             earlyFiredThisCycle &&
             config.earlyBoostFactor > 1.01 &&
             ctx.iobRatio < 0.35
         ) {
-            minOf(config.maxSMB * config.earlyBoostFactor, config.maxSMB * 1.8)
+            val boostedCap = minOf(config.maxSMB * config.earlyBoostFactor, config.maxSMB * 1.8)
+            // Lerp tussen normale cap (taper=0) en volle boosted cap (taper=1)
+            config.maxSMB + (boostedCap - config.maxSMB) * boostBudgetTaper
         } else {
             config.maxSMB
         }
@@ -4084,7 +4144,7 @@ class FCLvNext(
             val boosted = effectiveMaxSmb > config.maxSMB
             status.append(
                 "Cap maxSMB ${"%.2f".format(finalDose)} → ${"%.2f".format(effectiveMaxSmb)}U" +
-                    (if (boosted) " (earlyBoost verhoogd)" else "") + "\n"
+                    (if (boosted) " (earlyBoost verhoogd, budgetTaper=${"%.2f".format(boostBudgetTaper)})" else "") + "\n"
             )
             finalDose = effectiveMaxSmb
             logRow.guardMaxSmbLimited = !boosted  // alleen markeren als normale cap
@@ -4489,6 +4549,10 @@ class FCLvNext(
                     if (committedDose >= 0.40) lastCommitAt = now
                     lastCommitDose = committedDose
                     lastCommitReason = "${mealSignal.state} frac=${"%.2f".format(fraction)}"
+                    if (committedDose >= 1.5) {
+                        lastBigCommitAt = now
+                        lastBigCommitDose = committedDose
+                    }
 
                     didCommitThisCycle = true
                     // Alleen tellen als early floor deze cyclus niet al telde
@@ -5027,6 +5091,48 @@ class FCLvNext(
                 (1.0 - baseReductie * fd60IobFactor).coerceAtLeast(0.20)
             }
 
+            // Laag 1b: tijdelijke verzwaring direct na een grote commit
+            //
+            // Achtergrond (17/06-incident): een korte, scherpe stijging
+            // (snoep/drop) gaf in twee opeenvolgende cycli 4.69U + 2.60U.
+            // Op het moment van de tweede dosis was futureDrop60 nog maar
+            // net over de 8.0-drempel gekomen (de IOB-sprong van de eerste
+            // dosis was nog vers), waardoor laag 1 maar 11% afremde — te
+            // weinig om de stapeling te voorkomen. Analyse van 51 historische
+            // episodes toonde geen betrouwbaar vroeg kinematisch signaal om
+            // zo'n korte, "lege" stijging te onderscheiden van een echte
+            // maaltijd op het moment zelf — daarom grijpt deze laag niet in
+            // op basis van curve-vorm, maar puur op recente dosis-grootte:
+            // vlak na een forse commit is voorzichtigheid altijd verstandig,
+            // ongeacht de oorzaak van de stijging.
+            //
+            // Werking: binnen ~10 min (2 cycli) na een commit >= 1.5U wordt
+            // dezelfde fd60-curve als laag 1 toegepast, maar met een lagere
+            // bodem (max 90% reductie i.p.v. 80%) — kortdurend en zelf-
+            // beperkend, want zodra het venster verstrijkt of futureDrop60
+            // weer onder 8.0 zakt is deze laag net als laag 1 inactief.
+            // Normale, doorlopende maaltijden met geleidelijk oplopende IOB
+            // raken deze laag niet: die houden futureDrop60 doorgaans onder
+            // de 8.0-drempel totdat het venster al verstreken is.
+            val minutesSinceLastBigCommit = lastBigCommitAtSnapshot?.let {
+                org.joda.time.Minutes.minutesBetween(it, now).minutes
+            } ?: 999
+            val postBigCommitActive =
+                lastBigCommitDoseSnapshot >= 1.5 && minutesSinceLastBigCommit in 0..10
+            val postBigCommitScale: Double = if (postBigCommitActive && futureDrop60Mmol > 8.0 && fd60IobFactor > 0.0) {
+                val baseReductie = when {
+                    futureDrop60Mmol <= 12.0 -> ((futureDrop60Mmol - 8.0) / 4.0) * 0.40
+                    else -> (0.40 + ((futureDrop60Mmol - 12.0) / 8.0) * 0.40).coerceAtMost(0.80)
+                }
+                (1.0 - baseReductie * fd60IobFactor * 1.5).coerceAtLeast(0.10)
+            } else 1.0
+            if (postBigCommitActive && postBigCommitScale < 0.999) {
+                status.append(
+                    "POST-COMMIT REM ×${"%.2f".format(postBigCommitScale)} " +
+                        "(${minutesSinceLastBigCommit}min na ${"%.2f".format(lastBigCommitDoseSnapshot)}U, fd60=${"%.1f".format(futureDrop60Mmol)})\n"
+                )
+            }
+
             // Laag 2: hoge IOB + late fase guard
             val minutesSinceEpisode = mealEpisodeStartTime?.let {
                 org.joda.time.Minutes.minutesBetween(it, now).minutes
@@ -5060,13 +5166,14 @@ class FCLvNext(
                 1.0 - frac * 0.60
             } else 1.0
 
-            val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale
+            val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale * postBigCommitScale
             logRow.afterloadFutureDrop60Scale = futureDrop60Scale
             logRow.afterloadHighIobLateScale  = highIobLateWaveScale
-            // lateSecondWaveScale is bewust niet toegevoegd aan LogRow/Entity:
-            // dat zou een Room schema-bump vereisen die (met de huidige
-            // fallbackToDestructiveMigration) de 7-dagen cyclus-log wist.
-            // De waarde is zichtbaar via de status-regel hieronder.
+            // lateSecondWaveScale en postBigCommitScale zijn bewust niet
+            // toegevoegd aan LogRow/Entity: dat zou een Room schema-bump
+            // vereisen die (met de huidige fallbackToDestructiveMigration)
+            // de 7-dagen cyclus-log wist. Beide waarden zijn zichtbaar via
+            // de status-regels (hieronder resp. hierboven).
 
             if (afterloadScale < 1.0 - 1e-9) {
                 val beforeAfterload = commandedDose
