@@ -1,6 +1,6 @@
 package app.aaps.plugins.calibration
 
-import app.aaps.plugins.calibration.db.CalibrationEntry
+import app.aaps.core.data.model.CAL
 import kotlin.math.abs
 import kotlin.math.sign
 
@@ -68,7 +68,7 @@ data class SplineFit(
             sensorMgdl <= cx_low  -> cy_low  + slope_low            * (sensorMgdl - cx_low)
             sensorMgdl >= cx_high -> cy_high + extrapolateHighSlope  * (sensorMgdl - cx_high)
             else -> hermite(sensorMgdl, cx_low, cy_low, slope_low,
-                                        cx_high, cy_high, slope_high)
+                            cx_high, cy_high, slope_high)
         }
         return fitted + manualOffsetMgdl
     }
@@ -81,7 +81,7 @@ data class SplineFit(
 // Public fit function
 // ---------------------------------------------------------------------------
 
-fun fitSplineCalibration(entries: List<CalibrationEntry>, now: Long): SplineFit? {
+fun fitSplineCalibration(entries: List<CAL>, now: Long): SplineFit? {
     if (entries.size < MIN_ENTRIES_FOR_SPLINE) return null
 
     val linear = fitLinearCalibration(entries, now) ?: return null
@@ -101,8 +101,8 @@ fun fitSplineCalibration(entries: List<CalibrationEntry>, now: Long): SplineFit?
 // ---------------------------------------------------------------------------
 
 private fun fitSegmentSpline(
-    low:    List<CalibrationEntry>,
-    high:   List<CalibrationEntry>,
+    low:    List<CAL>,
+    high:   List<CAL>,
     linear: CalibrationFit,
     now:    Long
 ): SplineFit? {
@@ -152,9 +152,9 @@ private fun fitSegmentSpline(
  * Gewogen lineaire regressie voor één segment → slope.
  * Geeft null als de sensorwaarden te dicht bij elkaar liggen (< MIN_SEGMENT_RANGE_MGDL).
  */
-private fun segmentSlope(entries: List<CalibrationEntry>, now: Long): Double? {
+private fun segmentSlope(entries: List<CAL>, now: Long): Double? {
     val sensorRange = entries.maxOf { it.sensorMgdlAtPairing } -
-                      entries.minOf { it.sensorMgdlAtPairing }
+        entries.minOf { it.sensorMgdlAtPairing }
     if (sensorRange < MIN_SEGMENT_RANGE_MGDL) return null
 
     var sumW = 0.0; var sumWX = 0.0; var sumWY = 0.0
@@ -187,7 +187,7 @@ private fun hermite(
     return h00*y0 + h10*h*m0 + h01*y1 + h11*h*m1
 }
 
-private fun weightedCentroid(entries: List<CalibrationEntry>, now: Long): Pair<Double, Double> {
+private fun weightedCentroid(entries: List<CAL>, now: Long): Pair<Double, Double> {
     var sumW = 0.0; var sumWX = 0.0; var sumWY = 0.0
     for (e in entries) {
         val w = weightFor(e.timestamp, now)

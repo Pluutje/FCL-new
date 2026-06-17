@@ -339,9 +339,10 @@ open class OpenAPSFCLPlugin @Inject constructor(
         return value
     }
 
-    override fun configuration(): JsonObject = JsonObject(emptyMap())
+ //   override fun configuration(): JsonObject = JsonObject(emptyMap())
 
-    override fun applyConfiguration(configuration: JsonObject) {}
+ //   override fun applyConfiguration(configuration: JsonObject) {}
+
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
            key = "fcl_vnext_settings",

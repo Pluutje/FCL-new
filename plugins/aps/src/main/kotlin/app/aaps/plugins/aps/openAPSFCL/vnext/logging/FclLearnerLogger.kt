@@ -5,6 +5,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics
 import java.io.File
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 /**
  * FclLearnerLogger — schrijft één CSV-regel per learner-evaluatie.
@@ -46,7 +47,7 @@ object FclLearnerLogger {
         "raw_delta_f", "accum_d_before", "accum_f_before", "ep_count_before", "week_delta_d_before", "week_delta_f_before",
         "aanpassing_geblokt", "old_d", "old_f", "new_d", "new_f", "eb_signal",
         "eb_tier", "eb_old_boost", "eb_new_boost", "eb_old_watching", "eb_new_watching", "eb_step",
-        "fl_richting", "fl_gemiddelde_marge_min", "fl_oude_wmd", "fl_nieuwe_wmd", "fl_bruikbaar_count", "v_signal",
+        "fl_richting", "fl_gemiddelde_marge_min", "fl_oude_wmd", "fl_nieuwe_wmd", "fl_oude_wff", "fl_nieuwe_wff", "fl_bruikbaar_count", "v_signal",
         "v_old_extra", "v_new_extra", "v_step", "v_cluster_fires"
     )
 
@@ -126,6 +127,8 @@ object FclLearnerLogger {
         values["fl_gemiddelde_marge_min"] = ""
         values["fl_oude_wmd"]             = ""
         values["fl_nieuwe_wmd"]           = ""
+        values["fl_oude_wff"]             = ""
+        values["fl_nieuwe_wff"]           = ""
         values["fl_bruikbaar_count"]      = ""
         values["v_signal"]        = ""
         values["v_old_extra"]     = ""
@@ -181,6 +184,8 @@ object FclLearnerLogger {
         values["fl_gemiddelde_marge_min"] = ""
         values["fl_oude_wmd"]             = ""
         values["fl_nieuwe_wmd"]           = ""
+        values["fl_oude_wff"]             = ""
+        values["fl_nieuwe_wff"]           = ""
         values["fl_bruikbaar_count"]      = ""
         values["v_signal"]        = ""
         values["v_old_extra"]     = ""
@@ -201,6 +206,8 @@ object FclLearnerLogger {
         gemMarge:       Int,
         oudeWmd:        Double,
         nieuweWmd:      Double,
+        oudeWff:        Double = 0.0,
+        nieuweWff:      Double = 0.0,
         bruikbaarCount: Int
     ) {
         val values = emptyRow()
@@ -234,6 +241,8 @@ object FclLearnerLogger {
         values["fl_gemiddelde_marge_min"] = gemMarge.toString()
         values["fl_oude_wmd"]             = fmt4(oudeWmd)
         values["fl_nieuwe_wmd"]           = if (richting != "GOED") fmt4(nieuweWmd) else ""
+        values["fl_oude_wff"]             = fmt4(oudeWff)
+        values["fl_nieuwe_wff"]           = if (abs(nieuweWff - oudeWff) >= 0.001) fmt4(nieuweWff) else ""
         values["fl_bruikbaar_count"]      = bruikbaarCount.toString()
 
         append(values)
@@ -274,7 +283,7 @@ object FclLearnerLogger {
             "aanpassing_geblokt","old_d","old_f","new_d","new_f",
             "eb_signal","eb_tier","eb_old_boost","eb_new_boost",
             "eb_old_watching","eb_new_watching","eb_step",
-            "fl_richting","fl_gemiddelde_marge_min","fl_oude_wmd","fl_nieuwe_wmd","fl_bruikbaar_count"
+            "fl_richting","fl_gemiddelde_marge_min","fl_oude_wmd","fl_nieuwe_wmd","fl_oude_wff","fl_nieuwe_wff","fl_bruikbaar_count"
         )
         leeg.forEach { values[it] = "" }
 

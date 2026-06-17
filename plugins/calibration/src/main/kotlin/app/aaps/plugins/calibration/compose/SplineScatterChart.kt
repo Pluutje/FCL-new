@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.plugins.calibration.CalibrationFit
 import app.aaps.plugins.calibration.SplineFit
-import app.aaps.plugins.calibration.db.CalibrationEntry
+import app.aaps.core.data.model.CAL
 import app.aaps.plugins.calibration.weightFor
 import kotlin.math.max
 import kotlin.math.min
@@ -65,7 +65,7 @@ internal enum class ZoomSegment { FULL, LOW, MID, HIGH }
  */
 @Composable
 internal fun SplineScatterChart(
-    entries: List<CalibrationEntry>,
+    entries: List<CAL>,
     splineFit: SplineFit?,
     linearFit: CalibrationFit?,
     selectedEntryId: Long?,
@@ -116,72 +116,72 @@ internal fun SplineScatterChart(
             .fillMaxWidth()
             .aspectRatio(1f)
     ) {
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .pointerInput(splineFit, zoomSegment) {
-                detectTapGestures {
-                    val next = when (zoomSegment) {
-                        ZoomSegment.FULL -> ZoomSegment.LOW
-                        ZoomSegment.LOW  -> ZoomSegment.HIGH
-                        ZoomSegment.MID  -> ZoomSegment.HIGH
-                        ZoomSegment.HIGH -> ZoomSegment.FULL
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .pointerInput(splineFit, zoomSegment) {
+                    detectTapGestures {
+                        val next = when (zoomSegment) {
+                            ZoomSegment.FULL -> ZoomSegment.LOW
+                            ZoomSegment.LOW  -> ZoomSegment.HIGH
+                            ZoomSegment.MID  -> ZoomSegment.HIGH
+                            ZoomSegment.HIGH -> ZoomSegment.FULL
+                        }
+                        onZoomChange(next)
                     }
-                    onZoomChange(next)
+                }
+        ) {
+            val topPad   = 8.dp.toPx()
+            val rightPad = leftAxisWidthPx   // zelfde marge rechts als links zodat het plot zelf vierkant is
+
+            val plotSize = Size(
+                width  = size.width  - leftAxisWidthPx - rightPad,
+                height = size.height - topPad - bottomAxisHeightPx
+            )
+            val plotOrigin = Offset(leftAxisWidthPx, topPad)
+
+            if (plotSize.width <= 0f || plotSize.height <= 0f) return@Canvas
+
+            // Bepaal as-bereik op basis van zoomstatus
+            val (fullMin, fullMax) = computeAxisRange(entries)
+            val (axisMin, axisMax) = computeZoomedRange(
+                fullMin, fullMax, zoomSegment, splineFit
+            )
+            val span = axisMax - axisMin
+
+            // Toon zoom-indicator als ingezoomd
+            val isZoomed = zoomSegment != ZoomSegment.FULL
+
+            fun xToPx(v: Float) = plotOrigin.x + ((v - axisMin) / span) * plotSize.width
+            fun yToPx(v: Float) = plotOrigin.y + plotSize.height - ((v - axisMin) / span) * plotSize.height
+
+            // Achtergrond gridlijnen (kruisdraden)
+            drawGrid(plotOrigin, plotSize, axisMin, axisMax, gridColor)
+
+            drawAxes(plotOrigin, plotSize, axisColor)
+            drawAxisLabels(plotOrigin, plotSize, axisMin, axisMax, glucoseUnit, labelPaint, density)
+            drawIdentityLine(::xToPx, ::yToPx, axisMin, axisMax, identityColor)
+
+            if (splineFit != null) {
+                linearFit?.takeIf { it.isApplicable }?.let {
+                    drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, 0f, linearGhostColor, dashed = true)
+                }
+                drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, manualOffsetMgdl, regressionColor)
+                drawKnotMarker(::xToPx, ::yToPx, splineFit, manualOffsetMgdl, knotColor, density)
+                // Enkelvoudige Hermite — geen tweede knooppunt marker
+            } else {
+                linearFit?.takeIf { it.isApplicable }?.let {
+                    drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, manualOffsetMgdl, regressionColor, dashed = false)
                 }
             }
-    ) {
-        val topPad   = 8.dp.toPx()
-        val rightPad = leftAxisWidthPx   // zelfde marge rechts als links zodat het plot zelf vierkant is
 
-        val plotSize = Size(
-            width  = size.width  - leftAxisWidthPx - rightPad,
-            height = size.height - topPad - bottomAxisHeightPx
-        )
-        val plotOrigin = Offset(leftAxisWidthPx, topPad)
-
-        if (plotSize.width <= 0f || plotSize.height <= 0f) return@Canvas
-
-        // Bepaal as-bereik op basis van zoomstatus
-        val (fullMin, fullMax) = computeAxisRange(entries)
-        val (axisMin, axisMax) = computeZoomedRange(
-            fullMin, fullMax, zoomSegment, splineFit
-        )
-        val span = axisMax - axisMin
-
-        // Toon zoom-indicator als ingezoomd
-        val isZoomed = zoomSegment != ZoomSegment.FULL
-
-        fun xToPx(v: Float) = plotOrigin.x + ((v - axisMin) / span) * plotSize.width
-        fun yToPx(v: Float) = plotOrigin.y + plotSize.height - ((v - axisMin) / span) * plotSize.height
-
-        // Achtergrond gridlijnen (kruisdraden)
-        drawGrid(plotOrigin, plotSize, axisMin, axisMax, gridColor)
-
-        drawAxes(plotOrigin, plotSize, axisColor)
-        drawAxisLabels(plotOrigin, plotSize, axisMin, axisMax, glucoseUnit, labelPaint, density)
-        drawIdentityLine(::xToPx, ::yToPx, axisMin, axisMax, identityColor)
-
-        if (splineFit != null) {
-            linearFit?.takeIf { it.isApplicable }?.let {
-                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, 0f, linearGhostColor, dashed = true)
-            }
-            drawSplineCurve(::xToPx, ::yToPx, axisMin, axisMax, splineFit, manualOffsetMgdl, regressionColor)
-            drawKnotMarker(::xToPx, ::yToPx, splineFit, manualOffsetMgdl, knotColor, density)
-            // Enkelvoudige Hermite — geen tweede knooppunt marker
-        } else {
-            linearFit?.takeIf { it.isApplicable }?.let {
-                drawLinearLine(::xToPx, ::yToPx, axisMin, axisMax, it, manualOffsetMgdl, regressionColor, dashed = false)
-            }
+            drawEntries(
+                entries, selectedEntryId, now, ::xToPx, ::yToPx,
+                dotColor, selectedColor, selectedHaloColor, density,
+                splineFit, linearFit, manualOffsetMgdl, residualAbove, residualBelow
+            )
         }
-
-        drawEntries(
-            entries, selectedEntryId, now, ::xToPx, ::yToPx,
-            dotColor, selectedColor, selectedHaloColor, density,
-            splineFit, linearFit, manualOffsetMgdl, residualAbove, residualBelow
-        )
-    }
     }
 }
 
@@ -220,7 +220,7 @@ private fun computeZoomedRange(
     }
 }
 
-private fun computeAxisRange(entries: List<CalibrationEntry>): Pair<Float, Float> {
+private fun computeAxisRange(entries: List<CAL>): Pair<Float, Float> {
     if (entries.isEmpty()) return 40f to 200f
     var lo = Float.POSITIVE_INFINITY
     var hi = Float.NEGATIVE_INFINITY
@@ -419,7 +419,7 @@ private fun DrawScope.drawKnotMarker(
 }
 
 private fun DrawScope.drawEntries(
-    entries: List<CalibrationEntry>,
+    entries: List<CAL>,
     selectedEntryId: Long?,
     now: Long,
     xToPx: (Float) -> Float,
@@ -457,7 +457,7 @@ private fun DrawScope.drawEntries(
             val fittedY = yToPx(activeFit(e.sensorMgdlAtPairing).toFloat())
             val residualColor = if (e.fingerstickMgdl > activeFit(e.sensorMgdlAtPairing))
                 residualBelow.copy(alpha = residualBelow.alpha * alpha)  // sensor te laag: prik hoger dan fit
-                else residualAbove.copy(alpha = residualAbove.alpha * alpha)
+            else residualAbove.copy(alpha = residualAbove.alpha * alpha)
             drawLine(
                 color       = residualColor,
                 start       = Offset(sx, fy),

@@ -8,25 +8,46 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.REF_WMD_MIN
 import kotlin.math.abs
 
 /**
- * FrontloadLearner — leert automatisch wanneer de frontload-trigger optimaal is.
+ * FrontloadLearner — leert automatisch wanneer en hoe groot de frontload-
+ * commit moet zijn.
  *
  * KERNGEDACHTE:
  * Het frontload-mechanisme triggert als BG met voldoende snelheid stijgt.
- * De drempel (REF_WMD) bepaalt hoe vroeg dat gebeurt.
+ * Twee onafhankelijke vragen, twee parameters:
+ *   - REF_WMD: WANNEER triggeren (op basis van marge tot de piek)
+ *   - REF_WFF: HOEVEEL insuline dan al gegarandeerd gegeven wordt
+ *     (op basis van firstBigCommitFrac — het aandeel van de totale dosis
+ *     dat al in de eerste grote commit zit)
  *
- * Een goede frontload triggert ruim VOOR de piek (≥ 25 min ervoor).
- * Te laat triggeren = piek wordt niet afgevlakt.
- * Te vroeg triggeren = onnodige insuline als BG toch niet stijgt.
+ * Een goede frontload triggert ruim VOOR de piek (≥ 25 min ervoor) ÉN
+ * geeft dan al een substantieel deel van de uiteindelijke dosis.
+ * Data-analyse (16-06-2026, 32 episodes) toonde: episodes met fbc < 0.35
+ * hadden gemiddeld 1.25 mmol hogere piek en ~3x langere tijd-tot-piek dan
+ * episodes met fbc >= 0.60 — fbc is dus een directe, vroege voorspeller
+ * van de uitkomst en daarmee een beter stuursignaal dan de vroegere
+ * "staart-fractie" (die het probleem pas achteraf detecteert).
  *
- * LEERLOGICA:
+ * LEERLOGICA REF_WMD (timing):
  * - Bereken per episode: (piek-tijdstip) − (eerste frontload-tijdstip)
  *   = "marge voor de piek"
  * - Te laat (< 20 min marge) → REF_WMD verlagen (eerder reageren)
  * - Te vroeg (> 50 min marge) + piek laag → REF_WMD verhogen (later reageren)
  * - Goed (20-50 min marge) → niets doen
+ *
+ * LEERLOGICA REF_WFF (commit-grootte):
+ * - Gemiddelde firstBigCommitFrac over veilige episodes (geen hypo, geen
+ *   bevestigde rescue) bepaalt de richting.
+ * - fbc < 0.45 → REF_WFF omhoog (grotere gegarandeerde vroege dosis)
+ * - fbc > 0.65 én staart-fractie laag → REF_WFF omlaag (voorkom over-dosing)
+ * - Anders → niets doen
+ *
+ * VEILIGHEID:
  * - Minimaal 5 bruikbare episodes voor aanpassing
- * - Max stap: 0.05 mmol per evaluatie
+ * - Max stap: 0.05 (WMD) / 0.03 (WFF) per evaluatie
  * - Cooldown: 48 uur tussen aanpassingen
+ * - Episodes met hypo of bevestigde rescue tellen niet mee voor de
+ *   fbc-gemiddelde (zouden een fout signaal geven: "meer vroege insuline
+ *   is hier beter" terwijl de episode al te veel kreeg)
  */
 object FrontloadLearner {
 
@@ -134,20 +155,44 @@ object FrontloadLearner {
         }
 
         // ── REF_WFF: hoe groot de frontload-commit ──────────────────────────
-        // lastSignificantCommitFrac geeft aan hoeveel van de insuline in de
-        // "staart" zat (< 15 min voor piek). Als dat structureel hoog is
-        // (gemiddeld > 0.20), moeten de vroege commits groter worden: WFF omhoog.
-        // Omgekeerd: als de frontload al groot was maar de piek te vroeg viel
-        // (gemiddeldeMarge > MARGE_MAX), WFF licht omlaag.
+        // Stuurt nu DIRECT op firstBigCommitFrac (fbc) — het aandeel van de
+        // totale dosis dat al in de eerste grote commit zit. Data-analyse
+        // (16-06-2026) toonde een sterke samenhang: episodes met fbc < 0.35
+        // hadden gemiddeld 1.25 mmol hogere piek en 3x langere tijd-tot-piek
+        // dan episodes met fbc >= 0.60. lastSignificantCommitFrac (staart)
+        // werd voorheen gebruikt maar reageert pas NA het probleem; fbc is
+        // het directere en vroegere signaal.
+        //
+        // Doelbereik fbc: 0.45-0.65 (vergelijkbaar met de "hoog frontload"
+        // groep uit de analyse, met marge zodat niet structureel over-dosed
+        // wordt bij kleine/onzekere episodes).
+        // Veiligheid: WFF wordt NIET verhoogd op basis van episodes met hypo
+        // of bevestigde rescue — die episodes zijn geen goede leersignaal
+        // voor "meer vroege insuline is beter".
+        val veiligeEpisodes = bruikbaar.filter { !it.hypoDetected && !it.rescueConfirmed }
+
+        val gemiddeldeFbc = if (veiligeEpisodes.isNotEmpty())
+            veiligeEpisodes.map { it.firstBigCommitFrac }.average()
+        else null
+
         val gemiddeldeStaartFrac = bruikbaar
             .map { it.lastSignificantCommitFrac }
             .average()
         val stapWff = 0.03  // voorzichtige stap voor WFF
 
+        val FBC_TARGET_MIN = 0.45
+        val FBC_TARGET_MAX = 0.65
+
         val nieuwWff = when {
-            gemiddeldeStaartFrac > 0.20 ->
+            // Geen veilige episodes om op te leren: WFF onveranderd
+            gemiddeldeFbc == null -> huidigWff
+            // fbc structureel te laag: te weinig vroege insuline → WFF omhoog
+            gemiddeldeFbc < FBC_TARGET_MIN ->
                 (huidigWff + stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
-            gemiddeldeStaartFrac < 0.08 && richting == "LATER" ->
+            // fbc structureel te hoog: mogelijk over-frontloading → WFF omlaag,
+            // maar alleen als de staart niet ook al hoog is (anders is het geen
+            // WFF-probleem maar eerder een algemene dosis-kwestie)
+            gemiddeldeFbc > FBC_TARGET_MAX && gemiddeldeStaartFrac < 0.15 ->
                 (huidigWff - stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
             else -> huidigWff
         }
@@ -161,6 +206,8 @@ object FrontloadLearner {
                 gemMarge       = gemiddeldeMarge,
                 oudeWmd        = huidigWmd,
                 nieuweWmd      = huidigWmd,
+                oudeWff        = huidigWff,
+                nieuweWff      = huidigWff,
                 bruikbaarCount = bruikbaar.size
             )
             return null
@@ -171,7 +218,8 @@ object FrontloadLearner {
         prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
 
         val effectiefRichting = if (richting != "GOED") richting
-            else if (gemiddeldeStaartFrac > 0.20) "EERDER" else "GOED"
+            else if (gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN) "EERDER"
+            else "GOED"
 
         val step = FrontloadLearningStep(
             tsUtc            = java.time.Instant.now().toString(),
@@ -189,6 +237,8 @@ object FrontloadLearner {
             gemMarge       = gemiddeldeMarge,
             oudeWmd        = huidigWmd,
             nieuweWmd      = nieuwWmd,
+            oudeWff        = huidigWff,
+            nieuweWff      = nieuwWff,
             bruikbaarCount = bruikbaar.size
         )
 

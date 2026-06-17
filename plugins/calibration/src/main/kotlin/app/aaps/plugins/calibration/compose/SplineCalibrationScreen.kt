@@ -61,7 +61,7 @@ import app.aaps.core.ui.compose.navigation.LocalPluginNavigationRequest
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.plugins.calibration.MIN_ENTRIES_FOR_SPLINE
 import app.aaps.plugins.calibration.R
-import app.aaps.plugins.calibration.db.CalibrationEntry
+import app.aaps.core.data.model.CAL
 import kotlin.math.roundToInt
 
 @Composable
@@ -412,7 +412,7 @@ private fun SplineEmptyEntries() {
 
 @Composable
 private fun SplineEntriesList(
-    entries: List<CalibrationEntry>,
+    entries: List<CAL>,
     state: SplineCalibrationUiState,
     selectedEntryId: Long?,
     glucoseUnit: GlucoseUnit,
@@ -444,7 +444,7 @@ private fun SplineEntriesList(
 
 @Composable
 private fun SplineEntryRow(
-    entry: CalibrationEntry,
+    entry: CAL,
     state: SplineCalibrationUiState,
     selected: Boolean,
     glucoseUnit: GlucoseUnit,
@@ -485,7 +485,7 @@ private fun SplineEntryRow(
                         label = "sensor",
                         value = entry.sensorMgdlAtPairing.formatBgDisplay(glucoseUnit),
                         delta = (entry.fingerstickMgdl - entry.sensorMgdlAtPairing)
-                                    .formatBgDisplay(glucoseUnit, signed = true),
+                            .formatBgDisplay(glucoseUnit, signed = true),
                         accentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (calibrated != null) {
@@ -496,7 +496,7 @@ private fun SplineEntryRow(
                             delta = calDelta.formatBgDisplay(glucoseUnit, signed = true),
                             accentColor = when {
                                 kotlin.math.abs(calDelta) <= (if (glucoseUnit == GlucoseUnit.MMOL) 0.5 else 9.0)
-                                    -> MaterialTheme.colorScheme.tertiary
+                                     -> MaterialTheme.colorScheme.tertiary
                                 else -> MaterialTheme.colorScheme.error
                             }
                         )
@@ -665,19 +665,19 @@ private fun VerticalOffsetSlider(
                         val botY   = size.height - thumbRadiusPx
                         val trackH = botY - topY
                         val fraction = ((state.manualOffsetMmol + MANUAL_OFFSET_MAX_MMOL) /
-                                        (MANUAL_OFFSET_MAX_MMOL * 2f)).coerceIn(0f, 1f)
+                            (MANUAL_OFFSET_MAX_MMOL * 2f)).coerceIn(0f, 1f)
                         val thumbY = botY - fraction * trackH
                         val midY   = botY - 0.5f * trackH
 
                         drawLine(color = surfaceVar, start = Offset(cx, topY), end = Offset(cx, botY),
-                            strokeWidth = trackWidthPx, cap = StrokeCap.Round)
+                                 strokeWidth = trackWidthPx, cap = StrokeCap.Round)
                         drawLine(color = primaryColor.copy(alpha = 0.7f),
-                            start = Offset(cx, minOf(midY, thumbY)), end = Offset(cx, maxOf(midY, thumbY)),
-                            strokeWidth = trackWidthPx, cap = StrokeCap.Round)
+                                 start = Offset(cx, minOf(midY, thumbY)), end = Offset(cx, maxOf(midY, thumbY)),
+                                 strokeWidth = trackWidthPx, cap = StrokeCap.Round)
                         drawCircle(color = primaryColor, radius = thumbRadiusPx, center = Offset(cx, thumbY))
                         drawLine(color = primaryColor.copy(alpha = 0.4f),
-                            start = Offset(cx - thumbRadiusPx, midY), end = Offset(cx + thumbRadiusPx, midY),
-                            strokeWidth = 1.5f)
+                                 start = Offset(cx - thumbRadiusPx, midY), end = Offset(cx + thumbRadiusPx, midY),
+                                 strokeWidth = 1.5f)
                     }
                 }
 

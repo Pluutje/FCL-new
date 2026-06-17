@@ -4,7 +4,7 @@ import androidx.compose.runtime.Immutable
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.plugins.calibration.CalibrationFit
 import app.aaps.plugins.calibration.SplineFit
-import app.aaps.plugins.calibration.db.CalibrationEntry
+import app.aaps.core.data.model.CAL
 
 /** SharedPreferences key for the manual offset. */
 const val PREF_MANUAL_OFFSET_MMOL = "spline_manual_offset_mmol"
@@ -20,7 +20,7 @@ data class SplineCalibrationUiState(
     val sessionStart: Long?             = null,
     val warmUpEndsAt: Long?             = null,
     val isInWarmUp: Boolean             = false,
-    val entries: List<CalibrationEntry> = emptyList(),
+    val entries: List<CAL> = emptyList(),
     val splineFit: SplineFit?           = null,
     /** Linear fallback — always computed when entries ≥ 2, used for the UI baseline and status text. */
     val linearFit: CalibrationFit?      = null,

@@ -7,7 +7,7 @@ import app.aaps.plugins.aps.loop.LoopPlugin
 import app.aaps.plugins.aps.openAPSAMA.OpenAPSAMAPlugin
 import app.aaps.plugins.aps.openAPSAutoISF.OpenAPSAutoISFPlugin
 import app.aaps.plugins.aps.openAPSSMB.OpenAPSSMBPlugin
-import app.aaps.plugins.automation.AutomationPlugin
+
 import app.aaps.plugins.calibration.LinearCalibrationPlugin
 import app.aaps.plugins.calibration.NoCalibrationPlugin
 import app.aaps.plugins.constraints.bgQualityCheck.BgQualityCheckPlugin
@@ -43,7 +43,7 @@ import app.aaps.plugins.source.TomatoPlugin
 import app.aaps.plugins.source.XdripSourcePlugin
 import app.aaps.plugins.source.instara.InstaraPlugin
 import app.aaps.plugins.sync.garmin.GarminPlugin
-import app.aaps.plugins.sync.nsclient.NSClientPlugin
+
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.openhumans.OpenHumansUploaderPlugin
 import app.aaps.plugins.sync.smsCommunicator.SmsCommunicatorPlugin
@@ -63,6 +63,7 @@ import javax.inject.Qualifier
 
 import app.aaps.plugins.aps.openAPSFCL.OpenAPSFCLPlugin
 import app.aaps.plugins.calibration.SplineCalibrationPlugin
+
 
 @Suppress("unused")
 @Module
@@ -99,6 +100,8 @@ abstract class PluginsListModule {
     @IntKey(80)
     abstract fun bindSensitivityOref1Plugin(plugin: SensitivityOref1Plugin): PluginBase
 
+    // Pumps use @IntKey range 1000–1200. VirtualPump=1000, real drivers start at 1010.
+    // Each pump module registers its own @PumpDriver binding.
     @Multibinds
     @PumpDriver
     abstract fun pumpDrivers(): Map<Int, PluginBase>
@@ -142,12 +145,6 @@ abstract class PluginsListModule {
     @Binds
     @AllConfigs
     @IntoMap
-    @IntKey(250)
-    abstract fun bindAutomationPlugin(plugin: AutomationPlugin): PluginBase
-
-    @Binds
-    @AllConfigs
-    @IntoMap
     @IntKey(255)
     abstract fun bindAutotunePlugin(plugin: AutotunePlugin): PluginBase
 
@@ -186,12 +183,6 @@ abstract class PluginsListModule {
     @IntoMap
     @IntKey(310)
     abstract fun bindObjectivesPlugin(plugin: ObjectivesPlugin): PluginBase
-
-    @Binds
-    @AllConfigs
-    @IntoMap
-    @IntKey(350)
-    abstract fun bindNSClientPlugin(plugin: NSClientPlugin): PluginBase
 
     @Binds
     @AllConfigs
@@ -352,15 +343,14 @@ abstract class PluginsListModule {
     @Binds
     @AllConfigs
     @IntoMap
-    @IntKey(603)
-    abstract fun bindAvgSmoothingPlugin(plugin: AvgSmoothingPlugin): PluginBase
+    @IntKey(605)
+    abstract fun bindExponentialSmoothingPlugin(plugin: ExponentialSmoothingPlugin): PluginBase
 
     @Binds
     @AllConfigs
     @IntoMap
-    @IntKey(605)
-    abstract fun bindExponentialSmoothingPlugin(plugin: ExponentialSmoothingPlugin): PluginBase
-
+    @IntKey(610)
+    abstract fun bindAvgSmoothingPlugin(plugin: AvgSmoothingPlugin): PluginBase
 
 
     @Binds
@@ -386,6 +376,7 @@ abstract class PluginsListModule {
     @IntoMap
     @IntKey(630)
     abstract fun bindSplineCalibrationPlugin(plugin: SplineCalibrationPlugin): PluginBase
+
 
     @Qualifier
     annotation class AllConfigs

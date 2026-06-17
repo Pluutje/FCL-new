@@ -1,6 +1,7 @@
 package app.aaps.plugins.calibration
 
 import app.aaps.core.data.iob.InMemoryGlucoseValue
+import app.aaps.core.data.model.CAL
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.plugin.PluginType
@@ -15,13 +16,13 @@ import app.aaps.core.interfaces.calibration.CalibrationContext
 import app.aaps.plugins.calibration.compose.PREF_MANUAL_OFFSET_MMOL
 import dagger.hilt.android.qualifiers.ApplicationContext
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.db.observeChanges
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationAction
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
-import app.aaps.core.interfaces.plugin.OwnDatabasePlugin
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -30,8 +31,11 @@ import app.aaps.core.interfaces.rx.events.EventCalibrationChanged
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.ui.compose.icons.IcCalibration
 import app.aaps.plugins.calibration.compose.SplineCalibrationComposeContent
-import app.aaps.plugins.calibration.db.CalibrationDatabase
-import app.aaps.plugins.calibration.db.CalibrationRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -48,10 +52,10 @@ import kotlin.math.abs
  *   - Fewer than [MIN_ENTRIES_FOR_SPLINE] entries are available, or
  *   - The spline fit is rejected (not monotone, correction too large, etc.).
  *
- * Shares the same [CalibrationRepository] and [CalibrationDatabase] as
- * [LinearCalibrationPlugin] — fingerstick entries entered under either plugin
- * are visible in both.  This makes it safe to switch between plugins without
- * losing calibration history.
+ * Calibration entries now live in the main AAPS DB (model [CAL]) via
+ * [PersistenceLayer] — shared with [LinearCalibrationPlugin]. Fingerstick
+ * entries entered under either plugin are visible in both, making it safe
+ * to switch between plugins without losing calibration history.
  */
 @Singleton
 class SplineCalibrationPlugin @Inject constructor(
@@ -60,9 +64,7 @@ class SplineCalibrationPlugin @Inject constructor(
     private val dateUtil: DateUtil,
     private val persistenceLayer: PersistenceLayer,
     private val notificationManager: NotificationManager,
-    private val repository: CalibrationRepository,
     private val glucoseStatusProvider: GlucoseStatusProvider,
-    private val database: CalibrationDatabase,
     private val rxBus: RxBus,
     @ApplicationContext private val appContext: Context
 ) : PluginBase(
@@ -74,7 +76,35 @@ class SplineCalibrationPlugin @Inject constructor(
         .description(R.string.description_spline_calibration)
         .composeContent { SplineCalibrationComposeContent() },
     aapsLogger, rh
-), Calibration, OwnDatabasePlugin {
+), Calibration {
+
+    private var scope: CoroutineScope? = null
+
+    override suspend fun onStart() {
+        super.onStart()
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        // Calibration entries live in the main DB and arrive both from local entry (master)
+        // and NS sync (follower). Re-emit EventCalibrationChanged on any change so the BG graph
+        // recomputes the fit — identiek aan LinearCalibrationPlugin.
+        scope?.launch {
+            persistenceLayer.observeChanges<CAL>().collect {
+                rxBus.send(EventCalibrationChanged())
+            }
+        }
+        // App-wide "Reset databases" wipes the table via Room clearAllTables, which bypasses the
+        // change-tracking flow above — observe the dedicated cleared signal so the graph recomputes.
+        scope?.launch {
+            persistenceLayer.databaseClearedFlow.collect {
+                rxBus.send(EventCalibrationChanged())
+            }
+        }
+    }
+
+    override suspend fun onStop() {
+        scope?.cancel()
+        scope = null
+        super.onStop()
+    }
 
     override suspend fun calibrate(
         data: MutableList<InMemoryGlucoseValue>,
@@ -94,7 +124,7 @@ class SplineCalibrationPlugin @Inject constructor(
             return data
         }
 
-        val entries = repository.getSince(sessionStart)
+        val entries = persistenceLayer.getValidCalibrationEntriesSince(sessionStart)
 
         // Try spline first; fall back to linear.
         val spline = fitSplineCalibration(entries, now)
@@ -149,7 +179,7 @@ class SplineCalibrationPlugin @Inject constructor(
             ?: return AddEntryResult.Rejected.NoSession
         val delta = glucoseStatusProvider.glucoseStatusData?.shortAvgDelta
         if (delta != null) {
-            val activeFit = fitLinearCalibration(repository.getSince(sessionStart), timestamp)
+            val activeFit = fitLinearCalibration(persistenceLayer.getValidCalibrationEntriesSince(sessionStart), timestamp)
             val effectiveThreshold = if (activeFit != null && activeFit.isApplicable) {
                 DELTA_GATE_MGDL_PER_5MIN * activeFit.slope
             } else {
@@ -176,7 +206,9 @@ class SplineCalibrationPlugin @Inject constructor(
             end = timestamp,
             ascending = false
         ).first()
-        repository.insert(timestamp = timestamp, fingerstickMgdl = bgMgdl, sensorMgdlAtPairing = pair.value)
+        persistenceLayer.insertOrUpdateCalibrationEntry(
+            CAL(timestamp = timestamp, fingerstickMgdl = bgMgdl, sensorMgdlAtPairing = pair.value)
+        )
         aapsLogger.debug(LTag.GLUCOSE) {
             "SplineCalibration.addEntry: fingerstick=$bgMgdl sensorAtPairing=${pair.value}"
         }
@@ -231,11 +263,10 @@ class SplineCalibrationPlugin @Inject constructor(
         )
     }
 
-    override fun clearAllTables() {
-        database.clearAllTables()
-        aapsLogger.debug(LTag.DATABASE, "SplineCalibration: cleared all CalibrationDatabase tables")
-        rxBus.send(EventCalibrationChanged())
-    }
+    // clearAllTables() verwijderd: calibratiedata leeft nu in de centrale
+    // AAPS-database (model CAL via PersistenceLayer), niet meer in een eigen
+    // CalibrationDatabase. De app-wide "Reset databases" wist de CAL-tabel
+    // automatisch; databaseClearedFlow (zie onStart) zorgt voor de UI-refresh.
 
     private companion object {
         const val GAP_THRESHOLD_MIN         = 30L
