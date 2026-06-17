@@ -43,6 +43,9 @@ import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -116,11 +119,24 @@ class ClientControlReceiver @Inject constructor(
 
     // Phase 3 — client bolus-progress mirror (master side). The currently-armed client (the one whose bolus is
     // delivering); set in onVerifiedBolusCommit (the only place the clientId is known), cleared on terminal /
-    // non-delivery. The arm-TTL bounds a stale arm (e.g. a record-only commit that never starts a pump bolus).
+    // non-delivery. The arm-TTL bounds a stale arm (e.g. a record-only commit that never starts a pump bolus) —
+    // but ONLY in the pre-delivery window: once the first in-flight frame arrives we latch [progressDelivering]
+    // and mirror until the terminal frame regardless of wall-clock. Otherwise a long bolus (e.g. 1.6U on Omnipod
+    // ≈ 70s, > the 60s TTL) would have its mirror cut off mid-delivery, the terminal Complete frame would never
+    // be written, and the client's progress dialog would freeze forever (no client-side watchdog).
     private val progressClientId = AtomicReference<String?>(null)
     @Volatile private var progressArmedAt = 0L
+    @Volatile private var progressDelivering = false
+    // Generation of bolusProgressData captured at arm time. Only a bolus that start()s a NEWER generation (the
+    // client's own, queued AFTER this commit) is mirrored — so a bolus already running on the master when the
+    // client commits (the client's was queue-rejected) is never mis-attributed to the client's progress dialog.
+    @Volatile private var progressArmedGeneration = 0L
     private val progressSampleMs = 1_000L
     private val progressArmTtlMs = 60_000L
+    // Liveness heartbeat: some pump drivers (Medtronic, Omnipod Eros) deliver a bolus as one blocking call and
+    // emit NO intermediate progress. Re-publishing the current frame on this cadence keeps the client's stall
+    // watchdog from false-firing on a healthy long bolus; only a real relay/connection outage produces silence.
+    private val progressHeartbeatMs = 10_000L
 
     init {
         // Master only: mirror the live progress of a CLIENT-initiated bolus back to that client so its (un-gated)
@@ -129,23 +145,39 @@ class ClientControlReceiver @Inject constructor(
         if (!config.AAPSCLIENT) appScope.launch {
             var prev: BolusProgressState? = null
             var lastWrite = 0L
-            bolusProgressData.state.collect { st ->
+            // Merge a heartbeat ticker into THIS collector (rather than a second coroutine) so the re-tick reuses
+            // the same throttle/terminal logic and prev-tracking with no cross-thread race against a terminal frame.
+            // Each tick re-emits the CURRENT state; the in-flight branch's throttle (progressSampleMs) means a real
+            // ~1/s stream is unaffected, while a silent (Medtronic/Eros) delivery still emits a frame every ~10s.
+            merge(
+                bolusProgressData.state,
+                flow { while (true) { delay(progressHeartbeatMs); emit(bolusProgressData.state.value) } }
+            ).collect { st ->
                 val previous = prev // snapshot: prev is a mutated captured var, so it can't smart-cast in the when
                 val clientId = progressClientId.get()
-                val armedFresh = clientId != null && dateUtil.now() - progressArmedAt < progressArmTtlMs
-                if (clientId != null && armedFresh && st?.isSMB != true) {
+                // TTL guards only the PRE-delivery window (a commit that never starts a pump bolus). Once delivery
+                // has started (progressDelivering) we keep mirroring until the terminal frame regardless of elapsed
+                // time, so long boluses don't lose their Complete/Cleared frame and freeze the client dialog.
+                val armedFresh = clientId != null && (progressDelivering || dateUtil.now() - progressArmedAt < progressArmTtlMs)
+                // Only the client's OWN bolus: it start()s a generation NEWER than the one captured at arm. A bolus
+                // already running when the client committed keeps the armed generation → never mirrored to the client.
+                val ownBolus = bolusProgressData.currentGeneration > progressArmedGeneration
+                if (clientId != null && armedFresh && ownBolus && st?.isSMB != true) {
                     when {
                         st == null && previous != null  -> { // ended before 100 (pump failure / cancel)
                             writeProgress(clientId, ProgressPhase.Cleared, previous)
                             progressClientId.set(null)
+                            progressDelivering = false
                         }
 
                         st != null && st.percent >= 100 -> { // delivered
                             writeProgress(clientId, ProgressPhase.Complete, st)
                             progressClientId.set(null)
+                            progressDelivering = false
                         }
 
                         st != null                      -> { // in flight: send start immediately, then throttle
+                            progressDelivering = true
                             val nowMs = dateUtil.now()
                             if (previous == null || nowMs - lastWrite >= progressSampleMs) {
                                 writeProgress(clientId, ProgressPhase.Active, st)
@@ -465,15 +497,26 @@ class ClientControlReceiver @Inject constructor(
         // the synchronous phase is over, so any further failure is the async one: relay it as a late Delivery ack the
         // client turns into its own alarm. (The master itself already alarms via the executor — phase 1a.)
         // Arm the progress mirror to THIS client BEFORE delivery starts (the executor only sees Sources.NSClient,
-        // not the clientId). Disarmed below if nothing was parked, and on the terminal frame by the observer.
+        // not the clientId). Disarmed below if nothing was parked, on the terminal frame by the observer, and in
+        // the onError path if delivery fails before any frame streamed (so a stale arm can't mirror a later bolus).
         // Order matters: write progressArmedAt (plain @Volatile) BEFORE progressClientId.set() (AtomicReference). The
         // collector reads progressClientId.get() (acquire) then progressArmedAt; the release fence on .set() publishes
         // the prior armedAt write, so the collector can never observe the new clientId with a stale armedAt(0) and
         // wrongly drop the first progress frames (armedFresh=false).
         progressArmedAt = now
+        progressDelivering = false // new arm starts in the pre-delivery, TTL-guarded window
+        // Capture the generation now (before .set()'s release fence, like progressArmedAt): the mirror only
+        // forwards a bolus whose generation is strictly newer — i.e. one this commit actually starts, not a
+        // bolus already delivering on the master (which would otherwise be mis-shown on the client's dialog).
+        progressArmedGeneration = bolusProgressData.currentGeneration
         progressClientId.set(entry.clientId)
         val syncDone = AtomicBoolean(false)
         val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { comment ->
+            // Delivery failed. If no frame ever streamed for this arm (the bolus never started — e.g. the master was
+            // already bolusing, so the queue rejected this one), disarm now so a LATER unrelated master bolus isn't
+            // mirrored to this client during the remaining arm-TTL. Skip if it IS streaming (its terminal Cleared
+            // frame disarms instead); compareAndSet so a newer commit's arm is never clobbered (fires sync OR async).
+            if (!progressDelivering) progressClientId.compareAndSet(entry.clientId, null)
             if (syncDone.get()) appScope.launch { writeDeliveryFailureAck(entry, envelope.counter, comment) }
             else deliverError.set(comment)
         }, message.asAdvisor)

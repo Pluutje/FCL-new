@@ -827,7 +827,9 @@ class ComposeMainActivity : AppCompatActivity() {
                             commandQueue.cancelAllBoluses(null)
                         }
                     },
-                    onDismiss = { }
+                    // Only reachable via the stalled-state Dismiss button (client/follower): hides the
+                    // local mirror dialog. Delivery belongs to the master — this does not touch the pump.
+                    onDismiss = { bolusProgressData.clear() }
                 )
             }
         }

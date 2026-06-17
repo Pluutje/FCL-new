@@ -97,6 +97,12 @@ class ClientControlRoundTrip @Inject constructor(
         const val PUMP_ROUND_TRIP_TTL_MS = 60_000L
         const val PROPAGATION_MARGIN_MS = 2_000L
         const val PING_TTL_MS = 10_000L
+
+        // Client progress-stall watchdog. The master streams ~1 progress frame/s while a bolus delivers,
+        // so this much silence means the stream stalled (master arm-TTL, NS outage, WS drop) before a
+        // terminal frame — the dialog would otherwise hang forever. A false trigger self-heals: the next
+        // frame clears the flag (see BolusProgressData.updateProgress).
+        const val PROGRESS_WATCHDOG_MS = 30_000L
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -113,6 +119,11 @@ class ClientControlRoundTrip @Inject constructor(
 
     // Drops a late/out-of-order progress frame (NS can re-deliver or reorder).
     @Volatile private var lastProgressTs = 0L
+
+    // Client progress-stall watchdog job. Re-armed on every fresh in-flight frame, cancelled on a
+    // terminal frame; if it elapses it flags the dialog stalled. Only ever touched from onProgressDoc,
+    // which runs single-threaded on the Socket.IO callback thread, so cancel-then-relaunch is race-free.
+    private var progressWatchdogJob: Job? = null
 
     init {
         // Client→master alarm-clear (one-directional, by design): when the user dismisses/mutes the relayed
@@ -197,11 +208,35 @@ class ClientControlRoundTrip @Inject constructor(
                 if (bolusProgressData.state.value == null) bolusProgressData.start(env.insulin, isSMB = false)
                 bolusProgressData.updateProgress(env.percent, env.status, PumpInsulin(env.delivered))
                 bolusProgressData.enableStopDelivery(env.stopDeliveryEnabled)
+                armProgressWatchdog()
             }
 
-            ProgressPhase.Complete -> bolusProgressData.completeAndAutoClear()
-            ProgressPhase.Cleared  -> bolusProgressData.clear()
+            ProgressPhase.Complete -> { cancelProgressWatchdog(); bolusProgressData.completeAndAutoClear() }
+            ProgressPhase.Cleared  -> { cancelProgressWatchdog(); bolusProgressData.clear() }
         }
+    }
+
+    /**
+     * (Re)start the progress-stall watchdog after a fresh in-flight frame. If [PROGRESS_WATCHDOG_MS]
+     * passes with no further frame (the master stopped mirroring, or NS comms dropped) the dialog is
+     * flagged stalled so it can offer a manual dismiss instead of hanging on a terminal frame that
+     * will never arrive. Re-arming cancels the previous timer, so a steady stream never trips it.
+     */
+    private fun armProgressWatchdog() {
+        // Capture the generation now so a late fire can't flag a newer bolus (markStalled re-checks it).
+        val expectedGeneration = bolusProgressData.currentGeneration
+        progressWatchdogJob?.cancel()
+        progressWatchdogJob = appScope.launch {
+            delay(PROGRESS_WATCHDOG_MS)
+            aapsLogger.debug(LTag.NSCLIENT, "ClientControl: progress watchdog fired — marking bolus dialog stalled")
+            bolusProgressData.markStalled(expectedGeneration)
+        }
+    }
+
+    /** Cancel the watchdog on a terminal frame — nothing more to wait for. */
+    private fun cancelProgressWatchdog() {
+        progressWatchdogJob?.cancel()
+        progressWatchdogJob = null
     }
 
     /** Fire-and-forget: publish a StopBolus to the master to abort the bolus being mirrored here. Client-only. */
