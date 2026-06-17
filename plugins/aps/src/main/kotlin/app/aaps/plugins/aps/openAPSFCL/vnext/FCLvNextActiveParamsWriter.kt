@@ -53,6 +53,7 @@ object FCLvNextActiveParamsWriter {
         const val LATE_COMMIT_DECAY_THRESHOLD = 0.55
         const val SUSTAINED_RISE_SLOPE_MIN    = 0.40  // was ontbrekend; 0.35 = F=0.60-waarde
         const val SUSTAINED_RISE_MIN_TARGET   = 12    // was ontbrekend; 10  = F=0.60-waarde
+        const val EARLY_PEAK_BIAS_MMOL        = 0.0   // = REF_PEAK_BIAS_DEFAULT in DFMapping
     }
 
     // Cache — voorkomt I/O elke 5-minuten cyclus als niets veranderd is
@@ -149,7 +150,8 @@ object FCLvNextActiveParamsWriter {
             appendLine("    \"lateCommitDecayFactor\":   { \"active\": ${fmt(config.lateCommitDecayFactor)},   \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_FACTOR)},   \"delta\": \"${fmtDisplay(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\",   \"src\": \"${src(config.lateCommitDecayFactor,   Defaults.LATE_COMMIT_DECAY_FACTOR)}\" },")
             appendLine("    \"lateCommitDecayThreshold\": { \"active\": ${fmt(config.lateCommitDecayThreshold)}, \"default\": ${fmt(Defaults.LATE_COMMIT_DECAY_THRESHOLD)}, \"delta\": \"${fmtDisplay(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\", \"src\": \"${src(config.lateCommitDecayThreshold, Defaults.LATE_COMMIT_DECAY_THRESHOLD)}\" },")
             appendLine("    \"sustainedRiseSlopeMin\":   { \"active\": ${fmt(config.sustainedRiseSlopeMin)},   \"default\": ${fmt(Defaults.SUSTAINED_RISE_SLOPE_MIN)},   \"delta\": \"${fmtDisplay(config.sustainedRiseSlopeMin,   Defaults.SUSTAINED_RISE_SLOPE_MIN)}\",   \"src\": \"${src(config.sustainedRiseSlopeMin,   Defaults.SUSTAINED_RISE_SLOPE_MIN)}\" },")
-            append(  "    \"sustainedRiseMinTarget\":   { \"active\": ${config.sustainedRiseMinTarget},          \"default\": ${Defaults.SUSTAINED_RISE_MIN_TARGET},          \"delta\": \"${fmtDisplay(config.sustainedRiseMinTarget.toDouble(), Defaults.SUSTAINED_RISE_MIN_TARGET.toDouble())}\", \"src\": \"${srcInt(config.sustainedRiseMinTarget, Defaults.SUSTAINED_RISE_MIN_TARGET)}\" }")
+            appendLine("    \"sustainedRiseMinTarget\":   { \"active\": ${config.sustainedRiseMinTarget},          \"default\": ${Defaults.SUSTAINED_RISE_MIN_TARGET},          \"delta\": \"${fmtDisplay(config.sustainedRiseMinTarget.toDouble(), Defaults.SUSTAINED_RISE_MIN_TARGET.toDouble())}\", \"src\": \"${srcInt(config.sustainedRiseMinTarget, Defaults.SUSTAINED_RISE_MIN_TARGET)}\" },")
+            append(  "    \"earlyPeakBiasMmol\":        { \"active\": ${fmt(config.earlyPeakBiasMmol)},        \"default\": ${fmt(Defaults.EARLY_PEAK_BIAS_MMOL)},        \"delta\": \"${fmtDisplay(config.earlyPeakBiasMmol,        Defaults.EARLY_PEAK_BIAS_MMOL)}\",        \"src\": \"${src(config.earlyPeakBiasMmol,        Defaults.EARLY_PEAK_BIAS_MMOL)}\" }")
             appendLine()
             appendLine("  }")
             append("}")

@@ -136,6 +136,7 @@ object FrontloadLearner {
 
         val huidigWmd = DFLearner.getRefWmd(context)
         val huidigWff = DFLearner.getRefWff(context)
+        val huidigPeakBias = DFLearner.getRefPeakBias(context)
 
         // ── REF_WMD: wanneer triggeren ──────────────────────────────────────
         val richting = when {
@@ -197,10 +198,46 @@ object FrontloadLearner {
             else -> huidigWff
         }
 
+        // ── REF_PEAK_BIAS: vroege piek-voorspelling bias-correctie ───────────
+        // Data-analyse (16-06-2026, 31 episodes) toonde een structurele
+        // onderschatting van predictedPeak in de eerste 20 minuten van een
+        // maaltijd-episode: gemiddeld -0.80 mmol (std 0.89), bij 17/31
+        // episodes groter dan -0.5 mmol. Deze bias wordt opgeteld bij
+        // predictedPeak in datzelfde vroege venster (zie computeMealAggression
+        // in FCLvNext.kt) zodat de eerste/tweede grote bolus iets agressiever
+        // doseert wanneer de vroege voorspelling historisch te conservatief
+        // is gebleken.
+        //
+        // Veiligheid: alleen episodes zonder hypo/rescue tellen mee (zelfde
+        // veilige-subset-filter als bij WFF) — een onderschatting bij een
+        // episode die toch hypo werd is geen bewijs dat méér vroege insuline
+        // goed is. Stap is klein (0.10 mmol) en het totale bereik is hard
+        // begrensd op 0.0-1.5 mmol (zie REF_PEAK_BIAS_MIN/MAX in DFMapping).
+        val predFoutenVroeg = veiligeEpisodes.mapNotNull { it.predFout0_20 }
+        val gemiddeldePredFout0_20 = if (predFoutenVroeg.size >= MIN_EPISODES)
+            predFoutenVroeg.average() else null
+        val stapPeakBias = 0.10
+
+        val PRED_FOUT_DEAD_ZONE = 0.30  // mmol — kleinere fouten zijn ruis, geen signaal
+
+        val nieuwePeakBias = when {
+            gemiddeldePredFout0_20 == null -> huidigPeakBias
+            // Structurele onderschatting: bias omhoog (predictedPeak wordt hoger,
+            // dus computeMealAggression doseert iets vroeger/groter)
+            gemiddeldePredFout0_20 < -PRED_FOUT_DEAD_ZONE ->
+                (huidigPeakBias + stapPeakBias).coerceIn(DFMapping.REF_PEAK_BIAS_MIN, DFMapping.REF_PEAK_BIAS_MAX)
+            // Overschatting (zou kunnen ontstaan ALS de bias al te groot is):
+            // bias omlaag, voorkomt dat de correctie zelf een nieuw probleem wordt
+            gemiddeldePredFout0_20 > PRED_FOUT_DEAD_ZONE ->
+                (huidigPeakBias - stapPeakBias).coerceIn(DFMapping.REF_PEAK_BIAS_MIN, DFMapping.REF_PEAK_BIAS_MAX)
+            else -> huidigPeakBias
+        }
+
         val wmdVeranderd = abs(nieuwWmd - huidigWmd) >= 0.001
         val wffVeranderd = abs(nieuwWff - huidigWff) >= 0.001
+        val peakBiasVeranderd = abs(nieuwePeakBias - huidigPeakBias) >= 0.001
 
-        if (!wmdVeranderd && !wffVeranderd && richting == "GOED") {
+        if (!wmdVeranderd && !wffVeranderd && !peakBiasVeranderd && richting == "GOED") {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logFrontload(
                 richting       = "GOED",
                 gemMarge       = gemiddeldeMarge,
@@ -208,6 +245,8 @@ object FrontloadLearner {
                 nieuweWmd      = huidigWmd,
                 oudeWff        = huidigWff,
                 nieuweWff      = huidigWff,
+                oudePeakBias   = huidigPeakBias,
+                nieuwePeakBias = huidigPeakBias,
                 bruikbaarCount = bruikbaar.size
             )
             return null
@@ -215,6 +254,7 @@ object FrontloadLearner {
 
         if (wmdVeranderd) DFLearner.setRefWmd(context, nieuwWmd)
         if (wffVeranderd) DFLearner.setRefWff(context, nieuwWff)
+        if (peakBiasVeranderd) DFLearner.setRefPeakBias(context, nieuwePeakBias)
         prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
 
         val effectiefRichting = if (richting != "GOED") richting
@@ -239,6 +279,8 @@ object FrontloadLearner {
             nieuweWmd      = nieuwWmd,
             oudeWff        = huidigWff,
             nieuweWff      = nieuwWff,
+            oudePeakBias   = huidigPeakBias,
+            nieuwePeakBias = nieuwePeakBias,
             bruikbaarCount = bruikbaar.size
         )
 

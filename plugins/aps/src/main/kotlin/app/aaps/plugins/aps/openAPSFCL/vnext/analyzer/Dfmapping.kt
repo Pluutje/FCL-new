@@ -48,11 +48,13 @@ object DFMapping {
     const val REF_WMD_DEFAULT = 1.10   // Stijgingsdrempel frontload (mmol boven target) — verlaagd voor snellere trigger
     const val REF_WFF_DEFAULT = 0.72   // Frontload grootte (fractie van max SMB)
     const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
+    const val REF_PEAK_BIAS_DEFAULT = 0.0  // Vroege piek-bias-correctie (mmol), 0.0 = uit
 
     // Bereiken voor de kalibratie-knoppen
     const val REF_WMD_MIN = 0.80;  const val REF_WMD_MAX = 2.00
     const val REF_WFF_MIN = 0.40;  const val REF_WFF_MAX = 0.90
     const val REF_EB_MIN  = 1.0;   const val REF_EB_MAX  = 2.0
+    const val REF_PEAK_BIAS_MIN = 0.0;  const val REF_PEAK_BIAS_MAX = 1.5
 
     /**
      * Bereken alle 17 parameters als ConfigOverrideWriter.ParamOverrides
@@ -71,6 +73,7 @@ object DFMapping {
         refWmd: Double = REF_WMD_DEFAULT,
         refWff: Double = REF_WFF_DEFAULT,
         refEb:  Double = REF_EB_DEFAULT,
+        refPeakBias: Double = REF_PEAK_BIAS_DEFAULT,
         vExtra: Double = 0.0,
         aggLevel: Int = 5
     ): ConfigOverrideWriter.ParamOverrides {
@@ -104,6 +107,11 @@ object DFMapping {
 
             // Frontload dosis bij stijgingsdetectie
             watchingFrontloadFrac         = min(0.90, refWff + (fEff - 0.5) * 0.40),
+
+            // Vroege piek-bias-correctie: directe doorgave, geen D/F-afhankelijkheid.
+            // Wordt onafhankelijk geleerd door FrontloadLearner op basis van
+            // predFout0_20 (zie REF_PEAK_BIAS in DFMapping).
+            earlyPeakBiasMmol             = refPeakBias.coerceIn(REF_PEAK_BIAS_MIN, REF_PEAK_BIAS_MAX),
 
             // Commit pauze: F hoog = frequenter committen
             commitCooldownMinutes         = max(5, (REF_CC - (fEff - 0.5) * 10).roundToInt()),
@@ -208,6 +216,8 @@ object DFMapping {
                 append("  |  EB×${String.format("%.2f", po.earlyBoostFactor)}")
             if ((po.lateCommitDecayFactor ?: 0.0) > 0.01)
                 append(" LCD=${String.format("%.2f", po.lateCommitDecayFactor)}")
+            if ((po.earlyPeakBiasMmol ?: 0.0) > 0.01)
+                append(" PBias=+${String.format("%.2f", po.earlyPeakBiasMmol)}")
             append("  CC=${po.commitCooldownMinutes}m")
         }
     }

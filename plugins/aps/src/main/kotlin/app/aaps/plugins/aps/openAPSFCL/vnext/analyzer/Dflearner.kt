@@ -36,6 +36,7 @@ object DFLearner {
     private const val KEY_REF_WMD = "df_ref_wmd"   // Stijgingsdrempel frontload
     private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
     private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
+    private const val KEY_REF_PEAK_BIAS = "df_ref_peak_bias"  // Vroege piek-bias-correctie
 
     // ── EarlyBoost timing leren ──────────────────────────────────────────
     // Budget-neutraal: earlyBoostFactor groter → watchingFrontloadFrac kleiner.
@@ -210,6 +211,12 @@ object DFLearner {
 
     fun setRefWff(context: Context, v: Double) =
         prefs(context).edit().putFloat(KEY_REF_WFF, v.coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX).toFloat()).apply()
+
+    fun getRefPeakBias(context: Context): Double =
+        prefs(context).getFloat(KEY_REF_PEAK_BIAS, DFMapping.REF_PEAK_BIAS_DEFAULT.toFloat()).toDouble()
+
+    fun setRefPeakBias(context: Context, v: Double) =
+        prefs(context).edit().putFloat(KEY_REF_PEAK_BIAS, v.coerceIn(DFMapping.REF_PEAK_BIAS_MIN, DFMapping.REF_PEAK_BIAS_MAX).toFloat()).apply()
 
     fun getRefEb(context: Context): Double =
         prefs(context).getFloat(KEY_REF_EB, DFMapping.REF_EB_DEFAULT.toFloat()).toDouble()
@@ -860,6 +867,7 @@ object DFLearner {
             .putFloat(KEY_REF_WMD, DFMapping.REF_WMD_DEFAULT.toFloat())
             .putFloat(KEY_REF_WFF, DFMapping.REF_WFF_DEFAULT.toFloat())
             .putFloat(KEY_REF_EB,  DFMapping.REF_EB_DEFAULT.toFloat())
+            .putFloat(KEY_REF_PEAK_BIAS, DFMapping.REF_PEAK_BIAS_DEFAULT.toFloat())
             .apply()
     }
 

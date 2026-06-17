@@ -143,7 +143,8 @@ class FCLvNextStatusFormatter(
                 appendLine("• lateDecayFactor   : ${"%.2f".format(activeConfig.lateCommitDecayFactor)}")
                 appendLine("• lateDecayThreshold: ${"%.2f".format(activeConfig.lateCommitDecayThreshold)}")
                 appendLine("• sustainedSlopeMin : ${"%.2f".format(activeConfig.sustainedRiseSlopeMin)}")
-                append(    "• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
+                appendLine("• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
+                append(    "• earlyPeakBias     : +${"%.2f".format(activeConfig.earlyPeakBiasMmol)} ${BgUnits.unitShort(mgdl)}")
             }
         }
     }
@@ -165,7 +166,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v2.5.5")
+        appendLine(" 🧠 FCL V6 v2.5.8")
         appendLine("════════════════════════")
         appendLine()
 

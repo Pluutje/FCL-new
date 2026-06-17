@@ -28,6 +28,7 @@ object ConfigOverrideWriter {
         const val LATE_COMMIT_DECAY_THRESHOLD = 0.55
         const val SUSTAINED_RISE_SLOPE_MIN   = 0.40
         const val SUSTAINED_RISE_MIN_TARGET  = 12
+        const val EARLY_PEAK_BIAS_MMOL       = 0.0
     }
 
     // ── Defaults S/T/V/N ─────────────────────────────────────────────────
@@ -58,6 +59,7 @@ object ConfigOverrideWriter {
         val lateCommitDecayThreshold:      Double  = Defaults.LATE_COMMIT_DECAY_THRESHOLD,
         val sustainedRiseSlopeMin:         Double  = Defaults.SUSTAINED_RISE_SLOPE_MIN,
         val sustainedRiseMinTarget:        Int     = Defaults.SUSTAINED_RISE_MIN_TARGET,
+        val earlyPeakBiasMmol:             Double  = Defaults.EARLY_PEAK_BIAS_MMOL,
         val sterkte:                       Int     = StvDefaults.STERKTE,
         val timing:                        Int     = StvDefaults.TIMING,
         val volhoudendheid:                Int     = StvDefaults.VOLHOUDENDHEID,
@@ -83,7 +85,8 @@ object ConfigOverrideWriter {
         val lateCommitDecayFactor:         Double? = null,
         val lateCommitDecayThreshold:      Double? = null,
         val sustainedRiseSlopeMin:         Double? = null,
-        val sustainedRiseMinTarget:        Int?    = null
+        val sustainedRiseMinTarget:        Int?    = null,
+        val earlyPeakBiasMmol:             Double? = null
     ) {
         fun isEmpty() =
             peakPredictionThreshold       == null &&
@@ -101,7 +104,8 @@ object ConfigOverrideWriter {
                 lateCommitDecayFactor         == null &&
                 lateCommitDecayThreshold      == null &&
                 sustainedRiseSlopeMin         == null &&
-                sustainedRiseMinTarget        == null
+                sustainedRiseMinTarget        == null &&
+                earlyPeakBiasMmol             == null
     }
 
     // ── Publieke API ──────────────────────────────────────────────────────
@@ -131,6 +135,7 @@ object ConfigOverrideWriter {
             lateCommitDecayThreshold      = c.lateCommitDecayThreshold,
             sustainedRiseSlopeMin         = c.sustainedRiseSlopeMin,
             sustainedRiseMinTarget        = c.sustainedRiseMinTarget,
+            earlyPeakBiasMmol             = c.earlyPeakBiasMmol,
             sterkte                       = snap.sterkte,
             timing                        = snap.timing,
             volhoudendheid                = snap.volhoudendheid,
@@ -230,7 +235,8 @@ object ConfigOverrideWriter {
                         lateCommitDecayFactor         = p.lateCommitDecayFactor,
                         lateCommitDecayThreshold      = p.lateCommitDecayThreshold,
                         sustainedRiseSlopeMin         = p.sustainedRiseSlopeMin,
-                        sustainedRiseMinTarget        = p.sustainedRiseMinTarget
+                        sustainedRiseMinTarget        = p.sustainedRiseMinTarget,
+                        earlyPeakBiasMmol             = p.earlyPeakBiasMmol
                     )
             },
             iobBrakeLearned  = iobBrakeRaw?.let { it.toDouble() / 1000.0 }

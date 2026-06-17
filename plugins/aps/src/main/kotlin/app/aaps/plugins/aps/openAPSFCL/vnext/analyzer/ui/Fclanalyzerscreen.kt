@@ -791,8 +791,14 @@ private suspend fun runAdvisorFlow(
                 ConfigOverrideWriter.writeWithStvAndParams(
                     stvMap         = DFMapping.toStvMap(newD, newF, nachtFactor,
                         aggLevel = DFLearner.getAggressiveness(context)),
-                    paramOverrides = DFMapping.toParamOverrides(newD, newF,
-                        aggLevel = DFLearner.getAggressiveness(context)),
+                    paramOverrides = DFMapping.toParamOverrides(
+                        d = newD, f = newF,
+                        refWmd = DFLearner.getRefWmd(context),
+                        refWff = DFLearner.getRefWff(context),
+                        refEb = DFLearner.getRefEb(context),
+                        refPeakBias = DFLearner.getRefPeakBias(context),
+                        aggLevel = DFLearner.getAggressiveness(context)
+                    ),
                     reason         = "D/F: ${step!!.reason}",
                     episodeCount   = filteredMetrics.size
                 )

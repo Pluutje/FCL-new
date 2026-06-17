@@ -985,6 +985,7 @@ private fun HandmatigParametersTab(
         ParameterLeesCategorie("🔀 Frontload-shift") {
             ParameterLeesRij("Late decay factor",  "%.2f".format(activeParams.lateCommitDecayFactor),    D.LATE_COMMIT_DECAY_FACTOR)
             ParameterLeesRij("Decay drempel",      "%.2f".format(activeParams.lateCommitDecayThreshold), D.LATE_COMMIT_DECAY_THRESHOLD)
+            ParameterLeesRij("Vroege piek-bias",   app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatDelta(activeParams.earlyPeakBiasMmol, mgdl), D.EARLY_PEAK_BIAS_MMOL)
         }
     }
 }

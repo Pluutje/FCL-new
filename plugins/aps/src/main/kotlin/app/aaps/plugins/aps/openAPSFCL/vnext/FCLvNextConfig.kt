@@ -173,6 +173,9 @@ data class FCLvNextConfig(
     val watchingMinPeakRise: Double,       // minimale peakRiseSinceStart
     val watchingMaxIobRatio: Double,        // safety cap
 
+// vroege piek-bias-correctie (zelflerend, zie FrontloadLearner/REF_PEAK_BIAS)
+    val earlyPeakBiasMmol: Double,         // mmol opgeteld bij predictedPeak in 0-20min venster
+
 
 
 // hypo protection tuning knobs (config-driven)
@@ -320,6 +323,7 @@ fun loadFCLvNextConfig(
         po.lateCommitDecayThreshold?.let      { prefs.put(DoubleKey.fcl_vnext_late_commit_decay_threshold, it) }
         po.sustainedRiseSlopeMin?.let         { prefs.put(DoubleKey.fcl_vnext_sustained_rise_slope_min, it) }
         po.sustainedRiseMinTarget?.let        { prefs.put(IntKey.fcl_vnext_sustained_rise_min_target, it) }
+        po.earlyPeakBiasMmol?.let             { prefs.put(DoubleKey.fcl_vnext_early_peak_bias_mmol, it) }
     }
 
     // MaxSmbLearner uitgeschakeld — maxSMB volgt S% direct
@@ -518,8 +522,8 @@ fun loadFCLvNextConfig(
         lateCommitDecayThreshold = po?.lateCommitDecayThreshold ?: prefs.get(DoubleKey.fcl_vnext_late_commit_decay_threshold),
 
         sustainedRiseSlopeMin    = po?.sustainedRiseSlopeMin   ?: prefs.get(DoubleKey.fcl_vnext_sustained_rise_slope_min),
-        sustainedRiseMinTarget   = po?.sustainedRiseMinTarget  ?: prefs.get(IntKey.fcl_vnext_sustained_rise_min_target)
-
+        sustainedRiseMinTarget   = po?.sustainedRiseMinTarget  ?: prefs.get(IntKey.fcl_vnext_sustained_rise_min_target),
+        earlyPeakBiasMmol        = po?.earlyPeakBiasMmol       ?: prefs.get(DoubleKey.fcl_vnext_early_peak_bias_mmol),
     )
 
     return base
@@ -702,7 +706,8 @@ private fun applyParamOverridesFromWriter(
         lateCommitDecayFactor         = overrides.lateCommitDecayFactor,
         lateCommitDecayThreshold      = overrides.lateCommitDecayThreshold,
         sustainedRiseSlopeMin         = overrides.sustainedRiseSlopeMin,
-        sustainedRiseMinTarget        = overrides.sustainedRiseMinTarget
+        sustainedRiseMinTarget        = overrides.sustainedRiseMinTarget,
+        earlyPeakBiasMmol             = overrides.earlyPeakBiasMmol
     )
 )
 
@@ -785,6 +790,10 @@ private fun applyParamOverrides(
 
         sustainedRiseMinTarget = overrides.sustainedRiseMinTarget
             ?.coerceIn(5, 20)
-            ?: cfg.sustainedRiseMinTarget
+            ?: cfg.sustainedRiseMinTarget,
+
+        earlyPeakBiasMmol = overrides.earlyPeakBiasMmol
+            ?.coerceIn(0.0, 1.5)
+            ?: cfg.earlyPeakBiasMmol
     )
 }

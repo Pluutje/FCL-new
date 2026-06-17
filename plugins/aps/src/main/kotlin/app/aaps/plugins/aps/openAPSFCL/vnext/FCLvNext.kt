@@ -1636,7 +1636,9 @@ private fun computeMealAggression(
     ctx: FCLvNextContext,
     peak: PeakEstimate,
     mealSignal: MealSignal,
-    config: FCLvNextConfig
+    config: FCLvNextConfig,
+    earlyPeakBiasMmol: Double = 0.0,
+    minutesSinceMealStart: Int = 999
 ): MealAggression {
 
     // Fast-lane (dominant voor timing)
@@ -1660,8 +1662,24 @@ private fun computeMealAggression(
         MealState.NONE -> 0.0
     }
 
-    // Peak pressure (optioneel, mild)
-    val peakPressure = smooth01((peak.predictedPeak - 11.0) / (17.0 - 11.0)) * 0.10
+    // ── Vroege piek-bias-correctie (zelflerend) ──────────────────────────
+    // Data-analyse (16-06-2026, 31 episodes) toonde een structurele
+    // onderschatting van predictedPeak in de eerste 20 minuten van een
+    // maaltijd-episode: gemiddeld -0.80 mmol (std 0.89), bij 17/31 episodes
+    // groter dan -0.5 mmol. Die onderschatting correleerde met een lage
+    // firstBigCommitFrac (0.31) en een hogere uiteindelijke piek (9.18 mmol)
+    // — het algoritme doseerde te terughoudend omdat het de stijging vroeg
+    // nog niet "zag aankomen".
+    // earlyPeakBiasMmol is een door FrontloadLearner geleerde correctie
+    // (zie REF_PEAK_BIAS in DFMapping) die alleen wordt toegepast in het
+    // vroege venster (0-20 min na meal-start) — buiten dat venster is de
+    // voorspelling al accuraat genoeg (predFout20_40 gemiddeld -0.34) en
+    // is een correctie niet onderbouwd.
+    val biasEffectief = if (minutesSinceMealStart in 0..20) earlyPeakBiasMmol else 0.0
+    val effectivePredictedPeak = peak.predictedPeak + biasEffectief
+
+    // Peak pressure (optioneel, mild) — gebruikt de gecorrigeerde piek
+    val peakPressure = smooth01((effectivePredictedPeak - 11.0) / (17.0 - 11.0)) * 0.10
 
     var a =
         0.30 * vFastScore +
@@ -1676,7 +1694,7 @@ private fun computeMealAggression(
 
     return MealAggression(
         a = a,
-        reason = "AGGR a=${"%.2f".format(a)} (v5=${"%.2f".format(v5)} accel=${"%.2f".format(ctx.acceleration)} delta=${"%.2f".format(ctx.deltaToTarget)} cons=${"%.2f".format(ctx.consistency)})"
+        reason = "AGGR a=${"%.2f".format(a)} (v5=${"%.2f".format(v5)} accel=${"%.2f".format(ctx.acceleration)} delta=${"%.2f".format(ctx.deltaToTarget)} cons=${"%.2f".format(ctx.consistency)} peakBias=${"%.2f".format(biasEffectief)})"
     )
 }
 
@@ -4229,7 +4247,11 @@ class FCLvNext(
             } else 0.0
         logRow.baseCommitFraction = baseCommitFraction
 
-        val aggr = computeMealAggression(ctx, peak, mealSignal, config)
+        val aggr = computeMealAggression(
+            ctx, peak, mealSignal, config,
+            earlyPeakBiasMmol = config.earlyPeakBiasMmol,
+            minutesSinceMealStart = episodeMinutesForCommit
+        )
         status.append(aggr.reason + "\n")
 
 // aggression → multiplier 0.85 .. 1.25 (mild, safe)

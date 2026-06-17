@@ -485,8 +485,8 @@
     <string name="fcl_vnext_night_response_style_title">Nachtrespons</string>
     <string name="fcl_vnext_night_response_style_summary">Hoe FCL \'s nachts reageert op glucose-stijging</string>
     <string name="fcl_vnext_generic_choice_title">Keuze</string>
-    <string name="fcl_aaps_mulitplier_day_title">AAPS versterker overdag</string>
-    <string name="fcl_aaps_mulitplier_night_title">AAPS versterker nacht</string>
+    <string name="fcl_aaps_mulitplier_day_title">AAPS SMB versterker overdag</string>
+    <string name="fcl_aaps_mulitplier_night_title">AAPS SMB versterker nacht</string>
 
     <!-- Context -->
     <string name="fcl_vnext_context_title">🌙 🛡️ 🚶 Context</string>

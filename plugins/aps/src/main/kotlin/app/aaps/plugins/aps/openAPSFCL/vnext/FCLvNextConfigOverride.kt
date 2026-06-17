@@ -63,7 +63,8 @@ object FCLvNextConfigOverride {
         val lateCommitDecayFactor:         Double? = null,  // 0.0–1.0
         val lateCommitDecayThreshold:      Double? = null,  // 0.30–0.70
         val sustainedRiseSlopeMin:         Double? = null,  // 0.15–0.80 mmol/min
-        val sustainedRiseMinTarget:        Int?    = null   // 5–20 minuten
+        val sustainedRiseMinTarget:        Int?    = null,  // 5–20 minuten
+        val earlyPeakBiasMmol:             Double? = null   // 0.0–1.5 mmol, vroege piek-correctie
     )
 
     /**
@@ -123,7 +124,8 @@ object FCLvNextConfigOverride {
                 lateCommitDecayFactor         = extractDouble(block, "lateCommitDecayFactor"),
                 lateCommitDecayThreshold      = extractDouble(block, "lateCommitDecayThreshold"),
                 sustainedRiseSlopeMin         = extractDouble(block, "sustainedRiseSlopeMin"),
-                sustainedRiseMinTarget        = extractInt(block, "sustainedRiseMinTarget")
+                sustainedRiseMinTarget        = extractInt(block, "sustainedRiseMinTarget"),
+                earlyPeakBiasMmol             = extractDouble(block, "earlyPeakBiasMmol")
             )
         } catch (_: Exception) {
             null

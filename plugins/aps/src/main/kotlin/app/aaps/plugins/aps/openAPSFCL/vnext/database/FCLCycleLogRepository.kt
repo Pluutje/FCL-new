@@ -172,10 +172,16 @@ class FCLCycleLogRepository @Inject constructor(
             val refWmd = DFLearner.getRefWmd(context)
             val refWff = DFLearner.getRefWff(context)
             val refEb  = DFLearner.getRefEb(context)
+            val refPeakBias = DFLearner.getRefPeakBias(context)
             val agg    = DFLearner.getAggressiveness(context)
 
             val po = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
-                .toParamOverrides(d, f, refWmd, refWff, refEb, vExtra, agg)
+                .toParamOverrides(
+                    d = d, f = f,
+                    refWmd = refWmd, refWff = refWff, refEb = refEb,
+                    refPeakBias = refPeakBias,
+                    vExtra = vExtra, aggLevel = agg
+                )
             val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
                 .toStvMap(d, f, 85, vExtra, aggLevel = agg)
 
@@ -187,7 +193,8 @@ class FCLCycleLogRepository @Inject constructor(
                         "F=${"%.3f".format(f)} " +
                         "wmd=${"%.2f".format(refWmd)} " +
                         "wff=${"%.2f".format(refWff)} " +
-                        "eb=${"%.2f".format(refEb)}",
+                        "eb=${"%.2f".format(refEb)} " +
+                        "peakBias=${"%.2f".format(refPeakBias)}",
                     episodeCount   = episodeMetrics.size
                 )
         }

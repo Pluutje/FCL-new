@@ -142,9 +142,15 @@ fun DFControlTab(
                     val dApply = DFLearner.getD(context)
                     val fApply = DFLearner.getF(context)
                     val veApply = DFLearner.getVExtra(context)
-                    val po = DFMapping.toParamOverrides(dApply, fApply, DFLearner.getRefWmd(context),
-                        DFLearner.getRefWff(context), DFLearner.getRefEb(context), veApply,
-                        aggLevel = aggressiveness)
+                    val po = DFMapping.toParamOverrides(
+                        d = dApply, f = fApply,
+                        refWmd = DFLearner.getRefWmd(context),
+                        refWff = DFLearner.getRefWff(context),
+                        refEb = DFLearner.getRefEb(context),
+                        refPeakBias = DFLearner.getRefPeakBias(context),
+                        vExtra = veApply,
+                        aggLevel = aggressiveness
+                    )
                     val stvMap = DFMapping.toStvMap(dApply, fApply, nachtFactor, veApply,
                         aggLevel = aggressiveness)
                     val ok = onApplyToAaps(po, stvMap)
