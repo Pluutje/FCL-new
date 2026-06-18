@@ -35,6 +35,7 @@ enum class UnitDoubleKey(
         titleResId = R.string.pref_title_lgs_threshold,
         summaryResId = R.string.lgs_threshold_summary,
         defaultedBySM = true,
-        dependency = BooleanKey.ApsUseDynamicSensitivity
+        dependency = BooleanKey.ApsUseDynamicSensitivity,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     )
 }

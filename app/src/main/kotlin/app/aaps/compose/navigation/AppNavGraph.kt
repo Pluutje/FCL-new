@@ -412,7 +412,7 @@ fun NavGraphBuilder.appNavGraph(
             checkPumpCompatible = { percentage -> profileManagementViewModel.isPumpCompatible(profileIndex, percentage) },
             onActivate = { duration, percentage, timeshift, withTT, notes, timestamp, timeChanged ->
                 coroutineScope.launch {
-                    val success = profileManagementViewModel.activateProfile(
+                    profileManagementViewModel.activateProfile(
                         profileIndex = profileIndex,
                         durationMinutes = duration,
                         percentage = percentage,
@@ -420,11 +420,12 @@ fun NavGraphBuilder.appNavGraph(
                         withTT = withTT,
                         notes = notes,
                         timestamp = timestamp,
-                        timeChanged = timeChanged
+                        timeChanged = timeChanged,
+                        // Close only AFTER the user confirms and the switch actually commits (not when the confirm
+                        // dialog is merely shown). inclusive = true pops the Profile management screen too, so we
+                        // return to the screen it was opened from (e.g. Overview).
+                        onSuccess = { navController.popBackStack(AppRoute.Profile.route, inclusive = true) }
                     )
-                    if (success) {
-                        navController.popBackStack(AppRoute.Profile.route, inclusive = false)
-                    }
                 }
             }
         )

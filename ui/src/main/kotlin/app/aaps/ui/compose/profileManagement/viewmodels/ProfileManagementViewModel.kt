@@ -43,6 +43,7 @@ import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.core.ui.compose.icons.IcProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,6 +59,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -428,6 +430,8 @@ class ProfileManagementViewModel @Inject constructor(
      * to the master (which resolves the name in its own store); on the master it applies locally. The master-authored
      * confirmation lines are shown as the single confirm dialog, and an optional activity temp-target rides the same
      * atomic batch. Returns true when the switch was prepared (the confirm dialog is shown), false on a pre-check reject.
+     * [onSuccess] is invoked on the main thread ONLY after the user confirms and the switch is actually committed
+     * (ActionProgress.Applied) — so a caller can close the screen on real activation, not merely when the dialog appears.
      *
      * Note: back-dating ([timestamp]/[timeChanged]) isn't carried through the batch path — the master stamps now().
      */
@@ -440,7 +444,8 @@ class ProfileManagementViewModel @Inject constructor(
         withTT: Boolean,
         notes: String,
         timestamp: Long = dateUtil.now(),
-        timeChanged: Boolean = false
+        timeChanged: Boolean = false,
+        onSuccess: () -> Unit = {}
     ): Boolean {
         val profileNames = uiState.value.profileNames
         if (profileIndex !in profileNames.indices) {
@@ -476,8 +481,10 @@ class ProfileManagementViewModel @Inject constructor(
                         title = label, message = "", confirmationLines = prepared.lines, icon = IcProfile,
                         onOk = {
                             appScope.launch {
-                                batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label)
-                                if (percentage == 90 && durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesProfileSwitchUsed, true)
+                                if (batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label) is ActionProgress.Applied) {
+                                    if (percentage == 90 && durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesProfileSwitchUsed, true)
+                                    withContext(Dispatchers.Main) { onSuccess() }
+                                }
                             }
                         }
                     )

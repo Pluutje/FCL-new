@@ -391,7 +391,7 @@ fun TempTargetManagementScreen(
                     // unreachable — canceling a TT is a master/NS action that couldn't be delivered.
                     if (editingEnabled && uiState.activeTT != null) {
                         SmallFloatingActionButton(
-                            onClick = { viewModel.cancelActive() },
+                            onClick = { viewModel.cancelActive(onSuccess = onNavigateBack) },
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(end = 16.dp, bottom = 88.dp),

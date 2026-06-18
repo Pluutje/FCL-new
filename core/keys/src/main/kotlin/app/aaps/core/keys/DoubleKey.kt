@@ -36,7 +36,8 @@ enum class DoubleKey(
         summaryResId = R.string.insulin_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowInsulinButton,
-        unitType = UnitType.INSULIN
+        unitType = UnitType.INSULIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     OverviewInsulinButtonIncrement2(
         key = "insulin_button_increment_2",
@@ -47,7 +48,8 @@ enum class DoubleKey(
         summaryResId = R.string.insulin_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowInsulinButton,
-        unitType = UnitType.INSULIN
+        unitType = UnitType.INSULIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     OverviewInsulinButtonIncrement3(
         key = "insulin_button_increment_3",
@@ -58,7 +60,8 @@ enum class DoubleKey(
         summaryResId = R.string.insulin_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowInsulinButton,
-        unitType = UnitType.INSULIN
+        unitType = UnitType.INSULIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ActionsFillButton1(key = "fill_button1", defaultValue = 0.3, min = 0.05, max = 20.0, titleResId = R.string.pref_title_fill_button_1, defaultedBySM = true, hideParentScreenIfHidden = true, unitType = UnitType.INSULIN),
     ActionsFillButton2(key = "fill_button2", defaultValue = 0.0, min = 0.0, max = 20.0, titleResId = R.string.pref_title_fill_button_2, defaultedBySM = true, unitType = UnitType.INSULIN),
@@ -73,7 +76,8 @@ enum class DoubleKey(
         summaryResId = R.string.openapsma_max_basal_summary,
         defaultedBySM = true,
         calculatedBySM = true,
-        unitType = UnitType.INSULIN_RATE
+        unitType = UnitType.INSULIN_RATE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsSmbMaxIob(
         key = "openapsmb_max_iob",
@@ -84,7 +88,8 @@ enum class DoubleKey(
         summaryResId = R.string.openapssmb_max_iob_summary,
         defaultedBySM = true,
         calculatedBySM = true,
-        unitType = UnitType.INSULIN
+        unitType = UnitType.INSULIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAmaMaxIob(
         key = "openapsma_max_iob",
@@ -95,7 +100,8 @@ enum class DoubleKey(
         summaryResId = R.string.openapsma_max_iob_summary,
         defaultedBySM = true,
         calculatedBySM = true,
-        unitType = UnitType.INSULIN
+        unitType = UnitType.INSULIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsMaxDailyMultiplier(
         key = "openapsama_max_daily_safety_multiplier",
@@ -105,7 +111,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_max_daily_multiplier,
         summaryResId = R.string.openapsama_max_daily_safety_multiplier_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE
+        unitType = UnitType.DOUBLE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsMaxCurrentBasalMultiplier(
         key = "openapsama_current_basal_safety_multiplier",
@@ -115,7 +122,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_current_basal_multiplier,
         summaryResId = R.string.openapsama_current_basal_safety_multiplier_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE
+        unitType = UnitType.DOUBLE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAmaBolusSnoozeDivisor(
         key = "bolussnooze_dia_divisor",
@@ -125,7 +133,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_bolus_snooze_divisor,
         summaryResId = R.string.openapsama_bolus_snooze_dia_divisor_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE
+        unitType = UnitType.DOUBLE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAmaMin5MinCarbsImpact(
         key = "openapsama_min_5m_carbimpact",
@@ -191,8 +200,8 @@ enum class DoubleKey(
         unitType = UnitType.DOUBLE,
         sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
-    ApsAutoIsfMin(key = "autoISF_min", defaultValue = 1.0, min = 0.3, max = 1.0, titleResId = R.string.pref_title_autoisf_min, summaryResId = R.string.openapsama_autoISF_min_summary, defaultedBySM = true, unitType = UnitType.DOUBLE),
-    ApsAutoIsfMax(key = "autoISF_max", defaultValue = 1.0, min = 1.0, max = 3.0, titleResId = R.string.pref_title_autoisf_max, summaryResId = R.string.openapsama_autoISF_max_summary, defaultedBySM = true, unitType = UnitType.DOUBLE),
+    ApsAutoIsfMin(key = "autoISF_min", defaultValue = 1.0, min = 0.3, max = 1.0, titleResId = R.string.pref_title_autoisf_min, summaryResId = R.string.openapsama_autoISF_min_summary, defaultedBySM = true, unitType = UnitType.DOUBLE, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
+    ApsAutoIsfMax(key = "autoISF_max", defaultValue = 1.0, min = 1.0, max = 3.0, titleResId = R.string.pref_title_autoisf_max, summaryResId = R.string.openapsama_autoISF_max_summary, defaultedBySM = true, unitType = UnitType.DOUBLE, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     ApsAutoIsfBgAccelWeight(
         key = "bgAccel_ISF_weight",
         defaultValue = 0.0,
@@ -201,7 +210,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_bg_accel_weight,
         summaryResId = R.string.openapsama_bgAccel_ISF_weight_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfBgBrakeWeight(
         key = "bgBrake_ISF_weight",
@@ -211,7 +221,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_bg_brake_weight,
         summaryResId = R.string.openapsama_bgBrake_ISF_weight_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfLowBgWeight(
         key = "lower_ISFrange_weight",
@@ -221,7 +232,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_low_bg_weight,
         summaryResId = R.string.openapsama_lower_ISFrange_weight_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfHighBgWeight(
         key = "higher_ISFrange_weight",
@@ -231,7 +243,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_high_bg_weight,
         summaryResId = R.string.openapsama_higher_ISFrange_weight_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfSmbDeliveryRatioBgRange(
         key = "openapsama_smb_delivery_ratio_bg_range",
@@ -241,10 +254,11 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_smb_delivery_ratio_bg_range,
         summaryResId = R.string.openapsama_smb_delivery_ratio_bg_range_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE
+        unitType = UnitType.DOUBLE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
-    ApsAutoIsfPpWeight(key = "pp_ISF_weight", defaultValue = 0.0, min = 0.0, max = 0.15, titleResId = R.string.pref_title_pp_weight, summaryResId = R.string.openapsama_pp_ISF_weight_summary, defaultedBySM = true, unitType = UnitType.DOUBLE_3),
-    ApsAutoIsfDuraWeight(key = "dura_ISF_weight", defaultValue = 0.0, min = 0.0, max = 3.0, titleResId = R.string.pref_title_dura_weight, summaryResId = R.string.openapsama_dura_ISF_weight_summary, defaultedBySM = true, unitType = UnitType.DOUBLE_2),
+    ApsAutoIsfPpWeight(key = "pp_ISF_weight", defaultValue = 0.0, min = 0.0, max = 0.15, titleResId = R.string.pref_title_pp_weight, summaryResId = R.string.openapsama_pp_ISF_weight_summary, defaultedBySM = true, unitType = UnitType.DOUBLE_3, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
+    ApsAutoIsfDuraWeight(key = "dura_ISF_weight", defaultValue = 0.0, min = 0.0, max = 3.0, titleResId = R.string.pref_title_dura_weight, summaryResId = R.string.openapsama_dura_ISF_weight_summary, defaultedBySM = true, unitType = UnitType.DOUBLE_2, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     ApsAutoIsfSmbDeliveryRatio(
         key = "openapsama_smb_delivery_ratio",
         defaultValue = 0.5,
@@ -253,7 +267,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_smb_delivery_ratio,
         summaryResId = R.string.openapsama_smb_delivery_ratio_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfSmbDeliveryRatioMin(
         key = "openapsama_smb_delivery_ratio_min",
@@ -263,7 +278,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_smb_delivery_ratio_min,
         summaryResId = R.string.openapsama_smb_delivery_ratio_min_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfSmbDeliveryRatioMax(
         key = "openapsama_smb_delivery_ratio_max",
@@ -273,7 +289,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_smb_delivery_ratio_max,
         summaryResId = R.string.openapsama_smb_delivery_ratio_max_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE_2
+        unitType = UnitType.DOUBLE_2,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfSmbMaxRangeExtension(
         key = "openapsama_smb_max_range_extension",
@@ -283,7 +300,8 @@ enum class DoubleKey(
         titleResId = R.string.pref_title_smb_max_range_extension,
         summaryResId = R.string.openapsama_smb_max_range_extension_summary,
         defaultedBySM = true,
-        unitType = UnitType.DOUBLE
+        unitType = UnitType.DOUBLE,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
 
     // ── FCL vNext — Groep 1: Pomp & veiligheid ───────────────────────────

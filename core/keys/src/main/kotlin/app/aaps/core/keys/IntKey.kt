@@ -42,7 +42,8 @@ enum class IntKey(
         summaryResId = R.string.carb_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowCarbsButton,
-        unitType = UnitType.GRAMS
+        unitType = UnitType.GRAMS,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     OverviewCarbsButtonIncrement2(
         key = "carbs_button_increment_2",
@@ -53,7 +54,8 @@ enum class IntKey(
         summaryResId = R.string.carb_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowCarbsButton,
-        unitType = UnitType.GRAMS
+        unitType = UnitType.GRAMS,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     OverviewCarbsButtonIncrement3(
         key = "carbs_button_increment_3",
@@ -64,7 +66,8 @@ enum class IntKey(
         summaryResId = R.string.carb_increment_button_message,
         defaultedBySM = true,
         dependency = BooleanKey.OverviewShowCarbsButton,
-        unitType = UnitType.GRAMS
+        unitType = UnitType.GRAMS,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
 
     OverviewCageWarning(
@@ -228,7 +231,8 @@ enum class IntKey(
         summaryResId = R.string.deliver_part_of_boluswizard_reset_time,
         defaultedBySM = true,
         engineeringModeOnly = true,
-        unitType = UnitType.MIN
+        unitType = UnitType.MIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ProtectionTimeout(
         key = "protection_timeout",
@@ -308,12 +312,13 @@ enum class IntKey(
         defaultedBySM = true,
         unitType = UnitType.PERCENT
     ),
-    ApsMaxSmbFrequency(key = "smbinterval", defaultValue = 3, min = 1, max = 10, titleResId = R.string.pref_title_smb_frequency, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN),
-    ApsMaxMinutesOfBasalToLimitSmb(key = "smbmaxminutes", defaultValue = 30, min = 15, max = 120, titleResId = R.string.pref_title_smb_max_minutes, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN),
+    ApsMaxSmbFrequency(key = "smbinterval", defaultValue = 3, min = 1, max = 10, titleResId = R.string.pref_title_smb_frequency, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
+    ApsMaxMinutesOfBasalToLimitSmb(key = "smbmaxminutes", defaultValue = 30, min = 15, max = 120, titleResId = R.string.pref_title_smb_max_minutes, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     ApsUamMaxMinutesOfBasalToLimitSmb(
         key = "uamsmbmaxminutes", defaultValue = 30, min = 15, max = 120, titleResId = R.string.pref_title_uam_smb_max_minutes, summaryResId = R.string.uam_smb_max_minutes, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb,
         visibility = PreferenceVisibility { it.preferences.get(BooleanKey.ApsUseUam) },
-        unitType = UnitType.MIN
+        unitType = UnitType.MIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsCarbsRequestThreshold(
         key = "carbsReqThreshold",
@@ -323,7 +328,8 @@ enum class IntKey(
         titleResId = R.string.pref_title_carbs_request_threshold,
         summaryResId = R.string.carbs_req_threshold_summary,
         defaultedBySM = true,
-        unitType = UnitType.GRAMS
+        unitType = UnitType.GRAMS,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfHalfBasalExerciseTarget(
         key = "half_basal_exercise_target",
@@ -333,7 +339,8 @@ enum class IntKey(
         titleResId = R.string.pref_title_half_basal_exercise_target,
         summaryResId = R.string.half_basal_exercise_target_summary,
         defaultedBySM = true,
-        unitType = UnitType.MGDL
+        unitType = UnitType.MGDL,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsAutoIsfIobThPercent(
         key = "iob_threshold_percent",
@@ -343,7 +350,8 @@ enum class IntKey(
         titleResId = R.string.pref_title_iob_threshold_percent,
         summaryResId = R.string.openapsama_iob_threshold_percent_summary,
         defaultedBySM = true,
-        unitType = UnitType.PERCENT
+        unitType = UnitType.PERCENT,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     ApsDynIsfAdjustmentFactor(
         key = "DynISFAdjust",

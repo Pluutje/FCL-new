@@ -608,8 +608,10 @@ class TempTargetManagementViewModel @Inject constructor(
     /**
      * Cancel the currently active temp target — a duration-0 [BatchAction.TempTarget]. Same bolus-style flow:
      * contact the master, show the master's "cancel" confirmation, commit on OK.
+     * [onSuccess] is invoked on the main thread ONLY after the user confirms and the cancel actually commits
+     * (ActionProgress.Applied) — so the caller can close the screen on a real cancel, not when the dialog appears.
      */
-    fun cancelActive() {
+    fun cancelActive(onSuccess: () -> Unit) {
         val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_cancel_temp_target)
         val actions = listOf(BatchAction.TempTarget(TT.Reason.CUSTOM.text, 0.0, 0.0, 0, 0))
         viewModelScope.launch {
@@ -619,7 +621,12 @@ class TempTargetManagementViewModel @Inject constructor(
                         EventShowDialog.OkCancel(
                             title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "", confirmationLines = prepared.lines,
                             icon = ElementType.TEMP_TARGET_MANAGEMENT.icon(),
-                            onOk = { appScope.launch { batchExecutor.commit(prepared.id, Sources.TTDialog, label); loadData() } }
+                            onOk = {
+                                appScope.launch {
+                                    if (batchExecutor.commit(prepared.id, Sources.TTDialog, label) is ActionProgress.Applied)
+                                        withContext(Dispatchers.Main) { onSuccess() }
+                                }
+                            }
                         )
                     )
 
