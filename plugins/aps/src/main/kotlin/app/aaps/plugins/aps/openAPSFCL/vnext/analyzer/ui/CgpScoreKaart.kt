@@ -54,23 +54,20 @@ fun CgpScoreKaart(context: Context) {
 
     // Bovenste blok toont het meest recente 14-daagse venster — dat is
     // het officiële 14-daags gemiddelde, consistent met AAPS Statistics.
-    val window14 = scores14d.takeLast(14)
-    val pgr14d   = scores14d.lastOrNull()?.pgr
     val prev14d  = scores14d.dropLast(1).lastOrNull()?.pgr
 
-    // Synthetische CgpScore op basis van 14-daags gemiddelde parameters
-    val display: CgpScore? = if (window14.isNotEmpty() && pgr14d != null) {
-        CgpScore(
-            tsUtc            = window14.last().tsUtc,
-            torPct           = window14.map { it.torPct   }.average(),
-            cvPct            = window14.map { it.cvPct    }.average(),
-            hypoPct          = window14.map { it.hypoPct  }.average(),
-            hyperPct         = window14.map { it.hyperPct }.average(),
-            meanMgdl         = window14.map { it.meanMgdl }.average(),
-            pgr              = pgr14d,
-            weakestDimension = window14.last().weakestDimension
-        )
-    } else null
+    // BUGFIX (18/06/2026): voorheen werd hier window14.average() genomen
+    // over de laatste 14 DAGPUNTEN — maar elk dagpunt in scores14d is zelf
+    // al een 14-daags schuifvenster-gemiddelde (zie class-comment hierboven).
+    // Een gemiddelde van 14 van die punten is dus een gemiddelde-van-
+    // gemiddelden, met een effectief venster tot ~28 dagen, dat oudere,
+    // mogelijk afwijkende periodes onterecht laat doorwegen. Dit veroorzaakte
+    // een waargenomen discrepantie tussen de TIR-kaart (schoon 14-dagen-
+    // venster, bv. TAR 6%) en deze tabel (uitgesmeerd gemiddelde, bv.
+    // Hyper-tijd 9,3% op hetzelfde moment). Nu: gewoon het laatste,
+    // enkelvoudige 14-daags-schuifvenster-datapunt — consistent met de
+    // TIR-kaart en met de class-comment hierboven.
+    val display: CgpScore? = scores14d.lastOrNull()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
