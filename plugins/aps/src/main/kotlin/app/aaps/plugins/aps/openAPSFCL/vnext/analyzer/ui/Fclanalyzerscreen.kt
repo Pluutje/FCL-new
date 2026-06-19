@@ -349,7 +349,7 @@ fun FclAnalyzerScreen(
                             val d = DFLearner.getD(context)
                             val f = DFLearner.getF(context)
                             ConfigOverrideWriter.writeWithStvAndParams(
-                                stvMap       = DFMapping.toStvMap(d, f, activeParams.nachtFactor,
+                                stvMap       = DFMapping.toStvMap(d, f, DFLearner.getNfLevel(context),
                                     aggLevel = DFLearner.getAggressiveness(context)),
                                 paramOverrides = DFMapping.toParamOverrides(d, f,
                                     aggLevel = DFLearner.getAggressiveness(context)),
@@ -379,16 +379,16 @@ fun FclAnalyzerScreen(
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
-                        onApplyNacht = { newNachtFactor ->
-                            ConfigOverrideWriter.writeWithNacht(
+                        onApplyNacht = { newNfLevel ->
+                            ConfigOverrideWriter.writeWithNfLevel(
                                 currentState = currentAxisState ?: StvState(100, 100, 100),
-                                newNachtFactor = newNachtFactor,
-                                reason = "Nacht-N aanpassing via Analyzer",
+                                newNfLevel = newNfLevel,
+                                reason = "Nacht NF aanpassing via Advisor",
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
                         allRows = allRows ?: emptyList(),
-                        nachtFactor = activeParams.nachtFactor,
+                        nfLevel = DFLearner.getNfLevel(context),
                         onApplyDFToAaps = { params, stvMap ->
                             ConfigOverrideWriter.writeWithStvAndParams(
                                 stvMap = stvMap,
@@ -787,9 +787,9 @@ private suspend fun runAdvisorFlow(
                 // anders de algemene D/F.
                 val newD = DFLearner.getD(context)
                 val newF = DFLearner.getF(context)
-                val nachtFactor = ConfigOverrideWriter.readActiveParams().nachtFactor
+                val nfLevel = DFLearner.getNfLevel(context)
                 ConfigOverrideWriter.writeWithStvAndParams(
-                    stvMap         = DFMapping.toStvMap(newD, newF, nachtFactor,
+                    stvMap         = DFMapping.toStvMap(newD, newF, nfLevel,
                         aggLevel = DFLearner.getAggressiveness(context)),
                     paramOverrides = DFMapping.toParamOverrides(
                         d = newD, f = newF,

@@ -36,7 +36,7 @@ object ConfigOverrideWriter {
         const val STERKTE        = 100
         const val TIMING         = 100
         const val VOLHOUDENDHEID = 100
-        const val NACHT_FACTOR   = 90   // verhoogd van 85: nacht was te passief
+        const val NF_LEVEL       = 5.0  // schaal 1-9; 5=BALANCED (was: NACHT_FACTOR=90→% omgezet naar ~5.3)
         val MAX_SMB_DAY_LEARNED: Double? = null
         val IOB_BRAKE_LEARNED:   Double? = null
     }
@@ -63,7 +63,7 @@ object ConfigOverrideWriter {
         val sterkte:                       Int     = StvDefaults.STERKTE,
         val timing:                        Int     = StvDefaults.TIMING,
         val volhoudendheid:                Int     = StvDefaults.VOLHOUDENDHEID,
-        val nachtFactor:                   Int     = StvDefaults.NACHT_FACTOR,
+        val nfLevel:                       Double  = StvDefaults.NF_LEVEL,  // 1-9
         val writtenAt:                     String  = "",
         val dataAvailable:                 Boolean = false
     )
@@ -139,7 +139,7 @@ object ConfigOverrideWriter {
             sterkte                       = snap.sterkte,
             timing                        = snap.timing,
             volhoudendheid                = snap.volhoudendheid,
-            nachtFactor                   = snap.nachtFactor,
+            nfLevel                       = snap.nfLevel,
             writtenAt                     = java.time.Instant.now().toString(),
             dataAvailable                 = true
         )
@@ -164,19 +164,36 @@ object ConfigOverrideWriter {
     /**
      * Stuurt S/T/V + nieuwe N-factor rechtstreeks naar FCLvNext via de bridge.
      */
+    // writeWithNacht behouden voor backwards-compatibility maar deprecated
+    @Deprecated("Gebruik writeWithNfLevel")
     fun writeWithNacht(
         currentState: StvState,
         newNachtFactor: Int,
         reason: String,
         episodeCount: Int
+    ): Boolean = writeWithNfLevel(currentState, 5.0, reason, episodeCount)  // deprecated, nfLevel via DFLearner
+
+    fun writeWithNfLevel(
+        currentState: StvState,
+        newNfLevel: Double,
+        reason: String,
+        episodeCount: Int
     ): Boolean {
+        val clamped = newNfLevel.coerceIn(1.0, 9.0)
         val stv = mapOf(
             "sterkte"        to currentState.sterkte.coerceIn(80, 125),
             "timing"         to currentState.timing.coerceIn(80, 120),
-            "volhoudendheid" to currentState.volhoudendheid.coerceIn(70, 130),
-            "nacht_factor"   to newNachtFactor.coerceIn(60, 110)
+            "volhoudendheid" to currentState.volhoudendheid.coerceIn(70, 130)
         )
-        return postToBridge(stv, reason, episodeCount, paramOverrides = null)
+        // BUGFIX 19/06/2026: nfLevel moet daadwerkelijk in de Override mee,
+        // anders leest loadFCLvNextConfig() 'm nooit (override?.nfLevel was
+        // altijd null, dus viel altijd terug op de ongewijzigde prefs-waarde
+        // — de "Toepassen in AAPS"-knop op het Nacht-tabblad had hierdoor
+        // geen enkel effect op de actieve dosering, alleen op de UI-weergave
+        // via DFLearner.setNfLevel()). Zie ook FCLvNextConfig.kt regel ~306:
+        // de schrijf-terug-naar-prefs gebeurt al correct ZODRA nfLevel niet
+        // null is — die kant van de keten was altijd al goed.
+        return postToBridge(stv, reason, episodeCount, paramOverrides = null, nfLevel = clamped)
     }
 
     /**
@@ -196,19 +213,19 @@ object ConfigOverrideWriter {
         reason: String,
         episodeCount: Int,
         paramOverrides: ParamOverrides?,
-        context: android.content.Context? = null
+        context: android.content.Context? = null,
+        nfLevel: Double? = null
     ): Boolean {
         val sterkte        = stv["sterkte"]        ?: StvDefaults.STERKTE
         val timing         = stv["timing"]         ?: StvDefaults.TIMING
         val volhoudendheid = stv["volhoudendheid"] ?: StvDefaults.VOLHOUDENDHEID
-        val nachtFactor    = stv["nacht_factor"]
         val iobBrakeRaw    = stv["iob_brake_learned_x1000"]
 
         val override = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride.Override(
             sterkte          = sterkte,
             timing           = timing,
             volhoudendheid   = volhoudendheid,
-            nachtFactor      = nachtFactor,
+            nfLevel          = nfLevel,  // BUGFIX 19/06/2026: was altijd null, zie writeWithNfLevel()
             writtenAt        = java.time.Instant.now().toString(),
             basedOnEpisodes  = episodeCount,
             reason           = reason,

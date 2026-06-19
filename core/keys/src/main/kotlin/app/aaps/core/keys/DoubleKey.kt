@@ -334,4 +334,6 @@ enum class DoubleKey(
     fcl_aaps_mulitplier_day(key = "fcl_aaps_mulitplier_day", defaultValue = 1.0, min = 0.8, max = 2.0, titleResId = R.string.fcl_aaps_mulitplier_day_title, unitType = UnitType.DOUBLE),
     fcl_aaps_mulitplier_night(key = "fcl_aaps_mulitplier_night", defaultValue = 1.0, min = 0.8, max = 2.0, titleResId = R.string.fcl_aaps_mulitplier_night_title, unitType = UnitType.DOUBLE),
 
+    fcl_vnext_nf_level(key = "fcl_vnext_nf_level",defaultValue = 5.0,min = 1.0,max = 9.0,titleResId = R.string.fcl_vnext_internal),
+
 }

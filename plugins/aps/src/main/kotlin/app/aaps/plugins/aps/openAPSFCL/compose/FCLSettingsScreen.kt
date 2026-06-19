@@ -25,6 +25,7 @@ import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.pickers.TimeWheelPicker
 import app.aaps.core.ui.compose.pickers.WeekDaySelector
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
 @Composable
@@ -44,9 +45,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var maxBolusNight     by remember { mutableStateOf(preferences.get(DoubleKey.max_bolus_night)) }
     var maxIob            by remember { mutableStateOf(preferences.get(DoubleKey.fcl_vnext_MaxIOB)) }
     var doseStyle         by remember { mutableStateOf(preferences.get(StringKey.fcl_vnext_dose_distribution_style)) }
-    var nightStyle        by remember { mutableStateOf(preferences.get(StringKey.fcl_vnext_night_response_style)) }
-    var resBehavior       by remember { mutableStateOf(preferences.get(StringKey.fcl_vnext_resistance_behavior)) }
-    var resStability      by remember { mutableStateOf(preferences.get(StringKey.fcl_vnext_resistance_stability)) }
+    // nightStyle / resBehavior / resStability verwijderd (18/06/2026)
     var actBehavior       by remember { mutableStateOf(preferences.get(StringKey.fcl_vnext_activity_behavior)) }
     var weekendDagen      by remember { mutableStateOf(preferences.get(StringKey.WeekendDagen)) }
     var ochtendStart      by remember { mutableStateOf(preferences.get(StringKey.OchtendStart)) }
@@ -54,6 +53,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var nachtStart        by remember { mutableStateOf(preferences.get(StringKey.NachtStart)) }
 
     var expandedDosering  by remember { mutableStateOf(true) }
+    var expandedAnalyserAutomaat by remember { mutableStateOf(false) }
     var expandedContext   by remember { mutableStateOf(false) }
     var expandedAutosens  by remember { mutableStateOf(false) }
 
@@ -89,25 +89,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         "PULSED"      to s.doseStyleLabel("PULSED"),
         "VERY_PULSED" to s.doseStyleLabel("VERY_PULSED")
     )
-    val nightOptions = listOf(
-        "VERY_GUARDED" to s.nightStyleLabel("VERY_GUARDED"),
-        "GUARDED"      to s.nightStyleLabel("GUARDED"),
-        "BALANCED"     to s.nightStyleLabel("BALANCED"),
-        "RESPONSIVE"   to s.nightStyleLabel("RESPONSIVE"),
-        "PROACTIVE"    to s.nightStyleLabel("PROACTIVE")
-    )
-    val resBehaviorOptions = listOf(
-        "OFF"        to s.autosensGedragLabel("OFF"),
-        "LIGHT"      to "Licht",
-        "NORMAL"     to s.autosensGedragLabel("NORMAL"),
-        "STRONG"     to "Sterk",
-        "AGGRESSIVE" to s.autosensGedragLabel("AGGRESSIVE")
-    )
-    val resStabilityOptions = listOf(
-        "VERY_STABLE" to s.autosensStabiliteitLabel("VERY_STABLE"),
-        "STANDARD"    to s.autosensStabiliteitLabel("STANDARD"),
-        "RESPONSIVE"  to s.autosensStabiliteitLabel("RESPONSIVE")
-    )
+    // nightOptions/resBehaviorOptions/resStabilityOptions verwijderd (18/06/2026)
     val actOptions = listOf(
         "OFF"    to s.activiteitLabel("OFF"),
         "LIGHT"  to "Licht",
@@ -207,25 +189,37 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 }
             )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        }
 
-            FCLListRow(
-                label = "🌙 Nachtrespons",
-                summary = "Hoe vroeg en hoe gelijkmatig FCL 's nachts reageert bij aanhoudende stijging.",
-                options = nightOptions,
-                selected = nightStyle,
-                onInfo = {
-                    showInfo(
-                        "Nachtrespons",
-                        "Bepaalt hoe agressief FCL vNext 's nachts reageert op een stijgende " +
-                            "glucosewaarde."
+        FCLSection(
+            title = "🤖 Analyser Automaat",
+            expanded = expandedAnalyserAutomaat,
+            onToggle = { expandedAnalyserAutomaat = !expandedAnalyserAutomaat }
+        ) {
+            var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(ctx)) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Automaat leert",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                     )
-                },
-                onSelect = {
-                    nightStyle = it
-                    sp.putString(StringKey.fcl_vnext_night_response_style.key, it)
+                    Text(
+                        if (autoEnabled) "Past instellingen automatisch aan (dag en nacht)"
+                        else "Handmatig — automaat berekent maar past niet aan",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
+                Switch(checked = autoEnabled, onCheckedChange = {
+                    autoEnabled = it
+                    DFLearner.setAutoEnabled(ctx, it)
+                })
+            }
         }
 
         FCLSection(
@@ -304,52 +298,11 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         }
 
         FCLSection(
-            title = s.settingsAutosens,
+            title = "🚶 Activiteit",
             expanded = expandedAutosens,
             onToggle = { expandedAutosens = !expandedAutosens }
         ) {
-            Text(
-                text = "AutoSens past automatisch de insulinegevoeligheid aan op basis van je " +
-                    "glucoseverloop over meerdere dagen.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            FCLListRow(
-                label = "AutoSens – Gedrag",
-                summary = "Hoe sterk AutoSens mag ingrijpen bij structurele afwijking van target.",
-                options = resBehaviorOptions,
-                selected = resBehavior,
-                onInfo = {
-                    showInfo("AutoSens – Gedrag",
-                             "Bepaalt hoe sterk AutoSens mag ingrijpen wanneer je glucose " +
-                                 "structureel boven of onder target ligt.")
-                },
-                onSelect = {
-                    resBehavior = it
-                    sp.putString(StringKey.fcl_vnext_resistance_behavior.key, it)
-                }
-            )
-
-            FCLListRow(
-                label = "AutoSens – Stabiliteit",
-                summary = "Hoeveel dagen worden gebruikt om AutoSens te berekenen.",
-                options = resStabilityOptions,
-                selected = resStability,
-                onInfo = {
-                    showInfo("AutoSens – Stabiliteit",
-                             "Bepaalt hoeveel dagen en uren worden gebruikt om de AutoSens-ratio " +
-                                 "te berekenen.")
-                },
-                onSelect = {
-                    resStability = it
-                    sp.putString(StringKey.fcl_vnext_resistance_stability.key, it)
-                }
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
+            // AutoSens-sectie verwijderd (18/06/2026)
             FCLListRow(
                 label = "🚶 Activiteit",
                 summary = "Past insuline en target aan op basis van beweging via de stappenteller.",

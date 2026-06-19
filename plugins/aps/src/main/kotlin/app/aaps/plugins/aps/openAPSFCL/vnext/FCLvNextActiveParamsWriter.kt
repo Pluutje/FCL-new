@@ -32,7 +32,7 @@ object FCLvNextActiveParamsWriter {
         const val STERKTE        = 100
         const val TIMING         = 100
         const val VOLHOUDENDHEID = 100
-        const val NACHT_FACTOR   = 90   // verhoogd van 85: nacht was te passief
+        const val NF_LEVEL = 5.0  // was NACHT_FACTOR   = 90   // verhoogd van 85: nacht was te passief
         // Groep-A params — gelijk aan DFMapping-referentie bij D=1.0, F=0.50.
         // Dit is de enige bron van default-kennis binnen AAPS voor active_params.json.
         // ConfigOverrideWriter.Defaults (Analyzer) en DoubleKey/IntKey defaultValues
@@ -66,9 +66,9 @@ object FCLvNextActiveParamsWriter {
         sterkte: Int = Defaults.STERKTE,
         timing: Int = Defaults.TIMING,
         volhoudendheid: Int = Defaults.VOLHOUDENDHEID,
-        nachtFactor: Int = Defaults.NACHT_FACTOR
+        nfLevel: Double = Defaults.NF_LEVEL
     ) {
-        val stvKey = "$sterkte/$timing/$volhoudendheid/$nachtFactor"
+        val stvKey = "$sterkte/$timing/$volhoudendheid/NF${nfLevel.toInt()}"
 
         // Snapshot altijd bijwerken — ook als config ongewijzigd is.
         // max_bolus_day kan veranderd zijn terwijl de rest van de config gelijk blijft.
@@ -78,7 +78,7 @@ object FCLvNextActiveParamsWriter {
             sterkte         = sterkte,
             timing          = timing,
             volhoudendheid  = volhoudendheid,
-            nachtFactor     = nachtFactor,
+            nfLevel         = nfLevel,
             manualMaxBolus = manualMaxBolus
         )
 
@@ -91,7 +91,7 @@ object FCLvNextActiveParamsWriter {
                 "$RELATIVE_PATH/$FILENAME"
             )
             file.parentFile?.mkdirs()
-            file.writeText(buildJson(config, sterkte, timing, volhoudendheid, nachtFactor))
+            file.writeText(buildJson(config, sterkte, timing, volhoudendheid, nfLevel))
             lastWrittenConfig = config
             lastWrittenSTV    = stvKey
         } catch (_: Exception) {
@@ -104,7 +104,7 @@ object FCLvNextActiveParamsWriter {
         sterkte: Int,
         timing: Int,
         volhoudendheid: Int,
-        nachtFactor: Int
+        nfLevel: Double
     ): String {
         val now = Instant.now().toString()
 
@@ -131,7 +131,7 @@ object FCLvNextActiveParamsWriter {
             appendLine("    \"sterkte\": $sterkte,")
             appendLine("    \"timing\": $timing,")
             appendLine("    \"volhoudendheid\": $volhoudendheid,")
-            appendLine("    \"nacht_factor\": $nachtFactor")
+            appendLine("    \"nf_level\": $nfLevel")
             appendLine("  },")
             appendLine("  \"params\": {")
             appendLine("    \"peakPredictionThreshold\":  { \"active\": ${fmt(config.peakPredictionThreshold)},  \"default\": ${fmt(Defaults.PEAK_PREDICTION_THRESHOLD)},  \"delta\": \"${fmtDisplay(config.peakPredictionThreshold,  Defaults.PEAK_PREDICTION_THRESHOLD)}\",  \"src\": \"${src(config.peakPredictionThreshold,  Defaults.PEAK_PREDICTION_THRESHOLD)}\" },")

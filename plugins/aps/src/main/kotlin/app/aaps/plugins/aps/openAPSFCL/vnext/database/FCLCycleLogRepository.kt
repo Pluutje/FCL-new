@@ -22,7 +22,8 @@ import javax.inject.Singleton
 
 @Singleton
 class FCLCycleLogRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val preferences: app.aaps.core.keys.interfaces.Preferences
 ) {
     private val db by lazy { FCLAnalyzerDatabase.getInstance(context) }
     private val dao by lazy { db.cycleLogDao() }
@@ -183,7 +184,7 @@ class FCLCycleLogRepository @Inject constructor(
                     vExtra = vExtra, aggLevel = agg
                 )
             val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
-                .toStvMap(d, f, 85, vExtra, aggLevel = agg)
+                .toStvMap(d, f, 85.0, vExtra, aggLevel = agg)
 
             app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
                 .writeWithStvAndParams(
@@ -197,6 +198,24 @@ class FCLCycleLogRepository @Inject constructor(
                         "peakBias=${"%.2f".format(refPeakBias)}",
                     episodeCount   = episodeMetrics.size
                 )
+        }
+
+        // ── Stap 8: NachtLearner (NF-schaal, 1-9) ───────────────────────────
+        // Evalueert alleen wanneer het NU overdag is (dus ná een afgeronde
+        // nacht) — de eigen dagelijkse cooldown in NachtLearner zorgt dat dit
+        // ondanks de uurlijkse aanroepfrequentie maar 1x per dag daadwerkelijk
+        // een aanpassing doet. Toepassing op AAPS gebeurt binnen NachtLearner
+        // zelf, gegated door dezelfde DFLearner.isAutoEnabled-schakelaar als
+        // de dag-learner (Settings → Analyser Automaat).
+        val isNightNow = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper(preferences).isNightNow()
+        if (!isNightNow) {
+            val laasteEpisodeEndMs = completedEpisodes.lastOrNull()?.end?.toEpochMilli()
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.NachtLearner.maybeLearnNacht(
+                context             = context,
+                preferences         = preferences,
+                repository          = this,
+                laasteEpisodeEndMs  = laasteEpisodeEndMs
+            )
         }
     }
 
@@ -347,6 +366,7 @@ class FCLCycleLogRepository @Inject constructor(
 
     suspend fun getRecent(limit: Int) = dao.getRecent(limit)
     suspend fun getSince(fromMs: Long) = dao.getSince(fromMs)
+    suspend fun getRowsInRange(fromMs: Long, toMs: Long) = dao.getInRange(fromMs, toMs)
     suspend fun count() = dao.count()
     suspend fun getAll() = dao.getAll()
 }
@@ -359,7 +379,7 @@ private fun csvHeader(sep: String): String = listOf(
     "doseDistributionStyle", "nightResponseStyle",
     "bg_mmol", "target_mmol", "delta_target",
     "iob", "iob_ratio", "bg_zone", "dose_access",
-    "final_dose", "commanded_dose", "delivered_total", "bolus", "basal_u_h", "should_deliver",
+    "final_dose", "commanded_dose", "delivered_total", "bolus", "basal_u_h", "real_delivered_u", "should_deliver",
     "external_bolus_u",
     "slope", "accel", "recent_slope", "recent_delta5m", "consistency",
     "effective_isf", "gain", "energy_base", "energy_total",
@@ -421,7 +441,7 @@ private fun FCLCycleLogEntity.toCsvLine(
         doseDistributionStyle, nightResponseStyle,
         bg1(bg), bg1(target), d2(deltaTarget),
         d2(iob), d2(iobRatio), bgZone, doseAccess,
-        d2(finalDose), d2(commandedDose), d2(deliveredTotal), d2(bolus), d2(basalRate),
+        d2(finalDose), d2(commandedDose), d2(deliveredTotal), d2(bolus), d2(basalRate), d2(realDeliveredU),
         bool(shouldDeliver),
         d2(externalBolusU),
         d2(slope), d2(accel), d2(recentSlope), d2(recentDelta5m), d2(consistency),

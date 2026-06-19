@@ -225,6 +225,84 @@ object DFLearner {
         prefs(context).edit().putFloat(KEY_REF_EB, v.coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX).toFloat()).apply()
 
     // Agressiviteitsschaal (Stap 1: opslag, Stap 2: koppeling aan params)
+    // NachtFactor-niveau (1-9), analoog aan aggressiveness
+    private const val KEY_NF_LEVEL = "nf_level"
+
+    fun getNfLevel(context: Context): Double =
+        context.getSharedPreferences("df_learner_prefs", android.content.Context.MODE_PRIVATE)
+            .getFloat(KEY_NF_LEVEL, 5.0f).toDouble().coerceIn(1.0, 9.0)
+
+    fun setNfLevel(context: Context, level: Double) {
+        val clamped = level.coerceIn(1.0, 9.0)
+        context.getSharedPreferences("df_learner_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_NF_LEVEL, clamped.toFloat()).apply()
+    }
+
+    // Laatst-toegepaste NF-waarde (voor "Toepassen in AAPS" alleen tonen bij
+    // afwijking — zelfde patroon als getLastAppliedAggressiveness).
+    // Default 5.0: bij een schone start is er nog geen override actief,
+    // dus "niets toegepast" == "niveau 5" (BALANCED).
+    private const val KEY_NF_LEVEL_APPLIED = "nf_level_applied"
+
+    fun getLastAppliedNfLevel(context: Context): Double =
+        context.getSharedPreferences("df_learner_prefs", android.content.Context.MODE_PRIVATE)
+            .getFloat(KEY_NF_LEVEL_APPLIED, 5.0f).toDouble().coerceIn(1.0, 9.0)
+
+    fun setLastAppliedNfLevel(context: Context, level: Double) {
+        val clamped = level.coerceIn(1.0, 9.0)
+        context.getSharedPreferences("df_learner_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_NF_LEVEL_APPLIED, clamped.toFloat()).apply()
+    }
+
+    // ── Nacht Agressiviteit (handmatige laag, los van geleerde NF) ─────────
+    // Analoog aan getAggressiveness()/setAggressiveness() voor Dag: een
+    // losse, handmatige schuif (1-9, 5=standaard=geen effect) die NIET door
+    // de NachtLearner wordt aangeraakt. De effectieve NF die naar AAPS gaat
+    // is geleerde NF + (nachtAggressiviteit - 5) stappen, geclipt op 1-9 —
+    // zie ConfigOverrideWriter.effectiveNfLevel(). Zo kan de gebruiker
+    // bovenop wat de learner heeft bijgesteld nog een eigen stap zetten,
+    // zonder het geleerde te overschrijven (vraag Ecko 19/06/2026).
+    private const val KEY_NACHT_AGGRESSIVITEIT = "nacht_aggressiviteit"
+    const val NACHT_AGGRESSIVITEIT_DEFAULT = 5
+    const val NACHT_AGGRESSIVITEIT_MIN = 1
+    const val NACHT_AGGRESSIVITEIT_MAX = 9
+
+    fun getNachtAggressiviteit(context: Context): Int =
+        prefs(context).getInt(KEY_NACHT_AGGRESSIVITEIT, NACHT_AGGRESSIVITEIT_DEFAULT)
+
+    fun setNachtAggressiviteit(context: Context, level: Int) {
+        prefs(context).edit()
+            .putInt(KEY_NACHT_AGGRESSIVITEIT, level.coerceIn(NACHT_AGGRESSIVITEIT_MIN, NACHT_AGGRESSIVITEIT_MAX))
+            .apply()
+    }
+
+    /**
+     * Laatst-toegepaste nacht-aggressiviteit (zelfde "Toepassen"-gating
+     * patroon als getLastAppliedAggressiveness/getLastAppliedNfLevel).
+     */
+    private const val KEY_NACHT_AGGRESSIVITEIT_APPLIED = "nacht_aggressiviteit_applied"
+
+    fun getLastAppliedNachtAggressiviteit(context: Context): Int =
+        prefs(context).getInt(KEY_NACHT_AGGRESSIVITEIT_APPLIED, NACHT_AGGRESSIVITEIT_DEFAULT)
+
+    fun setLastAppliedNachtAggressiviteit(context: Context, level: Int) {
+        prefs(context).edit()
+            .putInt(KEY_NACHT_AGGRESSIVITEIT_APPLIED, level.coerceIn(NACHT_AGGRESSIVITEIT_MIN, NACHT_AGGRESSIVITEIT_MAX))
+            .apply()
+    }
+
+    /**
+     * De daadwerkelijk naar AAPS te sturen NF-waarde: geleerde NF + de
+     * handmatige stap-offset van de Nacht-Agressiviteit-schuif, geclipt op
+     * 1-9. Eén centrale plek voor deze optelling, gebruikt door zowel
+     * NachtLearner (auto-toepassen) als NachtControlTab ("Toepassen in AAPS").
+     */
+    fun effectiveNfLevel(context: Context): Double {
+        val geleerd = getNfLevel(context)
+        val offset  = getNachtAggressiviteit(context) - NACHT_AGGRESSIVITEIT_DEFAULT
+        return (geleerd + offset).coerceIn(1.0, 9.0)
+    }
+
     fun getAggressiveness(context: Context): Int =
         prefs(context).getInt(KEY_AGGRESSIVENESS, AGGRESSIVENESS_DEFAULT)
 

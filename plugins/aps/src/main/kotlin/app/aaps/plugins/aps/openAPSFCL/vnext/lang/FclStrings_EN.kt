@@ -153,12 +153,12 @@ object FclStrings_EN : FclStrings {
     override val sensorBlip         = "Sensor blip"
 
     // ── Advisor ───────────────────────────────────────────────────────────
-    override val advisorAnalyse     = "Advisor Analysis"
+    override val advisorAnalyse     = "Auto Learner"
     override val advisorOverzicht   = "Analysis overview"
-    override val automaat           = "Auto-learn"
+    override val automaat           = "Day"
     override val maxSmb             = "MaxSMB"
     override val parameters         = "Fine-tuning"
-    override val nachtNLabel        = "Night N"
+    override val nachtNLabel        = "Night"
     override val analyse            = "Pattern analysis"
     override val confidence         = "Confidence"
     override val gebruikt           = "Used"

@@ -62,6 +62,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.MAX_DELIVERY_HISTORY
 import app.aaps.plugins.aps.openAPSFCL.vnext.lastCycleFclDelivered
 
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclBasalProfileNightLogger
+import app.aaps.plugins.aps.openAPSFCL.vnext.FclRealDoseTracker
 
 @Singleton
 
@@ -81,9 +82,13 @@ class DetermineBasalFCL @Inject constructor(
 
     private val fclMetrics = FCLMetrics(context = context,preferences = preferences,persistenceLayer = persistenceLayer)
     private val fclActivityModule = FCLActivityModule(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
-    private val fclResistance = FCLResistance(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
-
     private val bgHistoryProvider = FCLvNextBgHistoryProvider(iobCobCalculator, dateUtil)
+    private val fclRealDoseTracker = FclRealDoseTracker(persistenceLayer)
+    // Tijdstip (ms) van het vorige cycle-einde — gebruikt als ondergrens voor
+    // FclRealDoseTracker.deliveredUnits(), zodat elke cyclus precies het
+    // venster sinds de vorige cyclus afdekt (geen gaten, geen overlap).
+    // 0L bij eerste run na (her)start: dan vallen we terug op "laatste 5 min".
+    private var lastCycleTimestampMs: Long = 0L
     private val basalProfileNightLogger =
         FclBasalProfileNightLogger(
             context = context,
@@ -312,23 +317,11 @@ class DetermineBasalFCL @Inject constructor(
             isNight = isNight
         )
 
-        fclResistance.updateTargetMmol(target_bg/18.0)
-        fclResistance.updateResistentieIndienNodig(isNight)
-
-        val resistanceFactor: Double =
-            fclResistance.getCurrentResistanceFactor()
-
-        val resistanceLog: String =
-            fclResistance.getCurrentResistanceLog()
-
-
-
-        // Resistentie corrigeert ALLEEN ISF
-        sensMgdl /= resistanceFactor
-        sensitivityRatio = resistanceFactor
-        if (isNight) {
-            basal = profile.current_basal * sensitivityRatio
-        }
+        // FCLResistance (AutoSens nacht) verwijderd 18/06/2026:
+        // veroorzaakte hetzelfde probleem als overdag — maaltijdpatronen
+        // werden verward met structurele insulinegevoeligheidsverandering.
+        val resistanceLog: String? = null
+        sensitivityRatio = 1.0
         basal = round_basal(basal)
 
 
@@ -375,6 +368,23 @@ class DetermineBasalFCL @Inject constructor(
             )
             val manualBolusDetected = externalBolusDetected >= 0.5
 
+            // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal +
+            // bolus/SMB, ongeacht FCL of de oref0-fallback de bron was) —
+            // zie FclRealDoseTracker voor de achtergrond. Loopt 1 cyclus
+            // achter: dit venster dekt wat er SINDS de vorige cyclus is
+            // afgeleverd, niet wat deze cyclus zelf gaat doen (dat staat
+            // pas na deze aanroep vast). Bij de allereerste run na een
+            // (her)start van de singleton is er nog geen vorig tijdstip —
+            // dan pakken we de laatste 5 minuten als redelijke schatting.
+            val nowMs = currentTime
+            val vorigeCycleMs =
+                if (lastCycleTimestampMs > 0L) lastCycleTimestampMs
+                else nowMs - 5 * 60 * 1000L
+            val realDeliveredU = kotlinx.coroutines.runBlocking {
+                fclRealDoseTracker.deliveredUnits(vorigeCycleMs, nowMs)
+            }
+            lastCycleTimestampMs = nowMs
+
             val fclInput = FCLvNextInput(
                 bgNow = bgNowMmol,
                 bgHistory = bgHistoryMmol,
@@ -383,7 +393,8 @@ class DetermineBasalFCL @Inject constructor(
                 effectiveISF = sensMgdl / 18.0,
                 targetBG = targetMgdl / 18.0,
                 externalBolusU = externalBolusDetected,
-                isNight = isNight
+                isNight = isNight,
+                realDeliveredU = realDeliveredU
             )
 
             val advice = fclvNext.getAdvice(fclInput)

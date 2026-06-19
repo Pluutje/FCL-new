@@ -15,6 +15,7 @@ import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.keys.IntKey
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.toEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
 
 import kotlin.math.roundToInt
 
@@ -26,7 +27,12 @@ data class FCLvNextInput(
     val effectiveISF: Double,                   // mmol/L per U
     val targetBG: Double,                       // mmol/L
     val isNight: Boolean,
-    val externalBolusU: Double = 0.0            // gedetecteerde externe bolus (IOB-delta)
+    val externalBolusU: Double = 0.0,           // gedetecteerde externe bolus (IOB-delta)
+    // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal+bolus/SMB,
+    // via AAPS-behandelhistorie — zie FclRealDoseTracker). Dekt zowel FCL's
+    // eigen doses als alles wat de oref0/SMB-fallback aflevert wanneer FCL
+    // niet zelf ingrijpt. Default 0.0 voor andere/oudere call sites.
+    val realDeliveredU: Double = 0.0
 )
 
 data class FCLvNextContext(
@@ -3237,7 +3243,8 @@ class FCLvNext(
             ts = now,
             isNight = input.isNight,
             bg = input.bgNow,
-            target = input.targetBG
+            target = input.targetBG,
+            realDeliveredU = input.realDeliveredU
         )
         val status = StringBuilder()
 
@@ -3265,9 +3272,9 @@ class FCLvNext(
         logRow.sterktePct        = preferences.get(IntKey.fcl_vnext_sterkte)
         logRow.timingPct         = preferences.get(IntKey.fcl_vnext_timing)
         logRow.volhoudendheidPct = preferences.get(IntKey.fcl_vnext_volhoudendheid)
-        logRow.nachtFactorPct    = preferences.get(IntKey.fcl_vnext_nacht_factor)
+        logRow.nachtFactorPct    = DFLearner.getNfLevel(context).toInt()  // nfLevel als proxy
         logRow.doseDistributionStyle = config.doseDistributionStyle
-        logRow.nightResponseStyle    = config.nightResponseStyle
+        logRow.nightResponseStyle    = "NF${config.nfLevel.toInt()}"  // nfLevel als label
 
         logRow.bgZone = zoneEnum.name
         logRow.iob = input.currentIOB
@@ -3287,8 +3294,8 @@ class FCLvNext(
         logRow.watchingIobOk = false
 
 
-        status.append("S=${preferences.get(IntKey.fcl_vnext_sterkte)} T=${preferences.get(IntKey.fcl_vnext_timing)} V=${preferences.get(IntKey.fcl_vnext_volhoudendheid)} N=${preferences.get(IntKey.fcl_vnext_nacht_factor)}\n")
-        status.append("DIST=${config.doseDistributionStyle} NIGHT=${config.nightResponseStyle}\n")
+        status.append("S=${preferences.get(IntKey.fcl_vnext_sterkte)} T=${preferences.get(IntKey.fcl_vnext_timing)} V=${preferences.get(IntKey.fcl_vnext_volhoudendheid)} NF=${DFLearner.getNfLevel(context).toInt()}\n")
+        status.append("DIST=${config.doseDistributionStyle} NF=${config.nfLevel.toInt()}\n")
 
 
         // ─────────────────────────────────────────────

@@ -41,7 +41,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
  * DFMapping genereert een volledige param_overrides set → één JSON naar AAPS.
  *
  * Garantie: elke s.dfControlToepassen schrijft altijd BEIDE blokken:
- *   stv { sterkte, timing, volhoudendheid, nacht_factor }
+ *   stv { sterkte, timing, volhoudendheid, nf_level }
  *   param_overrides { alle 16 DFMapping-params }
  */
 @Composable
@@ -50,7 +50,7 @@ fun DFControlTab(
     metrics: List<EpisodeMetrics> = emptyList(),
     allRows: List<LogRow> = emptyList(),
     onApplyToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
-    nachtFactor: Int = 85
+    nfLevel: Double = 5.0
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
@@ -69,7 +69,6 @@ fun DFControlTab(
     val vExtra = DFLearner.getVExtra(context)
 
     // Algemene state
-    var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(context)) }
     var aggressiveness by remember { mutableStateOf(DFLearner.getAggressiveness(context)) }
     var lastAppliedAggressiveness by remember { mutableStateOf(DFLearner.getLastAppliedAggressiveness(context)) }
     var history by remember { mutableStateOf(DFLearner.getHistory(context)) }
@@ -85,19 +84,19 @@ fun DFControlTab(
     // S/T/V voor geselecteerd type
     // S en T worden berekend via D en F (zoals voorheen).
     // V wordt berekend via D + vExtra — onafhankelijk van S.
-    val stv  = DFMapping.toStvMap(d, f, nachtFactor, vExtra)
+    val stv  = DFMapping.toStvMap(d, f, nfLevel, vExtra)
     val sNu  = stv["sterkte"]        ?: 95
     val tNu  = stv["timing"]         ?: 100
     val vNu  = stv["volhoudendheid"] ?: 95
 
     // Bereken ook S en V puur op basis van D (zonder vExtra) voor de S-kaart.
     // Zo ziet de gebruiker dat S alleen via D beweegt, en V via vExtra.
-    val stvZonderVExtra = DFMapping.toStvMap(d, f, nachtFactor, 0.0)
+    val stvZonderVExtra = DFMapping.toStvMap(d, f, nfLevel, 0.0)
     val sViaD           = stvZonderVExtra["sterkte"] ?: 95
 
     val sStap = 5; val tStap = 4; val vStap = 5
-    val sMin = DFMapping.toStvMap(DFMapping.D_MIN, f, nachtFactor)["sterkte"] ?: 80
-    val sMax = DFMapping.toStvMap(DFMapping.D_MAX, f, nachtFactor)["sterkte"] ?: 128
+    val sMin = DFMapping.toStvMap(DFMapping.D_MIN, f, nfLevel)["sterkte"] ?: 80
+    val sMax = DFMapping.toStvMap(DFMapping.D_MAX, f, nfLevel)["sterkte"] ?: 128
     val tMin = 80; val tMax = 120
     // V-grenzen op basis van vExtra-bereik (D-component is constant bij V-aanpassing)
     val vBasisViaDOnly = stvZonderVExtra["volhoudendheid"] ?: 95
@@ -151,7 +150,7 @@ fun DFControlTab(
                         vExtra = veApply,
                         aggLevel = aggressiveness
                     )
-                    val stvMap = DFMapping.toStvMap(dApply, fApply, nachtFactor, veApply,
+                    val stvMap = DFMapping.toStvMap(dApply, fApply, nfLevel, veApply,
                         aggLevel = aggressiveness)
                     val ok = onApplyToAaps(po, stvMap)
                     if (ok) {
@@ -173,38 +172,13 @@ fun DFControlTab(
         AdvisorAssenKaarten(
             d = d,
             f = f,
-            nachtFactor = nachtFactor,
+            nfLevel = nfLevel,
             vExtra = vExtra,
             aggressiveness = aggressiveness
         )
 
-        // ── 2. Automaat leert ─────────────────────────────────────────────
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("🤖  Automaat leert", style = MaterialTheme.typography.bodyMedium,
-                             fontWeight = FontWeight.SemiBold)
-                        Text(
-                            if (autoEnabled) "Past instellingen automatisch aan na elke maaltijd"
-                            else "Handmatig — automaat berekent maar past niet aan",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = autoEnabled, onCheckedChange = {
-                        autoEnabled = it; DFLearner.setAutoEnabled(context, it)
-                    })
-                }
-            }
-        }
+        // ── 2. Automaat-leert-schakelaar verplaatst naar Advisorscreen (boven
+        //      de tabbladen) — geldt straks voor dag- én nacht-learner samen.
 
         // ── 3. CGP Scorekaart — 14-daagse prestatie-indicatoren ────────────
         // CGP Score staat nu op het Statistics-tabblad
@@ -472,7 +446,7 @@ private fun StvKaart(
 @Composable
 private fun STVVerloopGrafiek(
     history: List<DFLearner.LearningStep>,
-    nachtFactor: Int
+    nfLevel: Double
 ) {
     if (history.size < 2) return
 
@@ -487,7 +461,7 @@ private fun STVVerloopGrafiek(
         val eersteTs = runCatching {
             Instant.parse(history.first().tsUtc).toEpochMilli()
         }.getOrDefault(0L)
-        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor)
+        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nfLevel)
         add(Punt(
             eersteTs - 1,
             oudeStv["sterkte"] ?: 95,
@@ -496,7 +470,7 @@ private fun STVVerloopGrafiek(
         ))
         history.forEach { step ->
             val ms  = runCatching { Instant.parse(step.tsUtc).toEpochMilli() }.getOrDefault(0L)
-            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor)
+            val stv = DFMapping.toStvMap(step.newD, step.newF, nfLevel)
             add(Punt(
                 ms,
                 stv["sterkte"] ?: 95,
@@ -853,12 +827,12 @@ private fun KalibratieParm(
 
 
 @Composable
-private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
+private fun MaaltijdTypeOverzicht(nfLevel: Double) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val d      = DFLearner.getD(context)
     val f      = DFLearner.getF(context)
     val ve     = DFLearner.getVExtra(context)
-    val stv    = DFMapping.toStvMap(d, f, nachtFactor, ve)
+    val stv    = DFMapping.toStvMap(d, f, nfLevel, ve)
     val hist   = DFLearner.getHistory(context)
 
     Card(
@@ -894,7 +868,7 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
             if (hist.size >= 2) {
                 STVVerloopGrafiekKlein(
                     history     = hist,
-                    nachtFactor = nachtFactor,
+                    nfLevel = nfLevel,
                     titel       = "📊 D/F verloop",
                     accentKleur = MaterialTheme.colorScheme.primary,
                     vExtra      = ve
@@ -907,7 +881,7 @@ private fun MaaltijdTypeOverzicht(nachtFactor: Int) {
 @Composable
 private fun STVVerloopGrafiekKlein(
     history: List<DFLearner.LearningStep>,
-    nachtFactor: Int,
+    nfLevel: Double,
     titel: String,
     accentKleur: Color,
     vExtra: Double = 0.0   // huidige vExtra voor dit type — gebruikt voor V-lijn
@@ -925,11 +899,11 @@ private fun STVVerloopGrafiekKlein(
         val eersteTs = runCatching {
             java.time.Instant.parse(history.first().tsUtc).toEpochMilli()
         }.getOrDefault(0L)
-        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nachtFactor, vExtra)
+        val oudeStv = DFMapping.toStvMap(history.first().oldD, history.first().oldF, nfLevel, vExtra)
         add(Punt(eersteTs - 1, oudeStv["sterkte"] ?: 95, oudeStv["timing"] ?: 100, oudeStv["volhoudendheid"] ?: 95))
         history.forEach { step ->
             val ms  = runCatching { java.time.Instant.parse(step.tsUtc).toEpochMilli() }.getOrDefault(0L)
-            val stv = DFMapping.toStvMap(step.newD, step.newF, nachtFactor, vExtra)
+            val stv = DFMapping.toStvMap(step.newD, step.newF, nfLevel, vExtra)
             add(Punt(ms, stv["sterkte"] ?: 95, stv["timing"] ?: 100, stv["volhoudendheid"] ?: 95))
         }
     }.sortedBy { it.tsMs }

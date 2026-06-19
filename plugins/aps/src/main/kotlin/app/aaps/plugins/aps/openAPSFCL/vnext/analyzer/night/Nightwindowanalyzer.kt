@@ -232,7 +232,7 @@ object NightWindowAnalyzer {
             latestNonBlank(sortedRows, { it.doseDistributionStyle }, "UNKNOWN_DOSE_DISTRIBUTION")
 
         val activeNightResponseStyle =
-            latestNonBlank(sortedRows, { it.nightResponseStyle }, "BALANCED")
+            latestNonBlank(sortedRows, { it.nightResponseStyle }, "BALANCED")  // legacy-veld; nfLevel via DFLearner
 
         val activeSettingsSignature = listOf(
             activeProfileSourceTsUtc.ifBlank { "NO_BASAL_HISTORY" },

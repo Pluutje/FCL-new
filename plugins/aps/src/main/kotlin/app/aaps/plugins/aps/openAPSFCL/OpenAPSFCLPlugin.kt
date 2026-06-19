@@ -273,7 +273,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             val usedIsfMgdl = rt.variable_sens?.takeIf { it > 0.0 } ?: oapsProfile.sens
             determineBasalResult.variableSens = usedIsfMgdl
 
-            val fclResistanceRatio = rt.sensitivityRatio?.takeIf { it > 0.0 } ?: 1.0
+            val fclResistanceRatio = 1.0  // FCLResistance verwijderd (18/06/2026)
             determineBasalResult.autosensResult = AutosensResult(
                 ratio = fclResistanceRatio,
                 ratioFromTdd = fclResistanceRatio,
@@ -357,7 +357,8 @@ open class OpenAPSFCLPlugin @Inject constructor(
                     /*   DoubleKey.max_bolus_night,
                        DoubleKey.fcl_vnext_MaxIOB,
                        StringKey.fcl_vnext_dose_distribution_style,
-                       StringKey.fcl_vnext_night_response_style   */
+                       // StringKey.fcl_vnext_night_response_style verwijderd (18/06/2026)
+                       // DoubleKey.fcl_vnext_nf_level   */
                    )
                ),
             /*   PreferenceSubScreenDef(
@@ -368,8 +369,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
                        StringKey.OchtendStart,
                        StringKey.OchtendStartWeekend,
                        StringKey.NachtStart,
-                       StringKey.fcl_vnext_resistance_behavior,
-                       StringKey.fcl_vnext_resistance_stability,
+                       // fcl_vnext_resistance_behavior/stability verwijderd (18/06/2026)
                        StringKey.fcl_vnext_activity_behavior
                    )
                )   */

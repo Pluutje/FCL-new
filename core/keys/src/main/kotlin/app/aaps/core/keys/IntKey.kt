@@ -423,7 +423,7 @@ enum class IntKey(
     fcl_vnext_sterkte(key = "fcl_vnext_sterkte", defaultValue = 100, min = 80, max = 125, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
     fcl_vnext_timing(key = "fcl_vnext_timing", defaultValue = 100, min = 80, max = 120, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
     fcl_vnext_volhoudendheid(key = "fcl_vnext_volhoudendheid", defaultValue = 100, min = 70, max = 130, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
-    fcl_vnext_nacht_factor(key = "fcl_vnext_nacht_factor", defaultValue = 85, min = 60, max = 110, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
+    // fcl_vnext_nacht_factor(key = "fcl_vnext_nacht_factor", defaultValue = 85, min = 60, max = 110, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
 
     // ── FCL vNext — Groep 3: Analyzer-gestuurde fijnafstelling ────────────
     fcl_vnext_commit_cooldown_minutes(key = "fcl_vnext_commit_cooldown_minutes", defaultValue = 13, min = 5, max = 25, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.MIN),

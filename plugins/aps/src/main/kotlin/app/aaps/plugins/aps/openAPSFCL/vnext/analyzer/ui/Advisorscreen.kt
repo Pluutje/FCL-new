@@ -61,10 +61,10 @@ fun AdvisorScreen(
     onBack: () -> Unit,
     onApplyToAaps: ((Map<String, Int>) -> Boolean)? = null,
     nightWindows: List<NightWindowEntity> = emptyList(),
-    onApplyNacht: ((Int) -> Boolean)? = null,
+    onApplyNacht: ((Double) -> Boolean)? = null,
     allRows: List<LogRow> = emptyList(),
     onApplyDFToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
-    nachtFactor: Int = 85,
+    nfLevel: Double = 5.0,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)? = null,
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
@@ -85,21 +85,26 @@ fun AdvisorScreen(
             .getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
             .getBoolean("expert_mode_active", false)
 
+        // "Automaat leert"-schakelaar verplaatst naar Settings → "🤖 Analyser
+        // Automaat" (tussen "Dosering & gedrag" en "Dag / nacht context"),
+        // zie FCLSettingsScreen.kt. Wordt hier niet meer getoond — neemt
+        // weinig ruimte in en wordt zelden aangeraakt.
+
         val advisorPages = buildList {
             // ── 1. Automaat: D/F zelflerend systeem (startblad) ──────────
             add(InfoTabPage(s.automaat) {
                 DFControlTab(
                     episodes    = episodes,
                     metrics     = metrics,
-                    nachtFactor = nachtFactor,
+                    nfLevel = nfLevel,
                     onApplyToAaps = onApplyDFToAaps
                 )
             })
 
             // ── 2. Nacht N: nachtfactor instelling ───────────────────────
             add(InfoTabPage(s.nachtNLabel) {
-                NachtTab(
-                    currentNachtFactor = activeParams.nachtFactor,
+                NachtControlTab(
+                    currentNfLevel = DFLearner.getNfLevel(androidx.compose.ui.platform.LocalContext.current),
                     nightWindows = nightWindows,
                     onApplyNacht = onApplyNacht
                 )
@@ -697,103 +702,157 @@ private fun evidenceStatusColor(evidence: FclAxisEvidence) = when {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Nacht-N Tab — geïntegreerde nacht-gain analyse in de Advisor
+// ════════════════════════════════════════════════════════════════════════════
+// NachtControlTab — structureel identiek aan DFControlTab (dag-aggressiviteit)
+// NF 1-9 schaal: 1=zeer voorzichtig, 5=balanced, 9=proactief
+// Vervangt: NachtTab (losse N%-schuif) + NachtresponsStyle (5-preset-dropdown)
 // ════════════════════════════════════════════════════════════════════════════
 
 @Composable
-fun NachtTab(
-    currentNachtFactor: Int,
+fun NachtControlTab(
+    currentNfLevel: Double,
     nightWindows: List<NightWindowEntity>,
-    onApplyNacht: ((Int) -> Boolean)?
+    onApplyNacht: ((Double) -> Boolean)?
 ) {
-    var factor by remember(currentNachtFactor) { mutableStateOf(currentNachtFactor) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Geleerde NF (door NachtLearner bijgesteld) en de losse handmatige
+    // Nacht-Agressiviteit-stap (door de gebruiker, NOOIT door de learner
+    // aangeraakt) — zelfde opzet als Dag: D/F worden geleerd, de
+    // Agressiviteit-schuif stapelt daar onafhankelijk bovenop. Hier:
+    // currentNfLevel = geleerde NF, nachtAgg = handmatige stap.
+    var nachtAgg by remember { mutableStateOf(DFLearner.getNachtAggressiviteit(context)) }
+    var lastAppliedAgg by remember { mutableStateOf(DFLearner.getLastAppliedNachtAggressiviteit(context)) }
+    var lastAppliedNfLevel by remember { mutableStateOf(DFLearner.getLastAppliedNfLevel(context)) }
     var applyResult by remember { mutableStateOf<String?>(null) }
     var applyTs by remember { mutableStateOf(0L) }
 
-    val stap = 5
-    val eps = 1
+    val effectieveNf = (currentNfLevel + (nachtAgg - DFLearner.NACHT_AGGRESSIVITEIT_DEFAULT))
+        .coerceIn(1.0, 9.0)
+    val labelVoorEffectief: String = DFMapping.nfLabel(effectieveNf)
+    val gainPct = DFMapping.nfGainPct(effectieveNf)
+
+    val accentKleur = when {
+        effectieveNf <= 2 -> androidx.compose.ui.graphics.Color(0xFF4FC3F7)
+        effectieveNf <= 4 -> androidx.compose.ui.graphics.Color(0xFF81C784)
+        effectieveNf in 4.1..6.0 -> MaterialTheme.colorScheme.primary
+        effectieveNf <= 7 -> androidx.compose.ui.graphics.Color(0xFFFFB74D)
+        else -> androidx.compose.ui.graphics.Color(0xFFE57373)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-        // Uitleg
-        Text(
-            "De nacht-factor schalt de insulinedosering tijdens nachtelijke uren. " +
-                "N=85 betekent 15% minder dan overdag. Pas aan op basis van nachtelijke BG-trends.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // N-factor kaart
+        // ── Nacht Agressiviteit (handmatige laag, los van geleerde NF) ───
+        // Analoog aan AggressiviteitsKaart bij Dag: deze schuif staat los
+        // van wat de NachtLearner leert. Niveau 5 = geen extra effect; de
+        // schuif telt als hele stappen op/af bij de geleerde NF.
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            colors = CardDefaults.cardColors(
+                containerColor = accentKleur.copy(alpha = 0.10f)
+            )
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("🌙 Nacht-factor (N)",
-                             style = MaterialTheme.typography.titleSmall,
-                             fontWeight = FontWeight.SemiBold)
-                        Text("Insulinesterkte 's nachts t.o.v. overdag",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                     Text(
-                        "$factor%",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = when {
-                            factor < currentNachtFactor -> MaterialTheme.colorScheme.tertiary
-                            factor > currentNachtFactor -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
+                        "🌙 Nacht Agressiviteit",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "$nachtAgg  —  ${DFMapping.nfLabel(nachtAgg.toDouble())}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = accentKleur
                     )
                 }
+                Text(
+                    "Eigen stap bovenop de geleerde NF (${currentNfLevel.toInt()}) — " +
+                    "5 = geen effect. Effectief: NF ${effectieveNf.toInt()} " +
+                    "(~$gainPct% gain, $labelVoorEffectief)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.material3.Slider(
+                    value = nachtAgg.toFloat(),
+                    onValueChange = {
+                        nachtAgg = it.toInt().coerceIn(
+                            DFLearner.NACHT_AGGRESSIVITEIT_MIN, DFLearner.NACHT_AGGRESSIVITEIT_MAX
+                        )
+                        DFLearner.setNachtAggressiviteit(context, nachtAgg)
+                    },
+                    valueRange = 1f..9f,
+                    steps = 7,
+                    colors = androidx.compose.material3.SliderDefaults.colors(
+                        thumbColor = accentKleur,
+                        activeTrackColor = accentKleur
+                    )
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    OutlinedButton(
-                        onClick = { if (factor - stap >= 60) factor -= stap },
-                        enabled = factor > 60 + eps,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("−  ${factor - stap}%") }
-                    OutlinedButton(
-                        onClick = { if (factor + stap <= 100) factor += stap },
-                        enabled = factor < 100 - eps,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("+  ${factor + stap}%") }
+                    Text("Voorzichtiger",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Proactiever",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (onApplyNacht != null) {
+
+                // Toon ook de knop als de geleerde NF zelf is veranderd maar
+                // (nog) niet is toegepast — bv. omdat "Automaat leert" uit
+                // staat, of de NachtLearner net heeft bijgesteld voordat de
+                // gebruiker hier kijkt.
+                val nfNogNietToegepast = kotlin.math.abs(currentNfLevel - lastAppliedNfLevel) > 0.01
+                if (onApplyNacht != null && (nachtAgg != lastAppliedAgg || nfNogNietToegepast)) {
                     Button(
                         onClick = {
-                            val ok = onApplyNacht(factor)
-                            applyResult = if (ok) "✓ Nacht-factor verzonden naar AAPS" else "✗ Verzenden mislukt"
+                            val ok = onApplyNacht(effectieveNf)
+                            applyResult = if (ok) "✓ NF verzonden naar AAPS" else "✗ Verzenden mislukt"
                             applyTs = System.currentTimeMillis()
+                            if (ok) {
+                                DFLearner.setLastAppliedNachtAggressiviteit(context, nachtAgg)
+                                DFLearner.setLastAppliedNfLevel(context, currentNfLevel)
+                                lastAppliedAgg = nachtAgg
+                                lastAppliedNfLevel = currentNfLevel
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = accentKleur)
                     ) { Text("Toepassen in AAPS") }
+
                     applyResult?.let { msg ->
                         if (System.currentTimeMillis() - applyTs < 20_000L) {
-                            Text(msg,
-                                 style = MaterialTheme.typography.bodySmall,
-                                 color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
-                                 else MaterialTheme.colorScheme.error)
+                            Text(
+                                msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Nachtvensters tonen als aanwezig
+        // ── NF-kaart: GELEERDE NF (door NachtLearner) — hoofdwaarde +
+        // 14-dagen verloop + laatste aanpassing. Onaangeraakt door de
+        // handmatige Nacht-Agressiviteit hierboven, zodat dit zuiver toont
+        // hoe de automaat zelf leert (net als de Sterkte/Timing-kaarten bij
+        // Dag, die ook de geleerde D/F tonen, niet de Agressiviteit-schuif).
+        NfKaart(s = FclStrings.get(context), currentNf = currentNfLevel)
+
+        // ── Nachtvensters (legacy — blijft zichtbaar voor context) ───────
         NachtVenstersCompact(nightWindows = nightWindows)
     }
 }
-
 
 
 // ── NachtVenstersCompact ──────────────────────────────────────────────────

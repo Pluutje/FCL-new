@@ -182,11 +182,34 @@ object DFMapping {
      */
     // Agressiviteitsschaal uit niveau 1-9 (5=standaard=0.0)
     fun aggScaleFromLevel(level: Int): Double = (level - 5) / 4.0
+    fun nfScaleFromLevel(level: Double): Double = (level - 5.0) / 4.0
+
+    // Labels en afgeleide gain% voor de NF-schaal (1-9) — gedeelde bron
+    // voor zowel de Nacht-tab-schuif (NachtControlTab) als de NF-kaart
+    // (AdvisorAssenKaarten.NfKaart), zodat ze nooit uit de pas lopen.
+    private val NF_LABELS = mapOf(
+        1.0 to "Zeer voorzichtig",
+        2.0 to "Voorzichtig",
+        3.0 to "Iets voorzichtig",
+        4.0 to "Licht conservatief",
+        5.0 to "Standaard (balanced)",
+        6.0 to "Licht responsiever",
+        7.0 to "Responsief",
+        8.0 to "Proactief",
+        9.0 to "Maximaal proactief"
+    )
+    fun nfLabel(level: Double): String =
+        NF_LABELS.entries.minByOrNull { kotlin.math.abs(it.key - level) }?.value ?: "Standaard"
+
+    /** Afgeleide gain% voor toelichting (85% bij niveau 5, ±3.75% per niveau-stap). */
+    fun nfGainPct(level: Double): Int =
+        (85.0 + (level - 5.0) * (15.0 / 4.0)).toInt().coerceIn(60, 110)
+
 
     // aggLevel verschuift de geleerde waarden met een multiplier.
     // De geleerde D/F/vExtra blijven ongewijzigd in SharedPreferences.
     // Niveau 5 = geen effect (mul=1.0). Niveau 9 = +12% S, +6% T, +10% V.
-    fun toStvMap(d: Double, f: Double, nachtFactor: Int, vExtra: Double = 0.0,
+    fun toStvMap(d: Double, f: Double, nfLevel: Double = 5.0, vExtra: Double = 0.0,
                  aggLevel: Int = 5): Map<String, Int> {
         val dC    = d.coerceIn(D_MIN, D_MAX)
         val fC    = f.coerceIn(F_MIN, F_MAX)
@@ -199,16 +222,15 @@ object DFMapping {
             "sterkte"        to ((REF_S * dC) * sMul).roundToInt().coerceIn(75, 130),
             "timing"         to ((REF_T + (fC - 0.5) * 40) * tMul).roundToInt().coerceIn(80, 130),
             "volhoudendheid" to ((REF_V + (dC - 1.0) * 50 + vC * 30) * vMul).roundToInt().coerceIn(70, 130),
-            "nacht_factor"   to nachtFactor
         )
-    }
+    }  // nf_level apart bewaard via DFLearner, niet in de Int-map
 
     /**
      * Geeft een leesbare samenvatting van de belangrijkste afgeleide waarden.
      * Voor weergave in de UI naast de D/F knoppen.
      */
     fun summary(d: Double, f: Double, vExtra: Double = 0.0): String {
-        val stv = toStvMap(d, f, 85, vExtra)
+        val stv = toStvMap(d, f, 85.0, vExtra)
         val po  = toParamOverrides(d, f, vExtra = vExtra)
         return buildString {
             append("S=${stv["sterkte"]} T=${stv["timing"]} V=${stv["volhoudendheid"]}")

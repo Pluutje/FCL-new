@@ -19,7 +19,7 @@ object FclActiveConfigBridge {
         val sterkte:        Int,
         val timing:         Int,
         val volhoudendheid: Int,
-        val nachtFactor:    Int,
+        val nfLevel:        Double,
         val manualMaxBolus: Double  // prefs max_bolus_day — handmatige MaxSMB instelling
     )
 
@@ -31,10 +31,10 @@ object FclActiveConfigBridge {
         sterkte:         Int,
         timing:          Int,
         volhoudendheid:  Int,
-        nachtFactor:     Int,
+        nfLevel:         Double,
         manualMaxBolus: Double
     ) {
-        current.set(Snapshot(config, sterkte, timing, volhoudendheid, nachtFactor, manualMaxBolus))
+        current.set(Snapshot(config, sterkte, timing, volhoudendheid, nfLevel, manualMaxBolus))
     }
 
     /** Aanroepen vanuit de Analyzer i.p.v. readActiveParams() */

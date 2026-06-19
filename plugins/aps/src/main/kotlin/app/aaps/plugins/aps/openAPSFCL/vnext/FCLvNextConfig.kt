@@ -26,7 +26,8 @@ data class FCLvNextConfig(
     val mealHandlingStyle: String,
     val hypoProtectionStyle: String,
     val doseDistributionStyle: String,
-    val nightResponseStyle: String,
+    val nightResponseStyle: String,  // "NF_SCALE" als nfLevel actief is
+    val nfLevel: Double = 5.0,        // 1-9, NachtFactor-schaal; 5=BALANCED
 
 
     // smoothing
@@ -289,8 +290,11 @@ fun loadFCLvNextConfig(
         .coerceIn(80, 120)
     val volhoudendheid = (override?.volhoudendheid ?: prefs.get(IntKey.fcl_vnext_volhoudendheid))
         .coerceIn(70, 130)
-    val nachtFactor    = (override?.nachtFactor    ?: prefs.get(IntKey.fcl_vnext_nacht_factor))
-        .coerceIn(60, 110)
+    // nachtFactor (IntKey.fcl_vnext_nacht_factor) vervangen door nfLevel (DoubleKey.fcl_vnext_nf_level, 1-9)
+    // nfLevel 5 = BALANCED (was: nachtFactor 85). Gain-multiplier afgeleid via nfScaleFromLevel().
+    val nfLevel = (override?.nfLevel ?: prefs.get(DoubleKey.fcl_vnext_nf_level)
+        .let { if (it < 0.5) 5.0 else it }).coerceIn(1.0, 9.0)
+    val nachtFactor: Int = (85.0 + (nfLevel - 5.0) * (15.0 / 4.0)).toInt().coerceIn(60, 110)
 
     // ── Schrijf terug naar prefs (StatusFormatter en UI lezen hieruit) ────
     if (override?.sterkte != null && sterkte != prefs.get(IntKey.fcl_vnext_sterkte))
@@ -299,8 +303,11 @@ fun loadFCLvNextConfig(
         prefs.put(IntKey.fcl_vnext_timing, timing)
     if (override?.volhoudendheid != null && volhoudendheid != prefs.get(IntKey.fcl_vnext_volhoudendheid))
         prefs.put(IntKey.fcl_vnext_volhoudendheid, volhoudendheid)
-    if (override?.nachtFactor != null && nachtFactor != prefs.get(IntKey.fcl_vnext_nacht_factor))
-        prefs.put(IntKey.fcl_vnext_nacht_factor, nachtFactor)
+    if (override?.nfLevel != null) {
+        val stored = prefs.get(DoubleKey.fcl_vnext_nf_level)
+        if (kotlin.math.abs(nfLevel - stored) > 0.05)
+            prefs.put(DoubleKey.fcl_vnext_nf_level, nfLevel)
+    }
 
     // ── Analyzer param-overrides persistent terugschrijven naar prefs ────
     // Zo blijven alle Analyzer-aanpassingen actief na het consumeren van
@@ -362,7 +369,8 @@ fun loadFCLvNextConfig(
         }
 
     val doseDistributionStyle = prefs.get(StringKey.fcl_vnext_dose_distribution_style)
-    val nightResponseStyle    = prefs.get(StringKey.fcl_vnext_night_response_style)
+    // nightResponseStyle niet meer uit prefs — wordt afgeleid van nfLevel via nfScaleFromLevel()
+    val nightResponseStyle = "NF_SCALE"  // alleen voor log-label, effect via applyNightResponseStyle
 
     val base = FCLvNextConfig(
         gain             = gain,
@@ -371,7 +379,8 @@ fun loadFCLvNextConfig(
         minDeliverDose   = 0.075,
 
         // Log-label toont actieve S/T/V/N
-        profielNaam           = "S${sterkte}/T${timing}/V${volhoudendheid}/N${nachtFactor}",
+        profielNaam           = "S${sterkte}/T${timing}/V${volhoudendheid}/NF${nfLevel.toInt()}",
+        nfLevel               = nfLevel,
         mealDetectSpeed       = "MODERATE",
         correctionStyle       = "NORMAL",
         mealHandlingStyle     = "BALANCED",
@@ -531,7 +540,7 @@ fun loadFCLvNextConfig(
         .let { applyDoseDistributionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
         .let { applyParamOverrides(it, override?.paramOverrides) }
-        .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nachtFactor) }
+        .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nfLevel) }
 }
 
 private fun applySTVModel(
@@ -572,6 +581,13 @@ private fun applySTVModel(
     )
 }
 
+// NachtFactor-schaal: continue functie afgeleid van de 5 discrete nightResponseStyle-presets.
+// nfLevel 1-9, waarbij 5=BALANCED (geen wijziging). Formule: scale = (nfLevel - 5) / 4.0
+// Parameters afgeleid via lineaire interpolatie door de 5 discrete preset-waarden:
+//   stagnDelta:  +0.326*(-scale)   cooldown:  *1.000 - 0.228*scale
+//   stagnBoost:  *1.000 + 0.248*scale        corrHold: *1.000 + 0.164*scale
+//   persAggr:    +0.140*scale                absorb:   *1.000 + 0.126*scale
+// (zie ook: DFMapping.aggScaleFromLevel voor het analoge dag-mechanisme)
 private fun applyNightResponseStyle(
     cfg: FCLvNextConfig,
     isNight: Boolean
@@ -579,49 +595,24 @@ private fun applyNightResponseStyle(
 
     if (!isNight) return cfg
 
-    fun scaleCooldown(value: Int, factor: Double): Int =
-        (value * factor).toInt().coerceAtLeast(1)
+    val scale = (cfg.nfLevel - 5.0) / 4.0  // -1.0 (niveau 1) tot +1.0 (niveau 9)
 
-    return when (cfg.nightResponseStyle) {
+    val newStagnDelta  = (cfg.stagnationDeltaMin    - 0.326 * scale).coerceAtLeast(0.40)
+    val newStagnBoost  =  cfg.stagnationEnergyBoost * (1.0  + 0.248 * scale)
+    val newPersAggr    =  cfg.persistentAggressionMul + 0.140 * scale
+    val newCooldown    = (cfg.smallCorrectionCooldownMinutes * (1.0 - 0.228 * scale))
+        .toInt().coerceAtLeast(1)
+    val newCorrHold    =  cfg.correctionHoldDeltaMax * (1.0 + 0.164 * scale)
+    val newAbsorb      = (cfg.absorptionDoseFactor   * (1.0 + 0.126 * scale)).coerceIn(0.08, 0.40)
 
-        "VERY_GUARDED" -> cfg.copy(
-            stagnationDeltaMin = cfg.stagnationDeltaMin + 0.35,
-            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 0.75,
-            persistentAggressionMul = cfg.persistentAggressionMul - 0.12,
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 1.25),
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.85,
-            absorptionDoseFactor = (cfg.absorptionDoseFactor * 0.85).coerceIn(0.08, 0.40)
-        )
-
-        "GUARDED" -> cfg.copy(
-            stagnationDeltaMin = cfg.stagnationDeltaMin + 0.18,
-            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 0.88,
-            persistentAggressionMul = cfg.persistentAggressionMul - 0.06,
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 1.10),
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 0.92,
-            absorptionDoseFactor = (cfg.absorptionDoseFactor * 0.92).coerceIn(0.08, 0.40)
-        )
-
-        "RESPONSIVE" -> cfg.copy(
-            stagnationDeltaMin = (cfg.stagnationDeltaMin - 0.15).coerceAtLeast(0.40),
-            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 1.12,
-            persistentAggressionMul = cfg.persistentAggressionMul + 0.08,
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.90),
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.08,
-            absorptionDoseFactor = (cfg.absorptionDoseFactor * 1.05).coerceIn(0.08, 0.40)
-        )
-
-        "PROACTIVE" -> cfg.copy(
-            stagnationDeltaMin = (cfg.stagnationDeltaMin - 0.30).coerceAtLeast(0.40),
-            stagnationEnergyBoost = cfg.stagnationEnergyBoost * 1.25,
-            persistentAggressionMul = cfg.persistentAggressionMul + 0.16,
-            smallCorrectionCooldownMinutes = scaleCooldown(cfg.smallCorrectionCooldownMinutes, 0.78),
-            correctionHoldDeltaMax = cfg.correctionHoldDeltaMax * 1.18,
-            absorptionDoseFactor = (cfg.absorptionDoseFactor * 1.10).coerceIn(0.08, 0.40)
-        )
-
-        else -> cfg // BALANCED
-    }
+    return cfg.copy(
+        stagnationDeltaMin             = newStagnDelta,
+        stagnationEnergyBoost          = newStagnBoost,
+        persistentAggressionMul        = newPersAggr,
+        smallCorrectionCooldownMinutes = newCooldown,
+        correctionHoldDeltaMax         = newCorrHold,
+        absorptionDoseFactor           = newAbsorb
+    )
 }
 
 // ─────────────────────────────────────────────

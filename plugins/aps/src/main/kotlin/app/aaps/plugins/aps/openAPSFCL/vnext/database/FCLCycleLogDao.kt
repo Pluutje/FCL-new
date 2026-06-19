@@ -17,6 +17,9 @@ interface FCLCycleLogDao {
     @Query("SELECT * FROM fcl_cycle_log WHERE timestampMs >= :fromMs ORDER BY timestampMs ASC")
     suspend fun getSince(fromMs: Long): List<FCLCycleLogEntity>
 
+    @Query("SELECT * FROM fcl_cycle_log WHERE timestampMs >= :fromMs AND timestampMs <= :toMs ORDER BY timestampMs ASC")
+    suspend fun getInRange(fromMs: Long, toMs: Long): List<FCLCycleLogEntity>
+
     @Query("SELECT COUNT(*) FROM fcl_cycle_log")
     suspend fun count(): Int
 

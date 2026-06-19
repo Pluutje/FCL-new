@@ -114,6 +114,10 @@ data class FCLvNextCsvLogRow(
     var deliveredTotal: Double = 0.0,
     var bolus: Double = 0.0,
     var basalRate: Double = 0.0,
+    // Werkelijk afgegeven insuline sinds de vorige cyclus, uit AAPS'
+    // behandelhistorie (FclRealDoseTracker) — i.t.t. deliveredTotal/bolus/
+    // basalRate hierboven, die alleen FCL's EIGEN bijdrage zijn.
+    var realDeliveredU: Double = 0.0,
     var shouldDeliver: Boolean = false,
     var externalBolusU: Double = 0.0,
 

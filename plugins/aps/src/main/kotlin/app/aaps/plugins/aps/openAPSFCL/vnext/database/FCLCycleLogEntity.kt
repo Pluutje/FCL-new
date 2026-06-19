@@ -48,6 +48,7 @@ data class FCLCycleLogEntity(
     val deliveredTotal: Double,
     val bolus: Double,
     val basalRate: Double,
+    val realDeliveredU: Double = 0.0,
     val shouldDeliver: Boolean,
     // Externe insuline (handmatige bolus of AAPS SMB) gedetecteerd via IOB-delta.
     // Berekend als max(0, currentIOB - prevIOB + expectedDecay - fclOwnDose).

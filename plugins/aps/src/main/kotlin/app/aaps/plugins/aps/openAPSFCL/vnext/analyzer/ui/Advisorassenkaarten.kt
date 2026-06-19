@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.NachtLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 import app.aaps.plugins.aps.openAPSFCL.vnext.persist.VLearner
 import java.time.Instant
@@ -47,7 +48,7 @@ private const val HISTORY_DAYS = 14
 fun AdvisorAssenKaarten(
     d: Double,
     f: Double,
-    nachtFactor: Int,
+    nfLevel: Double,
     vExtra: Double,
     aggressiveness: Int
 ) {
@@ -57,9 +58,9 @@ fun AdvisorAssenKaarten(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        SterkteKaart(s, d, f, nachtFactor, vExtra, aggressiveness)
-        TimingKaart(s, d, f, nachtFactor, vExtra, aggressiveness)
-        VasthoudendheidKaart(s, d, f, nachtFactor, vExtra, aggressiveness)
+        SterkteKaart(s, d, f, nfLevel, vExtra, aggressiveness)
+        TimingKaart(s, d, f, nfLevel, vExtra, aggressiveness)
+        VasthoudendheidKaart(s, d, f, nfLevel, vExtra, aggressiveness)
         FrontloadTimingKaart(s)
     }
 }
@@ -68,20 +69,20 @@ fun AdvisorAssenKaarten(
 
 @Composable
 private fun SterkteKaart(
-    s: FclStrings, d: Double, f: Double, nachtFactor: Int, vExtra: Double, agg: Int
+    s: FclStrings, d: Double, f: Double, nfLevel: Double, vExtra: Double, agg: Int
 ) {
     val context = LocalContext.current
     val history = DFLearner.getHistorySince(context, HISTORY_DAYS)
 
-    val huidig = DFMapping.toStvMap(d, f, nachtFactor, vExtra, aggLevel = agg)["sterkte"] ?: 100
+    val huidig = DFMapping.toStvMap(d, f, nfLevel, vExtra, aggLevel = agg)["sterkte"] ?: 100
 
     // Tijdreeks: voor elk historiepunt het sterkte-percentage bij die D/F-waarde,
-    // met de huidige nachtFactor/vExtra/agg als constante (we tonen het verloop
+    // met de huidige nfLevel/vExtra/agg als constante (we tonen het verloop
     // van D, niet van de andere factoren).
     val punten: List<Pair<Instant, Double>> = history.mapNotNull { step ->
         runCatching {
             val ts = Instant.parse(step.tsUtc)
-            val pct = DFMapping.toStvMap(step.newD, step.newF, nachtFactor, vExtra, aggLevel = agg)["sterkte"]!!
+            val pct = DFMapping.toStvMap(step.newD, step.newF, nfLevel, vExtra, aggLevel = agg)["sterkte"]!!
             ts to pct.toDouble()
         }.getOrNull()
     } + listOf(Instant.now() to huidig.toDouble())
@@ -106,17 +107,17 @@ private fun SterkteKaart(
 
 @Composable
 private fun TimingKaart(
-    s: FclStrings, d: Double, f: Double, nachtFactor: Int, vExtra: Double, agg: Int
+    s: FclStrings, d: Double, f: Double, nfLevel: Double, vExtra: Double, agg: Int
 ) {
     val context = LocalContext.current
     val history = DFLearner.getHistorySince(context, HISTORY_DAYS)
 
-    val huidig = DFMapping.toStvMap(d, f, nachtFactor, vExtra, aggLevel = agg)["timing"] ?: 100
+    val huidig = DFMapping.toStvMap(d, f, nfLevel, vExtra, aggLevel = agg)["timing"] ?: 100
 
     val punten: List<Pair<Instant, Double>> = history.mapNotNull { step ->
         runCatching {
             val ts = Instant.parse(step.tsUtc)
-            val pct = DFMapping.toStvMap(step.newD, step.newF, nachtFactor, vExtra, aggLevel = agg)["timing"]!!
+            val pct = DFMapping.toStvMap(step.newD, step.newF, nfLevel, vExtra, aggLevel = agg)["timing"]!!
             ts to pct.toDouble()
         }.getOrNull()
     } + listOf(Instant.now() to huidig.toDouble())
@@ -149,7 +150,7 @@ private fun TimingKaart(
 
 @Composable
 private fun VasthoudendheidKaart(
-    s: FclStrings, d: Double, f: Double, nachtFactor: Int, vExtra: Double, agg: Int
+    s: FclStrings, d: Double, f: Double, nfLevel: Double, vExtra: Double, agg: Int
 ) {
     val context = LocalContext.current
     val history = VLearner.getHistory(context)
@@ -158,14 +159,14 @@ private fun VasthoudendheidKaart(
         runCatching { Instant.parse(p.tsUtc).isAfter(cutoff) }.getOrDefault(false)
     }
 
-    val huidig = DFMapping.toStvMap(d, f, nachtFactor, vExtra, aggLevel = agg)["volhoudendheid"] ?: 100
+    val huidig = DFMapping.toStvMap(d, f, nfLevel, vExtra, aggLevel = agg)["volhoudendheid"] ?: 100
 
     // Voor elk historiepunt: het volhoudendheid-percentage bij die vExtra-waarde,
-    // met de huidige D/F/nachtFactor/agg als constante.
+    // met de huidige D/F/nfLevel/agg als constante.
     val punten: List<Pair<Instant, Double>> = recent.mapNotNull { p ->
         runCatching {
             val ts = Instant.parse(p.tsUtc)
-            val pct = DFMapping.toStvMap(d, f, nachtFactor, p.vExtra, aggLevel = agg)["volhoudendheid"]!!
+            val pct = DFMapping.toStvMap(d, f, nfLevel, p.vExtra, aggLevel = agg)["volhoudendheid"]!!
             ts to pct.toDouble()
         }.getOrNull()
     } + listOf(Instant.now() to huidig.toDouble())
@@ -225,6 +226,46 @@ private fun FrontloadTimingKaart(s: FclStrings) {
     )
 }
 
+// ── Nacht NF ─────────────────────────────────────────────────────────────
+// Zelfde opzet als de Dag-kaarten hierboven: hoofdwaarde + sparkline van
+// het verloop + korte toelichting bij de laatste aanpassing. Vervangt de
+// eerdere tekstuele "Wat doet NF?"-uitleg met de losse sub-parameters op
+// de Nacht-tab — die opsomming verhuist naar het toekomstige losse
+// referentiedocument over de volledige algoritmewerking.
+@Composable
+fun NfKaart(s: FclStrings, currentNf: Double) {
+    val context = LocalContext.current
+    val history = NachtLearner.getHistory(context)
+
+    val huidigGain = DFMapping.nfGainPct(currentNf)
+    val huidigLabel = DFMapping.nfLabel(currentNf)
+
+    val punten: List<Pair<Instant, Double>> = history.mapNotNull { p ->
+        runCatching { Instant.parse(p.tsUtc) to p.nfLevel }.getOrNull()
+    } + listOf(Instant.now() to currentNf)
+
+    val toelichting = "Gain 's nachts: ~$huidigGain%  ·  $huidigLabel"
+    val laatste = history.lastOrNull()
+    val diagnoseRegel = laatste?.let {
+        if (it.reden == "OMHOOG")
+            "BG bleef 's nachts te lang hoog — NF iets verhoogd"
+        else
+            "BG keerde snel en stabiel terug naar target — NF iets verlaagd"
+    }
+
+    AsKaart(
+        icoon = "🌙",
+        titel = "Nacht NF",
+        waarde = "${currentNf.toInt()}",
+        toelichting = toelichting,
+        punten = punten,
+        eenheid = "",
+        diagnoseRegel = diagnoseRegel,
+        lastAanpassingTs = laatste?.tsUtc,
+        referentieWaarde = 5.0
+    )
+}
+
 private fun frontloadStatusKey(wmd: Double): String {
     val default = DFMapping.REF_WMD_DEFAULT
     return when {
@@ -259,7 +300,8 @@ private fun AsKaart(
     eenheid: String,
     diagnoseRegel: String?,
     lastAanpassingTs: String? = null,
-    omgekeerdeAs: Boolean = false
+    omgekeerdeAs: Boolean = false,
+    referentieWaarde: Double? = null
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -296,6 +338,7 @@ private fun AsKaart(
             Sparkline(
                 punten = punten,
                 omgekeerd = omgekeerdeAs,
+                referentieOverride = referentieWaarde,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
@@ -342,7 +385,8 @@ private fun AsKaart(
 private fun Sparkline(
     punten: List<Pair<Instant, Double>>,
     omgekeerd: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    referentieOverride: Double? = null
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
     val fillColor = lineColor.copy(alpha = 0.10f)
@@ -389,8 +433,10 @@ private fun Sparkline(
         }
 
         // Horizontale referentielijn op 100% (of, voor de frontload-as,
-        // op de standaard-WMD) als die binnen het bereik valt.
-        val referentie = if (omgekeerd) DFMapping.REF_WMD_DEFAULT else 100.0
+        // op de standaard-WMD, of een expliciet meegegeven referentieOverride
+        // zoals NF-niveau 5) als die binnen het bereik valt.
+        val referentie = referentieOverride
+            ?: if (omgekeerd) DFMapping.REF_WMD_DEFAULT else 100.0
         if (referentie in yMin..yMax) {
             drawLine(
                 color = gridColor,

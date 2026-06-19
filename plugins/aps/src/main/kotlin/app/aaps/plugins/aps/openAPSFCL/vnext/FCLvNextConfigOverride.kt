@@ -10,7 +10,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FclOverrideBridge
  * Schema 3 formaat:
  * {
  *   "schema": 3,
- *   "stv": { "sterkte": 95, "timing": 108, "volhoudendheid": 88, "nacht_factor": 82 },
+ *   "stv": { "sterkte": 95, "timing": 108, "volhoudendheid": 88, "nf_level": 6.0 },
  *   "param_overrides": { ... },
  *   "reason": "..."
  * }
@@ -29,7 +29,7 @@ object FCLvNextConfigOverride {
         val sterkte:         Int? = null,
         val timing:          Int? = null,
         val volhoudendheid:  Int? = null,
-        val nachtFactor:     Int? = null,
+        val nfLevel:         Double? = null,  // vervangt nachtFactor (18/06/2026)
 
         val writtenAt:       String? = null,
         val basedOnEpisodes: Int?    = null,
@@ -92,7 +92,7 @@ object FCLvNextConfigOverride {
                 sterkte        = stvBlock?.let { extractInt(it, "sterkte") },
                 timing         = stvBlock?.let { extractInt(it, "timing") },
                 volhoudendheid = stvBlock?.let { extractInt(it, "volhoudendheid") },
-                nachtFactor    = stvBlock?.let { extractInt(it, "nacht_factor") },
+                nfLevel        = stvBlock?.let { extractDouble(it, "nf_level") },
 
                 writtenAt       = extractString(json, "written_at"),
                 basedOnEpisodes = extractInt(json, "based_on_episodes"),
