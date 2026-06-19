@@ -30,6 +30,7 @@ import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -37,6 +38,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -79,6 +81,15 @@ internal class ClientControlRoundTripTest {
     private val notifications = MutableStateFlow<List<AapsNotification>>(emptyList())
     private lateinit var sut: ClientControlRoundTrip
 
+    // Scope injected into the SUT — cancelled in tearDown() so the progress-stall watchdog (a delayed
+    // coroutine armed on an Active progress frame) can't fire after the test and touch a cleared mock.
+    private lateinit var appScope: CoroutineScope
+
+    @AfterEach
+    fun tearDown() {
+        if (::appScope.isInitialized) appScope.cancel()
+    }
+
     // Any command exercises the round-trip mechanics; SceneStop is a simple parameterized survivor.
     private val cmd = ClientControlActionDispatcher.Command.SceneStop(triggerChain = false)
 
@@ -94,7 +105,8 @@ internal class ClientControlRoundTripTest {
         whenever(config.AAPSCLIENT).thenReturn(true)
         whenever(notificationManager.notifications).thenReturn(notifications)
         whenever(bolusProgressData.state).thenReturn(MutableStateFlow<BolusProgressState?>(null))
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, bolusProgressData, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
+        appScope = CoroutineScope(Dispatchers.Unconfined)
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, bolusProgressData, aapsLogger, appScope)
     }
 
     @Test

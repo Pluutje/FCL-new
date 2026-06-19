@@ -41,6 +41,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -118,6 +119,18 @@ class ClientControlUplinkIntegrationTest {
     private lateinit var masterAuthorizedRepository: AuthorizedClientsRepository
     private lateinit var masterReceiver: ClientControlReceiver
 
+    // Scopes injected into the round-trip (client watchdog) and receiver (master progress-mirror + heartbeat).
+    // Both host long-lived coroutines; cancelled in tearDown() so they can't fire after the test and touch a
+    // cleared mock (a flaky "uncaught exception before the next test").
+    private lateinit var clientScope: CoroutineScope
+    private lateinit var masterScope: CoroutineScope
+
+    @AfterEach
+    fun tearDown() {
+        if (::clientScope.isInitialized) clientScope.cancel()
+        if (::masterScope.isInitialized) masterScope.cancel()
+    }
+
     // -- NS bridge (the settings collection) --
     private var bridgeIdentifier: String? = null
     private var bridgeDoc: JSONObject? = null
@@ -172,6 +185,7 @@ class ClientControlUplinkIntegrationTest {
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
         whenever(notificationManager.notifications).thenReturn(MutableStateFlow(emptyList<AapsNotification>()))
         whenever(bolusProgressData.state).thenReturn(MutableStateFlow<BolusProgressState?>(null))
+        clientScope = CoroutineScope(Dispatchers.Unconfined)
         val clientControlRoundTrip =
             ClientControlRoundTrip(
                 clientControlPublisher,
@@ -184,15 +198,16 @@ class ClientControlUplinkIntegrationTest {
                 rh,
                 bolusProgressData,
                 aapsLogger,
-                CoroutineScope(Dispatchers.Unconfined)
+                clientScope
             )
         preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, rh, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
+        masterScope = CoroutineScope(Dispatchers.Unconfined)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
             offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, masterConfig, bolusProgressData, commandQueue, aapsLogger,
-            CoroutineScope(Dispatchers.Unconfined)
+            masterScope
         )
 
         // ---------- pairing: same secret on both sides ----------

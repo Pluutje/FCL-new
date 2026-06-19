@@ -43,9 +43,8 @@ import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -136,7 +135,11 @@ class ClientControlReceiver @Inject constructor(
     // Liveness heartbeat: some pump drivers (Medtronic, Omnipod Eros) deliver a bolus as one blocking call and
     // emit NO intermediate progress. Re-publishing the current frame on this cadence keeps the client's stall
     // watchdog from false-firing on a healthy long bolus; only a real relay/connection outage produces silence.
+    // It is a lifecycle-bound job — started ONLY while a client bolus is delivering and cancelled on the terminal
+    // frame — so when idle (no armed bolus) there is no scheduled delay to leak. Touched only from the single
+    // mirror collector coroutine.
     private val progressHeartbeatMs = 10_000L
+    @Volatile private var progressHeartbeatJob: Job? = null
 
     init {
         // Master only: mirror the live progress of a CLIENT-initiated bolus back to that client so its (un-gated)
@@ -145,14 +148,7 @@ class ClientControlReceiver @Inject constructor(
         if (!config.AAPSCLIENT) appScope.launch {
             var prev: BolusProgressState? = null
             var lastWrite = 0L
-            // Merge a heartbeat ticker into THIS collector (rather than a second coroutine) so the re-tick reuses
-            // the same throttle/terminal logic and prev-tracking with no cross-thread race against a terminal frame.
-            // Each tick re-emits the CURRENT state; the in-flight branch's throttle (progressSampleMs) means a real
-            // ~1/s stream is unaffected, while a silent (Medtronic/Eros) delivery still emits a frame every ~10s.
-            merge(
-                bolusProgressData.state,
-                flow { while (true) { delay(progressHeartbeatMs); emit(bolusProgressData.state.value) } }
-            ).collect { st ->
+            bolusProgressData.state.collect { st ->
                 val previous = prev // snapshot: prev is a mutated captured var, so it can't smart-cast in the when
                 val clientId = progressClientId.get()
                 // TTL guards only the PRE-delivery window (a commit that never starts a pump bolus). Once delivery
@@ -168,16 +164,19 @@ class ClientControlReceiver @Inject constructor(
                             writeProgress(clientId, ProgressPhase.Cleared, previous)
                             progressClientId.set(null)
                             progressDelivering = false
+                            stopProgressHeartbeat()
                         }
 
                         st != null && st.percent >= 100 -> { // delivered
                             writeProgress(clientId, ProgressPhase.Complete, st)
                             progressClientId.set(null)
                             progressDelivering = false
+                            stopProgressHeartbeat()
                         }
 
                         st != null                      -> { // in flight: send start immediately, then throttle
                             progressDelivering = true
+                            startProgressHeartbeat()
                             val nowMs = dateUtil.now()
                             if (previous == null || nowMs - lastWrite >= progressSampleMs) {
                                 writeProgress(clientId, ProgressPhase.Active, st)
@@ -189,6 +188,34 @@ class ClientControlReceiver @Inject constructor(
                 prev = st
             }
         }
+    }
+
+    /**
+     * Start the liveness heartbeat (idempotent) for the in-flight client bolus: re-publish the current frame every
+     * [progressHeartbeatMs] so a non-streaming pump (Medtronic/Eros, which emits no intermediate progress) still
+     * keeps the client's stall watchdog fed. Cancelled on the terminal frame by [stopProgressHeartbeat]. Started/
+     * stopped only from the single mirror collector coroutine, so no extra synchronization is needed.
+     */
+    private fun startProgressHeartbeat() {
+        if (progressHeartbeatJob?.isActive == true) return
+        progressHeartbeatJob = appScope.launch {
+            while (true) {
+                delay(progressHeartbeatMs)
+                val clientId = progressClientId.get() ?: continue
+                val st = bolusProgressData.state.value ?: continue
+                // Re-check the live state right before writing so a heartbeat that wins a race with a terminal
+                // frame doesn't re-publish an Active after Complete/Cleared.
+                if (progressDelivering && !st.isSMB && st.percent < 100 &&
+                    bolusProgressData.currentGeneration > progressArmedGeneration
+                ) writeProgress(clientId, ProgressPhase.Active, st)
+            }
+        }
+    }
+
+    /** Cancel the heartbeat on a terminal frame — nothing left to keep alive. */
+    private fun stopProgressHeartbeat() {
+        progressHeartbeatJob?.cancel()
+        progressHeartbeatJob = null
     }
 
     /**

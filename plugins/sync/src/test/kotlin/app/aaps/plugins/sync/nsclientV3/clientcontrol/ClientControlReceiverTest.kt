@@ -43,12 +43,14 @@ import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -110,6 +112,16 @@ internal class ClientControlReceiverTest {
     // simulate the client's bolus actually starting.
     private var progressGeneration = 0L
 
+    // Scope injected into the SUT — cancelled in tearDown(). The master progress-mirror collector (and its
+    // periodic heartbeat) is a long-lived coroutine; without cancellation it would outlive the test and fire
+    // after Mockito cleared the inline mocks, surfacing as a flaky "uncaught exception before the next test".
+    private lateinit var appScope: CoroutineScope
+
+    @AfterEach
+    fun tearDown() {
+        if (::appScope.isInitialized) appScope.cancel()
+    }
+
     @BeforeEach
     fun setUp() {
         MockitoAnnotations.openMocks(this)
@@ -135,6 +147,7 @@ internal class ClientControlReceiverTest {
         whenever(dateUtil.now()).thenReturn(now)
         whenever(bolusProgressData.state).thenReturn(bolusState)
         whenever(bolusProgressData.currentGeneration).thenAnswer { progressGeneration }
+        appScope = CoroutineScope(Dispatchers.Unconfined)
         sut = ClientControlReceiver(
             authorizedRepository,
             Provider { nsClientV3Plugin },
@@ -152,7 +165,7 @@ internal class ClientControlReceiverTest {
             bolusProgressData,
             commandQueue,
             aapsLogger,
-            CoroutineScope(Dispatchers.Unconfined)
+            appScope
         )
     }
 
