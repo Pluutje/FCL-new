@@ -28,11 +28,23 @@ data class FCLvNextInput(
     val targetBG: Double,                       // mmol/L
     val isNight: Boolean,
     val externalBolusU: Double = 0.0,           // gedetecteerde externe bolus (IOB-delta)
-    // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal+bolus/SMB,
-    // via AAPS-behandelhistorie — zie FclRealDoseTracker). Dekt zowel FCL's
-    // eigen doses als alles wat de oref0/SMB-fallback aflevert wanneer FCL
-    // niet zelf ingrijpt. Default 0.0 voor andere/oudere call sites.
-    val realDeliveredU: Double = 0.0
+    // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal en
+    // bolus/SMB apart), via AAPS-behandelhistorie — zie FclRealDoseTracker.
+    // Dekt zowel FCL's eigen doses als alles wat de oref0/SMB-fallback
+    // aflevert wanneer FCL niet zelf ingrijpt. Default 0.0 voor andere/
+    // oudere call sites.
+    val realDeliveredBasalU: Double = 0.0,
+    val realDeliveredBolusU: Double = 0.0,
+    // Geprogrammeerde profiel-basaalstand (U/h) op dit moment — nodig om
+    // realDeliveredBasalU te kunnen beoordelen (boven/op/onder profiel).
+    val profileBasalUH: Double = 0.0,
+    // Activiteit (stappen) — FCLActivityModule past sensMgdl en targetMgdl
+    // elke cyclus aan; tot 19/06/2026 nergens gelogd.
+    val activityActive: Boolean = false,
+    val activityInsulinPct: Double = 100.0,
+    val activityTargetAdjust: Double = 0.0,     // mmol/L
+    // Schaalt alleen de oref0/SMB-fallback-laag (Laag 2), niet FCLvNext zelf.
+    val aapsMultiplier: Double = 1.0
 )
 
 data class FCLvNextContext(
@@ -3244,7 +3256,13 @@ class FCLvNext(
             isNight = input.isNight,
             bg = input.bgNow,
             target = input.targetBG,
-            realDeliveredU = input.realDeliveredU
+            realDeliveredBasalU = input.realDeliveredBasalU,
+            realDeliveredBolusU = input.realDeliveredBolusU,
+            profileBasalUH = input.profileBasalUH,
+            activityActive = input.activityActive,
+            activityInsulinPct = input.activityInsulinPct,
+            activityTargetAdjust = input.activityTargetAdjust,
+            aapsMultiplier = input.aapsMultiplier
         )
         val status = StringBuilder()
 
@@ -3272,9 +3290,30 @@ class FCLvNext(
         logRow.sterktePct        = preferences.get(IntKey.fcl_vnext_sterkte)
         logRow.timingPct         = preferences.get(IntKey.fcl_vnext_timing)
         logRow.volhoudendheidPct = preferences.get(IntKey.fcl_vnext_volhoudendheid)
-        logRow.nachtFactorPct    = DFLearner.getNfLevel(context).toInt()  // nfLevel als proxy
+        logRow.nachtFactorPct    = DFLearner.getNfLevel(context).toInt()  // nfLevel als proxy (legacy kolom, lage precisie — zie nf_level_geleerd/effectief hieronder)
         logRow.doseDistributionStyle = config.doseDistributionStyle
         logRow.nightResponseStyle    = "NF${config.nfLevel.toInt()}"  // nfLevel als label
+
+        // NF: geleerd vs effectief (incl. handmatige Nacht-Agressiviteit-
+        // offset) apart loggen, met volle precisie — i.t.t. nachtFactorPct
+        // hierboven (Int, en alleen de geleerde waarde). Pas toegevoegd
+        // 19/06/2026 bij het loskoppelen van schuif en geleerde waarde; dat
+        // onderscheid was tot nu toe nergens zichtbaar in de log.
+        logRow.nfLevelGeleerd    = DFLearner.getNfLevel(context)
+        logRow.nfLevelEffectief  = config.nfLevel
+        logRow.nachtAggressiviteit = DFLearner.getNachtAggressiviteit(context)
+
+        // De 6 sub-parameters die NF 's nachts daadwerkelijk afleidt
+        // (applyNightResponseStyle in FCLvNextConfig.kt) — overdag staan ze
+        // op hun ongemoeide basiswaarde (geen NF-effect), 's nachts tonen ze
+        // het NF-gemoduleerde resultaat. Tot nu toe alleen impliciet
+        // herleidbaar via de formule, nooit rechtstreeks gelogd.
+        logRow.nightStagnationDeltaMin        = config.stagnationDeltaMin
+        logRow.nightStagnationEnergyBoost     = config.stagnationEnergyBoost
+        logRow.nightPersistentAggressionMul   = config.persistentAggressionMul
+        logRow.nightCooldownMinutes           = config.smallCorrectionCooldownMinutes
+        logRow.nightCorrectionHoldDeltaMax    = config.correctionHoldDeltaMax
+        logRow.nightAbsorptionDoseFactor      = config.absorptionDoseFactor
 
         logRow.bgZone = zoneEnum.name
         logRow.iob = input.currentIOB

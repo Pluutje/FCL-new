@@ -23,10 +23,19 @@ import app.aaps.core.interfaces.db.PersistenceLayer
  * wordt bovendien alleen gevuld in het extended-bolus-faking-pad (zie
  * IobCobCalculatorPlugin.calculateIobToTimeFromTempBasalsIncludingConvertedExtended),
  * dus niet bruikbaar voor reguliere temp-basaal-pompen.
+ *
+ * Basaal en bolus/SMB worden bewust apart geretourneerd (niet alleen een
+ * totaal) — dat kost niets extra (al apart berekend) en maakt het later
+ * mogelijk te onderscheiden of een patroon (bv. negatieve IOB) door
+ * basaal-onderdrukking komt of door agressieve SMB's (19/06/2026).
  */
 class FclRealDoseTracker(
     private val persistenceLayer: PersistenceLayer
 ) {
+
+    data class RealDelivery(val basalU: Double, val bolusU: Double) {
+        val totalU: Double get() = basalU + bolusU
+    }
 
     /**
      * Hoever terugkijken voorbij [fromMs] om temp-basalen te vinden die al
@@ -36,14 +45,16 @@ class FclRealDoseTracker(
     private val LOOKBACK_MARGIN_MS = 24L * 60 * 60 * 1000
 
     /**
-     * Werkelijk afgegeven insuline (basaal + bolus/SMB samen) in het
+     * Werkelijk afgegeven insuline (basaal + bolus/SMB apart) in het
      * halfopen venster [fromMs, toMs), ongeacht of FCL of de oref0-fallback
-     * de bron was. Som van temp-basaal-overlap × duur, plus alle
-     * bolus/SMB-bedragen met timestamp in het venster.
+     * de bron was.
      */
-    suspend fun deliveredUnits(fromMs: Long, toMs: Long): Double {
-        if (toMs <= fromMs) return 0.0
-        return deliveredBasalUnits(fromMs, toMs) + deliveredBolusUnits(fromMs, toMs)
+    suspend fun deliveredUnits(fromMs: Long, toMs: Long): RealDelivery {
+        if (toMs <= fromMs) return RealDelivery(0.0, 0.0)
+        return RealDelivery(
+            basalU = deliveredBasalUnits(fromMs, toMs),
+            bolusU = deliveredBolusUnits(fromMs, toMs)
+        )
     }
 
     private suspend fun deliveredBasalUnits(fromMs: Long, toMs: Long): Double {

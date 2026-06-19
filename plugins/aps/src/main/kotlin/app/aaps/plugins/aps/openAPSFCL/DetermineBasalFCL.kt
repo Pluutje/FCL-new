@@ -306,6 +306,18 @@ class DetermineBasalFCL @Inject constructor(
         val dayNightHelper = FCLvNextDayNightHelper(preferences)
         val isNight: Boolean = dayNightHelper.isNightNow()
 
+        // AAPS-multiplier: schaalt alleen de AAPS-correcties (Laag 2), niet
+        // FCLvNext. Vroeg in de functie berekend (i.p.v. pas vlak voor
+        // gebruik verderop) zodat de waarde ook beschikbaar is voor de
+        // per-cyclus CSV-log, ongeacht of deze cyclus uiteindelijk de
+        // FCL-eigen dosering of de oref0-fallback gebruikt.
+        // Dag: hoger = agressievere AAPS micro-bolussen bij hoge BG.
+        // Nacht: lager = voorzichtigere AAPS correcties (default 0.9 = 10% minder).
+        // Range 0.9-1.5. Heeft geen effect op FCLvNext zelf.
+        val aaps_multiplier =
+            if (isNight) preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
+            else preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
+
         // Sla unit-keuze op zodat composables (BgUnits) geen profileFunction nodig hebben
         app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.setIsMgdl(
             context,
@@ -369,10 +381,10 @@ class DetermineBasalFCL @Inject constructor(
             val manualBolusDetected = externalBolusDetected >= 0.5
 
             // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal +
-            // bolus/SMB, ongeacht FCL of de oref0-fallback de bron was) —
-            // zie FclRealDoseTracker voor de achtergrond. Loopt 1 cyclus
-            // achter: dit venster dekt wat er SINDS de vorige cyclus is
-            // afgeleverd, niet wat deze cyclus zelf gaat doen (dat staat
+            // bolus/SMB apart, ongeacht FCL of de oref0-fallback de bron
+            // was) — zie FclRealDoseTracker voor de achtergrond. Loopt 1
+            // cyclus achter: dit venster dekt wat er SINDS de vorige cyclus
+            // is afgeleverd, niet wat deze cyclus zelf gaat doen (dat staat
             // pas na deze aanroep vast). Bij de allereerste run na een
             // (her)start van de singleton is er nog geen vorig tijdstip —
             // dan pakken we de laatste 5 minuten als redelijke schatting.
@@ -380,7 +392,7 @@ class DetermineBasalFCL @Inject constructor(
             val vorigeCycleMs =
                 if (lastCycleTimestampMs > 0L) lastCycleTimestampMs
                 else nowMs - 5 * 60 * 1000L
-            val realDeliveredU = kotlinx.coroutines.runBlocking {
+            val realDelivery = kotlinx.coroutines.runBlocking {
                 fclRealDoseTracker.deliveredUnits(vorigeCycleMs, nowMs)
             }
             lastCycleTimestampMs = nowMs
@@ -394,7 +406,13 @@ class DetermineBasalFCL @Inject constructor(
                 targetBG = targetMgdl / 18.0,
                 externalBolusU = externalBolusDetected,
                 isNight = isNight,
-                realDeliveredU = realDeliveredU
+                realDeliveredBasalU = realDelivery.basalU,
+                realDeliveredBolusU = realDelivery.bolusU,
+                profileBasalUH = profile_current_basal,
+                activityActive = activity.isActive,
+                activityInsulinPct = activity.insulinPercentage,
+                activityTargetAdjust = activity.targetAdjust,
+                aapsMultiplier = aaps_multiplier
             )
 
             val advice = fclvNext.getAdvice(fclInput)
@@ -814,14 +832,6 @@ class DetermineBasalFCL @Inject constructor(
 // *************************************************************************************************************************8
 // *************************************************************************************************************************8
 
-
-        // AAPS-multiplier: schaalt alleen de AAPS-correcties (Laag 2), niet FCLvNext.
-        // Dag: hoger = agressievere AAPS micro-bolussen bij hoge BG.
-        // Nacht: lager = voorzichtigere AAPS correcties (default 0.9 = 10% minder).
-        // Range 0.9-1.5. Heeft geen effect op FCLvNext zelf.
-        val aaps_multiplier =
-            if (isNight) preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
-            else preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
 
         if ((bolusAmount > 0.0 || basalRate > 0.0) && shouldDeliver) {
 

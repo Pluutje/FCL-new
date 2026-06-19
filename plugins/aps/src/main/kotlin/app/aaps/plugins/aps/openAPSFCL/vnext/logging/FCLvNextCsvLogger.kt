@@ -117,7 +117,29 @@ data class FCLvNextCsvLogRow(
     // Werkelijk afgegeven insuline sinds de vorige cyclus, uit AAPS'
     // behandelhistorie (FclRealDoseTracker) — i.t.t. deliveredTotal/bolus/
     // basalRate hierboven, die alleen FCL's EIGEN bijdrage zijn.
-    var realDeliveredU: Double = 0.0,
+    var realDeliveredBasalU: Double = 0.0,
+    var realDeliveredBolusU: Double = 0.0,
+    // Geprogrammeerde profiel-basaalstand (U/h) — referentie om
+    // realDeliveredBasalU tegen af te zetten.
+    var profileBasalUH: Double = 0.0,
+    // Activiteit (stappen) — beïnvloedt sensMgdl/targetMgdl elke cyclus.
+    var activityActive: Boolean = false,
+    var activityInsulinPct: Double = 100.0,
+    var activityTargetAdjust: Double = 0.0,
+    var aapsMultiplier: Double = 1.0,
+    // NF geleerd vs effectief (incl. handmatige Nacht-Agressiviteit-offset),
+    // en de 6 sub-parameters die NF 's nachts afleidt — zie
+    // FCLvNextConfig.applyNightResponseStyle(). Overdag staan de
+    // sub-parameters op hun ongemoeide basiswaarde.
+    var nfLevelGeleerd: Double = 5.0,
+    var nfLevelEffectief: Double = 5.0,
+    var nachtAggressiviteit: Int = 5,
+    var nightStagnationDeltaMin: Double = 0.0,
+    var nightStagnationEnergyBoost: Double = 0.0,
+    var nightPersistentAggressionMul: Double = 0.0,
+    var nightCooldownMinutes: Int = 0,
+    var nightCorrectionHoldDeltaMax: Double = 0.0,
+    var nightAbsorptionDoseFactor: Double = 0.0,
     var shouldDeliver: Boolean = false,
     var externalBolusU: Double = 0.0,
 
