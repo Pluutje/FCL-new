@@ -66,8 +66,14 @@ fun EpisodeChart(
     val hasPredPeak = sorted.any { it.predictedPeak != null && it.predictedPeak > 0.0 }
 
     val rawMaxIob = sorted.maxOf { it.iob }
-    val maxIob = max(1, kotlin.math.ceil(rawMaxIob).toInt() + 1).toDouble()
-    val maxDose = max(0.1, sorted.maxOf { if (it.shouldDeliver) it.finalDose else 0.0 })
+    val rawMaxDose = sorted.maxOf { if (it.shouldDeliver) it.finalDose else 0.0 }
+    // BUGFIX (20/06/2026): de dosis-staven moeten dezelfde rechter-as
+    // (insuline, U) delen als de IOB-lijn, anders klopt de afgelezen
+    // absolute waarde niet — alleen de onderlinge verhouding tussen de
+    // staven zelf klopte toen nog (zie EpisodeChart-aanroep hieronder).
+    // Daarom telt rawMaxDose ook mee in het bepalen van de as-bovengrens,
+    // zodat een enkele grote bolus niet boven de as uit zou steken.
+    val maxIob = max(1, kotlin.math.ceil(max(rawMaxIob, rawMaxDose)).toInt() + 1).toDouble()
 
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
     val dateFormatter = DateTimeFormatter.ofPattern("dd-MM-yyyy").withZone(ZoneId.systemDefault())
@@ -163,11 +169,14 @@ fun EpisodeChart(
             drawContext.canvas.nativeCanvas.drawPath(predPath, predPaint)
         }
 
-        // Dosis staven
+        // Dosis staven — zelfde schaal (yIob/maxIob) als de IOB-lijn en de
+        // rechter-as-labels hieronder, zodat de absolute hoogte klopt met
+        // wat er op de as staat (was voorheen los geschaald op maxDose,
+        // zie bugfix-comment bij maxIob hierboven).
         sorted.filter { it.shouldDeliver && it.finalDose > 0.0 }.forEach { row ->
             val x = xOf(row.timestamp)
-            val barH = (row.finalDose.toFloat() / maxDose.toFloat()) * plotH * 0.35f
-            val yTop = topPad + plotH - barH
+            val yTop = yIob(row.finalDose)
+            val barH = (topPad + plotH) - yTop
             drawRect(
                 color = AapsDoseBlue.copy(alpha = 0.90f),
                 topLeft = Offset(x - 2f, yTop),

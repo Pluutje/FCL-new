@@ -227,10 +227,12 @@ fun CgpScoreKaart(context: Context) {
 
             Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 
-            // ── Pentagon op basis van 14-daags gemiddelde ──────────────────
-            val gemiddeld14d = gemiddeld14Daags(scores14d)
+            // ── Pentagon op basis van het laatste 14-daags schuifvenster-punt ──
+            // (zelfde brondatapunt als de tabel hierboven — zie bugfix-comment
+            // bij gemiddeld14Daags())
+            val gemiddeld14d = gemiddeld14Daags(display)
             if (gemiddeld14d != null) {
-                Text("Pentagon (14-daags gemiddelde)",
+                Text("Pentagon (laatste 14-daags venster)",
                      style = MaterialTheme.typography.labelSmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
 
@@ -652,26 +654,33 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
         }
     )
 }
- /* voor de pentagon-grafiek. Retourneert genormaliseerde waarden [0.18-1.0].
+ /**
+ * Normaliseert één CgpScore (bedoeld: het laatste 14-daags
+ * schuifvenster-punt) naar [0.18-1.0] voor de pentagon-grafiek.
+ *
+ * BUGFIX (20/06/2026): nam voorheen het gemiddelde over ALLE punten in
+ * scores14d — maar elk punt in scores14d is zelf al een 14-daags
+ * schuifvenster-gemiddelde (zie class-comment hierboven en de bugfix van
+ * 18/06/2026 voor `display` in CgpScoreKaart()). Een gemiddelde van die
+ * punten is dus weer een gemiddelde-van-gemiddelden, met een effectief
+ * venster tot ~28 dagen — exact dezelfde fout die toen voor de tabel is
+ * opgelost, maar hier per ongeluk niet meegenomen. Gevolg: bij waarden die
+ * in de tabel (Actueel) op 0% staan, week de pentagon daar toch vanaf
+ * zodra er meerdere dagpunten in scores14d zaten. Nu: zelfde brondatapunt
+ * (`display`) als de tabel, dus altijd consistent.
  */
-private fun gemiddeld14Daags(history: List<CgpScore>): List<Double>? {
-    if (history.isEmpty()) return null
+private fun gemiddeld14Daags(latest: CgpScore?): List<Double>? {
+    if (latest == null) return null
 
     val BASELINE_OFFSET = 0.18
     fun norm(v: Double, max: Double) =
         BASELINE_OFFSET + (1.0 - BASELINE_OFFSET) * (v / max).coerceIn(0.0, 1.0)
 
-    val avgTor   = history.map { it.torPct   }.average()
-    val avgCv    = history.map { it.cvPct    }.average()
-    val avgHypo  = history.map { it.hypoPct  }.average()
-    val avgHyper = history.map { it.hyperPct }.average()
-    val avgMean  = history.map { it.meanMgdl }.average()
-
     return listOf(
-        norm(avgTor,    100.0),
-        norm(avgCv,      60.0),
-        norm(avgHypo,    20.0),
-        norm(avgHyper,   80.0),
-        norm(avgMean,   300.0)
+        norm(latest.torPct,    100.0),
+        norm(latest.cvPct,      60.0),
+        norm(latest.hypoPct,    20.0),
+        norm(latest.hyperPct,   80.0),
+        norm(latest.meanMgdl,  300.0)
     )
 }
