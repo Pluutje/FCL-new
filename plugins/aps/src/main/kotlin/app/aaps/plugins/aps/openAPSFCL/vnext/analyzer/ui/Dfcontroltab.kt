@@ -147,6 +147,7 @@ fun DFControlTab(
                         refWff = DFLearner.getRefWff(context),
                         refEb = DFLearner.getRefEb(context),
                         refPeakBias = DFLearner.getRefPeakBias(context),
+                        refLcd = DFLearner.getRefLcd(context),
                         vExtra = veApply,
                         aggLevel = aggressiveness
                     )

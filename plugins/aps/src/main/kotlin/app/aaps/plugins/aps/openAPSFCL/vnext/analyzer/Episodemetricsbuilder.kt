@@ -4,6 +4,33 @@ import java.time.Duration
 
 object EpisodeMetricsBuilder {
 
+    // Drempels voor de automatische near-hypo-detectie — bewust gelijk aan
+    // de bestaande rescue-ARM/CONFIRM-constanten in FCLvNext.kt, zodat
+    // beide mechanismen consistent dezelfde situatie als "verdacht" zien.
+    private const val NEAR_HYPO_THRESH        = 4.8   // mmol/L — waarschuwingsdrempel, boven de harde hypo-grens (3.9)
+
+    // Gedeelde maat voor "is dit een betekenisvolle hoeveelheid insuline voor
+    // déze patiënt" — RELATIEF aan maxSMB, niet absoluut (zie controlevraag
+    // Ecko 20/06/2026: bij 3× zo'n grote maxSMB is een vast getal in U niet
+    // meer betekenisvol — wat voor de ene patiënt "significant" is, is voor
+    // een ander ruis, en omgekeerd). Hergebruikt voor zowel "nog actieve IOB
+    // op het dieptepunt" (NEAR_HYPO) als "was deze commit significant"
+    // (significantThresholdU) hieronder — beide stellen feitelijk dezelfde
+    // vraag. .coerceAtLeast() is puur een veiligheidsvloer voor het
+    // randgeval maxSMB≈0 (bv. bij init), niet een herintroductie van een
+    // vast getal als norm.
+    private const val SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB = 0.12
+    // Iets ruimer dan SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB: een vervolgcommit telt
+    // al mee als die "niet verwaarloosbaar" is, een lagere lat dan "significant".
+    private const val FOLLOWUP_COMMIT_FRAC_OF_MAXSMB  = 0.04
+
+    // Let op: bewust RUWE IOB (U), niet iobRatio (= IOB/maxIOB, genormaliseerd
+    // tegen de Max-IOB-veiligheidsgrens — bv. 0,5U/10,5U=0,05, wat een
+    // "klein" getal lijkt terwijl 0,5U nog steeds actief werkende insuline
+    // is).
+    private const val REBOUND_ACCEL_MIN       = 0.18
+    private const val REBOUND_SLOPE_MIN       = 0.25
+
 
 
     fun build(
@@ -55,18 +82,26 @@ object EpisodeMetricsBuilder {
             val firstBigCommitFrac = if (totalInsulinDelivered > 0.1)
                 biggestSingleCommit / totalInsulinDelivered else 0.0
 
-            // followUpCommitCount: commits met deliveredTotal > 0.10U
-            // die LATER komen dan de grootste commit
+            // followUpCommitCount: commits die LATER komen dan de grootste
+            // commit, en zelf nog substantieel waren (RELATIEF aan maxSMB —
+            // was voorheen een vaste 0,10U, zie controlevraag Ecko 20/06/2026:
+            // bij een patiënt met 3× zo'n grote maxSMB zou 0,10U verwaarloosbaar
+            // ruis zijn i.p.v. een echte vervolgcommit).
+            val followUpThresholdU = (FOLLOWUP_COMMIT_FRAC_OF_MAXSMB * manualMaxSmb).coerceAtLeast(0.03)
             val bigCommitTs = rows.maxByOrNull { it.deliveredTotal }?.timestamp
             val followUpCommitCount = if (bigCommitTs != null)
-                rows.count { it.deliveredTotal > 0.10 && it.timestamp > bigCommitTs }
+                rows.count { it.deliveredTotal > followUpThresholdU && it.timestamp > bigCommitTs }
             else 0
 
             // ── Staart-analyse ────────────────────────────────────────────────
-            // Drempel: een commit is "significant" als hij zowel > 0.30U is ALS
+            // Drempel: een commit is "significant" als hij zowel substantieel is
+            // t.o.v. maxSMB (RELATIEF — was voorheen een vaste 0,30U) ALS
             // > 15% van de totale insuline in de episode beslaat. Dit filtert
             // de kleine correctiedoses eruit maar houdt echte bolussen over.
-            val significantThresholdU   = 0.30
+            // Zelfde fractie (12%) als NEAR_HYPO_MIN_IOB_FRAC_OF_MAXSMB
+            // hierboven — beide vragen feitelijk "is dit een betekenisvolle
+            // hoeveelheid insuline voor déze patiënt", dus bewust dezelfde maat.
+            val significantThresholdU = (SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB * manualMaxSmb).coerceAtLeast(0.15)
             val significantThresholdFrac = 0.15
             val significantCommits = rows
                 .filter { row ->
@@ -159,6 +194,31 @@ object EpisodeMetricsBuilder {
                 Duration.between(episode.start, it.timestamp).toMinutes()
             }
 
+            // ── Automatische near-hypo-detectie (20/06/2026) ───────────────
+            // Doel: een hypo herkennen die alleen is uitgebleven doordat de
+            // gebruiker (rescue-)koolhydraten at — zonder afhankelijk te zijn
+            // van een handmatige "Ja"-bevestiging (die was oorspronkelijk
+            // bedoeld om de rescue-detector-drempels te kalibreren, niet als
+            // vereiste bewijslast — episodes die niemand bekeek bestonden
+            // evengoed). Gezocht wordt, ná de episode-piek, naar een
+            // dieptepunt met nog substantiële IOB gevolgd door een
+            // duidelijke rebound. Drempels zijn bewust gelijk aan de
+            // bestaande rescue-ARM/CONFIRM-logica in FCLvNext.kt, BEHALVE
+            // de daar aanwezige eis dat er geen insuline gelijktijdig wordt
+            // afgegeven — die eis is hier weggelaten: insuline kan een
+            // BG-stijging niet verklaren, dus sluit die eis het probleem
+            // hier juist uit i.p.v. bevestigt 'm.
+            val rowsAfterPeak = peakRow?.let { pr -> rows.filter { it.timestamp > pr.timestamp } } ?: emptyList()
+            val nadirRow = rowsAfterPeak.minByOrNull { it.bg }
+            val nearHypoAverted = nadirRow != null &&
+                nadirRow.bg < NEAR_HYPO_THRESH &&
+                nadirRow.iob >= manualMaxSmb * SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB &&
+                rowsAfterPeak.any {
+                    it.timestamp > nadirRow.timestamp &&
+                    it.accel >= REBOUND_ACCEL_MIN &&
+                    it.slope >= REBOUND_SLOPE_MIN
+                }
+
             EpisodeMetrics(
                 id = episode.id,
                 start = episode.start,
@@ -187,6 +247,7 @@ object EpisodeMetricsBuilder {
                 includedInAdvice = false,
                 adviceStatus = "NEW",
                 rescueConfirmed = false,  // wordt later overschreven vanuit DB
+                nearHypoAverted = nearHypoAverted,
                 firstCommitU = firstCommitU,
                 iobRatioAt15min = iobRatioAt15min,
                 firstBigCommitFrac = firstBigCommitFrac,

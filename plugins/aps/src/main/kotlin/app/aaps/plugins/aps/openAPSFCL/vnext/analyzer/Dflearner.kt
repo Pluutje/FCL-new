@@ -37,6 +37,7 @@ object DFLearner {
     private const val KEY_REF_WFF = "df_ref_wff"   // Frontload grootte
     private const val KEY_REF_EB  = "df_ref_eb"    // Vroege boost
     private const val KEY_REF_PEAK_BIAS = "df_ref_peak_bias"  // Vroege piek-bias-correctie
+    private const val KEY_REF_LCD = "df_ref_lcd"   // Late-commit-decay extra (los van F)
 
     // ── EarlyBoost timing leren ──────────────────────────────────────────
     // Budget-neutraal: earlyBoostFactor groter → watchingFrontloadFrac kleiner.
@@ -104,7 +105,20 @@ object DFLearner {
     private const val DEAD_ZONE_PEAK    = 0.5    // mmol: geen actie bij kleine piek-afwijking
     private const val DEAD_ZONE_IOBR    = 0.08   // geen actie bij kleine IOBratio-afwijking
     private const val MIN_VALID_PEAK_BG = 6.5    // mmol: minimale piek voor echte maaltijdepisode
-    private const val MIN_VALID_INSULIN = 1.5    // U: minimale insuline voor echte maaltijdepisode
+    // MIN_VALID_INSULIN_FRAC: RELATIEF aan maxSMB (was een vaste 1,5U) — zie
+    // controlevraag Ecko 20/06/2026. Zelfde fractie (0,60) als de bestaande
+    // MIN_INSULIN_FRAC in EpisodeMetricsBuilder.computeAdvisorWeight(), die
+    // feitelijk dezelfde vraag stelt ("was dit een echte, volwaardige
+    // episode") — nu bewust dezelfde maat, niet toevallig dicht bij elkaar.
+    private const val MIN_VALID_INSULIN_FRAC = 0.60
+    // Absolute veiligheidsvloer, alleen voor het randgeval maxSMB≈0 (init) —
+    // geen herintroductie van een vast getal als norm.
+    private const val MIN_VALID_INSULIN_FLOOR = 0.40
+
+    // Eén gedeelde plek, gebruikt door evaluate(), evaluateEarlyBoost() en
+    // evaluateLateCommitDecay() (zie controlevraag Ecko 20/06/2026).
+    private fun minValidInsulinFor(manualMaxSmb: Double): Double =
+        (MIN_VALID_INSULIN_FRAC * manualMaxSmb).coerceAtLeast(MIN_VALID_INSULIN_FLOOR)
 
     // ── Leertempo's ───────────────────────────────────────────────────────
     enum class Tempo { LANGZAAM, NORMAAL, SNEL }
@@ -223,6 +237,12 @@ object DFLearner {
 
     fun setRefEb(context: Context, v: Double) =
         prefs(context).edit().putFloat(KEY_REF_EB, v.coerceIn(DFMapping.REF_EB_MIN, DFMapping.REF_EB_MAX).toFloat()).apply()
+
+    fun getRefLcd(context: Context): Double =
+        prefs(context).getFloat(KEY_REF_LCD, DFMapping.REF_LCD_DEFAULT.toFloat()).toDouble()
+
+    fun setRefLcd(context: Context, v: Double) =
+        prefs(context).edit().putFloat(KEY_REF_LCD, v.coerceIn(DFMapping.REF_LCD_MIN, DFMapping.REF_LCD_MAX).toFloat()).apply()
 
     // Agressiviteitsschaal (Stap 1: opslag, Stap 2: koppeling aan params)
     // NachtFactor-niveau (1-9), analoog aan aggressiveness
@@ -372,13 +392,20 @@ object DFLearner {
         context: Context,
         metrics: EpisodeMetrics,
         skipHistory: Boolean = false,
-        skipSideEffects: Boolean = false   // true = sla KEY_LAST_TS en weekDelta niet op
+        skipSideEffects: Boolean = false,   // true = sla KEY_LAST_TS en weekDelta niet op
+        // RELATIEF aan maxSMB i.p.v. een vast getal — zie controlevraag Ecko
+        // 20/06/2026 (minValidInsulinFor() en de OK-tak hieronder gebruiken dit).
+        // Default 1.25 = bestaande fallback-waarde elders in het bestand.
+        manualMaxSmb: Double = 1.25
     ): LearningStep? {
         // Tempo: de Langzaam/Normaal/Snel-keuze is verwijderd uit de UI.
         // Het systeem gebruikt altijd NORMAAL als basis; de effectieve stap-
         // grootte wordt dynamisch bepaald door episodeVertrouwen en tbtModifier.
         // getTempo/setTempo blijven beschikbaar voor migratie van opgeslagen data.
         val tp = tempoMap[Tempo.NORMAAL]!!
+
+        // Relatieve "echte episode"-drempel — zie kdoc bij MIN_VALID_INSULIN_FRAC.
+        val minValidInsulin = minValidInsulinFor(manualMaxSmb)
 
         if (!isAutoEnabled(context)) {
             // Automaat staat uit: geen aanpassingen, maar WEL loggen zodat
@@ -540,14 +567,17 @@ object DFLearner {
         val diagnose: String
 
         when {
-            metrics.peakBg < MIN_VALID_PEAK_BG || metrics.totalInsulinDelivered < MIN_VALID_INSULIN -> {
+            metrics.peakBg < MIN_VALID_PEAK_BG || metrics.totalInsulinDelivered < minValidInsulin -> {
                 rawDeltaD = 0.0; rawDeltaF = 0.0; diagnose = "SKIP_GEEN_EPISODE"
             }
 
             // ── RESCUE: te veel of te laat insuline — alleen stabiel door rescue carbs ──
             // D licht omlaag (minder sterkte), F ook iets omlaag (minder frontload)
             // tenzij er ook een hypo was (dan is de hypo-tak relevant)
-            metrics.rescueConfirmed && metrics.minBgInWindow >= HYPO_THRESHOLD -> {
+            // (rescueConfirmed OF nearHypoAverted, zie kdoc bij
+            // EpisodeMetrics.nearHypoAverted — automatische detectie, geen
+            // handmatige bevestiging meer vereist, 20/06/2026)
+            (metrics.rescueConfirmed || metrics.nearHypoAverted) && metrics.minBgInWindow >= HYPO_THRESHOLD -> {
                 rawDeltaD = -tp.alphaPiek * 0.5
                 rawDeltaF = -tp.alphaPiek * 0.2
                 diagnose  = "RESCUE_OVERPOWERED"
@@ -712,7 +742,7 @@ object DFLearner {
             // Kleine positieve stap — de piek moet ook hier onder het plafond blijven.
             else -> {
                 if (hypoStraf == 0.0 && !metrics.afterloadWasActive &&
-                    metrics.peakBg < AFTERLOAD_MAX_PEAK && metrics.totalInsulinDelivered >= 1.0) {
+                    metrics.peakBg < AFTERLOAD_MAX_PEAK && metrics.totalInsulinDelivered >= minValidInsulin) {
                     rawDeltaD = +tp.alphaPiek * 0.15   // klein positief: alles prima
                     rawDeltaF = 0.0
                     diagnose  = "OK"
@@ -888,7 +918,7 @@ object DFLearner {
         // Pas earlyBoostFactor en watchingFrontloadFrac aan op basis van
         // hoe goed de frontload-timing was in deze episode.
         if (!skipSideEffects) {
-            evaluateEarlyBoost(context, metrics)
+            evaluateEarlyBoost(context, metrics, manualMaxSmb)
         }
 
         return step
@@ -946,6 +976,7 @@ object DFLearner {
             .putFloat(KEY_REF_WFF, DFMapping.REF_WFF_DEFAULT.toFloat())
             .putFloat(KEY_REF_EB,  DFMapping.REF_EB_DEFAULT.toFloat())
             .putFloat(KEY_REF_PEAK_BIAS, DFMapping.REF_PEAK_BIAS_DEFAULT.toFloat())
+            .putFloat(KEY_REF_LCD, DFMapping.REF_LCD_DEFAULT.toFloat())
             .apply()
     }
 
@@ -1031,16 +1062,19 @@ object DFLearner {
      * FORWARD: earlyBoostFrac < 0.55 en piek > 9.5 en geen hypo
      *          → kleine stap naar voren (+stepSize)
      * BACK:    hypo én earlyBoostWasActive én geen externe bolus
+     *          — OF bevestigde reddingskoolhydraten zonder echte hypo
+     *            (nearMissViaRescue, toegevoegd 20/06/2026)
      *          → 3 stappen terug (3 × stepSize)
      *          → als vorige signaal FORWARD was: stepSize halveren (oscillatiepunt)
      * NONE:    geen aanpassing
      */
     fun evaluateEarlyBoost(
         context: android.content.Context,
-        metrics: EpisodeMetrics
+        metrics: EpisodeMetrics,
+        manualMaxSmb: Double = 1.25
     ): String? {
         if (metrics.hasManualCorrection) return null
-        if (metrics.totalInsulinDelivered < 1.0) return null
+        if (metrics.totalInsulinDelivered < minValidInsulinFor(manualMaxSmb)) return null
 
         val p = prefs(context)
         val oldBoost    = p.getFloat(KEY_EB_BOOST,    EB_BOOST_DEFAULT).toDouble()
@@ -1068,9 +1102,32 @@ object DFLearner {
             metrics.earlyBoostWasActive &&
             !metrics.hasManualCorrection
 
+        // NIEUW (20/06/2026): near-miss via bevestigde reddingskoolhydraten
+        // ÓF automatische near-hypo-detectie (nearHypoAverted — zie kdoc bij
+        // EpisodeMetrics.nearHypoAverted). BG bleef boven de echte
+        // hypo-drempel, maar alleen omdat de gebruiker moest bijeten —
+        // dezelfde onderliggende situatie als een hypo, alleen op tijd
+        // afgewend. evaluate() (D/F) heeft hiervoor al de
+        // RESCUE_OVERPOWERED-tak; earlyBoostFactor/watchingFrontloadFrac
+        // hadden geen equivalent en bleven zo onaangeroerd na een afgewend
+        // incident, ook al was de onderliggende oorzaak (te vroeg/te veel)
+        // identiek aan wat hypoOorzaakFrontload hierboven al afvangt. Door
+        // ook nearHypoAverted mee te nemen is dit niet langer afhankelijk
+        // van een handmatige bevestiging — episodes die niemand bekeek
+        // worden nu ook meegenomen.
+        // Zelfde stapgrootte (3×stepU bij BACK) als een bevestigde hypo —
+        // bewust niet afgezwakt: dit is net zo'n reëel signaal, alleen
+        // eerder opgevangen.
+        val nearMissViaRescue =
+            !metrics.hypoDetected &&
+            (metrics.rescueConfirmed || metrics.nearHypoAverted) &&
+            metrics.earlyBoostWasActive &&
+            !metrics.hasManualCorrection
+
         // Tier 1: klassiek — te weinig insuline vroeg terwijl piek hoog was
         val frontloadTeKlein =
             !metrics.hypoDetected &&
+            !nearMissViaRescue &&
             metrics.earlyBoostFrac in 0.01..0.54 &&
             metrics.peakBg > 9.5 &&
             metrics.followUpCommitCount >= 1
@@ -1082,6 +1139,7 @@ object DFLearner {
         // eerder moest, niet hoeveel eerder).
         val frontloadTeLaatHogePiek =
             !metrics.hypoDetected &&
+            !nearMissViaRescue &&
             !frontloadTeKlein &&
             metrics.peakBg > 12.0 &&
             metrics.earlyBoostFrac < 0.80 &&
@@ -1090,6 +1148,7 @@ object DFLearner {
 
         val signal = when {
             hypoOorzaakFrontload   -> "BACK"
+            nearMissViaRescue      -> "BACK"
             frontloadTeKlein       -> "FORWARD"
             frontloadTeLaatHogePiek -> "FORWARD"
             else                   -> "NONE"
@@ -1183,7 +1242,12 @@ object DFLearner {
             .apply()
 
 
-        val tier = if (stapHalveerVoorTier2) "T2" else "T1"
+        val tier = when {
+            signal == "BACK" && hypoOorzaakFrontload -> "HYPO"
+            signal == "BACK" && nearMissViaRescue     -> "RESCUE_NEARMISS"
+            stapHalveerVoorTier2                      -> "T2"
+            else                                       -> "T1"
+        }
         val richting = if (signal == "FORWARD") "→ voren" else "← terug"
 
         app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEarlyBoost(
@@ -1200,5 +1264,108 @@ object DFLearner {
         return "EARLYBOOST[$tier] $richting: boost ${"%.3f".format(oldBoost)}" +
             "→${"%.3f".format(newBoost)} watch ${"%.3f".format(oldWatching)}" +
             "→${"%.3f".format(newWatching)} step=${"%.4f".format(effectiveStep)} [$signal]"
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Late-commit-decay leren (refLcd)
+    // BEWUSTE uitzondering op het "alles via D/F"-principe — zie kdoc bij
+    // DFMapping.REF_LCD_DEFAULT. Reageert specifiek op het patroon "de
+    // laatste significante commit viel te dicht bij/na de piek", los van de
+    // algehele frontload-balans die F stuurt.
+    // ─────────────────────────────────────────────────────────────────────
+
+    private const val KEY_LCD_STEP     = "lcd_step"
+    private const val LCD_STEP_DEFAULT = 0.06
+    private const val LCD_STEP_MIN     = 0.015
+
+    // Drempel voor "staart te laat/te groot" — gelijk aan de bestaande
+    // staartTeGroot-drempels in evaluate() (lastSigFrac > 0.20, < 15 min).
+    private const val LCD_LAAT_FRAC_MIN  = 0.20
+    private const val LCD_LAAT_MIN_VOOR_PIEK = 15
+
+    // FORWARD-conditie: piek te hoog terwijl er GEEN late significante
+    // commit was (>30 min voor de piek, of helemaal geen) — een aanwijzing
+    // dat de demping mogelijk te streng is en nuttige late insuline tegenhoudt.
+    // Zelfde piekdoel als EpisodeClassifier.Config.peakGoal.
+    private const val LCD_FORWARD_PEAK_THRESHOLD = 10.5
+    private const val LCD_FORWARD_VROEG_MIN = 30
+
+    fun getLcdStep(context: android.content.Context): Double =
+        prefs(context).getFloat(KEY_LCD_STEP, LCD_STEP_DEFAULT.toFloat()).toDouble()
+
+    /**
+     * Evalueer één episode en pas refLcd aan.
+     *
+     * BACK:    (hypo, OF rescueConfirmed, OF nearHypoAverted — automatisch,
+     *          zie EpisodeMetrics.nearHypoAverted) EN de laatste significante
+     *          commit was groot (>20% van totaal) en laat (≤15 min voor de
+     *          piek, of erna) → refLcd omhoog: latere commits krimpen harder
+     *          of vervallen helemaal. Dit is de PRIMAIRE reactie op dit
+     *          specifieke patroon — D/sterkte-verlaging loopt apart via
+     *          evaluate()'s RESCUE_OVERPOWERED-tak en wordt niet verdubbeld.
+     * FORWARD: geen risico-signaal, piek juist te hoog, EN geen (recente)
+     *          late significante commit → refLcd voorzichtig omlaag.
+     * NONE:    geen van beide.
+     */
+    fun evaluateLateCommitDecay(
+        context: android.content.Context,
+        metrics: EpisodeMetrics,
+        manualMaxSmb: Double = 1.25
+    ): String? {
+        if (metrics.hasManualCorrection) return null
+        if (metrics.totalInsulinDelivered < minValidInsulinFor(manualMaxSmb)) return null
+
+        val lastFrac = metrics.lastSignificantCommitFrac
+        val lastMins = metrics.lastSignificantCommitMinutesBeforePeak
+
+        val laatEnGroot = lastFrac > LCD_LAAT_FRAC_MIN &&
+            lastMins != null && lastMins <= LCD_LAAT_MIN_VOOR_PIEK
+
+        val geenRecenteLateCommit = lastFrac <= LCD_LAAT_FRAC_MIN ||
+            lastMins == null || lastMins > LCD_FORWARD_VROEG_MIN
+
+        val risicoSignaal = metrics.hypoDetected || metrics.rescueConfirmed || metrics.nearHypoAverted
+
+        val signal = when {
+            risicoSignaal && laatEnGroot -> "BACK"
+            !risicoSignaal && metrics.peakBg > LCD_FORWARD_PEAK_THRESHOLD && geenRecenteLateCommit -> "FORWARD"
+            else -> "NONE"
+        }
+
+        val p = prefs(context)
+        val oldRef = getRefLcd(context)
+
+        if (signal == "NONE") {
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logLateCommitDecay(
+                metrics = metrics, signal = "NONE", oldRef = oldRef, newRef = oldRef, step = 0.0
+            )
+            return null
+        }
+
+        var step = getLcdStep(context)
+        // BACK → refLcd omhoog (meer demping), 3× zo grote stap als FORWARD
+        // — zelfde voorzichtigheidsprincipe als evaluateEarlyBoost (een
+        // gemiste (bijna-)hypo weegt zwaarder dan een te voorzichtige episode).
+        // FORWARD → refLcd omlaag (minder demping), kleine stap.
+        val stepSigned = if (signal == "BACK") 3.0 * step else -step
+        val newRef = (oldRef + stepSigned).coerceIn(DFMapping.REF_LCD_MIN, DFMapping.REF_LCD_MAX)
+
+        setRefLcd(context, newRef)
+
+        // Stapgrootte zelf licht laten convergeren, zelfde patroon als
+        // evaluateEarlyBoost — voorkomt dat de leerstap nooit kleiner wordt.
+        if (signal == "BACK") {
+            // BACK is het belangrijkste/zeldzaamste signaal — stap niet verkleinen.
+        } else {
+            step = (step * 0.97).coerceAtLeast(LCD_STEP_MIN)
+            p.edit().putFloat(KEY_LCD_STEP, step.toFloat()).apply()
+        }
+
+        app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logLateCommitDecay(
+            metrics = metrics, signal = signal, oldRef = oldRef, newRef = newRef, step = step
+        )
+
+        return "LCD $signal: refLcd ${"%.3f".format(oldRef)}→${"%.3f".format(newRef)} " +
+            "(laatsteCommitFrac=${"%.2f".format(lastFrac)} minVoorPiek=${lastMins ?: "—"})"
     }
 }

@@ -48,7 +48,8 @@ object FclLearnerLogger {
         "aanpassing_geblokt", "old_d", "old_f", "new_d", "new_f", "eb_signal",
         "eb_tier", "eb_old_boost", "eb_new_boost", "eb_old_watching", "eb_new_watching", "eb_step",
         "fl_richting", "fl_gemiddelde_marge_min", "fl_oude_wmd", "fl_nieuwe_wmd", "fl_oude_wff", "fl_nieuwe_wff", "fl_oude_peak_bias", "fl_nieuwe_peak_bias", "fl_bruikbaar_count", "v_signal",
-        "v_old_extra", "v_new_extra", "v_step", "v_cluster_fires"
+        "v_old_extra", "v_new_extra", "v_step", "v_cluster_fires",
+        "lcd_signal", "lcd_old_ref", "lcd_new_ref", "lcd_step", "lcd_last_commit_frac", "lcd_last_commit_min_before_peak"
     )
 
     /** Start een rij met alle 64 kolommen leeg, in de canonieke volgorde. */
@@ -196,6 +197,32 @@ object FclLearnerLogger {
         values["v_new_extra"]     = ""
         values["v_step"]          = ""
         values["v_cluster_fires"] = ""
+
+        append(values)
+    }
+
+    /**
+     * Schrijf een LCD-regel: wat DFLearner.evaluateLateCommitDecay() besloot
+     * (de losse, van F ontkoppelde leeras voor refLcd — zie kdoc bij
+     * DFMapping.REF_LCD_DEFAULT).
+     */
+    fun logLateCommitDecay(
+        metrics: EpisodeMetrics,
+        signal:  String,   // "FORWARD" | "BACK" | "NONE"
+        oldRef:  Double,
+        newRef:  Double,
+        step:    Double
+    ) {
+        val values = emptyRow()
+        fillCommon(values, "LCD", metrics)
+
+        values["lcd_signal"]  = signal
+        values["lcd_old_ref"] = fmt4(oldRef)
+        values["lcd_new_ref"] = if (signal != "NONE") fmt4(newRef) else ""
+        values["lcd_step"]    = fmt4(step)
+        values["lcd_last_commit_frac"] = fmt4(metrics.lastSignificantCommitFrac)
+        values["lcd_last_commit_min_before_peak"] =
+            metrics.lastSignificantCommitMinutesBeforePeak?.toString() ?: ""
 
         append(values)
     }

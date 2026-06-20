@@ -27,6 +27,7 @@ class FCLCycleLogRepository @Inject constructor(
 ) {
     private val db by lazy { FCLAnalyzerDatabase.getInstance(context) }
     private val dao by lazy { db.cycleLogDao() }
+    private val episodeDao by lazy { db.episodeDao() }
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private val persistDb by lazy {
@@ -136,14 +137,40 @@ class FCLCycleLogRepository @Inject constructor(
         if (completedEpisodes.isEmpty()) return
 
         // ── Stap 3: metrics bouwen ────────────────────────────────────────
-        val episodeMetrics = EpisodeMetricsBuilder.build(completedEpisodes, manualMaxSmb)
+        var episodeMetrics = EpisodeMetricsBuilder.build(completedEpisodes, manualMaxSmb)
+
+        // BUGFIX (20/06/2026): EpisodeMetricsBuilder zet rescueConfirmed
+        // altijd op false ("wordt later overschreven vanuit DB") — die
+        // overschrijving gebeurde tot nu toe ALLEEN in Fclanalyzerscreen.kt
+        // (UI-getriggerd, "Stap 4"), nooit in deze automatische
+        // achtergrond-pijplijn. Gevolg: een bevestiging op "Daadwerkelijk
+        // genomen: Ja" in de Episode Viewer kwam nooit bij de automatische
+        // DFLearner.evaluate()/evaluateEarlyBoost()-aanroep hieronder terecht
+        // — de RESCUE_OVERPOWERED-tak (D/F) en de nieuwe nearMissViaRescue-tak
+        // (earlyBoostFactor/watchingFrontloadFrac) vuurden hierdoor in de
+        // praktijk nooit automatisch af, ook niet na een bevestigd
+        // afgewend incident. Hier dezelfde matching als in Fclanalyzerscreen.kt
+        // (op Episode.start.toString() == EpisodeEntity.startTs).
+        val rescueYesTs = episodeDao.getRescueConfirmedEpisodes().map { it.startTs }.toSet()
+        if (rescueYesTs.isNotEmpty()) {
+            episodeMetrics = episodeMetrics.mapIndexed { i, m ->
+                val ep = completedEpisodes.getOrNull(i)
+                if (ep != null && ep.start.toString() in rescueYesTs) m.copy(rescueConfirmed = true) else m
+            }
+        }
 
         // ── Stap 4: DFLearner ─────────────────────────────────────────────
         // evaluate() logt altijd (ook bij AUTO_DISABLED/COOLDOWN/etc) via
         // FclLearnerLogger, en past D/F alleen toe als isAutoEnabled=true.
         val latestMetrics = episodeMetrics.lastOrNull()
         if (latestMetrics != null) {
-            DFLearner.evaluate(context, latestMetrics)
+            DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb)
+            // Losse leeras voor refLcd (laatste-commit-demping) — zie kdoc
+            // bij DFMapping.REF_LCD_DEFAULT en DFLearner.evaluateLateCommitDecay.
+            // Bewust een eigen aanroep, niet ondergebracht in evaluate()
+            // zelf: dit reageert specifiek op het "te late/te grote laatste
+            // commit"-patroon, los van de algehele D/F-balans.
+            DFLearner.evaluateLateCommitDecay(context, latestMetrics, manualMaxSmb = manualMaxSmb)
         }
 
         // ── Stap 5: FrontloadLearner ───────────────────────────────────────
@@ -174,13 +201,14 @@ class FCLCycleLogRepository @Inject constructor(
             val refWff = DFLearner.getRefWff(context)
             val refEb  = DFLearner.getRefEb(context)
             val refPeakBias = DFLearner.getRefPeakBias(context)
+            val refLcd = DFLearner.getRefLcd(context)
             val agg    = DFLearner.getAggressiveness(context)
 
             val po = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
                 .toParamOverrides(
                     d = d, f = f,
                     refWmd = refWmd, refWff = refWff, refEb = refEb,
-                    refPeakBias = refPeakBias,
+                    refPeakBias = refPeakBias, refLcd = refLcd,
                     vExtra = vExtra, aggLevel = agg
                 )
             val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
@@ -195,7 +223,8 @@ class FCLCycleLogRepository @Inject constructor(
                         "wmd=${"%.2f".format(refWmd)} " +
                         "wff=${"%.2f".format(refWff)} " +
                         "eb=${"%.2f".format(refEb)} " +
-                        "peakBias=${"%.2f".format(refPeakBias)}",
+                        "peakBias=${"%.2f".format(refPeakBias)} " +
+                        "lcd=${"%.2f".format(refLcd)}",
                     episodeCount   = episodeMetrics.size
                 )
         }

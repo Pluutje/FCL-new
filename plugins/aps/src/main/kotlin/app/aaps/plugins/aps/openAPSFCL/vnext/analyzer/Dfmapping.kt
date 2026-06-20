@@ -50,11 +50,23 @@ object DFMapping {
     const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
     const val REF_PEAK_BIAS_DEFAULT = 0.0  // Vroege piek-bias-correctie (mmol), 0.0 = uit
 
+    // refLcd: BEWUSTE UITZONDERING op het "alles via D/F"-principe hierboven.
+    // lateCommitDecayFactor was tot 20/06/2026 puur afgeleid van F — maar een
+    // (bijna-)hypo veroorzaakt door specifiek de LAATSTE, te-late commit moet
+    // niet per se F (en daarmee de hele frontload-balans) bijstellen; dat is
+    // een ander signaal dan "te veel/te weinig vroeg gedoseerd". refLcd is een
+    // losse, additionele extra bovenop de F-afgeleide basiswaarde — zelfde
+    // soort persistente "ondergrond"-parameter als refEb, alleen specifiek
+    // gericht op het krimpen/laten vervallen van late commits, onafhankelijk
+    // bijgestuurd door DFLearner.evaluateLateCommitDecay().
+    const val REF_LCD_DEFAULT = 0.0    // 0.0 = geen extra demping bovenop de F-afgeleide basis
+
     // Bereiken voor de kalibratie-knoppen
     const val REF_WMD_MIN = 0.80;  const val REF_WMD_MAX = 2.00
     const val REF_WFF_MIN = 0.40;  const val REF_WFF_MAX = 0.90
     const val REF_EB_MIN  = 1.0;   const val REF_EB_MAX  = 2.0
     const val REF_PEAK_BIAS_MIN = 0.0;  const val REF_PEAK_BIAS_MAX = 1.5
+    const val REF_LCD_MIN = 0.0;   const val REF_LCD_MAX = 0.45
 
     /**
      * Bereken alle 17 parameters als ConfigOverrideWriter.ParamOverrides
@@ -74,6 +86,7 @@ object DFMapping {
         refWff: Double = REF_WFF_DEFAULT,
         refEb:  Double = REF_EB_DEFAULT,
         refPeakBias: Double = REF_PEAK_BIAS_DEFAULT,
+        refLcd: Double = REF_LCD_DEFAULT,
         vExtra: Double = 0.0,
         aggLevel: Int = 5
     ): ConfigOverrideWriter.ParamOverrides {
@@ -146,7 +159,12 @@ object DFMapping {
             // Bij F=0.75: lcd=0.35 (was 0.50). Gecombineerd met budgetDecay
             // blijft effectiveDecay onder het max van 0.70, wat commit 2
             // iets groter maakt (lateDecayMul 0.33 i.p.v. 0.30).
-            lateCommitDecayFactor         = max(0.0, (fEff - 0.5) * 1.4 - vC * 0.6),
+            // refLcd: losse, onafhankelijk geleerde extra bovenop de
+            // F-afgeleide basis (zie kdoc bij REF_LCD_DEFAULT hierboven) —
+            // specifiek voor "laatste commit was te laat/te groot", los van
+            // de algehele frontload-balans die F stuurt.
+            lateCommitDecayFactor         = (max(0.0, (fEff - 0.5) * 1.4 - vC * 0.6) + refLcd)
+                .coerceIn(0.0, REF_LCD_MAX + 0.65),
             lateCommitDecayThreshold      = max(0.40, 0.55 - (fEff - 0.5) * 0.10),
 
             // Piekkalibr.: F hoog = steilere vroege stijging verwacht

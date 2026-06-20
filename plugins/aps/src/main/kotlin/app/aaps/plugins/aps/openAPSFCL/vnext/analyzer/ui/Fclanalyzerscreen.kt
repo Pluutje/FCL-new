@@ -371,9 +371,18 @@ fun FclAnalyzerScreen(
                         onApplyToAaps = { stvMap ->
                             val d = DFLearner.getD(context)
                             val f = DFLearner.getF(context)
+                            // BUGFIX (20/06/2026): gaf voorheen alleen d/f/aggLevel door —
+                            // refWmd/refWff/refEb/refPeakBias/refLcd vielen daardoor terug
+                            // op hun DEFAULT i.p.v. de geleerde waarden, telkens als deze
+                            // knop werd ingedrukt. Ontdekt bij het toevoegen van refLcd.
                             ConfigOverrideWriter.writeWithStvAndParams(
                                 stvMap = stvMap,
                                 paramOverrides = DFMapping.toParamOverrides(d, f,
+                                    refWmd = DFLearner.getRefWmd(context),
+                                    refWff = DFLearner.getRefWff(context),
+                                    refEb = DFLearner.getRefEb(context),
+                                    refPeakBias = DFLearner.getRefPeakBias(context),
+                                    refLcd = DFLearner.getRefLcd(context),
                                     aggLevel = DFLearner.getAggressiveness(context)),
                                 reason = result.summary,
                                 episodeCount = episodes?.size ?: 0
@@ -775,7 +784,10 @@ private suspend fun runAdvisorFlow(
 
         if (latestMetrics != null) {
             // Type-specifieke leer-stap
-            val step = DFLearner.evaluate(context, latestMetrics)
+            // manualMaxSmb hier opnieuw opgehaald (niet in scope vanuit de
+            // LaunchedEffect hierboven) — zie controlevraag Ecko 20/06/2026.
+            val manualMaxSmbForEval = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
+            val step = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmbForEval)
             // MaxSmbLearner.evaluate verwijderd — maxSMB volgt S%
 
             // Frontload timing leren — alle bruikbare episodes meegeven
@@ -797,6 +809,7 @@ private suspend fun runAdvisorFlow(
                         refWff = DFLearner.getRefWff(context),
                         refEb = DFLearner.getRefEb(context),
                         refPeakBias = DFLearner.getRefPeakBias(context),
+                        refLcd = DFLearner.getRefLcd(context),
                         aggLevel = DFLearner.getAggressiveness(context)
                     ),
                     reason         = "D/F: ${step!!.reason}",

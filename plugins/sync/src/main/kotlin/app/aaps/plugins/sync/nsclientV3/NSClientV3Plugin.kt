@@ -747,8 +747,26 @@ class NSClientV3Plugin @Inject constructor(
             val recalculatedMgdl: Double = run {
                 val ts = dataPair.value.timestamp
                 val toleranceMs = 150_000L  // ±2.5 minuten: dekt alle xDrip-intervals
-                val isRecentEntry = (System.currentTimeMillis() - ts) < 90_000L
-                val maxWaitMs = if (isRecentEntry) 8_000L else 0L
+                // BUGFIX (20/06/2026, Ecko): was 90_000L. Dat is de leeftijd van de
+                // METING zelf, niet van het moment waarop deze code daadwerkelijk
+                // draait — en daar zit het probleem. Bij drukte (WorkManager-keten
+                // LoadStatusWorker→...→DataSyncWorker bezig met andere taken, een
+                // net afgeronde sync, etc.) kan er ruim meer dan 90s zitten tussen
+                // het ontstaan van de meting en het moment dat dbOperationEntries()
+                // voor díe meting wordt uitgevoerd. Op dat moment was de meting dus
+                // allang "niet meer recent" volgens de oude grens — terwijl de
+                // herberekening (die door diezelfde drukke AAPS-instantie moet
+                // gebeuren) op dat moment evengoed nog bezig kan zijn. Resultaat:
+                // precies in de situaties waarin AAPS het drukst is, valt deze check
+                // het vaakst terug op de ruwe waarde — exact het patroon dat op de
+                // M5-stack zichtbaar werd.
+                // 300_000L (5 min = één volledige CGM-cyclus) geeft veel meer marge
+                // voor pipeline-vertraging, zonder de bulk/historische resync-
+                // prestaties te raken: entries uit een volledige hersync zijn typisch
+                // uren tot dagen oud, dus ruim boven deze nieuwe grens — die blijven
+                // gewoon zonder wachttijd verwerkt, zoals nu ook al het geval is.
+                val isRecentEntry = (System.currentTimeMillis() - ts) < 300_000L
+                val maxWaitMs = if (isRecentEntry) 10_000L else 0L
                 val pollIntervalMs = 500L
                 var waited = 0L
                 var result: Double? = null

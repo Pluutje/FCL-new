@@ -111,5 +111,20 @@ data class EpisodeMetrics(
     // Budget-neutraal leren: frac te laag → earlyBoostFactor omhoog,
     // watchingFrontloadFrac evenredig omlaag zodat totaal gelijk blijft.
     val earlyBoostDeliveredU: Double = 0.0,
-    val earlyBoostFrac: Double = 0.0
+    val earlyBoostFrac: Double = 0.0,
+
+    // ── Automatische near-hypo-detectie (20/06/2026) ─────────────────────
+    // True wanneer de BG-kinetiek zelf (dieptepunt + substantiële IOB +
+    // duidelijke rebound erna) er sterk op wijst dat een hypo alleen is
+    // uitgebleven door koolhydraten (rescue of gewoon een vervolgmaaltijd) —
+    // automatisch berekend uit de cyclusdata, NIET afhankelijk van de
+    // handmatige "Ja/Nee"-bevestiging in de Episode Viewer (die was
+    // oorspronkelijk bedoeld om de detector-drempels te kalibreren, niet als
+    // vereiste bewijslast — zie EpisodeMetricsBuilder voor de exacte criteria).
+    // In tegenstelling tot de rescue-ARM/CONFIRM-detector in FCLvNext.kt
+    // (real-time gebruikerswaarschuwing) is hier GEEN eis dat er geen
+    // insuline gelijktijdig werd afgegeven — insuline kan een BG-stijging
+    // toch niet verklaren, dus die eis zou hier het probleem juist
+    // uitsluiten in plaats van bevestigen.
+    val nearHypoAverted: Boolean = false
 )
