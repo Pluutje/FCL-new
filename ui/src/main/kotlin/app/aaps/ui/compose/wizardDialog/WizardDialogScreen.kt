@@ -283,11 +283,14 @@ private fun WizardDialogContent(
                 if (uiState.totalInsulin > 0.0) {
                     Text(stringResource(CoreUiR.string.format_insulin_units, uiState.totalInsulin))
                 }
-                if (uiState.totalInsulin > 0.0 && uiState.carbs > 0) {
+                if (uiState.totalInsulin > 0.0 && (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0)) {
                     Spacer(modifier = Modifier.width(4.dp))
                 }
-                if (uiState.carbs > 0) {
-                    Text(stringResource(CoreUiR.string.format_carbs, uiState.carbs))
+                if (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0) {
+                    Text(
+                        if (uiState.eCarbs > 0) stringResource(CoreUiR.string.format_carbs_split, uiState.effectiveCarbs, uiState.eCarbs)
+                        else stringResource(CoreUiR.string.format_carbs, uiState.effectiveCarbs)
+                    )
                 }
                 if (!uiState.okVisible) {
                     Text(stringResource(CoreUiR.string.ok))
@@ -345,9 +348,10 @@ private fun WizardDialogContent(
                                         color = ElementType.INSULIN.color()
                                     )
                                 }
-                                if (uiState.carbs > 0) {
+                                if (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0) {
                                     Text(
-                                        text = stringResource(CoreUiR.string.format_carbs, uiState.carbs),
+                                        text = if (uiState.eCarbs > 0) stringResource(CoreUiR.string.format_carbs_split, uiState.effectiveCarbs, uiState.eCarbs)
+                                        else stringResource(CoreUiR.string.format_carbs, uiState.effectiveCarbs),
                                         fontWeight = FontWeight.Bold,
                                         color = ElementType.CARBS.color()
                                     )
