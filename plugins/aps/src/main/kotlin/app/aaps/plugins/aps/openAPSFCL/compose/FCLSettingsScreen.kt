@@ -31,6 +31,11 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 @Composable
 fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
+    // Link naar het externe FCLvNext-handboek (Google Doc) — los bestand,
+    // zodat het bijwerken van de uitleg geen nieuwe app-build vereist.
+  //  val FCL_DOCS_URL = "https://docs.google.com/document/d/14iTVM0uW8aYZgQYYRJaJ9O7XyiN9ZbAy/edit"
+    val FCL_DOCS_URL = "https://docs.google.com/document/d/1bexT8FFEA0SGP7-P13pL25iXvgkfH_yA/edit"
+
     fun String.toHour(): Int = split(":").getOrNull(0)?.toIntOrNull() ?: 7
     fun String.toMinute(): Int = split(":").getOrNull(1)?.toIntOrNull() ?: 0
 
@@ -104,6 +109,47 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+
+        // ── Documentatie: link naar het volledige FCLvNext-handboek ───────
+        // Externe (Google Doc) link i.p.v. ingebouwde tekst — zelfde opzet
+        // als het oude systeem: één centraal, makkelijk bij te werken
+        // document i.p.v. uitleg die in de app zelf verspreid staat.
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("📘", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Hoe werkt FCLvNext?",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                }
+                Text(
+                    "Uitleg van het hele algoritme — wat het doet, hoe het leert " +
+                    "(indien ingeschakeld) en wat elke instelling betekent.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(FCL_DOCS_URL)
+                        )
+                        ctx.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open handleiding")
+                }
+            }
+        }
 
         FCLSection(
             title = s.settingsDosisBehavior,
