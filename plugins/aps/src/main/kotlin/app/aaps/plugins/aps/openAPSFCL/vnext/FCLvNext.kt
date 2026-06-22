@@ -1745,6 +1745,9 @@ private fun computeEarlyDoseDecision(
     now: DateTime,
     config: FCLvNextConfig,
     sustainedHighSlopeMinutes: Double = 0.0,
+    // Acceleratie-afname t.o.v. ~18 min geleden — zie kdoc bij
+    // FCLvNext.updateAccelHistoryAndGetDecline(). Positief = decelererend.
+    accelDeclineSinceUncertain: Double = 0.0,
     // Voor hypo-debt compensatie: projectie zónder insuline uit de meest recente
     // hypo-bescherming check. Geeft zekerheid dat compensatie veilig is.
     hypoProjectedMinNoInsulin: Double = Double.POSITIVE_INFINITY,
@@ -1786,9 +1789,31 @@ private fun computeEarlyDoseDecision(
     val sustainScore = smooth01(
         sustainedHighSlopeMinutes / config.sustainedRiseMinTarget.toDouble()
     )
-    // Alleen meetellen als mealState al CONFIRMED is (eerste zekerheidsdrempel)
-    val effectiveSustainScore = if (mealSignal.state == MealState.CONFIRMED)
-        sustainScore else 0.0
+
+    // ── Persistentie-check (decelereert de stijging, of houdt ze aan?) ─────
+    // Onderscheidt "stijging topt vanzelf uit" (accelDeclineSinceUncertain duidelijk
+    // positief, zoals het ontbijt van 20/06: piek 7,2 — terecht klein
+    // gebleven) van "stijging houdt aan" (accelDeclineSinceUncertain ~0, zoals de
+    // maaltijd van 21/06 10:15: piek 13,2 — had eerder mogen escaleren).
+    // declineTolerance is bewust klein: bij het ontbijt was de afname al na
+    // ~10-15 min duidelijk meetbaar; ruis in een enkele cyclus mag de score
+    // niet meteen op 0 zetten.
+    val declineTolerance = 0.015
+    val persistScore = smooth01((declineTolerance - accelDeclineSinceUncertain) / declineTolerance)
+
+    // Gefaseerd: CONFIRMED telt zoals voorheen voluit mee. UNCERTAIN telt nu
+    // ÓÓK mee, maar alleen als de persistentie-check de stijging als
+    // "aanhoudend" beoordeelt, én met een verlaagd gewicht (0.65) — extra
+    // voorzichtigheid omdat de maaltijdherkenning zelf nog niet CONFIRMED is.
+    // NONE telt nooit mee. Zie analyse 21/06/2026 in het overdrachtsdocument:
+    // dit signaal stond eerder ~25 minuten lang op 0 tijdens precies het
+    // venster waarin de maaltijd van 21/06 had moeten escaleren.
+    val UNCERTAIN_SUSTAIN_WEIGHT = 0.65
+    val effectiveSustainScore = when (mealSignal.state) {
+        MealState.CONFIRMED -> sustainScore
+        MealState.UNCERTAIN -> sustainScore * persistScore * UNCERTAIN_SUSTAIN_WEIGHT
+        MealState.NONE      -> 0.0
+    }
 
     val watchingBonus =
         if (peak.state == PeakPredictionState.WATCHING) 0.10 else 0.0
@@ -2791,6 +2816,52 @@ class FCLvNext(
     // Reset naar 0 zodra slope onder de drempel zakt.
     private var sustainedHighSlopeMinutes: Double = 0.0
     private var sustainedLastUpdateAt: DateTime? = null
+
+    // ── Persistentie van een stijging (deceleratie-detectie) ───────────────
+    // sustainedHighSlopeMinutes meet alleen HOELANG slope al hoog is — niet
+    // OF de stijging aan het uittoppen is. Twee stijgingen kunnen allebei een
+    // verzadigde sustainScore hebben terwijl de ene vanzelf afremt (acceleratie
+    // daalt duidelijk) en de andere gewoon doorzet (acceleratie blijft ~gelijk).
+    // Bevinding 21/06/2026: ontbijt 20/06 (terecht klein gebleven, piek 7,2)
+    // en de maaltijd van 21/06 10:15 (had eerder mogen escaleren, piek 13,2)
+    // hadden BEIDE een verzadigde sustainScore tijdens hun MealState.UNCERTAIN-
+    // venster — het onderscheidende signaal zat in de accel-trend, niet in
+    // de slope-duur.
+    //
+    // Eerste opzet (vergelijk met accel van een vast aantal minuten terug)
+    // bleek de aanloopfase van de stijging zelf te raken: bij een net
+    // gestarte stijging valt "X min geleden" vaak nog middenin de eerste,
+    // altijd-aanwezige versnellingspiek, wat ten onrechte als "decelererend"
+    // werd gelezen. In plaats daarvan wordt nu de acceleratie bevroren op
+    // het MOMENT dat de classificatie van CONFIRMED terugvalt naar UNCERTAIN
+    // — en alles daarna binnen diezelfde UNCERTAIN-periode vergeleken met
+    // dát ankerpunt. Bij het ontbijt was de afname binnen 5-10 minuten na
+    // dat omslagpunt al duidelijk meetbaar; bij de maaltijd van 21/06 bleef
+    // de acceleratie de hele UNCERTAIN-periode nagenoeg gelijk. Geverifieerd
+    // tegen beide episodes vóór implementatie.
+    private var accelAtUncertainEntry: Double? = null
+    private var lastMealState: MealState? = null
+
+    /**
+     * Werkt de UNCERTAIN-ankerwaarde bij en geeft de afname sinds het moment
+     * van binnenkomst in UNCERTAIN (positief = afgenomen/decelererend, 0 of
+     * negatief = gelijk gebleven of toegenomen). Buiten een UNCERTAIN-periode
+     * altijd 0.0 (neutraal).
+     */
+    private fun updateAccelDeclineSinceUncertain(currentState: MealState, currentAccel: Double): Double {
+        val decline = if (currentState == MealState.UNCERTAIN) {
+            if (lastMealState != MealState.UNCERTAIN) {
+                accelAtUncertainEntry = currentAccel
+            }
+            (accelAtUncertainEntry ?: currentAccel) - currentAccel
+        } else {
+            accelAtUncertainEntry = null
+            0.0
+        }
+        lastMealState = currentState
+        return decline
+    }
+
     var lastActiveConfig: FCLvNextConfig? = null
         private set
 
@@ -3724,6 +3795,14 @@ class FCLvNext(
             sustainedHighSlopeMinutes = 0.0
         }
 
+// ─────────────────────────────────────────────
+// 📉 ACCELERATIE-TREND (decelereert de stijging, of houdt ze aan?)
+// Zie kdoc bij accelAtUncertainEntry/updateAccelDeclineSinceUncertain hierboven.
+// ─────────────────────────────────────────────
+
+        val accelDeclineSinceUncertain = updateAccelDeclineSinceUncertain(mealSignal.state, ctx.acceleration)
+        logRow.accelDeclineSinceUncertain = accelDeclineSinceUncertain
+
         logRow.sustainedHighSlopeMinutes = sustainedHighSlopeMinutes
 
 // ─────────────────────────────────────────────
@@ -3750,6 +3829,7 @@ class FCLvNext(
             now = now,
             config = config,
             sustainedHighSlopeMinutes = sustainedHighSlopeMinutes,
+            accelDeclineSinceUncertain = accelDeclineSinceUncertain,
             hypoProjectedMinNoInsulin = hypoNoInsulinProjection,
             episodeHypoDebtU = episodeHypoDebtU
         )

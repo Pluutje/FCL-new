@@ -64,6 +64,7 @@ data class FCLCycleLogEntity(
     val nightCooldownMinutes: Int = 0,
     val nightCorrectionHoldDeltaMax: Double = 0.0,
     val nightAbsorptionDoseFactor: Double = 0.0,
+    val accelDeclineSinceUncertain: Double = 0.0,
     val shouldDeliver: Boolean,
     // Externe insuline (handmatige bolus of AAPS SMB) gedetecteerd via IOB-delta.
     // Berekend als max(0, currentIOB - prevIOB + expectedDecay - fclOwnDose).

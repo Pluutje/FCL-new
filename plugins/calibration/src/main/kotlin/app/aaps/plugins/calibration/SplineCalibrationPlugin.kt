@@ -127,7 +127,7 @@ class SplineCalibrationPlugin @Inject constructor(
         val entries = persistenceLayer.getValidCalibrationEntriesSince(sessionStart)
 
         // Try spline first; fall back to linear.
-        val spline = fitSplineCalibration(entries, now)
+        val spline = fitSplineCalibration(entries, now).fit
         val linear = spline?.linearFallback ?: fitLinearCalibration(entries, now)
 
         // Manual offset (mmol/L → mg/dL), persisted by SplineCalibrationViewModel

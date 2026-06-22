@@ -140,6 +140,10 @@ data class FCLvNextCsvLogRow(
     var nightCooldownMinutes: Int = 0,
     var nightCorrectionHoldDeltaMax: Double = 0.0,
     var nightAbsorptionDoseFactor: Double = 0.0,
+    // Acceleratie-afname t.o.v. ~18 min geleden — positief = decelererend
+    // (stijging topt uit), 0/negatief = aanhoudend/versnellend. Zie kdoc bij
+    // FCLvNext.updateAccelHistoryAndGetDecline().
+    var accelDeclineSinceUncertain: Double = 0.0,
     var shouldDeliver: Boolean = false,
     var externalBolusU: Double = 0.0,
 

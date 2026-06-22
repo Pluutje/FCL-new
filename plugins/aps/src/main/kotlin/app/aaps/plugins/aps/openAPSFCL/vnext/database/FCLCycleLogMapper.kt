@@ -51,6 +51,7 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
     nightCooldownMinutes          = nightCooldownMinutes,
     nightCorrectionHoldDeltaMax   = nightCorrectionHoldDeltaMax,
     nightAbsorptionDoseFactor     = nightAbsorptionDoseFactor,
+    accelDeclineSinceUncertain               = accelDeclineSinceUncertain,
     shouldDeliver          = shouldDeliver,
     externalBolusU         = externalBolusU,
 

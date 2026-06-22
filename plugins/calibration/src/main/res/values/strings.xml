@@ -30,7 +30,7 @@
 
 
 
-    
+
 
     <!-- Plugin naam / beschrijving -->
     <string name="spline_calibration_name">Spline calibration</string>
@@ -39,13 +39,25 @@
         Monotone piecewise-cubic (Fritsch–Carlson) calibration with a single
         interior knot at 6 mmol/L (108 mg/dL). Corrects S-shaped sensor bias
         in the clinically critical low range. Falls back to linear calibration
-        when fewer than 3 entries are available or the spline fit is rejected.
+        when fewer than 4 entries are available or the spline fit is rejected.
     </string>
 
     <!-- Statuscard -->
     <string name="spline_cal_status_spline_active">Spline calibration applied</string>
-    <!-- %1$d = MIN_ENTRIES_FOR_SPLINE (3) -->
+    <!-- %1$d = MIN_ENTRIES_FOR_SPLINE (4) -->
     <string name="spline_cal_status_linear_fallback">Linear fallback active (need %1$d entries for spline)</string>
+    <!-- Specific fallback reasons (21/06/2026): the generic message above only
+         covers "not enough entries in total" — with a fresh sensor session,
+         the far more common case is having enough entries overall but not
+         enough spread across both the low and high BG segment. Shown instead
+         of spline_cal_status_linear_fallback whenever the real reason is known. -->
+    <!-- %1$d = MIN_POINTS_PER_SEGMENT (2) -->
+    <string name="spline_cal_status_fallback_low_segment">Linear fallback active (need %1$d entries below 6 mmol/L)</string>
+    <!-- %1$d = MIN_POINTS_PER_SEGMENT (2) -->
+    <string name="spline_cal_status_fallback_high_segment">Linear fallback active (need %1$d entries above 6 mmol/L)</string>
+    <string name="spline_cal_status_fallback_slope_rejected">Linear fallback active (spline rejected — slope outside safe range)</string>
+    <string name="spline_cal_status_fallback_segments_close">Linear fallback active (entries too close together for a stable curve)</string>
+    <string name="spline_cal_status_fallback_not_monotone">Linear fallback active (spline rejected — fit would not be monotone)</string>
 
     <!-- Knooppunt detail -->
     <!-- %1$s = correctie bij knooppunt bijv. "+0,3" -->

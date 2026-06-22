@@ -60,38 +60,117 @@ data class SplineFit(
     val linearFallback: CalibrationFit
 ) {
     fun apply(sensorMgdl: Double, manualOffsetMgdl: Double = 0.0): Double {
-        // Bij extrapolatie boven cx_high: slope minimaal 1.0 zodat de correctie
-        // niet daalt bij verder stijgende BG. slope_high < 1.0 reflecteert sensor-
-        // compressie in de data maar mag de gecalibreerde waarde niet laten afbuigen.
-        val extrapolateHighSlope = slope_high.coerceAtLeast(1.0)
         val fitted = when {
-            sensorMgdl <= cx_low  -> cy_low  + slope_low            * (sensorMgdl - cx_low)
-            sensorMgdl >= cx_high -> cy_high + extrapolateHighSlope  * (sensorMgdl - cx_high)
+            sensorMgdl <= cx_low  -> cy_low  + slope_low * (sensorMgdl - cx_low)
+            sensorMgdl >= cx_high -> extrapolateAboveHigh(sensorMgdl)
             else -> hermite(sensorMgdl, cx_low, cy_low, slope_low,
                             cx_high, cy_high, slope_high)
         }
         return fitted + manualOffsetMgdl
     }
 
+    /**
+     * Extrapolatie boven cx_high, met een veiligheidsvloer van slope 1.0 —
+     * de gecalibreerde waarde mag nooit afvlakken bij verder stijgende
+     * sensorwaarden (slope_high < 1.0 reflecteert sensor-compressie in de
+     * data, maar mag de correctie niet laten afbuigen).
+     *
+     * BUGFIX (21/06/2026, Ecko): de vloer werd voorheen instant toegepast
+     * (`slope_high.coerceAtLeast(1.0)`) — bij elke fit met slope_high < 1.0
+     * (toegestaan, SLOPE_MIN=0.55) sprong de afgeleide dan abrupt van
+     * slope_high naar 1.0 precies op cx_high: de waarde liep door, maar de
+     * helling kneep — een zichtbare knik in de grafiek ("rare afbuigingen").
+     * Nu vloeit de slope, als slope_high < 1.0, geleidelijk op naar 1.0 over
+     * BLEND_WIDTH_MGDL — waarde én afgeleide sluiten bij cx_high naadloos
+     * aan op de Hermite-curve (geen knik meer), en pas voorbij de
+     * overgangszone geldt de volledige veiligheidsvloer.
+     */
+    private fun extrapolateAboveHigh(sensorMgdl: Double): Double {
+        val dx = sensorMgdl - cx_high
+        if (slope_high >= 1.0) {
+            // Geen vloer nodig — eigen slope kan nooit een knik geven.
+            return cy_high + slope_high * dx
+        }
+        val blend = BLEND_WIDTH_MGDL
+        return if (dx <= blend) {
+            // Lineair oplopende slope van slope_high (bij dx=0) naar 1.0
+            // (bij dx=blend), geïntegreerd → kwadratisch stuk. Waarde en
+            // afgeleide sluiten bij dx=0 exact aan op de Hermite-tak.
+            cy_high + slope_high * dx + 0.5 * (1.0 - slope_high) / blend * dx * dx
+        } else {
+            // Voorbij de overgangszone: rechte lijn met slope 1.0, aansluitend
+            // op het eindpunt van de overgangszone (waarde én afgeleide).
+            val blendEndY = cy_high + slope_high * blend + 0.5 * (1.0 - slope_high) * blend
+            blendEndY + 1.0 * (dx - blend)
+        }
+    }
+
     val correctionAtKnot: Double get() = knotY - knotX
     val hasTwoKnots: Boolean get() = false
 }
+
+/** Breedte (mg/dL) van de overgangszone waarin de veiligheidsvloer-slope
+ *  geleidelijk wordt bereikt — zie kdoc bij [SplineFit.extrapolateAboveHigh].
+ *  36 mg/dL = 2 mmol/L. */
+private const val BLEND_WIDTH_MGDL = 36.0
 
 // ---------------------------------------------------------------------------
 // Public fit function
 // ---------------------------------------------------------------------------
 
-fun fitSplineCalibration(entries: List<CAL>, now: Long): SplineFit? {
-    if (entries.size < MIN_ENTRIES_FOR_SPLINE) return null
+/**
+ * Reden waarom [fitSplineCalibration] is teruggevallen op de lineaire fit.
+ * Toegevoegd 21/06/2026 (Ecko): de UI toonde voorheen altijd "need 4 entries
+ * for spline" zodra de spline niet lukte — ook als er allang ≥4 punten waren
+ * maar bijvoorbeeld alle punten in hetzelfde segment (laag óf hoog t.o.v.
+ * SPLINE_SPLIT_MGDL) vielen. Met een verse sensorsessie waarbij vooral in
+ * het begin rond een vergelijkbare BG wordt gekalibreerd, is dat juist de
+ * meest voorkomende reden — niet "te weinig punten in totaal".
+ */
+enum class SplineFailureReason {
+    /** < MIN_ENTRIES_FOR_SPLINE punten in totaal. */
+    TOO_FEW_ENTRIES,
+    /** ≥ MIN_ENTRIES_FOR_SPLINE in totaal, maar < MIN_POINTS_PER_SEGMENT in het
+     *  segment sensor ≤ SPLINE_SPLIT_MGDL. */
+    TOO_FEW_LOW_SEGMENT,
+    /** ≥ MIN_ENTRIES_FOR_SPLINE in totaal, maar < MIN_POINTS_PER_SEGMENT in het
+     *  segment sensor > SPLINE_SPLIT_MGDL. */
+    TOO_FEW_HIGH_SEGMENT,
+    /** Eén van beide segment-slopes valt buiten [SLOPE_MIN, SLOPE_MAX]. */
+    SLOPE_OUT_OF_RANGE,
+    /** De segment-centroïden liggen te dicht bij elkaar (< MIN_SEGMENT_RANGE_MGDL
+     *  span) voor een numeriek stabiele overgangszone. */
+    SEGMENTS_TOO_CLOSE,
+    /** De Hermite-curve zou tussen de segmenten niet monotoon stijgend zijn. */
+    NOT_MONOTONE
+}
 
-    val linear = fitLinearCalibration(entries, now) ?: return null
+/**
+ * @return het succesvolle [SplineFit], of `null` met de reden in [SplineFitResult.reason]
+ *         wanneer is teruggevallen op lineair.
+ */
+data class SplineFitResult(
+    val fit: SplineFit?,
+    val reason: SplineFailureReason?
+)
+
+fun fitSplineCalibration(entries: List<CAL>, now: Long): SplineFitResult {
+    if (entries.size < MIN_ENTRIES_FOR_SPLINE)
+        return SplineFitResult(null, SplineFailureReason.TOO_FEW_ENTRIES)
+
+    val linear = fitLinearCalibration(entries, now)
+        ?: return SplineFitResult(null, SplineFailureReason.TOO_FEW_ENTRIES)
 
     val low  = entries.filter { it.sensorMgdlAtPairing <= SPLINE_SPLIT_MGDL }
     val high = entries.filter { it.sensorMgdlAtPairing >  SPLINE_SPLIT_MGDL }
 
     // Beide segmenten moeten voldoende punten hebben voor een betrouwbare fit.
-    if (low.size  < MIN_POINTS_PER_SEGMENT) return null
-    if (high.size < MIN_POINTS_PER_SEGMENT) return null
+    // Dit, niet "te weinig punten in totaal", is in de praktijk de meest
+    // voorkomende reden voor fallback vroeg in een sensorsessie.
+    if (low.size  < MIN_POINTS_PER_SEGMENT)
+        return SplineFitResult(null, SplineFailureReason.TOO_FEW_LOW_SEGMENT)
+    if (high.size < MIN_POINTS_PER_SEGMENT)
+        return SplineFitResult(null, SplineFailureReason.TOO_FEW_HIGH_SEGMENT)
 
     return fitSegmentSpline(low, high, linear, now)
 }
@@ -105,7 +184,7 @@ private fun fitSegmentSpline(
     high:   List<CAL>,
     linear: CalibrationFit,
     now:    Long
-): SplineFit? {
+): SplineFitResult {
     // Gewogen centroiden per segment
     val (cx_low,  cy_low)  = weightedCentroid(low,  now)
     val (cx_high, cy_high) = weightedCentroid(high, now)
@@ -117,15 +196,19 @@ private fun fitSegmentSpline(
     val slope_high = segmentSlope(high, now) ?: linear.slope
 
     // Beide slopes moeten fysiek plausibel zijn.
-    if (slope_low  < SLOPE_MIN || slope_low  > SLOPE_MAX) return null
-    if (slope_high < SLOPE_MIN || slope_high > SLOPE_MAX) return null
+    if (slope_low  < SLOPE_MIN || slope_low  > SLOPE_MAX)
+        return SplineFitResult(null, SplineFailureReason.SLOPE_OUT_OF_RANGE)
+    if (slope_high < SLOPE_MIN || slope_high > SLOPE_MAX)
+        return SplineFitResult(null, SplineFailureReason.SLOPE_OUT_OF_RANGE)
 
     // De overgangszone moet breed genoeg zijn voor numerieke stabiliteit.
     val span = cx_high - cx_low
-    if (span < MIN_SEGMENT_RANGE_MGDL) return null
+    if (span < MIN_SEGMENT_RANGE_MGDL)
+        return SplineFitResult(null, SplineFailureReason.SEGMENTS_TOO_CLOSE)
 
     // Monotonie: de Hermite-curve mag niet dalen tussen cx_low en cx_high.
-    if (!isMonotoneIncreasing(cx_low, cy_low, slope_low, cx_high, cy_high, slope_high)) return null
+    if (!isMonotoneIncreasing(cx_low, cy_low, slope_low, cx_high, cy_high, slope_high))
+        return SplineFitResult(null, SplineFailureReason.NOT_MONOTONE)
 
     // Knooppuntwaarde voor display (evalueer Hermite bij SPLINE_SPLIT_MGDL).
     val knotX = SPLINE_SPLIT_MGDL
@@ -135,12 +218,15 @@ private fun fitSegmentSpline(
         else -> hermite(knotX, cx_low, cy_low, slope_low, cx_high, cy_high, slope_high)
     }
 
-    return SplineFit(
-        knotX      = knotX,
-        knotY      = knotY,
-        cx_low     = cx_low,  cy_low  = cy_low,  slope_low  = slope_low,
-        cx_high    = cx_high, cy_high = cy_high, slope_high = slope_high,
-        linearFallback = linear
+    return SplineFitResult(
+        SplineFit(
+            knotX      = knotX,
+            knotY      = knotY,
+            cx_low     = cx_low,  cy_low  = cy_low,  slope_low  = slope_low,
+            cx_high    = cx_high, cy_high = cy_high, slope_high = slope_high,
+            linearFallback = linear
+        ),
+        reason = null
     )
 }
 

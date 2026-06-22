@@ -22,6 +22,9 @@ data class SplineCalibrationUiState(
     val isInWarmUp: Boolean             = false,
     val entries: List<CAL> = emptyList(),
     val splineFit: SplineFit?           = null,
+    /** Reden waarom splineFit null is — null wanneer de spline wél actief is.
+     *  Zie kdoc bij [app.aaps.plugins.calibration.SplineFailureReason]. */
+    val splineFailureReason: app.aaps.plugins.calibration.SplineFailureReason? = null,
     /** Linear fallback — always computed when entries ≥ 2, used for the UI baseline and status text. */
     val linearFit: CalibrationFit?      = null,
     val now: Long                       = 0L,

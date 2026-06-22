@@ -82,7 +82,8 @@ class SplineCalibrationViewModel @Inject constructor(
         val warmUpEndsAt = sessionStart?.plus(WARM_UP_DURATION_MS)
         val isInWarmUp   = warmUpEndsAt != null && now < warmUpEndsAt
 
-        val spline = fitSplineCalibration(entries, now)
+        val splineResult = fitSplineCalibration(entries, now)
+        val spline = splineResult.fit
         val linear = spline?.linearFallback ?: fitLinearCalibration(entries, now)
 
         _uiState.update { previous ->
@@ -94,6 +95,7 @@ class SplineCalibrationViewModel @Inject constructor(
                 isInWarmUp      = isInWarmUp,
                 entries         = entries,
                 splineFit       = spline,
+                splineFailureReason = splineResult.reason,
                 linearFit       = linear,
                 now             = now,
                 selectedEntryId = if (stillPresent) previous.selectedEntryId else entries.lastOrNull()?.id,

@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -60,6 +62,8 @@ import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.LocalPluginNavigationRequest
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.plugins.calibration.MIN_ENTRIES_FOR_SPLINE
+import app.aaps.plugins.calibration.MIN_POINTS_PER_SEGMENT
+import app.aaps.plugins.calibration.SplineFailureReason
 import app.aaps.plugins.calibration.R
 import app.aaps.core.data.model.CAL
 import kotlin.math.roundToInt
@@ -217,7 +221,25 @@ private fun SplineStatusCard(
                     stringResource(R.string.spline_cal_status_spline_active)
 
                 state.linearFit != null && state.linearFit.isApplicable ->
-                    stringResource(R.string.spline_cal_status_linear_fallback, MIN_ENTRIES_FOR_SPLINE)
+                    // BUGFIX (21/06/2026, Ecko): toonde voorheen altijd "need
+                    // N entries for spline" zodra de spline niet actief was —
+                    // ook wanneer er allang ≥N punten waren maar bijvoorbeeld
+                    // alle punten in hetzelfde segment (laag óf hoog) vielen.
+                    // Toont nu de daadwerkelijke reden, zie SplineFailureReason.
+                    when (state.splineFailureReason) {
+                        SplineFailureReason.TOO_FEW_LOW_SEGMENT ->
+                            stringResource(R.string.spline_cal_status_fallback_low_segment, MIN_POINTS_PER_SEGMENT)
+                        SplineFailureReason.TOO_FEW_HIGH_SEGMENT ->
+                            stringResource(R.string.spline_cal_status_fallback_high_segment, MIN_POINTS_PER_SEGMENT)
+                        SplineFailureReason.SLOPE_OUT_OF_RANGE ->
+                            stringResource(R.string.spline_cal_status_fallback_slope_rejected)
+                        SplineFailureReason.SEGMENTS_TOO_CLOSE ->
+                            stringResource(R.string.spline_cal_status_fallback_segments_close)
+                        SplineFailureReason.NOT_MONOTONE ->
+                            stringResource(R.string.spline_cal_status_fallback_not_monotone)
+                        SplineFailureReason.TOO_FEW_ENTRIES, null ->
+                            stringResource(R.string.spline_cal_status_linear_fallback, MIN_ENTRIES_FOR_SPLINE)
+                    }
 
                 state.entries.size < 2 ->
                     stringResource(R.string.cal_status_need_more_entries, state.entries.size)
@@ -642,6 +664,26 @@ private fun VerticalOffsetSlider(
                     maxLines = 1
                 )
 
+                // BUGFIX (21/06/2026, Ecko): het punt zelf vastpakken en
+                // verslepen werkt nagenoeg niet en zeker niet nauwkeurig.
+                // "+"-knop bovenaan (richting hogere/positieve offset, zelfde
+                // kant als waar de stip bij een positieve offset naartoe
+                // beweegt) — stapt per MANUAL_OFFSET_STEP_MMOL (0,05).
+                IconButton(
+                    onClick  = {
+                        onOffsetChange((state.manualOffsetMmol + MANUAL_OFFSET_STEP_MMOL)
+                            .coerceIn(-MANUAL_OFFSET_MAX_MMOL, MANUAL_OFFSET_MAX_MMOL))
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.Add,
+                        contentDescription = "+0,05",
+                        tint               = primaryColor,
+                        modifier           = Modifier.size(18.dp)
+                    )
+                }
+
                 // Draggable track in het midden
                 Box(
                     modifier = Modifier
@@ -679,6 +721,23 @@ private fun VerticalOffsetSlider(
                                  start = Offset(cx - thumbRadiusPx, midY), end = Offset(cx + thumbRadiusPx, midY),
                                  strokeWidth = 1.5f)
                     }
+                }
+
+                // "-"-knop onderaan (richting lagere/negatieve offset) —
+                // stapt per MANUAL_OFFSET_STEP_MMOL (0,05).
+                IconButton(
+                    onClick  = {
+                        onOffsetChange((state.manualOffsetMmol - MANUAL_OFFSET_STEP_MMOL)
+                            .coerceIn(-MANUAL_OFFSET_MAX_MMOL, MANUAL_OFFSET_MAX_MMOL))
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector        = Icons.Filled.Remove,
+                        contentDescription = "-0,05",
+                        tint               = primaryColor,
+                        modifier           = Modifier.size(18.dp)
+                    )
                 }
 
                 // Reset-knop onderaan in het kader
