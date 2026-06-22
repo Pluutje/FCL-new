@@ -84,8 +84,11 @@ import app.aaps.implementation.pump.PumpStatusProviderImpl
 import app.aaps.implementation.pump.PumpSyncImplementation
 import app.aaps.implementation.pump.PumpWithConcentrationImpl
 import app.aaps.implementation.pump.TemporaryBasalStorageImpl
+import app.aaps.implementation.receivers.BTReceiver
+import app.aaps.implementation.receivers.ChargingStateReceiver
 import app.aaps.implementation.receivers.NetworkChangeReceiver
 import app.aaps.implementation.receivers.ReceiverStatusStoreImpl
+import app.aaps.implementation.receivers.TimeDateOrTZChangeReceiver
 import app.aaps.implementation.resources.IconsProviderImplementation
 import app.aaps.implementation.resources.ResourceHelperImpl
 import app.aaps.implementation.sharedPreferences.PreferencesImpl
@@ -122,6 +125,9 @@ class ImplementationModule {
     interface Bindings {
 
         @ContributesAndroidInjector fun contributesNetworkChangeReceiver(): NetworkChangeReceiver
+        @ContributesAndroidInjector fun contributesBTReceiver(): BTReceiver
+        @ContributesAndroidInjector fun contributesChargingStateReceiver(): ChargingStateReceiver
+        @ContributesAndroidInjector fun contributesTimeDateOrTZChangeReceiver(): TimeDateOrTZChangeReceiver
 
         @Binds fun bindPreferences(preferencesImpl: PreferencesImpl): Preferences
         @Binds fun bindPreferenceVisibilityContext(impl: PreferenceVisibilityContextImpl): PreferenceVisibilityContext

@@ -113,7 +113,7 @@ class ProfileSealedTest : TestBase() {
 //        assertThat( p.getTargetLowTimeFromMidnight(2 * 60 * 60)).isWithin(0.01).of(4.0)
         assertThat(p.getTargetHighMgdl(c.timeInMillis)).isWithin(0.01).of(90.0)
 //        assertThat( p.getTargetHighTimeFromMidnight(2 * 60 * 60)).isWithin(0.01).of(5.0)
-        assertThat(p.getTargetList(rh, dateUtil).replace(".", ",")).isEqualTo("00:00    5,0 - 5,0 mmol")
+        assertThat(p.getTargetList(rh, dateUtil).replace(".", ",")).isEqualTo("00:00    5,0 - 5,0 mmol/L")
         assertThat(p.percentage).isEqualTo(100)
         assertThat(p.timeshift).isEqualTo(0)
 

@@ -663,6 +663,42 @@ class NSClientV3Plugin @Inject constructor(
         nsClientV3Service?.handleClearAlarm(originalAlarm, silenceTimeInMilliseconds)
     }
 
+    // --- Bounded retry for transient NS UPDATE failures ---
+    // A 404 on an UPDATE previously fell through to `return true`, advancing the per-collection sync
+    // cursor and permanently dropping the change. Worst case: NS returns 404 to a PATCH issued ~1-2s
+    // after the record's CREATE (NS read-after-write lag — the just-created treatment is briefly not
+    // visible to find-by-identifier), so e.g. a SUSPENDED_BY_PUMP duration-cut is lost and every
+    // follower stays stuck "Pump suspended". Now a 404 on a real UPDATE keeps the cursor in place and
+    // retries on a later sync cycle (by then NS has the record), bounded per nsId so a permanently
+    // failing record can't wedge its collection's cursor. Keyed by nsId (globally-unique), not a
+    // single slot, because doUpload() runs all collections in one pass and several share a handler.
+    // Deliberately NOT retried: 400 (deterministic bad request) and deletions (the NS SDK reports a
+    // successful idempotent delete as 404, see NSAndroidClientImpl.updateXxx).
+    private val failedUpdateCounts = HashMap<String, Int>()
+    private val maxUpdateRetries = 5
+
+    /**
+     * @return true  -> retry: caller must `return false` so the sync cursor is NOT advanced
+     *         false -> nothing to retry (not an UPDATE / a deletion / no id) or retries exhausted:
+     *                  caller proceeds normally and the cursor advances
+     */
+    private fun retryUpdateLater(operation: Operation, id: String?, isDeletion: Boolean): Boolean {
+        if (operation != Operation.UPDATE || isDeletion || id.isNullOrEmpty()) return false
+        val count = (failedUpdateCounts[id] ?: 0) + 1
+        if (count >= maxUpdateRetries) {
+            nsClientRepository.addLog("◄ GIVE_UP", "$id after $count attempts")
+            failedUpdateCounts.remove(id)
+            return false
+        }
+        failedUpdateCounts[id] = count
+        return true
+    }
+
+    /** Clear retry bookkeeping once an UPDATE for [id] finally succeeds. */
+    private fun clearUpdateRetry(operation: Operation, id: String?) {
+        if (operation == Operation.UPDATE && !id.isNullOrEmpty()) failedUpdateCounts.remove(id)
+    }
+
     suspend fun nsAdd(collection: String, dataPair: DataSyncSelector.DataPair, progress: String, profile: Profile? = null): Boolean =
         dbOperation(collection, dataPair, progress, Operation.CREATE, profile)
 
@@ -818,10 +854,19 @@ class NSClientV3Plugin @Inject constructor(
             )
             call?.let { it(data) }?.let { result ->
                 when (result.response) {
-                    200  -> nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                    200  -> {
+                        nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                        clearUpdateRetry(operation, id)
+                    }
+
                     201  -> nsClientRepository.addLog("◄ ADDED", "OK ${dataPair.value.javaClass.simpleName}")
                     400  -> nsClientRepository.addLog("◄ FAIL", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
-                    404  -> nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                    404  -> {
+                        nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                        if (!config.isEnabled(ExternalOptions.IGNORE_NS_V3_ERRORS) &&
+                            retryUpdateLater(operation, id, isDeletion = !dataPair.value.isValid)
+                        ) return false
+                    }
 
                     else -> {
                         nsClientRepository.addLog("◄ ERROR", "${result.errorResponse} ")
@@ -863,10 +908,19 @@ class NSClientV3Plugin @Inject constructor(
             )
             call?.let { it(data) }?.let { result ->
                 when (result.response) {
-                    200  -> nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                    200  -> {
+                        nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                        clearUpdateRetry(operation, id)
+                    }
+
                     201  -> nsClientRepository.addLog("◄ ADDED", "OK ${dataPair.value.javaClass.simpleName}")
                     400  -> nsClientRepository.addLog("◄ FAIL", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
-                    404  -> nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                    404  -> {
+                        nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                        if (!config.isEnabled(ExternalOptions.IGNORE_NS_V3_ERRORS) &&
+                            retryUpdateLater(operation, id, isDeletion = !dataPair.value.isValid)
+                        ) return false
+                    }
 
                     else -> {
                         nsClientRepository.addLog("◄ ERROR", "${result.errorResponse} ")
@@ -908,10 +962,19 @@ class NSClientV3Plugin @Inject constructor(
             )
             call?.let { it(data) }?.let { result ->
                 when (result.response) {
-                    200  -> nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                    200  -> {
+                        nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                        clearUpdateRetry(operation, id)
+                    }
+
                     201  -> nsClientRepository.addLog("◄ ADDED", "OK ${dataPair.value.javaClass.simpleName}")
                     400  -> nsClientRepository.addLog("◄ FAIL", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
-                    404  -> nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                    404  -> {
+                        nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                        if (!config.isEnabled(ExternalOptions.IGNORE_NS_V3_ERRORS) &&
+                            retryUpdateLater(operation, id, isDeletion = !dataPair.value.isValid)
+                        ) return false
+                    }
 
                     else -> {
                         nsClientRepository.addLog("◄ ERROR", "${result.errorResponse}")
@@ -974,10 +1037,19 @@ class NSClientV3Plugin @Inject constructor(
                 )
                 call?.let { it(data) }?.let { result ->
                     when (result.response) {
-                        200  -> nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                        200  -> {
+                            nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                            clearUpdateRetry(operation, id)
+                        }
+
                         201  -> nsClientRepository.addLog("◄ ADDED", "OK ${dataPair.value.javaClass.simpleName}")
                         400  -> nsClientRepository.addLog("◄ FAIL", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
-                        404  -> nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                        404  -> {
+                            nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                            if (!config.isEnabled(ExternalOptions.IGNORE_NS_V3_ERRORS) &&
+                                retryUpdateLater(operation, id, isDeletion = (dataPair.value as? HasIDs)?.isValid == false)
+                            ) return false
+                        }
 
                         else -> {
                             nsClientRepository.addLog("◄ ERROR", "${result.errorResponse} ")
