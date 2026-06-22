@@ -124,10 +124,16 @@ sealed class EventData : Event() {
     data class ActionScenePreCheck(val id: String, val title: String) : EventData()
 
     @Serializable
-    data class ActionSceneConfirmed(val id: String, val title: String) : EventData()
+    data class ActionSceneConfirmed(val id: String, val title: String, val bolusId: Long? = null) : EventData()
 
     @Serializable
     class ActionSceneStop : EventData()
+
+    @Serializable
+    class ActionSceneStopPreCheck : EventData()
+
+    @Serializable
+    class ActionSceneStopConfirmed : EventData()
 
     @Serializable
     data class ActiveSceneState(val active: Boolean) : EventData()

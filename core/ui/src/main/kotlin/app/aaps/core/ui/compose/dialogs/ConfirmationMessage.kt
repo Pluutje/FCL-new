@@ -27,6 +27,7 @@ fun List<ConfirmationLine>.toAnnotatedString(primaryColor: Color): AnnotatedStri
     val warning = MaterialTheme.colorScheme.error
     val info = AapsTheme.elementColors.tempTarget
     val tempTarget = AapsTheme.generalColors.inProgress
+    val scene = AapsTheme.elementColors.scene
     val loopClosed = AapsTheme.elementColors.loopClosed
     val loopOpen = AapsTheme.elementColors.loopOpened
     val loopLgs = AapsTheme.elementColors.loopLgs
@@ -42,6 +43,7 @@ fun List<ConfirmationLine>.toAnnotatedString(primaryColor: Color): AnnotatedStri
         ConfirmationRole.WARNING           -> warning
         ConfirmationRole.INFO              -> info
         ConfirmationRole.TEMP_TARGET       -> tempTarget
+        ConfirmationRole.SCENE             -> scene
         ConfirmationRole.LOOP_CLOSED       -> loopClosed
         ConfirmationRole.LOOP_OPEN         -> loopOpen
         ConfirmationRole.LOOP_LGS          -> loopLgs

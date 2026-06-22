@@ -701,7 +701,8 @@ class WizardBolusExecutorImpl @Inject constructor(
         out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.percentage_label), rh.gs(R.string.format_percent, ps.percentage)))
         if (ps.timeShiftHours != 0)
             out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.timeshift_label), rh.gs(R.string.value_with_unit, ps.timeShiftHours.toString(), rh.gs(app.aaps.core.interfaces.R.string.shorthour))))
-        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, ps.durationMinutes)))
+        if (ps.durationMinutes > 0)
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), formatMinutesAsDuration(ps.durationMinutes, rh)))
         return out
     }
 

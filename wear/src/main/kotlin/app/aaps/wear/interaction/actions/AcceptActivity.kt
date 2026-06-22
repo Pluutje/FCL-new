@@ -157,6 +157,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                                         "WARNING"           -> WearWarningAmber
                                                         "INFO"              -> WearSecondaryText
                                                         "TEMP_TARGET"       -> TempTargetYellow
+                                                        "SCENE"             -> ScenePurple
                                                         "LOOP_CLOSED"       -> LoopClosedColor
                                                         "LOOP_OPEN"         -> LoopOpenColor
                                                         "LOOP_LGS"          -> LoopLgsColor

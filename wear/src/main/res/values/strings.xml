@@ -85,8 +85,8 @@
     <string name="action_tempt_confirmation">Temp Target Requested</string>
     <string name="action_quick_wizard_confirmation">Quick Wizard Requested</string>
     <string name="action_user_action_confirmation">User Action Requested</string>
-    <string name="action_scene_confirmation">Activate Scene</string>
-    <string name="scene_stop">STOP</string>
+    <string name="action_scene_confirmation">Scene Requested</string>
+    <string name="scene_end">End</string>
     <string name="action_treatment_confirmation">Treatment Requested</string>
     <string name="action_bolus_confirmation">Bolus Requested</string>
     <string name="action_wizard_confirmation">Calculation Requested</string>
