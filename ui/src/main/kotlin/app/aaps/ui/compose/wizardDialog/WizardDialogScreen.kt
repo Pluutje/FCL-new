@@ -119,6 +119,10 @@ fun WizardDialogScreen(
                 is WizardDialogViewModel.SideEffect.ShowTempBasalError -> {
                     onShowDeliveryError(effect.comment)
                 }
+
+                is WizardDialogViewModel.SideEffect.NavigateBack       -> {
+                    onNavigateBack()
+                }
             }
         }
     }
@@ -150,10 +154,9 @@ fun WizardDialogScreen(
             uiState.forcedRecordOnly -> showRecordOnly = true
             // Deliver role-transparently: the master recomputes, caps + authors the confirmation and shows it on the
             // single app-level dialog (both roles); the advisor fork is decided from the master's prepared result.
-            else                     -> {
-                viewModel.deliverManualWizard()
-                onNavigateBack()
-            }
+            // The wizard stays open behind the confirmation — it closes only after the user confirms (via the
+            // NavigateBack side effect from deliverManualWizard); Cancel keeps it open with inputs intact.
+            else                     -> viewModel.deliverManualWizard()
         }
     }
 
@@ -185,7 +188,7 @@ fun WizardDialogScreen(
         uiState = uiState,
         decimalFormatter = viewModel.decimalFormatter,
         profileUtil = viewModel.profileUtil,
-        unitsLabel = uiState.units.asText,
+        unitsLabel = uiState.units.displayLabel,
         onBgChange = { viewModel.updateBg(it) },
         onCarbsChange = { viewModel.updateCarbs(it.toInt()) },
         onAddCarbs = viewModel::addCarbs,

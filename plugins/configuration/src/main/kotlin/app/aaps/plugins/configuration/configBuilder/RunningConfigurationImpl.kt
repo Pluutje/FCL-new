@@ -56,6 +56,11 @@ class RunningConfigurationImpl @Inject constructor(
     // called in AAPS mode only
     override fun configuration(): JSONObject {
         val json = JSONObject()
+        // Before init completes no pump is selected yet, and activePump.isInitialized() would throw
+        // "No pump selected" (PluginStore.activePumpInternal) instead of returning false. Treat
+        // "app not initialized" as an earlier "pump not ready" state and return the empty doc —
+        // RunningConfigurationPublisher skips an empty payload and retries once init completes.
+        if (!config.appInitialized) return json
         val pumpInterface = activePlugin.activePump
 
         if (!pumpInterface.isInitialized()) return json

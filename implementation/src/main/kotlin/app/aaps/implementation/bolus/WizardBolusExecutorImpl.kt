@@ -19,6 +19,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
@@ -49,6 +50,7 @@ import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.ui.R
+import app.aaps.core.ui.compose.formatMinutesAsDuration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -67,6 +69,7 @@ import kotlin.math.ceil
 class WizardBolusExecutorImpl @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val rh: ResourceHelper,
+    private val config: Config,
     private val quickWizard: QuickWizard,
     private val bolusWizardProvider: Provider<BolusWizard>,
     private val profileFunction: ProfileFunction,
@@ -150,6 +153,12 @@ class WizardBolusExecutorImpl @Inject constructor(
     }
 
     override suspend fun prepareQuickWizard(guid: String): WizardBolusExecutor.PrepareResult {
+        // Reject before plugins are wired up: a remote prepare (client-control) can land while the master is still
+        // initializing — before ConfigBuilder.initialize() ran verifySelectionInCategories(). At that point activeAPS
+        // is still null (unlike activePump, which has an init-time fallback), so getProfile() builds a profile whose
+        // BolusWizard.doCalc would hit ProfileSealed's "APS not defined" guard. Mirrors the appInitialized gate every
+        // other external trigger (wear, automation, widgets) already has.
+        if (!config.appInitialized) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.initializing))
         runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
         val actualBg = iobCobCalculator.ads.actualBg()
         val profile = profileFunction.getProfile()
@@ -190,6 +199,9 @@ class WizardBolusExecutorImpl @Inject constructor(
     }
 
     override suspend fun prepareWizard(inputs: WizardBolusExecutor.WizardInputs): WizardBolusExecutor.PrepareResult {
+        // Same pre-init guard as prepareQuickWizard: doCalc would otherwise hit ProfileSealed's "APS not defined" guard
+        // when a remote prepare arrives before verifySelectionInCategories() has populated activeAPS.
+        if (!config.appInitialized) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.initializing))
         runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
         // Resolve the dialog's profile selection: null → the master's active profile (kept dynamic — the master is
         // authoritative); a name → that stored profile (a client/watch relays a name the master owns), wrapped so
@@ -375,8 +387,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
+        val isTtOnly = bolus == null && ps == null && rm == null && cappedTb == null && cappedEb == null && ctb == null && ceb == null && ia == null
         val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
-            (tt?.let { buildTtLine(it) } ?: emptyList()) +
+            (tt?.let { buildTtLine(it, isTtOnly) } ?: emptyList()) +
             (ps?.let { buildPsLine(it) } ?: emptyList()) +
             (rm?.let { buildRmLine(it) } ?: emptyList()) +
             (cappedTb?.let { buildTempBasalLine(it, tb) } ?: emptyList()) +
@@ -609,7 +622,7 @@ class WizardBolusExecutorImpl @Inject constructor(
      * reason line, or a "cancel" line when [durationMinutes] is 0. [lowMgdl]/[highMgdl] in mg/dL; [reasonDisplay]
      * already localized (or "").
      */
-    private fun buildTempTargetLines(reasonDisplay: String, lowMgdl: Double, highMgdl: Double, durationMinutes: Int): List<ConfirmationLine> {
+    private fun buildTempTargetLines(reasonDisplay: String, lowMgdl: Double, highMgdl: Double, durationMinutes: Int, standalone: Boolean = false): List<ConfirmationLine> {
         val out = mutableListOf<ConfirmationLine>()
         if (durationMinutes == 0) {
             out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.cancel)))
@@ -618,9 +631,15 @@ class WizardBolusExecutorImpl @Inject constructor(
             val unitLabel = if (units == GlucoseUnit.MMOL) rh.gs(R.string.mmol) else rh.gs(R.string.mgdl)
             val low = decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(lowMgdl, units))
             val target = if (lowMgdl == highMgdl) low else low + " – " + decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(highMgdl, units))
+            val durationText = formatMinutesAsDuration(durationMinutes, rh)
+            val targetLabel = if (standalone) rh.gs(R.string.target_label) else rh.gs(R.string.temporary_target)
+            out += ConfirmationLine(
+                ConfirmationRole.TEMP_TARGET,
+                rh.gs(R.string.confirmation_line, targetLabel, rh.gs(R.string.value_with_unit, target, unitLabel))
+            )
             out += ConfirmationLine(
                 ConfirmationRole.NORMAL,
-                rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.value_with_unit, target, unitLabel) + " (" + rh.gs(R.string.format_mins, durationMinutes) + ")")
+                rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), durationText)
             )
             if (reasonDisplay.isNotEmpty())
                 out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.reason), reasonDisplay))
@@ -629,8 +648,8 @@ class WizardBolusExecutorImpl @Inject constructor(
     }
 
     /** The TT line(s) for any batch (wear / client / phone) — range + duration + a localized reason, or a cancel line. */
-    private fun buildTtLine(tt: BatchAction.TempTarget): List<ConfirmationLine> =
-        buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes)
+    private fun buildTtLine(tt: BatchAction.TempTarget, standalone: Boolean = false): List<ConfirmationLine> =
+        buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes, standalone)
 
     /**
      * Apply a batch ProfileSwitch via the dialog-free domain path. [profileName] non-null → switch to that named
@@ -734,10 +753,21 @@ class WizardBolusExecutorImpl @Inject constructor(
     /** The RM line(s) for any batch (wear / client / phone) — the target mode title + an optional duration. */
     private suspend fun buildRmLine(rm: BatchAction.RunningMode): List<ConfirmationLine> {
         val out = mutableListOf<ConfirmationLine>()
-        out += ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.running_mode), rmModeTitle(rm.mode)))
+        out += ConfirmationLine(rmModeRole(rm.mode), rmModeTitle(rm.mode))
         if (rm.durationMinutes > 0)
-            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, rm.durationMinutes)))
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), formatMinutesAsDuration(rm.durationMinutes, rh)))
         return out
+    }
+
+    private fun rmModeRole(mode: RM.Mode): ConfirmationRole = when (mode) {
+        RM.Mode.CLOSED_LOOP       -> ConfirmationRole.LOOP_CLOSED
+        RM.Mode.CLOSED_LOOP_LGS   -> ConfirmationRole.LOOP_LGS
+        RM.Mode.OPEN_LOOP         -> ConfirmationRole.LOOP_OPEN
+        RM.Mode.DISABLED_LOOP     -> ConfirmationRole.LOOP_DISABLED
+        RM.Mode.SUSPENDED_BY_USER -> ConfirmationRole.LOOP_SUSPENDED
+        RM.Mode.DISCONNECTED_PUMP -> ConfirmationRole.LOOP_DISCONNECTED
+        RM.Mode.RESUME            -> ConfirmationRole.LOOP_CLOSED
+        else                      -> ConfirmationRole.PRIMARY
     }
 
     /** Localized title for a target running mode (RESUME resolves to reconnect vs resume by the current loop state). */

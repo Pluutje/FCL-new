@@ -941,8 +941,13 @@ class DataHandlerMobile @Inject constructor(
         val states = if (allStates.any { it.state == AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND })
             allStates.filter { it.state != AvailableRunningMode.RunningMode.LOOP_DISABLE }
         else allStates
-        lastAuthorizedRunningModeChangeTS = System.currentTimeMillis()
-        lastRunningModes = states
+        // Only rotate the timestamp when available modes actually change.
+        // Keeping the old TS when modes are identical lets in-flight tile taps (e.g. from a
+        // just-woken watch) succeed without a "Please try again" race against onTileEnterEvent.
+        if (states != lastRunningModes || lastAuthorizedRunningModeChangeTS == null) {
+            lastAuthorizedRunningModeChangeTS = System.currentTimeMillis()
+            lastRunningModes = states
+        }
         sendToWear(
             EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states)
         )

@@ -152,12 +152,18 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                                     // Aligned with master ConfirmationRole (core.data.ui.ConfirmationRole):
                                                     // NORMAL/PRIMARY have no dedicated wear color → white.
                                                     color = when (role) {
-                                                        "BOLUS"          -> InsulinBlue
-                                                        "CARBS", "COB"   -> CarbsOrange
-                                                        "WARNING"        -> WearWarningAmber
-                                                        "INFO"           -> WearSecondaryText
-                                                        "NORMAL", "PRIMARY" -> Color.White
-                                                        else             -> Color.White
+                                                        "BOLUS"             -> InsulinBlue
+                                                        "CARBS", "COB"      -> CarbsOrange
+                                                        "WARNING"           -> WearWarningAmber
+                                                        "INFO"              -> WearSecondaryText
+                                                        "TEMP_TARGET"       -> TempTargetYellow
+                                                        "LOOP_CLOSED"       -> LoopClosedColor
+                                                        "LOOP_OPEN"         -> LoopOpenColor
+                                                        "LOOP_LGS"          -> LoopLgsColor
+                                                        "LOOP_SUSPENDED"    -> LoopSuspendedColor
+                                                        "LOOP_DISABLED"     -> LoopDisabledColor
+                                                        "LOOP_DISCONNECTED"  -> LoopDisconnectedColor
+                                                        else                -> Color.White
                                                     },
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.Bold,
