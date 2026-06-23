@@ -92,6 +92,7 @@ import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
+import app.aaps.core.objects.wizard.QuickWizardMode
 import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.ui.compose.DarkGeneralColors
 import app.aaps.core.ui.compose.LightGeneralColors
@@ -104,6 +105,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.LinkedList
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -264,7 +266,14 @@ class DataHandlerMobile @Inject constructor(
             // Commit the parked dose by id through the role-transparent relay (MASTER → local deliver; CLIENT →
             // signed BolusCommit). Consume-once = no double bolus; a failure surfaces to the watch.
             contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
-            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
+            // Remove unconditionally (no leak even on a failed commit); mark used + refresh only on a delivered bolus.
+            val quickWizardGuid = quickWizardFixedUsage.remove(it.bolusId)
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label))) {
+                quickWizardGuid?.let { guid ->
+                    quickWizard.get(guid)?.markAsUsed()
+                    sendQuickWizardListToWear() // refresh lastUsed so the fixed-mode tile cools down (matches phone)
+                }
+            }
         }
         onEvent<EventData.ActionECarbsPreCheck> { handleECarbsPreCheck(it) }
         onEvent<EventData.ActionECarbsConfirmed> {
@@ -294,7 +303,7 @@ class DataHandlerMobile @Inject constructor(
             // consume-once bolusId of the parked prepare. Do not rename the field (wire-compat with older watches).
             contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(wizardExecutor.commit(it.timeStamp, asAdvisor = false, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.boluswizard))) {
-                sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+                sendQuickWizardListToWear()
             }
         }
         onEvent<EventData.ActionUserActionPreCheck> {
@@ -692,14 +701,52 @@ class DataHandlerMobile @Inject constructor(
         )
     }
 
-    private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
-        // Role-transparent recompute: MASTER computes + caps + parks + authors lines locally; CLIENT relays a
-        // BolusPrepare(guid) to the master (gated on masterReachable). The watch renders the master's EXACT lines.
-        contacting()
-        shipPrepared(
-            wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(command.guid), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
-            rh.gs(app.aaps.core.ui.R.string.boluswizard)
-        ) { EventData.ActionWizardConfirmed(it) }
+    // Parked bolusId → QuickWizard guid for a FIXED (INSULIN/CARBS) wear quick-wizard, so the entry is marked used on a
+    // successful commit and the tile cools down for an hour (matches the phone's executeFixedBatch → markAsUsed). The
+    // WIZARD path marks used inside the executor — its PendingBolus carries the entry — but a fixed batch parks entry=null.
+    private val quickWizardFixedUsage = ConcurrentHashMap<Long, String>()
+
+    private fun rememberQuickWizardUsage(bolusId: Long, guid: String) {
+        // Drop ids older than the tile cooldown so a prepared-then-cancelled (never committed) entry can't accumulate.
+        quickWizardFixedUsage.keys.removeAll { dateUtil.now() - it > 3_600_000L } // 1 hour (QuickWizardSource.COOLDOWN_MILLIS)
+        quickWizardFixedUsage[bolusId] = guid
+    }
+
+    // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
+    internal suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
+        // Branch on the entry mode exactly like the phone (MainViewModel.executeQuickWizard): a fixed INSULIN/CARBS
+        // button goes through the generic BatchExecutor (no wizard recompute — that would deliver insulin for a
+        // carbs-only button), while a WIZARD button recomputes the dose. All three stay role-transparent (MASTER →
+        // local; CLIENT → signed round-trip) and the master is the single capping + confirmation authority.
+        // A null entry (guid gone) falls through to the wizard path, which ships a proper "not available" error.
+        val entry = quickWizard.get(command.guid)
+        when (entry?.mode()) {
+            QuickWizardMode.INSULIN -> sendBatchPreCheck(
+                BatchAction.Bolus(
+                    insulin = entry.insulin(), carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                    recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null
+                ),
+                label = rh.gs(app.aaps.core.ui.R.string.bolus)
+            ) { bolusId -> rememberQuickWizardUsage(bolusId, command.guid); EventData.ActionBolusConfirmed(bolusId) }
+
+            QuickWizardMode.CARBS   -> sendBatchPreCheck(
+                BatchAction.Bolus(
+                    insulin = 0.0, carbs = entry.carbs(), carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                    recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null
+                ),
+                label = rh.gs(app.aaps.core.ui.R.string.carbs)
+            ) { bolusId -> rememberQuickWizardUsage(bolusId, command.guid); EventData.ActionBolusConfirmed(bolusId) }
+
+            else                    -> {
+                // Role-transparent recompute: MASTER computes + caps + parks + authors lines locally; CLIENT relays a
+                // BolusPrepare(guid) to the master (gated on masterReachable). The watch renders the master's EXACT lines.
+                contacting()
+                shipPrepared(
+                    wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(command.guid), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
+                    rh.gs(app.aaps.core.ui.R.string.boluswizard)
+                ) { EventData.ActionWizardConfirmed(it) }
+            }
+        }
     }
 
     // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
@@ -739,8 +786,11 @@ class DataHandlerMobile @Inject constructor(
      * the master-authored [lines][EventData.ConfirmAction.lines] to the watch with the parked bolusId. The wear ✓
      * commits by id (consume-once). (Was a local-only `wizardBolusExecutor.prepareBatch`; now everything runs on the master.)
      */
-    private suspend fun sendBatchPreCheck(bolus: BatchAction.Bolus, returnCommand: (bolusId: Long) -> EventData) {
-        val label = rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)
+    private suspend fun sendBatchPreCheck(
+        bolus: BatchAction.Bolus,
+        label: String = rh.gs(app.aaps.core.ui.R.string.overview_treatment_label),
+        returnCommand: (bolusId: Long) -> EventData
+    ) {
         contacting()
         shipPrepared(batchExecutor.prepare(listOf(bolus), Sources.Wear, label), label, returnCommand)
     }
@@ -1020,6 +1070,9 @@ class DataHandlerMobile @Inject constructor(
             insulin = insulin()
         )
 
+    private fun sendQuickWizardListToWear() =
+        sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+
     suspend fun resendData(from: String) {
         aapsLogger.debug(LTag.WEAR, "Sending data to wear from $from")
         // Wear can request a resend before MainApp's init scope has populated pluginStore.plugins
@@ -1047,7 +1100,7 @@ class DataHandlerMobile @Inject constructor(
             )
         )
         // QuickWizard
-        sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+        sendQuickWizardListToWear()
         //UserAction
         sendUserActions()
         // Scenes

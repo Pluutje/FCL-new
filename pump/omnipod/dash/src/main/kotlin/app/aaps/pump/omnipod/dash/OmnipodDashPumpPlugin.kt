@@ -521,6 +521,9 @@ class OmnipodDashPumpPlugin @Inject constructor(
 
         val requestedInsulinAmount = PodConstants.POD_PULSE_BOLUS_UNITS
 
+        // Same staleness guard as deliverTreatment: refresh the reservoir from the current pod state so a freshly
+        // activated pod (whose _reservoirLevel is still the 0.0 init until the next getPumpStatus) isn't wrongly skipped.
+        syncPumpFlows()
         val availableInsulin = reservoirLevel.value.cU
         if (requestedInsulinAmount > availableInsulin) {
             aapsLogger.info(LTag.PUMP, "Basal correction skipped: not enough insulin in reservoir ($requestedInsulinAmount > $availableInsulin)")
@@ -643,6 +646,11 @@ class OmnipodDashPumpPlugin @Inject constructor(
         try {
             bolusDeliveryInProgress = true
             aapsLogger.info(LTag.PUMP, "Delivering treatment: $detailedBolusInfo $bolusCanceled")
+            // Recompute the reservoir from the current pod state before the gate below. _reservoirLevel is otherwise
+            // refreshed only by getPumpStatus(), so right after a pod activation (no status poll yet) it is still its
+            // 0.0 init and the gate would falsely reject every bolus as "not enough insulin". podStateManager is the
+            // source of truth here (a full pod → pulsesRemaining null → the 75.0 fallback in syncPumpFlows).
+            syncPumpFlows()
             val requestedBolusAmount = detailedBolusInfo.insulin
             if (requestedBolusAmount > reservoirLevel.value.cU) {
                 return pumpEnactResultProvider.get()
