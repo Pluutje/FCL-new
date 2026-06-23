@@ -1076,8 +1076,8 @@ private fun hypoProtection(
     // Zonder compensatie blokkeert de hypo-guard stage2 bij BG=9.2 stijgend.
     val mealCompensationFactor = if (
         mealSignal?.state == MealState.CONFIRMED &&
-            ctx.recentSlope >= 2.0 &&
-            ctx.input.bgNow >= 7.0
+        ctx.recentSlope >= 2.0 &&
+        ctx.input.bgNow >= 7.0
     ) 0.55 else 1.0
 
     fun insulinActionFrac(min: Int): Double = when {
@@ -1169,7 +1169,7 @@ private fun hypoProtection(
         ctx.recentDelta5m >= 0.0 &&
         ctx.iobRatio < 0.50 &&
         projectedMinWithInsulin >= safeProjectionThreshold
-        // projectedMinNoInsulin verwijderd: onhaalbaar bij hoge IOB na frontload
+    // projectedMinNoInsulin verwijderd: onhaalbaar bij hoge IOB na frontload
 
     if (clearlyRisingMealContext) {
         return HypoProtection(
@@ -1936,12 +1936,12 @@ private fun computeEarlyDoseDecision(
     } ?: Int.MAX_VALUE
     val inSecondBoostWindow =
         earlyDose.stage == 2 &&
-        minutesSinceStage2 in 5..20 &&
-        ctx.slope >= 0.50 &&
-        ctx.recentSlope >= 3.0 &&
-        peak.predictedPeak >= 9.5 &&
-        ctx.iobRatio < 0.75 &&
-        rawNoInsulinProjectionStage3 > 3.5
+            minutesSinceStage2 in 5..20 &&
+            ctx.slope >= 0.50 &&
+            ctx.recentSlope >= 3.0 &&
+            peak.predictedPeak >= 9.5 &&
+            ctx.iobRatio < 0.75 &&
+            rawNoInsulinProjectionStage3 > 3.5
 
     val effectiveStage3IobMax = if (inSecondBoostWindow) 0.75 else stage3IobMax
     val allowStage3 = allowLarge &&
@@ -1984,11 +1984,11 @@ private fun computeEarlyDoseDecision(
     //   6. boostCommitCount < effectiveMaxCommits (de dynamische grens respecteren)
     val highBgContinuation =
         earlyDose.stage >= 3 &&
-        ctx.input.bgNow >= 12.0 &&
-        ctx.slope >= 2.0 &&
-        ctx.iobRatio < 0.80 &&
-        minutesSinceLastFire >= 8 &&
-        earlyDose.boostCommitCount < effectiveMaxCommits
+            ctx.input.bgNow >= 12.0 &&
+            ctx.slope >= 2.0 &&
+            ctx.iobRatio < 0.80 &&
+            minutesSinceLastFire >= 8 &&
+            earlyDose.boostCommitCount < effectiveMaxCommits
 
     val stageToFire = when {
         earlyDose.stage == 0 && conf >= dynamicStage1Min -> 1
@@ -2065,7 +2065,7 @@ private fun computeEarlyDoseDecision(
     // Voorbeeld: schuld=0.40U, basis=0.80U → bonus = min(0.50*0.80, 0.40) = 0.40U
     //            effectieve dosis = 0.80 + 0.40 = 1.20U (nog steeds ≤ 1.5×maxSMB cap)
     val debtCompensationU = if (episodeHypoDebtU > 0.01 &&
-        mealSignal?.state == MealState.CONFIRMED &&
+        mealSignal.state == MealState.CONFIRMED &&
         hypoProjectedMinNoInsulin >= 4.8) {
         val baseTargetU = config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor
         val maxBonus = baseTargetU * 0.50          // max 50% van de basiskaart als bonus
@@ -2915,10 +2915,10 @@ class FCLvNext(
         } ?: Int.MAX_VALUE
         val graceRestart =
             !peakEstimator.active &&
-            minutesSinceLastExit <= 10 &&
-            ctx.deltaToTarget >= 0.5 &&
-            ctx.slope >= 0.0 &&
-            ctx.iobRatio < 0.60
+                minutesSinceLastExit <= 10 &&
+                ctx.deltaToTarget >= 0.5 &&
+                ctx.slope >= 0.0 &&
+                ctx.iobRatio < 0.60
 
         // ── episode init/reset ──
         if (!peakEstimator.active && (episodeShouldBeActive || graceRestart)) {
@@ -3001,7 +3001,7 @@ class FCLvNext(
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
-            }
+        }
         if (peakEstimator.active && !episodeShouldBeActive) {
             // Originele exit: duidelijke daling of BG dicht bij target
             val fallingClearly = ctx.slope <= -0.6 && ctx.consistency >= config.episodeMinConsistency
@@ -3532,7 +3532,7 @@ class FCLvNext(
             rapidDecelLocked = false
             rapidDecelConfirm = 0
 
-                status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
+            status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
         }
 
 // EINDE episode
@@ -3540,7 +3540,7 @@ class FCLvNext(
 
             status.append("MEAL EPISODE END id=$activeMealEpisodeId\n")
 
-                activeMealEpisodeId = -1
+            activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
             episodeCommitCount = 0
@@ -4597,7 +4597,22 @@ class FCLvNext(
                     status.append("COMMIT rawPlateauPenalty=${"%.2f".format(rawPlateauPenalty)}\n")
                 }
 
-                val commitAggressionMul = lerp(0.90, 1.20, aggr.a)
+                // commitAggressionMul: schaalt de commit op/neer op basis van de
+                // agressiviteitsinstelling. Maximaal 1.20 (meest agressief).
+                // BUGFIX 23/06/2026 (Ecko): bij hoge IOB terwijl BG al dicht bij
+                // de voorspelde piek zit (bijv. BG=9.1, pred_peak=10.3, iob=7.5)
+                // stond commitAggressionMul nog steeds op 1.20 — precies het
+                // tegenovergestelde van wat gewenst is. Als er al veel insuline
+                // actief is en de piek nadert, moet de aggressiviteit afnemen.
+                // bg/predicted_peak ≥ 0.85 = "≥ 85% van de weg naar de piek",
+                // gecombineerd met hoge IOB (iobRatio ≥ 0.35): dan wordt
+                // commitAggressionMul geclippt naar maximaal 1.0 (neutraal).
+                val nearPeakWithHighIob = ctx.iobRatio >= 0.35 &&
+                    peak.predictedPeak > 0 &&
+                    ctx.input.bgNow / peak.predictedPeak >= 0.85
+                val rawAggressionMul = lerp(0.90, 1.20, aggr.a)
+                val commitAggressionMul = if (nearPeakWithHighIob)
+                    rawAggressionMul.coerceAtMost(1.0) else rawAggressionMul
                 logRow.commitAggressionMul = commitAggressionMul
 
                 logRow.commitPostPeakFactor = postPeak.commitFactor
@@ -4623,9 +4638,24 @@ class FCLvNext(
                     .coerceIn(0.0, 0.70)
                 val lateDecayActive = effectiveDecay > 0.01 && commitNr > 1
 
+                // ── IOB-afhankelijke vloer voor lateDecayMul ──────────────────
+                // Bevinding 23/06/2026 (Ecko): bij grote maaltijden botste de
+                // vloer van 0.35 al bij commit 3-4 waarna ELKE volgende commit
+                // nog 35% van maxSMB leverde, ook als IOB al zeer hoog was en
+                // de BG dicht bij de voorspelde piek zat. De vaste vloer van
+                // 0.35 is bedoeld om de alleerlaatste commit niet tot nul te
+                // laten zakken, maar werkt averechts als er nog 3+ commits
+                // volgen — dan is de vloer de bottleneck, niet de decay-factor.
+                // Oplossing: de vloer schaalt mee met de IOB — hoe meer insuline
+                // al actief is, hoe lager de minimaal nog toegestane factor.
+                // coerceAtLeast(0.15): nooit volledig naar nul (kleine correctie
+                // blijft mogelijk), maar bij iobRatio ≥ 0.40 al erg klein.
+                val decayFloor = (0.35 * (1.0 - ctx.iobRatio * 1.2))
+                    .coerceIn(0.10, 0.35)
+
                 lateDecayMul = if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
-                        .coerceIn(0.35, 1.0)  // floor 0.25->0.35: commit 3+ groter
+                        .coerceIn(decayFloor, 1.0)
                 } else 1.0
 
                 if (lateDecayActive) {

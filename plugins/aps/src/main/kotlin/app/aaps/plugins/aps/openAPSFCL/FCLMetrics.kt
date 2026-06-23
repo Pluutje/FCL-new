@@ -334,7 +334,7 @@ class FCLMetrics @Inject constructor(
 
         fun getUserStatsString(isNight: Boolean): String {
             maybeUpdateUserStatsCache(isNight)
-            val str = if (context != null) app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.get(context) else null
+            val str = app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.get(context)
             val cache = userStatsCache ?: return str?.statistiekenWordenVerzameld ?: "Statistics are being collected…"
 
             val dq24 = cache.dataQuality24h
