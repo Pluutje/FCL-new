@@ -18,6 +18,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.night.NightWindowAnalyzer
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogEntity
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +106,7 @@ fun FclAnalyzerScreen(
             val lastEpisode = allCleaned.lastOrNull()
             val cleanedEpisodes = allCleaned.filter { ep ->
                 ep == lastEpisode ||   // meest recente altijd tonen
-                ep.rows.any { it.deliveredTotal >= significantDoseThreshold }
+                    ep.rows.any { it.deliveredTotal >= significantDoseThreshold }
             }
             episodes = cleanedEpisodes
 
@@ -255,6 +256,24 @@ fun FclAnalyzerScreen(
                 db.episodeDao().getAllEpisodes()
             }
 
+            // ── Stap 5: nachtvensters bouwen en opslaan ───────────────────
+            // insertNightWindows() werd hiervoor nooit aangeroepen — de data
+            // werd wel gelezen maar nooit berekend. Vanaf hier wordt bij elke
+            // refresh opnieuw gebouwd op basis van de laatste 14 nachten.
+            withContext(Dispatchers.IO) {
+                val cutoffMs = System.currentTimeMillis() - 14 * 24 * 3600_000L
+                // entities is List<FCLCycleLogEntity> — het juiste type voor
+                // NightWindowAnalyzer.build(). allRows is List<LogRow> (Instant-
+                // timestamp), entities heeft timestampMs (Long) voor de filter.
+                val recentEntities = entities.filter { it.timestampMs > cutoffMs }
+                val recentEpisodes = db.episodeDao().getAllEpisodes()
+                val profiles = db.basalProfileHistoryDao().getAll()
+                if (recentEntities.isNotEmpty()) {
+                    val windows = NightWindowAnalyzer.build(recentEntities, recentEpisodes, profiles)
+                    db.nightWindowDao().insertNightWindows(windows)
+                }
+            }
+
             nightWindows = withContext(Dispatchers.IO) {
                 db.nightWindowDao().getAllNightWindows()
             }
@@ -350,9 +369,9 @@ fun FclAnalyzerScreen(
                             val f = DFLearner.getF(context)
                             ConfigOverrideWriter.writeWithStvAndParams(
                                 stvMap       = DFMapping.toStvMap(d, f, DFLearner.getNfLevel(context),
-                                    aggLevel = DFLearner.getAggressiveness(context)),
+                                                                  aggLevel = DFLearner.getAggressiveness(context)),
                                 paramOverrides = DFMapping.toParamOverrides(d, f,
-                                    aggLevel = DFLearner.getAggressiveness(context)),
+                                                                            aggLevel = DFLearner.getAggressiveness(context)),
                                 reason       = "Initiële param-sync: earlyBoost nog op default",
                                 episodeCount = episodes?.size ?: 0
                             )
@@ -378,12 +397,12 @@ fun FclAnalyzerScreen(
                             ConfigOverrideWriter.writeWithStvAndParams(
                                 stvMap = stvMap,
                                 paramOverrides = DFMapping.toParamOverrides(d, f,
-                                    refWmd = DFLearner.getRefWmd(context),
-                                    refWff = DFLearner.getRefWff(context),
-                                    refEb = DFLearner.getRefEb(context),
-                                    refPeakBias = DFLearner.getRefPeakBias(context),
-                                    refLcd = DFLearner.getRefLcd(context),
-                                    aggLevel = DFLearner.getAggressiveness(context)),
+                                                                            refWmd = DFLearner.getRefWmd(context),
+                                                                            refWff = DFLearner.getRefWff(context),
+                                                                            refEb = DFLearner.getRefEb(context),
+                                                                            refPeakBias = DFLearner.getRefPeakBias(context),
+                                                                            refLcd = DFLearner.getRefLcd(context),
+                                                                            aggLevel = DFLearner.getAggressiveness(context)),
                                 reason = result.summary,
                                 episodeCount = episodes?.size ?: 0
                             )
@@ -802,7 +821,7 @@ private suspend fun runAdvisorFlow(
                 val nfLevel = DFLearner.getNfLevel(context)
                 ConfigOverrideWriter.writeWithStvAndParams(
                     stvMap         = DFMapping.toStvMap(newD, newF, nfLevel,
-                        aggLevel = DFLearner.getAggressiveness(context)),
+                                                        aggLevel = DFLearner.getAggressiveness(context)),
                     paramOverrides = DFMapping.toParamOverrides(
                         d = newD, f = newF,
                         refWmd = DFLearner.getRefWmd(context),

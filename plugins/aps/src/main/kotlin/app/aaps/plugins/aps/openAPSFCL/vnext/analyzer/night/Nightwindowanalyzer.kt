@@ -24,6 +24,14 @@ enum class NightWindowClass {
 enum class NightDriftSignal {
     BASAL_UP,
     BASAL_DOWN,
+    // Voorloper-signaal (23/06/2026, Ecko): BG stabiel of licht dalend TERWIJL
+    // IOB al laag/negatief is. De BG is nog nabij target, maar het feit dat er
+    // nauwelijks actieve insuline meer nodig was om op target te blijven duidt
+    // erop dat het basaal in die periode eigenlijk al te hoog was — anders had
+    // de BG zonder IOB gestegen. Vroeger te vangen dan BASAL_DOWN (die wacht
+    // tot BG al onder target - 0.6 is), en klinisch relevanter: je wilt het
+    // basaal aanpassen vóór de BG structureel te laag loopt, niet erna.
+    BASAL_DOWN_PRECURSOR,
     NEUTRAL,
     UNCERTAIN
 }
@@ -303,6 +311,13 @@ object NightWindowAnalyzer {
                 "CLEAN_BASAL"
         }
 
+        val (advisedShiftPct, advisedBasalUph, advisedConfidence) = computeAdvisedBasal(
+            signal = signal,
+            driftStrength = driftStrength,
+            currentBasalUph = activeProfileBasalUph,
+            suitabilityWeight = suitabilityWeight
+        )
+
         return NightWindowEntity(
             id = startInstant.toString(),
             localDate = date.toString(),
@@ -347,7 +362,10 @@ object NightWindowAnalyzer {
             lateOvershootRiskScore = lateOvershootRiskScore,
             guardFrictionScore = guardFrictionScore,
             tatPct = tatPct,
-            tbtPct = tbtPct
+            tbtPct = tbtPct,
+            advisedShiftPct = advisedShiftPct,
+            advisedBasalUph = advisedBasalUph,
+            advisedConfidence = advisedConfidence
         )
     }
 
@@ -441,16 +459,36 @@ object NightWindowAnalyzer {
         if (suitabilityWeight < 0.20) return NightDriftSignal.UNCERTAIN
 
         return when {
+            // ── Bestaand: BG boven target, stijgt nog, weinig IOB ────────────
             avgBg >= avgTarget + 1.0 &&
                 bgSlopePerHour >= 0.10 &&
                 avgIob <= 1.5 &&
                 iobDelta <= 0.25 ->
                 NightDriftSignal.BASAL_UP
 
+            // ── Bestaand: BG al duidelijk onder target en daalt ──────────────
             avgBg <= avgTarget - 0.6 &&
                 bgSlopePerHour <= -0.10 &&
                 avgIob <= 1.2 ->
                 NightDriftSignal.BASAL_DOWN
+
+            // ── NIEUW (23/06/2026, Ecko): voorloper-patroon ──────────────────
+            // BG stabiel of licht dalend bij minimale/negatieve IOB-belasting,
+            // terwijl BG nog nabij target ligt. Dit duidt op "basaal al te hoog
+            // in de voorafgaande periode": het systeem gaf nauwelijks iets meer
+            // dan het basaal zelf, en de BG bleef tóch niet stijgen — wat
+            // alleen kan als het basaal al voldoende (of te veel) was.
+            // Verschil met BASAL_DOWN: BG hoeft nog NIET onder target te zijn.
+            // iobDelta <= -0.10: IOB liep al actief af (minder dan een uur
+            // geleden was er meer actieve insuline — nu is die vrijwel verdwenen
+            // zonder dat er iets nieuws bij is gegeven).
+            // Negatieve slope toegestaan tot -0.35 (dalend maar niet steil):
+            // bij steile daling gaat het systeem toch al ingrijpen.
+            abs(avgBg - avgTarget) <= 0.8 &&
+                bgSlopePerHour in -0.35..0.05 &&
+                avgIob <= 1.0 &&
+                iobDelta <= -0.10 ->
+                NightDriftSignal.BASAL_DOWN_PRECURSOR
 
             abs(avgBg - avgTarget) <= 0.5 &&
                 abs(bgSlopePerHour) <= 0.15 ->
@@ -459,6 +497,56 @@ object NightWindowAnalyzer {
             else ->
                 NightDriftSignal.UNCERTAIN
         }
+    }
+
+    /**
+     * Berekent een concreet, voorzichtig basaaladvies op basis van het drift-
+     * signaal en de huidige basaalstand op het betreffende uur-slot.
+     *
+     * Teruggegeven waarden:
+     *   - advisedShiftPct: de procentuele aanpassing die geadviseerd wordt
+     *     (negatief = lager, positief = hoger). Nooit groter dan ±20% per
+     *     venster — meerdere opeenvolgende gelijke signalen zijn nodig voor
+     *     een groter effect; één venster is nooit voldoende bewijs voor meer.
+     *   - advisedBasalUph: de concreet geadviseerde basaalstand in U/h.
+     *   - confidence: 0–1 indicatie van hoe sterk het signaal is.
+     *
+     * Vuistregel: een basaaladvies is informatief, niet automatisch. De
+     * gebruiker past het profiel zelf aan.
+     */
+    fun computeAdvisedBasal(
+        signal: NightDriftSignal,
+        driftStrength: Double,
+        currentBasalUph: Double,
+        suitabilityWeight: Double
+    ): Triple<Double, Double, Double> {   // (shiftPct, advisedUph, confidence)
+        if (currentBasalUph <= 0.0) return Triple(0.0, 0.0, 0.0)
+
+        val confidence = (suitabilityWeight * driftStrength).coerceIn(0.0, 1.0)
+
+        val shiftPct = when (signal) {
+            NightDriftSignal.BASAL_UP ->
+                // Stijging ondanks lage IOB: basaal omhoog. Sterkte bepaalt hoeveel.
+                // Maximaal +20%, geschaald met signaalsterkte. Zacht: +5–15%.
+                (5.0 + driftStrength * 15.0).coerceIn(5.0, 20.0)
+
+            NightDriftSignal.BASAL_DOWN ->
+                // BG al onder target: basaal omlaag. Omzichtig: max -15%.
+                -(5.0 + driftStrength * 10.0).coerceIn(5.0, 15.0)
+
+            NightDriftSignal.BASAL_DOWN_PRECURSOR ->
+                // Vroeg signaal: kleinere stap dan BASAL_DOWN — max -10%.
+                // De BG is nog niet te laag, dus er is minder haast; een
+                // kleine aanpassing en dan opnieuw meten is de juiste aanpak.
+                -(3.0 + driftStrength * 7.0).coerceIn(3.0, 10.0)
+
+            NightDriftSignal.NEUTRAL, NightDriftSignal.UNCERTAIN -> 0.0
+        }
+
+        val advisedUph = (currentBasalUph * (1.0 + shiftPct / 100.0))
+            .coerceAtLeast(0.0)
+
+        return Triple(shiftPct, advisedUph, confidence)
     }
 
     private fun computeDriftStrength(
@@ -488,6 +576,12 @@ object NightWindowAnalyzer {
             NightDriftSignal.BASAL_DOWN ->
                 "BG ligt gemiddeld %.1f onder target en daalt verder zonder duidelijke hoge IOB-belasting."
                     .format(avgTarget - avgBg)
+
+            NightDriftSignal.BASAL_DOWN_PRECURSOR ->
+                "BG ligt nabij target (Δ %.1f mmol) maar IOB liep al grotendeels af zonder dat BG steeg — " +
+                "de voorafgaande basaalstand was vermoedelijk al voldoende of iets te hoog. " +
+                "Overweeg een kleine verlaging voor dit uur-slot."
+                    .format(abs(avgBg - avgTarget))
 
             NightDriftSignal.NEUTRAL ->
                 "BG blijft dicht bij target met beperkte drift en een interpreteerbare IOB-context."

@@ -774,8 +774,8 @@ fun NachtControlTab(
                 }
                 Text(
                     "Eigen stap bovenop de geleerde NF (${currentNfLevel.toInt()}) — " +
-                    "5 = geen effect. Effectief: NF ${effectieveNf.toInt()} " +
-                    "(~$gainPct% gain, $labelVoorEffectief)",
+                        "5 = geen effect. Effectief: NF ${effectieveNf.toInt()} " +
+                        "(~$gainPct% gain, $labelVoorEffectief)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -799,11 +799,11 @@ fun NachtControlTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Voorzichtiger",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Proactiever",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 // Toon ook de knop als de geleerde NF zelf is veranderd maar
@@ -856,47 +856,215 @@ fun NachtControlTab(
 
 
 // ── NachtVenstersCompact ──────────────────────────────────────────────────
-// Compacte weergave van nachtvensters, opgenomen in de Nacht-tab zodat de
-// aparte dashboard-knop "Nacht" niet meer nodig is.
+// Toont nachtvensters met concreet basaal-advies per uur-slot.
+// BASAL_DOWN_PRECURSOR (23/06/2026, Ecko): voorloper-signaal voor te hoog
+// basaal — BG stabiel/dalend bij negatieve IOB, nog nabij target.
 
 @Composable
 private fun NachtVenstersCompact(nightWindows: List<NightWindowEntity>) {
     if (nightWindows.isEmpty()) return
+
+    // Groepeer per effectHour: meerdere vensters voor hetzelfde uur-slot
+    // worden samengevat in één adviesregel — zo ziet de gebruiker onmiddellijk
+    // welke uur-slots structureel een signaal geven.
+    val byHour = nightWindows
+        .filter { it.driftSignal != "NEUTRAL" && it.driftSignal != "UNCERTAIN" }
+        .groupBy { it.effectHour }
+        .filter { it.value.size >= 2 }  // minimaal 2 nachten voor een advies
+        .toSortedMap()
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Nachtvensters", style = MaterialTheme.typography.titleSmall,
-                 fontWeight = FontWeight.SemiBold)
+            Text(
+                "Basaal-adviseur",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Gebaseerd op nachtvensters van de afgelopen nachten. " +
+                    "Advies is informatief — pas het basaalprofiel zelf aan.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Divider()
+
+            if (byHour.isEmpty()) {
+                Text(
+                    "Geen consistent basaal-signaal in de beschikbare nachtvensters.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                byHour.forEach { (hour, windows) ->
+                    val label = "${hour.toString().padStart(2,'0')}:00–${((hour+1)%24).toString().padStart(2,'0')}:00"
+                    // Dominante signaaltelling
+                    val signalCounts = windows.groupingBy { it.driftSignal }.eachCount()
+                    val dominant = signalCounts.maxByOrNull { it.value }?.key ?: "UNCERTAIN"
+                    val dominantCount = signalCounts[dominant] ?: 0
+
+                    // Gemiddeld advies over alle vensters met dit dominante signaal
+                    val relevantWindows = windows.filter { it.driftSignal == dominant && it.advisedBasalUph > 0 }
+                    val avgCurrentBasal = relevantWindows.map { it.activeProfileBasalUph }.average().takeIf { !it.isNaN() } ?: 0.0
+                    val avgAdvisedBasal = relevantWindows.map { it.advisedBasalUph }.average().takeIf { !it.isNaN() } ?: 0.0
+                    val avgShiftPct = relevantWindows.map { it.advisedShiftPct }.average().takeIf { !it.isNaN() } ?: 0.0
+                    val avgConfidence = relevantWindows.map { it.advisedConfidence }.average().takeIf { !it.isNaN() } ?: 0.0
+
+                    // Kleur op signaaltype
+                    val signalColor = when (dominant) {
+                        "BASAL_UP"              -> MaterialTheme.colorScheme.tertiary
+                        "BASAL_DOWN"            -> MaterialTheme.colorScheme.error
+                        "BASAL_DOWN_PRECURSOR"  -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    val signalLabel = when (dominant) {
+                        "BASAL_UP"              -> "↑ Te laag basaal"
+                        "BASAL_DOWN"            -> "↓ Te hoog basaal"
+                        "BASAL_DOWN_PRECURSOR"  -> "↓ Mogelijk te hoog basaal"
+                        else -> dominant
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = signalColor.copy(alpha = 0.07f),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                signalLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = signalColor,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        if (avgCurrentBasal > 0 && avgAdvisedBasal > 0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "Huidig: %.2f U/h".format(avgCurrentBasal),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "Advies: %.2f U/h (%+.0f%%)".format(avgAdvisedBasal, avgShiftPct),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = signalColor,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        // Sterkte-indicator + betrouwbaarheid
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "$dominantCount/${windows.size} nachten",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            // Visuele sterkte-balk
+                            androidx.compose.foundation.layout.Box(
+                                modifier = Modifier
+                                    .height(4.dp)
+                                    .weight(1f)
+                                    .background(
+                                        MaterialTheme.colorScheme.outlineVariant,
+                                        androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+                                    )
+                            ) {
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .fillMaxWidth(avgConfidence.toFloat().coerceIn(0f, 1f))
+                                        .background(
+                                            signalColor,
+                                            androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+                                        )
+                                )
+                            }
+                            Text(
+                                "%.0f%%".format(avgConfidence * 100),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Onderbouwingstekst van het meest recente venster
+                        windows.maxByOrNull { it.startTs }?.driftReason?.let { reason ->
+                            Text(
+                                reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Compact overzicht van alle nachtvensters onderaan (max 7 recente)
+            Divider()
+            Text(
+                "Recente vensters",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             val recent = nightWindows.sortedByDescending { it.localDate }.take(7)
             recent.forEach { w ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(w.localDate, style = MaterialTheme.typography.bodySmall)
                     Text(
-                        w.nightMechanism ?: "—",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when (w.nightMechanism) {
-                            "CLEAN_BASAL" -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        "${w.localDate} ${w.slotLabel}",
+                        style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        w.driftSignal ?: "—",
+                        when (w.driftSignal) {
+                            "BASAL_UP"             -> "↑"
+                            "BASAL_DOWN"           -> "↓"
+                            "BASAL_DOWN_PRECURSOR" -> "↓?"
+                            "NEUTRAL"              -> "="
+                            else                   -> "?"
+                        },
                         style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
                         color = when (w.driftSignal) {
-                            "BASAL_UP"   -> MaterialTheme.colorScheme.tertiary
-                            "BASAL_DOWN" -> MaterialTheme.colorScheme.error
+                            "BASAL_UP"             -> MaterialTheme.colorScheme.tertiary
+                            "BASAL_DOWN"           -> MaterialTheme.colorScheme.error
+                            "BASAL_DOWN_PRECURSOR" -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
+                    if (w.advisedBasalUph > 0 && w.driftSignal !in listOf("NEUTRAL","UNCERTAIN")) {
+                        Text(
+                            "→ %.2f U/h".format(w.advisedBasalUph),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
             if (nightWindows.size > 7) {

@@ -71,5 +71,10 @@ data class NightWindowEntity(
 
     // Directe TAT/TBT per venster (toegevoegd v16)
     val tatPct: Double = 0.0,   // % cycli boven target + 0.7 mmol/L
-    val tbtPct: Double = 0.0    // % cycli onder target − 0.7 mmol/L
+    val tbtPct: Double = 0.0,   // % cycli onder target − 0.7 mmol/L
+
+    // Basaal-advies (toegevoegd 23/06/2026, Ecko) — informatief, niet automatisch
+    val advisedShiftPct: Double = 0.0,    // negatief = lager basaal, positief = hoger
+    val advisedBasalUph: Double = 0.0,   // concreet geadviseerde basaalstand in U/h
+    val advisedConfidence: Double = 0.0   // 0–1: hoe sterk is het signaal
 )

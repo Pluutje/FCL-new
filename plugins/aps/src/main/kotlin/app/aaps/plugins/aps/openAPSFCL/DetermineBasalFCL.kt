@@ -78,7 +78,7 @@ class DetermineBasalFCL @Inject constructor(
     private val profileFunction: ProfileFunction,
     private val cycleLogRepository: app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogRepository,
 
-) {
+    ) {
 
     private val fclMetrics = FCLMetrics(context = context,preferences = preferences,persistenceLayer = persistenceLayer)
     private val fclActivityModule = FCLActivityModule(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
@@ -368,8 +368,17 @@ class DetermineBasalFCL @Inject constructor(
                 null
             }
 
-
-        if (bgHistoryPoints.size >= 10) {
+        // Minimaal 7 punten (≈ 35 minuten BG-geschiedenis) voor FCLvNext.
+        // Was 10 (50 minuten) — verlaagd 23/06/2026 (Ecko): bij FSL-2 via
+        // Juggluco→xDrip+ markeerde AAPS kortdurende NFC/BLE-overlaps als
+        // filledGap, waardoor het puntenaantal kunstmatig laag was. De
+        // filledGap-filter in FCLvNextBgHistoryProvider is nu aangepast
+        // (korte gaten ≤10 min worden meegenomen), maar als veiligheidsnet
+        // is de drempel ook verlaagd: 7 goede punten geven voldoende
+        // trend-signatuur voor slope + acceleratie. Bij minder dan 7 punten
+        // skipt FCLvNext wél, want met 5-6 punten is de acceleratieschatting
+        // te onzeker voor verantwoorde dosisbeslissingen.
+        if (bgHistoryPoints.size >= 7) {
             val bgHistoryMmol = bgHistoryPoints.map { it.timestamp to it.bg }
             val bgNowMmol = bgHistoryMmol.last().second
 
@@ -421,7 +430,7 @@ class DetermineBasalFCL @Inject constructor(
             basalRate = advice.basalRate
             shouldDeliver = advice.shouldDeliver
             lastCycleFclDelivered = shouldDeliver
-           
+
 
             val cycleMin = 5.0
             val commandedU =
@@ -482,7 +491,7 @@ class DetermineBasalFCL @Inject constructor(
 
 
         } else {
-            consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/10")
+            consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/7 (min 35 min history)")
         }
 
 

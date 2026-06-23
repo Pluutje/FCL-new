@@ -37,36 +37,93 @@ class FCLvNextBgHistoryProvider(
 
     /**
      * Haal BG-data op: de laatste [hoursBack] uren uit de bucketed data.
-     * Gefilterde/gevulde gaten (filledGap=true) worden overgeslagen.
-     * Resultaat gesorteerd oudste → nieuwste, in mmol/L.
+     * Gefilterde/gevulde gaten worden alleen overgeslagen als het gat
+     * meer dan MAX_GAP_MINUTES minuten omvat (lange interpolatie = onbetrouwbaar).
+     * Kortere gaten (≤ MAX_GAP_MINUTES, zoals één gemiste Libre-scan of een
+     * kleine NFC/BLE-overlap die AAPS als filledGap markeert) worden
+     * meegenomen — de trendberekening gebruikt actuele tijdstempels en
+     * schaalt er correct mee.
+     *
+     * Achtergrond (23/06/2026, Ecko): bij FSL-2 via Juggluco→xDrip+ ontvangt
+     * AAPS soms twee metingen binnen 1 minuut (BLE + NFC-scan tegelijk). AAPS
+     * buckette de tweede als filledGap. De !filledGap-filter gooide die er
+     * dan uit, waardoor het puntenaantal in het 2-uursvenster kunstmatig laag
+     * bleef en FCLvNext ten onrechte skipte. Het echte timing-interval
+     * (5m ± 6s zoals zichtbaar in xDrip) is geen probleem.
      */
+    private val MAX_GAP_MINUTES = 10L   // één gemiste Libre-scan = ~5 min, marge naar 10
+
     fun getLastHours(hoursBack: Int): List<BgPoint> {
         val data = iobCobCalculator.ads.getBucketedDataTableCopy()
             ?: return emptyList()
 
         val cutoffMs = dateUtil.now() - max(1, hoursBack) * 60L * 60L * 1000L
 
-        return data
-            .filter { it.timestamp >= cutoffMs && !it.filledGap && it.recalculated > 39.0 }
+        val sorted = data
+            .filter { it.timestamp >= cutoffMs && it.recalculated > 39.0 }
             .sortedBy { it.timestamp }
-            .map { BgPoint(time = DateTime(it.timestamp), bgMmol = it.recalculated / 18.0) }
+
+        // Bepaal per punt of het een lang gat dekt (dan weggooien) of een
+        // kort gat / NFC-overlap (dan gewoon meenemen).
+        val result = mutableListOf<BgPoint>()
+        for (i in sorted.indices) {
+            val pt = sorted[i]
+            if (!pt.filledGap) {
+                result += BgPoint(DateTime(pt.timestamp), pt.recalculated / 18.0)
+                continue
+            }
+            // filledGap = true: kijk hoe groot het gat is dat dit punt overbrugt.
+            // Vergelijk met het vorige échte punt; als dat te ver terug ligt,
+            // is dit een lange interpolatie → overslaan.
+            val prevReal = (i - 1 downTo 0)
+                .map { sorted[it] }
+                .firstOrNull { !it.filledGap }
+            val gapMinutes = if (prevReal != null)
+                (pt.timestamp - prevReal.timestamp) / 60_000L
+            else
+                Long.MAX_VALUE   // geen vorig echt punt → conservatief overslaan
+            if (gapMinutes <= MAX_GAP_MINUTES) {
+                result += BgPoint(DateTime(pt.timestamp), pt.recalculated / 18.0)
+            }
+            // gapMinutes > MAX_GAP_MINUTES → niet meenemen (lange onbetrouwbare interpolatie)
+        }
+        return result
     }
 
     /**
      * Convenience: BG-data tussen twee tijdstippen.
+     * Zelfde filledGap-logica als getLastHours(): korte gaten (≤ MAX_GAP_MINUTES)
+     * worden meegenomen, lange interpolaties niet.
      */
     fun getBetween(start: DateTime, end: DateTime): List<BgPoint> {
         val data = iobCobCalculator.ads.getBucketedDataTableCopy()
             ?: return emptyList()
 
-        return data
+        val sorted = data
             .filter {
                 it.timestamp >= start.millis &&
-                it.timestamp <= end.millis &&
-                !it.filledGap &&
-                it.recalculated > 39.0
+                    it.timestamp <= end.millis &&
+                    it.recalculated > 39.0
             }
             .sortedBy { it.timestamp }
-            .map { BgPoint(time = DateTime(it.timestamp), bgMmol = it.recalculated / 18.0) }
+
+        val result = mutableListOf<BgPoint>()
+        for (i in sorted.indices) {
+            val pt = sorted[i]
+            if (!pt.filledGap) {
+                result += BgPoint(DateTime(pt.timestamp), pt.recalculated / 18.0)
+                continue
+            }
+            val prevReal = (i - 1 downTo 0)
+                .map { sorted[it] }
+                .firstOrNull { !it.filledGap }
+            val gapMinutes = if (prevReal != null)
+                (pt.timestamp - prevReal.timestamp) / 60_000L
+            else Long.MAX_VALUE
+            if (gapMinutes <= MAX_GAP_MINUTES) {
+                result += BgPoint(DateTime(pt.timestamp), pt.recalculated / 18.0)
+            }
+        }
+        return result
     }
 }
