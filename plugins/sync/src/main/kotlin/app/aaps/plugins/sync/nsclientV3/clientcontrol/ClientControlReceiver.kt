@@ -4,6 +4,7 @@ import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
@@ -36,6 +37,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.ConfirmationLineDto
+import app.aaps.core.nssdk.localmodel.clientcontrol.WizardDetailDto
 import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
@@ -511,7 +513,8 @@ class ClientControlReceiver @Inject constructor(
                     bolusId = result.bolusId,
                     lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
                     advisorApplies = result.advisorApplies,
-                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) }
+                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    wizardDetail = result.wizardDetail?.toDto(),
                 )
                 nsClientRepository.addLog("◄ CLIENTCTL", "bolus.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g" + if (result.advisorApplies) " advisor" else "")
                 AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
@@ -600,7 +603,8 @@ class ClientControlReceiver @Inject constructor(
                     bolusId = result.bolusId,
                     lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
                     advisorApplies = result.advisorApplies,
-                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) }
+                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    wizardDetail = result.wizardDetail?.toDto(),
                 )
                 nsClientRepository.addLog("◄ CLIENTCTL", "wizard.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g" + if (result.advisorApplies) " advisor" else "")
                 AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
@@ -817,3 +821,26 @@ class ClientControlReceiver @Inject constructor(
     /** Result a command handler reports back so [verifyAndAck] can write the terminal Done ack. */
     private data class AckOutcome(val status: AckStatus, val reason: String?, val payload: String? = null)
 }
+
+private fun EventData.WizardDetail.toDto() = WizardDetailDto(
+    totalInsulin = totalInsulin,
+    carbs = carbs,
+    insulinFromBG = insulinFromBG,
+    insulinFromTrend = insulinFromTrend,
+    insulinFromCOB = insulinFromCOB,
+    insulinFromCarbs = insulinFromCarbs,
+    insulinFromBolusIOB = insulinFromBolusIOB,
+    insulinFromBasalIOB = insulinFromBasalIOB,
+    includeBolusIOB = includeBolusIOB,
+    includeBasalIOB = includeBasalIOB,
+    percentageCorrection = percentageCorrection,
+    cob = cob,
+    tempTargetLabel = tempTargetLabel,
+    ic = ic,
+    sens = sens,
+    eCarbsGrams = eCarbsGrams,
+    eCarbsDelayMinutes = eCarbsDelayMinutes,
+    eCarbsDurationHours = eCarbsDurationHours,
+    carbTimeMinutes = carbTimeMinutes,
+    alarm = alarm,
+)

@@ -443,7 +443,7 @@ class AutotuneViewModel(
         val params = mutableListOf<ResultRow>()
         val tuneInsulin = preferences.get(BooleanKey.AutotuneTuneInsulinCurve)
         if (tuneInsulin) {
-            params += formatRow(rh.gs(R.string.insulin_peak), pumpProfile.iCfg.peak.toDouble(), tunedProfile.iCfg.peak.toDouble(), "%.0f")
+            params += formatRow(rh.gs(R.string.autotune_peak), pumpProfile.iCfg.peak.toDouble(), tunedProfile.iCfg.peak.toDouble(), "%.0f")
             params += formatRow(rh.gs(app.aaps.core.ui.R.string.dia), Round.roundTo(pumpProfile.iCfg.dia, 0.1), Round.roundTo(tunedProfile.iCfg.dia, 0.1), "%.1f")
         }
         params += formatRow(rh.gs(app.aaps.core.ui.R.string.isf_short), Round.roundTo(pumpProfile.isf / toMgDl, 0.001), Round.roundTo(tunedProfile.isf / toMgDl, 0.001), isfFormat)

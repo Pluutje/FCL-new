@@ -167,6 +167,11 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
         val orphanDetector = mock<OrphanDetector>()
         whenever(orphanDetector.authorized).thenReturn(authorizedFlow)
         whenever(preferences.observe(StringNonKey.NsClientControlClientId)).thenReturn(pairedFlow)
+        // pairedFlow (NsClient.pairedFlow) is seeded synchronously from this at construction — start unpaired.
+        whenever(preferences.get(StringNonKey.NsClientControlClientId)).thenReturn("")
+        // Master's allow-client-control switch, synced master→client — the 5th masterReachable term. Default ON.
+        val controlFlow = MutableStateFlow(true)
+        whenever(preferences.observe(BooleanKey.NsClientAllowClientControl)).thenReturn(controlFlow)
 
         val client = buildPlugin(orphanDetector)
         // Heartbeat stays 0L until the first batch — the gate FAILS CLOSED at boot (no optimistic enable).
@@ -186,6 +191,10 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
                 authorizedFlow.value = false
                 awaitValue(client.masterReachable, false)                         // revoked / orphaned → gated
                 authorizedFlow.value = true
+                awaitValue(client.masterReachable, true)
+                controlFlow.value = false
+                awaitValue(client.masterReachable, false)                         // master switched OFF client control → gated
+                controlFlow.value = true
                 awaitValue(client.masterReachable, true)
             } finally {
                 collector.cancel()

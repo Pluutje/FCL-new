@@ -1,6 +1,7 @@
 package app.aaps.core.interfaces.clientcontrol
 
 import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.interfaces.rx.weardata.EventData
 
 /**
  * Progress/outcome of an action dispatched through [ClientControlActionDispatcher]. A `dispatch`
@@ -35,7 +36,8 @@ sealed interface ActionProgress {
         val id: Long,
         val lines: List<ConfirmationLine> = emptyList(),
         val advisorApplies: Boolean = false,
-        val advisorLines: List<ConfirmationLine> = emptyList()
+        val advisorLines: List<ConfirmationLine> = emptyList(),
+        val wizardDetail: EventData.WizardDetail? = null,
     ) : ActionProgress
 
     /** Terminal: definitely not applied — master refused / failed, or it never reached NS. */

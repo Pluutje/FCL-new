@@ -48,7 +48,7 @@ import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.interfaces.utils.TrendCalculator
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.implementation.alerts.LocalAlertUtilsImpl
 import app.aaps.implementation.androidNotification.AlarmSoundPlayerImpl
@@ -67,7 +67,7 @@ import app.aaps.implementation.notifications.NotificationManagerImpl
 import app.aaps.implementation.overview.LastBgDataImpl
 import app.aaps.implementation.overview.OverviewDataImpl
 import app.aaps.implementation.plugin.PluginStore
-import app.aaps.implementation.preference.PreferenceVisibilityContextImpl
+import app.aaps.implementation.preference.VisibilityContextImpl
 import app.aaps.implementation.profile.ProfileFunctionImpl
 import app.aaps.implementation.profile.ProfileRepositoryImpl
 import app.aaps.implementation.profile.ProfileStoreObject
@@ -130,7 +130,7 @@ class ImplementationModule {
         @ContributesAndroidInjector fun contributesTimeDateOrTZChangeReceiver(): TimeDateOrTZChangeReceiver
 
         @Binds fun bindPreferences(preferencesImpl: PreferencesImpl): Preferences
-        @Binds fun bindPreferenceVisibilityContext(impl: PreferenceVisibilityContextImpl): PreferenceVisibilityContext
+        @Binds fun bindVisibilityContext(impl: VisibilityContextImpl): VisibilityContext
         @Binds fun bindFabricPrivacy(fabricPrivacyImpl: FabricPrivacyImpl): FabricPrivacy
         @Binds fun bindActivePlugin(pluginStore: PluginStore): ActivePlugin
 

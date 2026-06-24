@@ -133,6 +133,11 @@ class PreferencesImpl @Inject constructor(
     override fun get(key: BooleanNonPreferenceKey): Boolean =
         sp.getBoolean(key.key, key.defaultValue)
 
+    override fun get(key: BooleanNonPreferenceKey, forSync: Boolean): Boolean =
+        // forSync: fall back to the COMPUTED default (no simple-mode forcing) so the operative value travels.
+        if (forSync && key is BooleanPreferenceKey && key.calculatedDefaultValue) sp.getBoolean(key.key, calculatedDefaultValue(key))
+        else sp.getBoolean(key.key, key.defaultValue)
+
     override fun getIfExists(key: BooleanNonPreferenceKey): Boolean? =
         if (sp.contains(key.key)) sp.getBoolean(key.key, key.defaultValue) else null
 
@@ -254,6 +259,10 @@ class PreferencesImpl @Inject constructor(
 
     override fun get(key: IntNonPreferenceKey): Int =
         sp.getInt(key.key, key.defaultValue)
+
+    override fun get(key: IntNonPreferenceKey, forSync: Boolean): Int =
+        if (forSync && key is IntPreferenceKey && key.calculatedDefaultValue) sp.getInt(key.key, calculatedDefaultValue(key))
+        else sp.getInt(key.key, key.defaultValue)
 
     override fun getIfExists(key: IntNonPreferenceKey): Int? =
         if (sp.contains(key.key)) sp.getInt(key.key, key.defaultValue) else null

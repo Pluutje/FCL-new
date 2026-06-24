@@ -813,7 +813,8 @@ class DataHandlerMobile @Inject constructor(
                     title, message = "",
                     returnCommand = returnCommand(progress.id),
                     lines = progress.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) },
-                    deferConfirm = config.AAPSCLIENT
+                    deferConfirm = config.AAPSCLIENT,
+                    wizardDetail = progress.wizardDetail,
                 )
             )
 
@@ -1586,7 +1587,7 @@ class DataHandlerMobile @Inject constructor(
     private suspend fun generateStatusString(profile: Profile?): String {
         var status = ""
         profile ?: return rh.gs(app.aaps.core.ui.R.string.noprofile)
-        if (!loop.runningMode().isLoopRunning()) status += rh.gs(R.string.disabled_loop) + "\n"
+        if (!loop.runningMode().isLoopRunning()) status += rh.gs(app.aaps.core.ui.R.string.disabled_loop) + "\n"
         return status
     }
 

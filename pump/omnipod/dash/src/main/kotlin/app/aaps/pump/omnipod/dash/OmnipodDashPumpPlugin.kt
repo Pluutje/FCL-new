@@ -455,7 +455,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
             }
             Completable.error(java.lang.IllegalStateException("Command not confirmed"))
         } else {
-            notificationManager.post(NotificationId.PROFILE_SET_OK, R.string.profile_set_ok)
+            notificationManager.post(NotificationId.PROFILE_SET_OK, app.aaps.core.ui.R.string.profile_set_ok)
 
             Completable.complete()
         }

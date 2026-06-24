@@ -558,18 +558,45 @@ class NSClientV3Plugin @Inject constructor(
             },
             _lastMasterSignalAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = false, now = dateUtil::now),
             preferences.observe(StringNonKey.NsClientControlClientId).map { it.isNotEmpty() },
-            orphanDetector.authorized
-        ) { ws, fresh, paired, authorized ->
-            val reachable = ws && fresh && paired && authorized
+            orphanDetector.authorized,
+            // Master's "allow client control" switch, synced master→client (effective value — see
+            // RunningConfigurationImpl). Off ⇒ master silently drops commands, so block fast here instead.
+            preferences.observe(BooleanKey.NsClientAllowClientControl)
+        ) { ws, fresh, paired, authorized, controlAllowed ->
+            val reachable = ws && fresh && paired && authorized && controlAllowed
             // Diagnostic (lazy — string built only when NSCLIENT logging is on): shows WHICH term gates.
             // heartbeatAgeMs > heartbeatStaleMs (9 min) ⇒ fresh=false.
-            aapsLogger.debug(LTag.NSCLIENT) { "masterReachable=$reachable (ws=$ws fresh=$fresh paired=$paired authorized=$authorized heartbeatAgeMs=${dateUtil.now() - lastDevicestatusReceivedAt.value})" }
+            aapsLogger.debug(LTag.NSCLIENT) { "masterReachable=$reachable (ws=$ws fresh=$fresh paired=$paired authorized=$authorized controlAllowed=$controlAllowed heartbeatAgeMs=${dateUtil.now() - lastDevicestatusReceivedAt.value})" }
             reachable
         }
             // Seed FALSE (fail-closed): before the combine first computes — and on a cold start / WS
             // resubscribe — the client must not momentarily report the master "reachable" and flash edit
             // controls open. The combine settles to the real value within a tick of subscription.
             .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // See [NsClient.pairedFlow]. STABLE pairing marker (flips only on pair/unpair) — kept separate from
+    // the flapping [masterReachable] so persistent chrome (nav tabs, Manage entries, search visibility)
+    // can HIDE mutating UI on an unpaired client without churn. Master: always paired. Client: observe the
+    // canonical NsClientControlClientId marker (same term masterReachable uses on line ~557). Seeded with
+    // the SYNCHRONOUS current value (not false) so a [PreferenceVisibilityContext] read sees the correct
+    // .value even before any collector subscribes.
+    override val masterOrPairedClientFlow: StateFlow<Boolean> =
+        if (!config.AAPSCLIENT) MutableStateFlow(true).asStateFlow()
+        else preferences.observe(StringNonKey.NsClientControlClientId)
+            .map { it.isNotEmpty() }
+            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), preferences.get(StringNonKey.NsClientControlClientId).isNotEmpty())
+
+    // See [NsClient.masterControlAllowed]. Master: always true. Client: true unless paired AND the master's
+    // synced "allow client control" switch is off — so an UNPAIRED client shows the generic unreachable banner,
+    // not this one. UI-only (the offline banner picks its message from this); masterReachable folds the raw
+    // synced term in directly. Seed true so the initial/unpaired state never flashes the control-disabled message.
+    override val masterControlAllowed: StateFlow<Boolean> =
+        if (!config.AAPSCLIENT) MutableStateFlow(true).asStateFlow()
+        else combine(
+            preferences.observe(StringNonKey.NsClientControlClientId).map { it.isNotEmpty() },
+            preferences.observe(BooleanKey.NsClientAllowClientControl)
+        ) { paired, control -> !paired || control }
+            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), true)
 
     private fun setClient() {
         if (nsAndroidClient == null)
