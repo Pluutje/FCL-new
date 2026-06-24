@@ -2045,7 +2045,19 @@ private fun computeEarlyDoseDecision(
     val boostActive =
         config.earlyBoostFactor > 1.0 + 1e-9 &&
             conf >= config.earlyBoostMinConfidence &&
-            earlyDose.boostCommitCount < effectiveMaxCommits
+            earlyDose.boostCommitCount < effectiveMaxCommits &&
+            // IOB-rem: als er al substantieel insuline actief is, heeft een
+            // versterkte vroege dosis geen zin meer — die werkt pas na de piek
+            // en versterkt de daling erna alleen maar.
+            // Drempel is bewust iets hoger dan peakIobBrakeSuppressThreshold (+0.08):
+            //   - peakIobBrakeSuppressThreshold (0.42): algemene "begin rustig aan"
+            //   - EarlyBoost mag nog één cyclus langer doorgaan (tot ~0.50) zodat
+            //     er één afnemende vervolgdosis volgt op de grote frontload, in
+            //     plaats van de sprong direct naar de kleine, gedecayede normale
+            //     commits. Achtergrond 24/06/2026 (Ecko): met exacte suppress-drempel
+            //     gaf dit 3,98 → 0,12 → 0,09U (te abrupt); met +0.08 marge wordt
+            //     het 3,98 → 1,06 → 0,09U (geleidelijk aflopend zoals gewenst).
+            ctx.iobRatio < (config.peakIobBrakeSuppressThreshold + 0.08).coerceAtMost(0.55)
 
     val effectiveBoostFactor = if (boostActive) config.earlyBoostFactor else 1.0
 
