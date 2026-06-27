@@ -119,6 +119,11 @@ object FrontloadLearner {
                 m.timeToPeakMinutes != null &&
                 m.timeToPeakMinutes > 0 &&
                 !m.rescueConfirmed &&
+                // Episodes waarbij een handmatige bolus van ≥ 0.5U werd gegeven
+                // zijn niet bruikbaar voor de frontload-timing learner: de piek
+                // werd mede bepaald door die externe bolus, niet puur door het
+                // frontload-mechanisme. Zelfde reden als in DFLearner.evaluate().
+                !m.hasManualCorrection &&
                 m.firstFrontloadMinutes < m.timeToPeakMinutes
         }
 
@@ -138,11 +143,30 @@ object FrontloadLearner {
         val huidigWff = DFLearner.getRefWff(context)
         val huidigPeakBias = DFLearner.getRefPeakBias(context)
 
-        // ── REF_WMD: wanneer triggeren ──────────────────────────────────────
+        // ── REF_WMD: wanneer de frontload triggert ───────────────────────────
+        // ONTWERPKEUZE (25/06/2026, Ecko): insuline zo vroeg mogelijk, piek zo
+        // laag mogelijk. De enige reden om de frontload-trigger te VERHOGEN
+        // (later triggeren, WMD omhoog) zou zijn dat de trigger te vroeg vuurt
+        // en daardoor de piek overschat. Maar een hogere WMD betekent dat de BG
+        // al hoog moet zijn voordat de frontload begint — dat is precies het
+        // tegengestelde van wat gewenst is bij snelle maaltijden.
+        //
+        // Nieuwe logica:
+        //   - EERDER (WMD omlaag): piek trad op < MARGE_MIN min na frontload →
+        //     frontload triggerde te laat → vroeger triggeren.
+        //   - GOED (geen aanpassing): piek trad in het ideale venster op.
+        //   - LATER (piek > MARGE_MAX min na frontload): dit betekent juist dat
+        //     de frontload vroeg en goed werkte — geen reden om later te gaan.
+        //     We VERLAGEN WMD nu ook in dit geval (om vroeg triggeren te
+        //     bekrachtigen), want als de piek pas na 50+ min komt, had de
+        //     frontload nog eerder gegeven kunnen worden.
+        //
+        // Kortom: de LATER-richting wordt nooit meer als "naar achteren bijstellen"
+        // geïnterpreteerd. WMD kan alleen gelijk blijven of omlaag.
         val richting = when {
-            gemiddeldeMarge < MARGE_MIN -> "EERDER"
-            gemiddeldeMarge > MARGE_MAX -> "LATER"
-            else                        -> "GOED"
+            gemiddeldeMarge < MARGE_MIN -> "EERDER"   // piek te vroeg → trigger eerder
+            gemiddeldeMarge > MARGE_MAX -> "EERDER"   // piek te laat → frontload had nog eerder gemoeten
+            else                        -> "GOED"     // in het ideale venster
         }
 
         val afwijking = abs(gemiddeldeMarge - MARGE_IDEAAL).toDouble()
@@ -151,25 +175,22 @@ object FrontloadLearner {
 
         val nieuwWmd = when (richting) {
             "EERDER" -> (huidigWmd - stapWmd).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
-            "LATER"  -> (huidigWmd + stapWmd).coerceIn(REF_WMD_MIN, REF_WMD_MAX)
-            else     -> huidigWmd
+            else     -> huidigWmd   // GOED → geen aanpassing
         }
 
         // ── REF_WFF: hoe groot de frontload-commit ──────────────────────────
-        // Stuurt nu DIRECT op firstBigCommitFrac (fbc) — het aandeel van de
-        // totale dosis dat al in de eerste grote commit zit. Data-analyse
-        // (16-06-2026) toonde een sterke samenhang: episodes met fbc < 0.35
-        // hadden gemiddeld 1.25 mmol hogere piek en 3x langere tijd-tot-piek
-        // dan episodes met fbc >= 0.60. lastSignificantCommitFrac (staart)
-        // werd voorheen gebruikt maar reageert pas NA het probleem; fbc is
-        // het directere en vroegere signaal.
+        // ONTWERPKEUZE (25/06/2026, Ecko): de frontload wordt ALLEEN verkleind
+        // als er een hypo volgt EN er weinig of geen vervolgdoses zijn geweest.
+        // Als er wél vervolgdoses waren én een hypo volgde: dan waren die
+        // vervolgdoses te veel, niet de frontload zelf. Die worden afgevangen
+        // door het lateDecayFactor-mechanisme.
         //
-        // Doelbereik fbc: 0.45-0.65 (vergelijkbaar met de "hoog frontload"
-        // groep uit de analyse, met marge zodat niet structureel over-dosed
-        // wordt bij kleine/onzekere episodes).
-        // Veiligheid: WFF wordt NIET verhoogd op basis van episodes met hypo
-        // of bevestigde rescue — die episodes zijn geen goede leersignaal
-        // voor "meer vroege insuline is beter".
+        // Concreet:
+        //   - WFF omhoog: fbc te laag (te weinig insuline vroeg gegeven) EN
+        //     geen hypo (dus meer vroege insuline had veilig gemoeten)
+        //   - WFF omlaag: hypo EN weinig vervolgdoses (≤ 1 follow-up commit) →
+        //     de frontload zelf was te groot
+        //   - WFF onveranderd: alles overige gevallen
         val veiligeEpisodes = bruikbaar.filter { !it.hypoDetected && !it.rescueConfirmed }
 
         val gemiddeldeFbc = if (veiligeEpisodes.isNotEmpty())
@@ -184,17 +205,38 @@ object FrontloadLearner {
         val FBC_TARGET_MIN = 0.45
         val FBC_TARGET_MAX = 0.65
 
+        // Episoden waarbij een hypo volgde maar er weinig vervolgdoses waren:
+        // de frontload was waarschijnlijk te groot.
+        // "Weinig vervolgdoses" = ≤ 1 follow-up commit, want bij 0-1 commits
+        // na de grote frontload is er weinig alternatief om de schuld aan te
+        // wijzen.
+        val hypoZonderVervolgdoses = bruikbaar.filter {
+            it.hypoDetected && it.followUpCommitCount <= 1
+        }
+        val hypoMétVervolgdoses = bruikbaar.filter {
+            it.hypoDetected && it.followUpCommitCount > 1
+        }
+
         val nieuwWff = when {
             // Geen veilige episodes om op te leren: WFF onveranderd
             gemiddeldeFbc == null -> huidigWff
-            // fbc structureel te laag: te weinig vroege insuline → WFF omhoog
+
+            // fbc structureel te laag én geen hypo: meer vroege insuline
+            // had veilig gemoeten → WFF omhoog
             gemiddeldeFbc < FBC_TARGET_MIN ->
                 (huidigWff + stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
-            // fbc structureel te hoog: mogelijk over-frontloading → WFF omlaag,
-            // maar alleen als de staart niet ook al hoog is (anders is het geen
-            // WFF-probleem maar eerder een algemene dosis-kwestie)
-            gemiddeldeFbc > FBC_TARGET_MAX && gemiddeldeStaartFrac < 0.15 ->
+
+            // Hypo na frontload ZONder vervolgdoses: frontload zelf was te groot
+            // → WFF omlaag. Maar alleen als dit een structureel patroon is
+            // (meer dan de helft van de bruikbare episodes).
+            hypoZonderVervolgdoses.size > bruikbaar.size / 2 ->
                 (huidigWff - stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
+
+            // Hypo na frontload MÉT vervolgdoses: die vervolgdoses waren te
+            // veel, niet de frontload. WFF NIET aanpassen — lateDecayFactor
+            // regelt dit al. Logging wel: dit patroon is informatief.
+            hypoMétVervolgdoses.size > 0 -> huidigWff   // expliciet GOED laten
+
             else -> huidigWff
         }
 
@@ -258,8 +300,8 @@ object FrontloadLearner {
         prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
 
         val effectiefRichting = if (richting != "GOED") richting
-            else if (gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN) "EERDER"
-            else "GOED"
+        else if (gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN) "EERDER"
+        else "GOED"
 
         val step = FrontloadLearningStep(
             tsUtc            = java.time.Instant.now().toString(),

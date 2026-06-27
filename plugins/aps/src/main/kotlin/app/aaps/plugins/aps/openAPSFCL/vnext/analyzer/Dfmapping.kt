@@ -45,10 +45,19 @@ object DFMapping {
     // Deze drie bepalen het basisgedrag bij D=1.0, F=0.5 en kunnen via de
     // Kalibratie-sectie in de Automaat-tab worden aangepast door de gebruiker.
     // Standaardwaarden zijn de gevalideerde baselines.
-    const val REF_WMD_DEFAULT = 1.10   // Stijgingsdrempel frontload (mmol boven target) — verlaagd voor snellere trigger
+    const val REF_WMD_DEFAULT = 1.10   // Stijgingsdrempel frontload (mmol boven target)
+    // VLOER 26/06/2026 (Ecko, architectuurreview): FrontloadLearner corrigeert nu
+    // alleen naar EERDER (lager WMD), maar zonder vloer zou hij via meerdere
+    // episoden te ver zakken. Onder 1.00 triggert watching bij BG=6.4 mmol
+    // (target 5.4) — bij trage maaltijden levert dat alleen kleine nutteloze
+    // commits op terwijl BG gewoon doorstijgt. REF_WMD_MIN verhoogd 0.80→1.00.
     const val REF_WFF_DEFAULT = 0.72   // Frontload grootte (fractie van max SMB)
     const val REF_EB_DEFAULT  = 1.0    // Vroege boost (1.0 = uit, 2.0 = maximaal)
-    const val REF_PEAK_BIAS_DEFAULT = 0.0  // Vroege piek-bias-correctie (mmol), 0.0 = uit
+    const val REF_PEAK_BIAS_DEFAULT = 0.20  // Vroege piek-bias-correctie (mmol)
+    // 26/06/2026: teruggezet van 0.0 naar 0.20. De learner had dit naar 0.0
+    // getrokken maar bij snelle grote maaltijden (slope ≥ 4 mmol/h) onderschat
+    // de voorspelling de piek systematisch met ~1-2 mmol. Een structurele bias
+    // van 0.20 mmol corrigeert dit zonder andere parameters te destabiliseren.
 
     // refLcd: BEWUSTE UITZONDERING op het "alles via D/F"-principe hierboven.
     // lateCommitDecayFactor was tot 20/06/2026 puur afgeleid van F — maar een
@@ -62,7 +71,7 @@ object DFMapping {
     const val REF_LCD_DEFAULT = 0.0    // 0.0 = geen extra demping bovenop de F-afgeleide basis
 
     // Bereiken voor de kalibratie-knoppen
-    const val REF_WMD_MIN = 0.80;  const val REF_WMD_MAX = 2.00
+    const val REF_WMD_MIN = 1.00;  const val REF_WMD_MAX = 2.00  // min verhoogd 0.80→1.00
     const val REF_WFF_MIN = 0.40;  const val REF_WFF_MAX = 0.90
     const val REF_EB_MIN  = 1.0;   const val REF_EB_MAX  = 2.0
     const val REF_PEAK_BIAS_MIN = 0.0;  const val REF_PEAK_BIAS_MAX = 1.5
@@ -163,8 +172,20 @@ object DFMapping {
             // F-afgeleide basis (zie kdoc bij REF_LCD_DEFAULT hierboven) —
             // specifiek voor "laatste commit was te laat/te groot", los van
             // de algehele frontload-balans die F stuurt.
-            lateCommitDecayFactor         = (max(0.0, (fEff - 0.5) * 1.4 - vC * 0.6) + refLcd)
-                .coerceIn(0.0, REF_LCD_MAX + 0.65),
+            // MINIMUM 26/06/2026 (Ecko, architectuurreview): earlyBoostFactor
+            // en lateCommitDecayFactor worden beide geleerd maar in dezelfde
+            // richting beïnvloed door F. Na overdoseringen daalde refLcd terug
+            // naar 0.0 terwijl F ook al daalde — het systeem corrigeerde
+            // dubbel waardoor lateCommitDecayFactor te ver zakte (0.36).
+            // Een vloer van 0.45 bij hogere F-waarden (≥ 0.65, waarbij earlyBoost
+            // ook actief is) voorkomt dat de decay zover zakt dat de commits na
+            // de grote frontload nog substantieel zijn. Dit werkt samen met de
+            // IOB-afhankelijke decay-vloer in FCLvNext.kt.
+            lateCommitDecayFactor         = run {
+                val rawLcd = max(0.0, (fEff - 0.5) * 1.4 - vC * 0.6) + refLcd
+                val minLcd = if (fEff >= 0.65) 0.45 else 0.0
+                rawLcd.coerceIn(minLcd, REF_LCD_MAX + 0.65)
+            },
             lateCommitDecayThreshold      = max(0.40, 0.55 - (fEff - 0.5) * 0.10),
 
             // Piekkalibr.: F hoog = steilere vroege stijging verwacht

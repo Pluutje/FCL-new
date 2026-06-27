@@ -222,8 +222,8 @@ data class FCLvNextConfig(
     val topGuardCapMin: Double,                 // 0.20 — onderste grens van TopGuard cap-factor (finetuning: hoe hard maximaal geknepen wordt)
     val topGuardCapMax: Double,                 // 0.65 — bovenste grens van TopGuard cap-factor (finetuning: minimale doorvoer bij actieve TopGuard)
 
-    // ── heightEscalationFactor ────────────────────────────────────────────
-    val heightEscalationIobCeiling: Double,     // 0.35 — boven deze IOB geen verdere escalatie (finetuning: eerder uitschakelen bij gevoelige patronen)
+    // ── EarlyBoost piekdruk-bonus (commit 1) ─────────────────────────────
+    val peakPressureBonusMaxIob: Double,     // 0.35 — boven deze IOB geen piekdrukbonus op commit 1
 
     // ── IOB-dempingscurve machtsvorm ─────────────────────────────────────
     val iobPowerDay: Double,                    // 2.1  — machtsvorm van de IOB-curve overdag (finetuning: hogere waarde = scherper afknijpen bij hoge IOB)
@@ -510,7 +510,7 @@ fun loadFCLvNextConfig(
         topGuardMinIobRatio             = 0.30,
         topGuardCapMin                  = 0.20,
         topGuardCapMax                  = 0.65,
-        heightEscalationIobCeiling      = 0.35,
+        peakPressureBonusMaxIob         = 0.35,
         iobPowerDay                     = 2.1,
         iobPowerNight                   = 2.3,
         peakApproachIobThreshold        = 0.62,
@@ -523,7 +523,13 @@ fun loadFCLvNextConfig(
         // Reden: prefs.put() gevolgd door prefs.get() in dezelfde aanroep kan de
         // gecachte prefs-waarde teruggeven i.p.v. de zojuist geschreven waarde.
         earlyBoostFactor         = po?.earlyBoostFactor        ?: prefs.get(DoubleKey.fcl_vnext_early_boost_factor),
-        earlyBoostMinConfidence  = po?.earlyBoostMinConfidence ?: prefs.get(DoubleKey.fcl_vnext_early_boost_min_confidence),
+        // Cap op 0.40 (26/06/2026, Ecko): confidence was 0.43-0.44 terwijl EarlyBoost
+        // al bij 22:59 had kunnen vuren (BG 8.4, slope 0.78, stijging duidelijk zichtbaar).
+        // Pas bij 23:09 (BG=9.3) haalde de confidence de drempel — te laat. 0.40 laat
+        // EarlyBoost vuren zodra het signaal "vrij overtuigend" is, terwijl de IOB-gate
+        // (iobRatio < 0.50) en lateDecayMul overdosering al voorkomen.
+        earlyBoostMinConfidence  = (po?.earlyBoostMinConfidence ?: prefs.get(DoubleKey.fcl_vnext_early_boost_min_confidence))
+            .coerceAtMost(0.40),
         earlyBoostMaxCommits     = po?.earlyBoostMaxCommits    ?: prefs.get(IntKey.fcl_vnext_early_boost_max_commits),
         earlyRiseFracMin         = po?.earlyRiseFracMin        ?: prefs.get(DoubleKey.fcl_vnext_early_rise_frac_min),
         peakMaxSlopeWeight       = po?.peakMaxSlopeWeight      ?: prefs.get(DoubleKey.fcl_vnext_peak_max_slope_weight),

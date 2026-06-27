@@ -209,8 +209,18 @@ private fun FrontloadTimingKaart(s: FclStrings) {
 
     val laatsteStap = history.lastOrNull()
     val statusTekst = s.frontloadStatusTekst(frontloadStatusKey(huidigWmd))
-    val diagnoseRegel = laatsteStap?.let {
-        s.frontloadTekst(it.richting, it.gemiddeldeMarge)
+
+    // Onderscheid (25/06/2026, Ecko): de diagnosetext toonde voorheen
+    // de gemiddeldeMarge over ALLE episodes — dat beschreef de cumulatieve
+    // trend, niet het meest recente enkelvoudige signaal. Door ook de
+    // konkrete delta (oudeWmd → nieuweWmd) te tonen, is duidelijk dat het
+    // gaat om de LAATSTE aanpassing, niet om de totale verschuiving.
+    val diagnoseRegel = laatsteStap?.let { stap ->
+        val deltaWmd = stap.nieuweWmd - stap.oudeWmd
+        val deltaTekst = if (kotlin.math.abs(deltaWmd) >= 0.01)
+            " (Δ ${if (deltaWmd > 0) "+" else ""}${"%.2f".format(deltaWmd)} mmol)"
+        else ""
+        s.frontloadTekst(stap.richting, stap.gemiddeldeMarge) + deltaTekst
     }
 
     AsKaart(

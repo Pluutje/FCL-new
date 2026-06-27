@@ -407,6 +407,30 @@ object DFLearner {
         // Relatieve "echte episode"-drempel — zie kdoc bij MIN_VALID_INSULIN_FRAC.
         val minValidInsulin = minValidInsulinFor(manualMaxSmb)
 
+        // ── Handmatige correctie: episode overslaan ──────────────────────────
+        // Ontwerpprincipe (26/06/2026, Ecko audit): als er een handmatige bolus
+        // van ≥ 0.5U is gegeven, is de uitkomst (piek, hypo, timing) mede het
+        // resultaat van die externe beslissing — niet van het algoritme zelf.
+        // evaluateEarlyBoost() en evaluateLateCommitDecay() hadden deze check al;
+        // de hoofd-evaluate() (die D/F = Sterkte/Timing/Vasthoudendheid bijstelt)
+        // miste hem, waardoor D/F konden worden bijgesteld op basis van episodes
+        // waarbij de uitkomst niet representatief was voor het algoritme.
+        if (metrics.hasManualCorrection) {
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
+                metrics      = metrics,
+                diagnose     = "SKIP_MANUAL_CORRECTION",
+                rawDeltaD    = 0.0,
+                rawDeltaF    = 0.0,
+                accumDVoor   = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble(),
+                accumFVoor   = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble(),
+                epCountVoor  = prefs(context).getInt(KEY_EP_COUNT, 0),
+                weekDVoor    = prefs(context).getFloat("df_week_delta_d", 0f).toDouble(),
+                weekFVoor    = prefs(context).getFloat("df_week_delta_f", 0f).toDouble(),
+                blokkade     = "MANUAL_CORRECTION(≥0.5U)"
+            )
+            return null
+        }
+
         if (!isAutoEnabled(context)) {
             // Automaat staat uit: geen aanpassingen, maar WEL loggen zodat
             // zichtbaar is wat de learner zou hebben gediagnosticeerd.
@@ -1099,8 +1123,8 @@ object DFLearner {
         // ── Bepaal signaal ──────────────────────────────────────────────
         val hypoOorzaakFrontload =
             metrics.hypoDetected &&
-            metrics.earlyBoostWasActive &&
-            !metrics.hasManualCorrection
+                metrics.earlyBoostWasActive &&
+                !metrics.hasManualCorrection
 
         // NIEUW (20/06/2026): near-miss via bevestigde reddingskoolhydraten
         // ÓF automatische near-hypo-detectie (nearHypoAverted — zie kdoc bij
@@ -1120,17 +1144,17 @@ object DFLearner {
         // eerder opgevangen.
         val nearMissViaRescue =
             !metrics.hypoDetected &&
-            (metrics.rescueConfirmed || metrics.nearHypoAverted) &&
-            metrics.earlyBoostWasActive &&
-            !metrics.hasManualCorrection
+                (metrics.rescueConfirmed || metrics.nearHypoAverted) &&
+                metrics.earlyBoostWasActive &&
+                !metrics.hasManualCorrection
 
         // Tier 1: klassiek — te weinig insuline vroeg terwijl piek hoog was
         val frontloadTeKlein =
             !metrics.hypoDetected &&
-            !nearMissViaRescue &&
-            metrics.earlyBoostFrac in 0.01..0.54 &&
-            metrics.peakBg > 9.5 &&
-            metrics.followUpCommitCount >= 1
+                !nearMissViaRescue &&
+                metrics.earlyBoostFrac in 0.01..0.54 &&
+                metrics.peakBg > 9.5 &&
+                metrics.followUpCommitCount >= 1
 
         // Tier 2: hoge piek ondanks actieve earlyBoost — timing te laat of
         // te weinig gewicht op de vroege commits t.o.v. het watching-deel.
@@ -1139,12 +1163,12 @@ object DFLearner {
         // eerder moest, niet hoeveel eerder).
         val frontloadTeLaatHogePiek =
             !metrics.hypoDetected &&
-            !nearMissViaRescue &&
-            !frontloadTeKlein &&
-            metrics.peakBg > 12.0 &&
-            metrics.earlyBoostFrac < 0.80 &&
-            metrics.earlyBoostWasActive &&
-            metrics.followUpCommitCount >= 1
+                !nearMissViaRescue &&
+                !frontloadTeKlein &&
+                metrics.peakBg > 12.0 &&
+                metrics.earlyBoostFrac < 0.80 &&
+                metrics.earlyBoostWasActive &&
+                metrics.followUpCommitCount >= 1
 
         val signal = when {
             hypoOorzaakFrontload   -> "BACK"
@@ -1160,9 +1184,9 @@ object DFLearner {
 
         if (signal == "NONE") {
             p.edit().putString(KEY_EB_PREV_SIG, lastSig)
-                    .putString(KEY_EB_LAST_SIG, "NONE")
-                    .putLong(KEY_EB_LAST_TS, System.currentTimeMillis())
-                    .apply()
+                .putString(KEY_EB_LAST_SIG, "NONE")
+                .putLong(KEY_EB_LAST_TS, System.currentTimeMillis())
+                .apply()
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEarlyBoost(
                 metrics     = metrics,
                 signal      = "NONE",

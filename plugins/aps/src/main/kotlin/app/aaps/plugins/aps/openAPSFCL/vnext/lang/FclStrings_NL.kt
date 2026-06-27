@@ -307,10 +307,18 @@ object FclStrings_NL : FclStrings {
     }
 
     override fun frontloadTekst(richting: String, gemiddeldeMargeMin: Int) = when (richting) {
-        "EERDER" ->
-            "Piek viel gemiddeld $gemiddeldeMargeMin min te laat — timing naar voren bijgesteld"
+        "EERDER" -> when {
+            gemiddeldeMargeMin < 0 ->
+                // piek trad vóór of vlak na de frontload op → trigger eerder
+                "Piek viel gemiddeld ${-gemiddeldeMargeMin} min te vroeg — frontload eerder ingesteld"
+            else ->
+                // piek trad laat op → frontload had nog eerder gemoeten
+                "Piek viel gemiddeld $gemiddeldeMargeMin min na frontload — frontload eerder ingesteld"
+        }
+        // "LATER" wordt niet meer toegewezen door de learner — alleen nog
+        // aanwezig voor terugwaartse compatibiliteit met opgeslagen history.
         "LATER" ->
-            "Piek viel gemiddeld ${-gemiddeldeMargeMin} min te vroeg — timing naar achteren bijgesteld"
+            "Piek viel gemiddeld ${-gemiddeldeMargeMin} min te vroeg (historisch opgeslagen — logica herzien)"
         "GOED" ->
             "Piektiming binnen marge, geen aanpassing nodig"
         else -> richting

@@ -2059,7 +2059,64 @@ private fun computeEarlyDoseDecision(
             //     het 3,98 → 1,06 → 0,09U (geleidelijk aflopend zoals gewenst).
             ctx.iobRatio < (config.peakIobBrakeSuppressThreshold + 0.08).coerceAtMost(0.55)
 
-    val effectiveBoostFactor = if (boostActive) config.earlyBoostFactor else 1.0
+    val effectiveBoostFactor = if (!boostActive) {
+        1.0
+    } else {
+        // ── Afnemende boost over opeenvolgende EarlyBoost-commits ──────────
+        // Ontwerp 26/06/2026 (Ecko): elke volgende commit wordt bewust kleiner.
+        //
+        // Redenering: bij commit 1 is de IOB nog minimaal en is alle urgentie
+        // aanwezig ("geef nu alles vroeg"). Bij commit 2 is de frontload al
+        // geleverd en bouwt de IOB op; de boost is minder kritisch. Bij 3 en 4
+        // loopt de IOB al fors — de boost dient dan bijna geen doel meer.
+        // Dit spiegelt de lateDecayMul voor normale commits, maar dan intern
+        // in het EarlyBoost-pad.
+        //
+        // Decay op het EXTRA deel boven 1.0 (zodat de factor nooit onder 1.0 zakt):
+        //   commit 1: 100% van de geconfigureerde extra
+        //   commit 2:  60% → duidelijk minder maar nog substantieel
+        //   commit 3:  30% → klein, lateDecayMul op normale commits pakt de rest
+        //   commit 4+: 10% → quasi-neutraal, IOB-gate sluit sowieso al eerder
+        val boostDecay = when (earlyDose.boostCommitCount) {
+            0    -> 1.00
+            1    -> 0.60
+            2    -> 0.30
+            else -> 0.10
+        }
+        val extraBoost = config.earlyBoostFactor - 1.0  // het deel boven 1.0
+
+        // ── Piekdruk-bonus (vervangt heightEscalationFactor) ───────────────
+        // heightEscalationFactor was een losse vermenigvuldiger die reageerde op
+        // slope, accel, deltaToTarget, consistency en predictedPeak — exact
+        // dezelfde signalen als EarlyBoost zelf. Door ze samen te voegen is er
+        // één mechanisme per scenario in plaats van twee ongecoördineerde.
+        //
+        // Bonus alleen op commit 1 (boostCommitCount == 0): de urgentie van een
+        // hoge verwachte piek geldt voor de EERSTE grote dosis, niet voor de
+        // kleinere vervolgcommits. Actief als predictedPeak >= 11.0 mmol/L.
+        //
+        // Maximale bonus: +0.35 op de boost-extra (d.w.z. bij earlyBoostFactor=1.75
+        // en piekdruk = max: 0.75 + 0.35 = 1.10 extra boven 1.0 → totaal 2.10).
+        // Gekoppeld aan dezelfde IOB-ceiling als heightEscalation had (0.35).
+        val peakPressureBonus = if (earlyDose.boostCommitCount == 0 &&
+            peak.predictedPeak >= 11.0 &&
+            ctx.iobRatio <= config.peakPressureBonusMaxIob
+        ) {
+            val peakPressure = smooth01((peak.predictedPeak - 11.0) / (17.0 - 11.0))
+            val momentumScore = run {
+                val slopeS   = smooth01((ctx.slope        - 0.35) / (1.40 - 0.35))
+                val accelS   = smooth01((ctx.acceleration - 0.05) / (0.35 - 0.05))
+                val deltaS   = smooth01((ctx.deltaToTarget - 0.8) / (3.50 - 0.80))
+                val consSc   = smooth01((ctx.consistency  - 0.45) / (0.80 - 0.45))
+                0.35 * slopeS + 0.35 * accelS + 0.15 * deltaS + 0.15 * consSc
+            }
+            // Alleen piekdrukbonus als het momentum ook overtuigend is
+            peakPressure * momentumScore * 0.35
+        } else 0.0
+
+        (1.0 + extraBoost * boostDecay + peakPressureBonus)
+            .coerceIn(1.0, config.earlyBoostFactor + 0.40)
+    }
 
     // ── Hypo-debt compensatie ─────────────────────────────────────────────
     // Als er eerder in deze episode insuline is achtergehouden door hypo-bescherming,
@@ -2734,57 +2791,7 @@ private fun isReentrySignal(
 }
 
 
-private fun heightEscalationFactor(
-    ctx: FCLvNextContext,
-    peak: PeakEstimate,
-    mealSignal: MealSignal,
-    config: FCLvNextConfig
-): Double {
 
-    // Alleen vóór de piek, anders nooit harder
-    if (peak.state == PeakPredictionState.CONFIRMED) return 1.0
-
-    // Geen meal-achtig gedrag → niets doen
-    if (mealSignal.state == MealState.NONE && peak.predictedPeak < 11.0) return 1.0
-
-    // ✅ IOB-ceiling: als IOB al significant is, geen escalatie toevoegen.
-    // heightEscalationFactor is bedoeld voor situaties met lage IOB en hoge piek.
-    // Bij iobRatio > 0.35 bouwt de IOB snel op — extra escalatie verergert
-    // het post-piek hypo-risico en wordt hier uitgeschakeld.
-    if (ctx.iobRatio > config.heightEscalationIobCeiling) return 1.0
-
-    // ── Normalisaties (alles 0..1) ──
-    val slopeScore =
-        smooth01((ctx.slope - 0.35) / (1.4 - 0.35))
-
-    val accelScore =
-        smooth01((ctx.acceleration - 0.05) / (0.35 - 0.05))
-
-    val deltaScore =
-        smooth01((ctx.deltaToTarget - 0.8) / (3.5 - 0.8))
-
-    val consistencyScore =
-        smooth01((ctx.consistency - 0.45) / (0.80 - 0.45))
-
-    val peakPressure =
-        smooth01((peak.predictedPeak - 11.0) / (17.0 - 11.0))
-
-    // ── Combineer tot “meal momentum” ──
-    val momentum =
-        0.30 * slopeScore +
-            0.30 * accelScore +
-            0.20 * deltaScore +
-            0.20 * consistencyScore
-
-    // ── Escalatie: basis + extra druk van verwachte piek ──
-    val baseBoost = lerp(1.0, 1.35, momentum)
-    val peakBoost = lerp(1.0, 1.30, peakPressure)
-
-    val factor = baseBoost * peakBoost
-
-    // Veilig clampen
-    return factor.coerceIn(1.0, 1.70)
-}
 
 
 
@@ -4102,17 +4109,10 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 🟥 HEIGHT ESCALATION (single, smooth factor)
         // ─────────────────────────────────────────────
-        val heightFactor =
-            heightEscalationFactor(ctx, peak, mealSignal, config)
-
-        if (heightFactor > 1.0) {
-            val before = finalDose
-            finalDose *= heightFactor
-            status.append(
-                "HEIGHT ESCALATION: ×${"%.2f".format(heightFactor)} " +
-                    "${"%.2f".format(before)}→${"%.2f".format(finalDose)}U\n"
-            )
-        }
+        // heightEscalationFactor is verwijderd (26/06/2026, Ecko): de piekdruk-
+        // en momentum-logica is geabsorbeerd in effectiveBoostFactor binnen
+        // computeEarlyDoseDecision() — zie commentaar aldaar. Eén mechanisme
+        // per scenario is beter te onderhouden dan twee ongecoördineerde.
 
 
         // ─────────────────────────────────────────────
@@ -4337,14 +4337,23 @@ class FCLvNext(
         val wffBudgetScaling = if (episodeBoostBudgetU > 0.1) {
             (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
-        // IOB-penalty op de watching target: bij hoge lopende IOB (iobRatio >= 0.40)
-        // worden watching commits kleiner. Dit voorkomt dat de 'staart' van een
-        // episode te veel insuline geeft terwijl de frontload al fors was.
-        // Formule: penalty = 1 - max(0, (iobRatio - 0.40) * 0.70)
-        // iobRatio=0.40 -> geen effect. iobRatio=0.68 -> factor 0.80. iobRatio=0.80 -> factor 0.72.
-        val wffIobPenalty = (1.0 - maxOf(0.0, (ctx.iobRatio - 0.40) * 0.70)).coerceIn(0.60, 1.0)
-
         // ── Watching consolidation: vergroot watching commits na grote frontload ──
+        // Probleem: na een stage2 commit van bijv. 3.5U geeft het systeem 4-5
+        // kleine watching commits (~0.70U elk) terwijl één geconsolideerde
+        // tweede commit van ~1.5U effectiever zou zijn:
+        //   - Insuline werkt eerder op de BG-stijging
+        //   - Lagere IOB op de piek → minder hypo-staartrisico
+        //
+        // VEREENVOUDIGING 26/06/2026 (Ecko, architectuurreview):
+        // wffIobPenalty (was: extra IOB-rem specifiek voor watching-frontload)
+        // is verwijderd. commitIobFactor verderop in de commit-formule dempt
+        // al op basis van IOB — een tweede IOB-penalty hier is overtollig en
+        // bleek de oorzaak van ongewenst kleine doses (0.10-0.15U) bij
+        // maaltijden met moderate IOB (ratio 0.50-0.70), terwijl BG gewoon
+        // doorsteeg naar 8+ mmol. De gecombineerde factor was 0.68× bij
+        // iobRatio=0.60 (= 0.795 commitIobFactor × 0.860 wffIobPenalty),
+        // nu nog 0.795× — één consistente IOB-rem via één mechanisme.
+
         // Probleem: na een stage2 commit van bijv. 3.5U geeft het systeem 4-5
         // kleine watching commits (~0.70U elk) terwijl één geconsolideerde
         // tweede commit van ~1.5U effectiever zou zijn:
@@ -4378,16 +4387,10 @@ class FCLvNext(
             1.6 - t * 0.6  // 1.6 → 1.0 over 25 minuten
         } else 1.0
 
-        // In het consolidatievenster: iobPenalty minder streng
-        // Normaal start penalty bij iobRatio=0.40 (max 35% aftrek).
-        // In venster: start bij 0.55 zodat grote watching commits bij
-        // iobRatio 0.55-0.75 minder worden afgeremd.
-        val wffIobPenaltyEffective = if (inConsolidationWindow)
-            (1.0 - maxOf(0.0, (ctx.iobRatio - 0.55) * 0.50)).coerceIn(0.70, 1.0)
-        else wffIobPenalty
-
+        // In het consolidatievenster geldt dezelfde aanpak: geen aparte IOB-penalty,
+        // commitIobFactor regelt de IOB-rem consistent voor alle commits.
         val watchingFrontloadTargetU =
-            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling * wffIobPenaltyEffective
+            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling
                 * watchingConsolidationFactor)
                 .coerceAtMost(config.maxSMB)
 
@@ -4615,21 +4618,33 @@ class FCLvNext(
                 // de voorspelde piek zit (bijv. BG=9.1, pred_peak=10.3, iob=7.5)
                 // stond commitAggressionMul nog steeds op 1.20 — precies het
                 // tegenovergestelde van wat gewenst is. Als er al veel insuline
-                // actief is en de piek nadert, moet de aggressiviteit afnemen.
-                // bg/predicted_peak ≥ 0.85 = "≥ 85% van de weg naar de piek",
-                // gecombineerd met hoge IOB (iobRatio ≥ 0.35): dan wordt
-                // commitAggressionMul geclippt naar maximaal 1.0 (neutraal).
+                // Bevinding 25/06/2026 (Ecko diner): de voorspelling onderschatte
+                // de piek met ~2 mmol/L bij een sterke stijging (slope ≥ 6 mmol/h).
+                // Bij bg/pred_peak=0.85 remde de aggressiviteit al af op ~73% van
+                // de werkelijke piek (0.85 × 11.4 = 9.7 mmol, terwijl de echte
+                // piek 12.9+ werd). 0.92 geeft meer marge voor de onderschatting:
+                // de rem treedt nu pas in als de BG minimaal 92% van de voorspelde
+                // piek heeft bereikt, wat bij de typische onderschatting neerkomt
+                // op ±80% van de werkelijke piek — een betere veiligheidsmarge.
+                // VEREENVOUDIGING 26/06/2026 (Ecko, architectuurreview):
+                // commitAggressionMul was lerp(0.90, 1.20, aggr.a) — maar aggrMul
+                // in de fraction-berekening (lerp 0.85-1.25) past aggressiviteit
+                // al toe. De combinatie gaf bij sterkte=81% een factor ×1.19 en
+                // bij sterkte=100% zelfs ×1.50 — dat is onbedoelde dubbelwerking.
+                // commitAggressionMul is nu een pure veiligheidspoort: 0.85 zodra
+                // de BG te dicht bij de voorspelde piek is bij hoge IOB, anders 1.0.
+                // De 15% korting bij nearPeakWithHighIob vervangt de ×1.0-cap die
+                // er eerder zat (capping at 1.0 = cap aggressiviteit; nu ook van
+                // 1.0→0.85 als het systeem al te gretig wil doseren nabij de piek).
                 val nearPeakWithHighIob = ctx.iobRatio >= 0.35 &&
                     peak.predictedPeak > 0 &&
-                    ctx.input.bgNow / peak.predictedPeak >= 0.85
-                val rawAggressionMul = lerp(0.90, 1.20, aggr.a)
-                val commitAggressionMul = if (nearPeakWithHighIob)
-                    rawAggressionMul.coerceAtMost(1.0) else rawAggressionMul
+                    ctx.input.bgNow / peak.predictedPeak >= 0.92
+                val commitAggressionMul = if (nearPeakWithHighIob) 0.85 else 1.0
                 logRow.commitAggressionMul = commitAggressionMul
 
                 logRow.commitPostPeakFactor = postPeak.commitFactor
 
-                // ── Episode-commit decay met boost-budget compensatie ────────────
+                // ── Episode-commit decay met boost-budget compensatie ────────────   export settings
                 //
                 // Twee componenten schalen de decay samen:
                 //   1. lateCommitDecayFactor (basis, configureerbaar)
