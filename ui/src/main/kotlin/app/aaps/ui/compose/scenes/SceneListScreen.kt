@@ -49,6 +49,7 @@ import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
 import app.aaps.core.ui.compose.AapsTopAppBar
+import app.aaps.core.ui.compose.ExcludeFromJacocoGeneratedReport
 import app.aaps.core.ui.compose.MasterOfflineBanner
 import app.aaps.core.ui.compose.dialogs.OkDialog
 import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
@@ -412,6 +413,7 @@ private fun SceneDeactivationDialog(
 
 // --- Previews ---
 
+@ExcludeFromJacocoGeneratedReport
 @Preview(showBackground = true)
 @Composable
 private fun SceneCardNormalPreview() {
@@ -439,6 +441,7 @@ private fun SceneCardNormalPreview() {
     }
 }
 
+@ExcludeFromJacocoGeneratedReport
 @Preview(showBackground = true)
 @Composable
 private fun SceneCardActivePreview() {
@@ -465,6 +468,7 @@ private fun SceneCardActivePreview() {
     }
 }
 
+@ExcludeFromJacocoGeneratedReport
 @Preview(showBackground = true)
 @Composable
 private fun SceneCardInvalidPreview() {
