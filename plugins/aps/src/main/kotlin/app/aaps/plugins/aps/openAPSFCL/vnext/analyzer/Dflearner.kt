@@ -455,7 +455,32 @@ object DFLearner {
         // Cooldown: min X uur sinds laatste aanpassing
         val lastTs = prefs(context).getLong(KEY_LAST_TS, 0L)
         val hoursSinceLast = (System.currentTimeMillis() - lastTs) / 3_600_000L
-        if (lastTs > 0 && hoursSinceLast < tp.minHours) {
+
+        // Hyper-bypass: bij ernstige piek (>= 11.5 mmol) zonder hypo mag de
+        // cooldown worden genegeerd voor een eenmalige timing+sterkte correctie.
+        // Redenering: een piek van 13+ mmol is gevaarlijker dan hypo-risico bij
+        // een conservatieve D-verhoging, en de cooldown blokkeert anders vrijwel
+        // altijd het leren van grote pieken (die vallen statistisch altijd tijdens
+        // een lopende cooldown na een vorige aanpassing).
+        // Analyse 28/06/2026 (Ecko): van 43 episoden met piek >10 mmol in de
+        // learner log belandden 43 in COOLDOWN. MEER_DOSIS triggerde slechts
+        // 3× (op 16 juni) — precies de enige keer dat er geen lopende cooldown was.
+        // De hyper-bypass geeft maximaal één aanpassing per ernstige episode;
+        // daarna start een nieuwe cooldown (via KEY_LAST_TS update in commitResult).
+        //
+        // Voorwaarden:
+        //   1. piek >= 11.5 mmol (duidelijk te hoog)
+        //   2. geen hypo (nadir >= NEAR_HYPO_THRESH) — bij combinatie hyper+hypo
+        //      is het signaal te gemengd voor betrouwbare leeruitkomst
+        //   3. geen handmatige bolus (al afgevangen vóór dit punt)
+        //   4. minimaal 4 uur cooldown al verstreken (vermijdt twee snelle aanpassingen)
+        val ernstigeHyper = metrics.peakBg >= 11.5 &&
+            metrics.minBgInWindow >= 4.8 &&   // 4.8 = NEAR_HYPO_THRESH, lokaal gedefinieerd later
+            !metrics.hasManualCorrection
+        val cooldownBypass = ernstigeHyper && lastTs > 0 &&
+            hoursSinceLast >= 4 && hoursSinceLast < tp.minHours
+
+        if (lastTs > 0 && hoursSinceLast < tp.minHours && !cooldownBypass) {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
                 metrics      = metrics,
                 diagnose     = "COOLDOWN",
@@ -662,9 +687,25 @@ object DFLearner {
                 diagnose  = "MEER_DOSIS_VROEG_ONDERSCHAT"
             }
             peekHoog -> {
-                rawDeltaD = +tp.alphaPiek * 2.0 * abs(peakFout)
-                rawDeltaF = 0.0
-                diagnose  = "MEER_DOSIS"
+                // Bij hyper-bypass (piek >=11.5 zonder hypo, cooldown omzeild):
+                // verhoog zowel D (sterkte) als F (timing/frontload).
+                // Redenering: de data toont consistent dat bij grote pieken de
+                // eerste-commit-fractie laag is (0.16-0.26) — het systeem geeft
+                // de insuline te laat en te weinig. D omhoog verbetert het totaal,
+                // F omhoog verbetert de verdeling (eerder meer).
+                // Bij gewone MEER_DOSIS (geen bypass): alleen D, F neutraal zoals voorheen.
+                // D-stapgrootte beperkt tot 0.5× van normaal bij bypass: de piek is
+                // deels een timing-probleem, niet alleen een hoeveelheid-probleem,
+                // en de F-aanpassing doet al een groot deel van het werk.
+                if (cooldownBypass) {
+                    rawDeltaD = +tp.alphaPiek * 1.0 * abs(peakFout)
+                    rawDeltaF = +tp.gammaIobr * 1.5 * abs(frac - TARGET_FIRST_FRAC)
+                    diagnose  = "MEER_DOSIS_HYPER_BYPASS"
+                } else {
+                    rawDeltaD = +tp.alphaPiek * 2.0 * abs(peakFout)
+                    rawDeltaF = 0.0
+                    diagnose  = "MEER_DOSIS"
+                }
             }
 
             // ── PIEK LAAG ─────────────────────────────────────────────────────────

@@ -1957,12 +1957,21 @@ private fun computeEarlyDoseDecision(
     else 0
 
     val extraCommitsFromBgRise = if (
-        ctx.input.bgNow >= 12.0 &&
+        ctx.input.bgNow >= 10.5 &&
         ctx.slope >= 2.0 &&
-        ctx.recentSlope >= 4.0 &&
-        ctx.input.bgNow > peak.predictedPeak - 1.0
+        ctx.recentSlope >= 3.0 &&
+        ctx.input.bgNow > peak.predictedPeak - 1.5
     ) {
-        ((ctx.input.bgNow - 12.0) / 2.0).toInt().coerceIn(0, 3)
+        // 10.5 mmol en stijgend: +1 commit
+        // 12.5 mmol en stijgend: +2 commits
+        // 14.5 mmol en stijgend: +3 commits (max)
+        // Achtergrond 28/06/2026 (Ecko): drempel was 12.0 en recentSlope 4.0.
+        // Bij de episoden van 27 juni (piek 11.5) en 28 juni ochtend (piek 13.9)
+        // was BG al 10-11 mmol met slope 6-8 mmol/h maar kreeg de EarlyBoost
+        // geen extra commits omdat de drempel te hoog lag. De IOB-gate (iobRatio
+        // > 0.50) stopte de EarlyBoost sowieso al, maar extraMaxCommits geeft
+        // alleen ruimte; de eigenlijke IOB-gate in boostActive blijft gelden.
+        ((ctx.input.bgNow - 10.5) / 2.0).toInt().coerceIn(0, 3)
     } else 0
 
     val effectiveMaxCommits = config.earlyBoostMaxCommits + extraCommitsFromDebt + extraCommitsFromBgRise
@@ -1990,16 +1999,45 @@ private fun computeEarlyDoseDecision(
             minutesSinceLastFire >= 8 &&
             earlyDose.boostCommitCount < effectiveMaxCommits
 
+    // ── Minimale wachttijd stage 1 → stage 2 ────────────────────────────────
+    // Standaard 5 minuten. Bij sterke, bevestigde stijging mag dit korter:
+    // de wachttijd dient om te voorkomen dat twee grote doses direct na elkaar
+    // gaan, maar als de BG al 1-2 mmol is gestegen in de vorige 5 minuten
+    // én de confidence hoog is, is het signaal betrouwbaar genoeg.
+    //
+    // Minimumgrens: 3 minuten (één CGM-punt). Nooit lager — dan zou stage 2
+    // kunnen vuren op basis van hetzelfde CGM-punt als stage 1.
+    //
+    // Logica:
+    //   conf >= 0.90 EN slope >= 3.0 → 3 min (maximale versnelling)
+    //   conf >= 0.80 EN slope >= 2.0 → 4 min
+    //   anders → 5 min (huidig gedrag)
+    //
+    // Stage 3 wachttijd ongewijzigd op 5 min: stage 3 volgt na stage 2 die
+    // al groot is — hier is haast minder geboden dan bij de stage 1→2 overgang.
+    //
+    // Achtergrond 28/06/2026 (Ecko): analyse toont dat stage 2 (de grootste
+    // commit) typisch op t+20 min zit na begin BG-stijging, terwijl het ideaal
+    // t+10 min zou zijn. Stage 1 vuurt op t+10-15, dan wacht het systeem 5 min
+    // waardoor stage 2 op t+15-20 valt. Bij snelle stijging (slope >3, conf >0.9)
+    // is die extra 2 minuten wachttijd niet nodig — het signaal is al volledig
+    // bevestigd door de CGM-reeks.
+    val minWachttijdStage2 = when {
+        conf >= 0.90 && ctx.slope >= 3.0 -> 3
+        conf >= 0.80 && ctx.slope >= 2.0 -> 4
+        else -> 5
+    }
+
     val stageToFire = when {
         earlyDose.stage == 0 && conf >= dynamicStage1Min -> 1
         earlyDose.stage == 1 && conf >= stage2Min &&
-            minutesSinceLastFire >= 5 && allowLarge -> 2
+            minutesSinceLastFire >= minWachttijdStage2 && allowLarge -> 2
         earlyDose.stage == 2 && conf >= stage2Min &&
             minutesSinceLastFire >= 5 && allowStage3 -> 3
         highBgContinuation -> 3  // hergebruik stage3 factor voor vervolg-commits
         else -> 0
     }
-    if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= 5 && !allowLarge) {
+    if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= minWachttijdStage2 && !allowLarge) {
         return EarlyDoseDecision(false, 0, conf, 0.0, "EARLY: stage2 blocked (trend=${trend.state})", remainingDebtU = episodeHypoDebtU)
     }
 
@@ -2167,7 +2205,7 @@ private fun computeEarlyDoseDecision(
         stageToFire = stageToFire,
         confidence = conf,
         targetU = targetU,
-        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)}$boostReason$debtReason$sustainReason",
+        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)} s2wait=${minWachttijdStage2}m$boostReason$debtReason$sustainReason",
         remainingDebtU = remainingDebtU,
         boostActive = boostActive,
         effectiveBoostFactor = effectiveBoostFactor,
@@ -4675,10 +4713,25 @@ class FCLvNext(
                 // volgen — dan is de vloer de bottleneck, niet de decay-factor.
                 // Oplossing: de vloer schaalt mee met de IOB — hoe meer insuline
                 // al actief is, hoe lager de minimaal nog toegestane factor.
-                // coerceAtLeast(0.15): nooit volledig naar nul (kleine correctie
-                // blijft mogelijk), maar bij iobRatio ≥ 0.40 al erg klein.
-                val decayFloor = (0.35 * (1.0 - ctx.iobRatio * 1.2))
-                    .coerceIn(0.10, 0.35)
+                // coerceAtLeast(0.10): nooit volledig naar nul.
+                //
+                // Aanvulling 28/06/2026 (Ecko): als BG nog substantieel stijgt
+                // (slope >= 1.5) én significant boven target zit (> target + 3),
+                // is de commit-teller géén goed criterium om te stoppen met geven.
+                // De vloer wordt dan hoger zodat commits bij 0.20-0.45 blijven
+                // i.p.v. naar 0.10 te zakken terwijl BG nog naar 13-14 gaat.
+                // De IOB-rem (commitIobFactor) en de afterload remmen het totaal
+                // al voldoende; de decayFloor mag hier niet de bottleneck zijn.
+                val bgStijgtNogFors = ctx.slope >= 1.5 &&
+                    ctx.input.bgNow > ctx.input.targetBG + 3.0
+                val decayFloor = if (bgStijgtNogFors) {
+                    // Stijgende BG ver boven target: hogere vloer
+                    // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18
+                    (0.45 * (1.0 - ctx.iobRatio * 1.0)).coerceIn(0.18, 0.40)
+                } else {
+                    // Normaal: IOB-afhankelijke vloer
+                    (0.35 * (1.0 - ctx.iobRatio * 1.2)).coerceIn(0.10, 0.35)
+                }
 
                 lateDecayMul = if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
@@ -5264,14 +5317,35 @@ class FCLvNext(
                 ctx.iobRatio <= 0.65 -> (ctx.iobRatio - 0.50) / 0.15
                 else -> 1.0
             }
-            val futureDrop60Scale: Double = if (futureDrop60Mmol <= 8.0 || fd60IobFactor == 0.0) {
+            // Slope-demper: als BG nog fors stijgt is de futureDrop60 voorspelling
+            // wel correct (IOB gáát de BG doen dalen), maar die daling komt PAS
+            // nadat de BG zijn piek heeft bereikt. Ondertussen moet het systeem nog
+            // kunnen doseren. De guard wordt daarom deels opgeschort bij actieve stijging:
+            //   slope >= 3.0 mmol/h → guard op 30% (BG stijgt harder dan insuline werkt)
+            //   slope >= 2.0 mmol/h → guard op 55%
+            //   slope >= 1.0 mmol/h → guard op 80%
+            //   slope < 1.0         → guard volledig actief (BG stabiel/dalend)
+            // Achtergrond 28/06/2026 (Ecko): bij de maaltijden van 25–28 juni remde
+            // de guard al op 0.43–0.65 terwijl BG met 5–8 mmol/h steeg naar 12–14 mmol.
+            // De guard combineert dan met late_decay_mul=0.10 en commitIobFactor=0.22 tot
+            // een effectieve dosis van <0.05U op het commit-pad — de EarlyBoost is dan
+            // de enige route, maar die stopt bij commit 4 (iobRatio > 0.50).
+            val slopeAfterloadDemper = when {
+                ctx.slope >= 3.0 -> 0.30
+                ctx.slope >= 2.0 -> 0.55
+                ctx.slope >= 1.0 -> 0.80
+                else             -> 1.0
+            }
+            val effectiveFd60IobFactor = fd60IobFactor * slopeAfterloadDemper
+
+            val futureDrop60Scale: Double = if (futureDrop60Mmol <= 8.0 || effectiveFd60IobFactor == 0.0) {
                 1.0
             } else {
                 val baseReductie = when {
                     futureDrop60Mmol <= 12.0 -> ((futureDrop60Mmol - 8.0) / 4.0) * 0.40
                     else -> (0.40 + ((futureDrop60Mmol - 12.0) / 8.0) * 0.40).coerceAtMost(0.80)
                 }
-                (1.0 - baseReductie * fd60IobFactor).coerceAtLeast(0.20)
+                (1.0 - baseReductie * effectiveFd60IobFactor).coerceAtLeast(0.20)
             }
 
             // Laag 1b: tijdelijke verzwaring direct na een grote commit
