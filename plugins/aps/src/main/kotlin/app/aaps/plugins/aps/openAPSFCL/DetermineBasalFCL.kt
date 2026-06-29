@@ -289,7 +289,9 @@ class DetermineBasalFCL @Inject constructor(
         // 1️⃣ ACTIVITEIT (STAPPEN)
         // ─────────────────────────────────────────────
 
-        val activity = fclActivityModule.evaluate()
+        val activity = fclActivityModule.evaluate(
+            iobRatio = if (max_iob > 0.0) (currentIOB / max_iob).coerceIn(0.0, 1.0) else 0.0
+        )
 
 
         // ISF correctie door activiteit

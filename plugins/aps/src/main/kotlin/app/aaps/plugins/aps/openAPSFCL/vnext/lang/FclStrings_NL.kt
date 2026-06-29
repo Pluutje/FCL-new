@@ -235,11 +235,8 @@ object FclStrings_NL : FclStrings {
     }
 
     override fun activiteitLabel(key: String) = when (key) {
-        "OFF"    -> "Uit"
-        "LIGHT"  -> "Licht"
-        "NORMAL" -> "Normaal"
-        "STRONG" -> "Sterk"
-        else     -> key
+        "OFF" -> "Uit"
+        else  -> "Aan"
     }
 
     // ── Advisor: leertoelichting per as ─────────────────────────────────────

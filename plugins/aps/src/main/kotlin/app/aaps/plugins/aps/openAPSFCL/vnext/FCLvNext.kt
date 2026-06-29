@@ -283,13 +283,31 @@ private fun computeDoseAccessLevel(
             DoseAccessLevel.BLOCKED
 
         BgZone.IN_RANGE -> when {
-            // Gebruik recent slope voor snelle detectie.
-            // Factor 0.3 → 0.5: IN_RANGE gebruikt nu dezelfde gewichting als MID,
-            // zodat een agressieve fast-lane stijging ook bij lage BG doorkomt.
-            // Accel-drempel 0.10 → 0.06: voorkomt dat een net-begonnende maaltijdstijging
-            // geblokkeerd blijft doordat versnelling nog iets achterloper op de sensordata.
+            // Multi-meting bevestiging: slope EN recentSlope EN acceleration moeten
+            // alle drie stijging bevestigen. Dit sluit sensorstoring uit (1-2 punten
+            // geven hoge slope maar lage recentSlope) en vereist minimaal 3 opeenvolgende
+            // metingen met stijging voordat de access wordt verhoogd.
+            //
+            // Upgrade IN_RANGE → SMALL bij bevestigde aanhoudende stijging:
+            //   slope >= 2.5 (duidelijke stijging langetermijn)
+            //   recentSlope >= 2.0 (ook recente punten bevestigen)
+            //   acceleration >= 0.06 (versnelling aanwezig, geen afvlakking)
+            // Dit geeft de commit-pad toegang tot smallCap (i.p.v. microCap) en laat
+            // de watching-frontload via Fix C de volledige target leveren.
+            //
+            // 29/06/2026 (Ecko): bij 10:41 UTC was BG=6.7 mmol (IN_RANGE),
+            // slope=3.41, maar commit werd gecapped op microCap=0.12U terwijl
+            // commit-pad correct 1.31U berekende. Multi-meting eis was al voldaan
+            // maar access bleef MICRO_ONLY → watchingFrontload kon niet overrijden.
+            ctx.slope >= 2.5 &&
+                ctx.recentSlope >= 2.0 &&
+                ctx.acceleration >= 0.06 ->
+                DoseAccessLevel.SMALL
+
+            // Bestaand: enkele meting met stijging → MICRO_ONLY
             maxOf(ctx.slope, ctx.recentSlope * 0.5) >= 0.6 && ctx.acceleration >= 0.06 ->
                 DoseAccessLevel.MICRO_ONLY
+
             else ->
                 DoseAccessLevel.BLOCKED
         }
@@ -4347,8 +4365,24 @@ class FCLvNext(
         val effectiveWatchingMaxIobRatio = config.watchingMaxIobRatio - watchingIobAdjustment
         val watchingIobOk = (ctx.iobRatio <= effectiveWatchingMaxIobRatio)
 
+        // Fix C (29/06/2026, Ecko): watchingFrontload mag ook triggeren als
+        // peak.state nog niet WATCHING is maar de stijging al duidelijk bevestigd
+        // is door meerdere metingen (earlyConfirmedRise). Dit lost het probleem op
+        // waarbij de allereerste commit bij lage BG (IN_RANGE) alleen microCap=0.12U
+        // krijgt terwijl de watching-frontload al 2.31U klaar heeft staan maar wacht
+        // op peak.state==WATCHING — die state komt pas ná de eerste commit.
+        //
+        // earlyConfirmedRise: stijging bevestigd door meerdere opeenvolgende metingen,
+        // niet op basis van één sensorpunt (sensorstoring-bescherming).
+        val earlyConfirmedRise =
+            mealSignal.state == MealState.CONFIRMED &&
+                ctx.slope >= 2.5 &&
+                ctx.recentSlope >= 2.0 &&
+                ctx.acceleration >= 0.06 &&
+                ctx.iobRatio <= config.watchingMaxIobRatio
+
         val watchingContextOk =
-            (peak.state == PeakPredictionState.WATCHING) &&
+            ((peak.state == PeakPredictionState.WATCHING) || earlyConfirmedRise) &&
                 !suppressForPeak &&
                 !postPeak.lockout &&
                 !postPeak.sensorBlip &&

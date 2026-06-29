@@ -27,7 +27,12 @@ object DFMapping {
     const val D_START = 1.05   // startpunt na reset: ~92% sterkte (was 1.00 = 95%)
 
     const val F_MIN = 0.20
-    const val F_MAX = 0.80
+    const val F_MAX = 0.95   // Verhoogd 0.80→0.95 (29/06/2026, Ecko): timing zat hard
+    // op ceiling van 118%. Bij F=0.95: timing max 124%,
+    // earlyBoostFactor 2.12 (was 1.75), lateCommitDecayFactor
+    // 0.63 (was 0.45) — sterkere frontload met sterkere afbouw
+    // na de piek. Sensorstoring-risico minimaal door Fix B
+    // (multi-meting eis in IN_RANGE access upgrade).
     const val F_START = 0.65   // startpunt na reset: ~118% timing (was 0.60 = 110%)
 
     // ── Referentiewaarden (bij D=1.0, F=0.5) ─────────────────────────────

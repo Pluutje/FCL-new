@@ -33,7 +33,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
     // Link naar het externe FCLvNext-handboek (Google Doc) — los bestand,
     // zodat het bijwerken van de uitleg geen nieuwe app-build vereist.
-  //  val FCL_DOCS_URL = "https://docs.google.com/document/d/14iTVM0uW8aYZgQYYRJaJ9O7XyiN9ZbAy/edit"
+    //  val FCL_DOCS_URL = "https://docs.google.com/document/d/14iTVM0uW8aYZgQYYRJaJ9O7XyiN9ZbAy/edit"
     val FCL_DOCS_URL = "https://docs.google.com/document/d/1bexT8FFEA0SGP7-P13pL25iXvgkfH_yA/edit"
 
     fun String.toHour(): Int = split(":").getOrNull(0)?.toIntOrNull() ?: 7
@@ -95,12 +95,6 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         "VERY_PULSED" to s.doseStyleLabel("VERY_PULSED")
     )
     // nightOptions/resBehaviorOptions/resStabilityOptions verwijderd (18/06/2026)
-    val actOptions = listOf(
-        "OFF"    to s.activiteitLabel("OFF"),
-        "LIGHT"  to "Licht",
-        "NORMAL" to "Normaal",
-        "STRONG" to "Sterk"
-    )
 
     Column(
         modifier = Modifier
@@ -132,7 +126,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 }
                 Text(
                     "Uitleg van het hele algoritme — wat het doet, hoe het leert " +
-                    "(indien ingeschakeld) en wat elke instelling betekent.",
+                        "(indien ingeschakeld) en wat elke instelling betekent.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -349,21 +343,37 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             onToggle = { expandedAutosens = !expandedAutosens }
         ) {
             // AutoSens-sectie verwijderd (18/06/2026)
-            FCLListRow(
-                label = "🚶 Activiteit",
-                summary = "Past insuline en target aan op basis van beweging via de stappenteller.",
-                options = actOptions,
-                selected = actBehavior,
-                onInfo = {
-                    showInfo("Activiteit",
-                             "Bij activering wordt op basis van de stappenteller een tijdelijk " +
-                                 "target ingesteld en de ISF verhoogd.")
-                },
-                onSelect = {
-                    actBehavior = it
-                    sp.putString(StringKey.fcl_vnext_activity_behavior.key, it)
+            // Vereenvoudigd van 4 standen (UIT/LICHT/NORMAAL/STERK) naar AAN/UIT
+            // (29/06/2026): intensiteitsdetectie op basis van stappenaantal regelt
+            // het effect automatisch — aparte standen voegden geen meerwaarde toe.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "🚶 Activiteit",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        if (actBehavior != "OFF")
+                            "Past insuline en target aan op basis van stappenteller."
+                        else
+                            "Activiteitsdetectie uitgeschakeld.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
+                Switch(
+                    checked = actBehavior != "OFF",
+                    onCheckedChange = { aan ->
+                        actBehavior = if (aan) "ON" else "OFF"
+                        sp.putString(StringKey.fcl_vnext_activity_behavior.key, actBehavior)
+                    }
+                )
+            }
         }
 
         // ── Expert modus ──────────────────────────────────────────────────

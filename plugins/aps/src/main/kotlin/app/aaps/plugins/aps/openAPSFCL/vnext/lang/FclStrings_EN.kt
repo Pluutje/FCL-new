@@ -235,11 +235,8 @@ object FclStrings_EN : FclStrings {
     }
 
     override fun activiteitLabel(key: String) = when (key) {
-        "OFF"    -> "Off"
-        "LIGHT"  -> "Light"
-        "NORMAL" -> "Normal"
-        "STRONG" -> "Strong"
-        else     -> key
+        "OFF" -> "Off"
+        else  -> "On"
     }
 
     // ── Advisor: learning explanation per axis ──────────────────────────────
