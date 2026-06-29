@@ -160,18 +160,16 @@ class FCLvNextStatusFormatter(
         ui: FclUiSnapshot,
         activityLog: String?,
         resistanceLog: String?,
-        metricsText: String?,
         activeConfig: FCLvNextConfig? = null,
         history: ArrayDeque<Triple<DateTime, Double, Boolean>>
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v2.9.1")
+        appendLine(" 🧠 FCL V6 v2.9.2")
         appendLine("════════════════════════")
         appendLine()
 
         appendLine(buildSituatieSectie(isNight, ui, advice))
-    //    appendLine()
 
         appendLine(buildBeslissingSectie(bolusAmount, basalRate, shouldDeliver))
         appendLine()
@@ -182,14 +180,9 @@ class FCLvNextStatusFormatter(
         appendLine("🏃 ${str.activiteit}")
         appendLine("─────────────────────")
         appendLine(activityLog ?: str.geenActiviteitdata)
-      //  appendLine()
 
         // AutoSens-sectie verwijderd (18/06/2026)
-
-        appendLine("📈 ${str.glucoseStatHeader}")
-        appendLine("─────────────────────")
-        appendLine(metricsText ?: str.nogGeenData)
-        appendLine()
+        // Glucose statistieken verwijderd (29/06/2026): zie Statistics-tabblad
 
         append(buildAnalyzerConfigSectie(activeConfig))
     }

@@ -80,7 +80,6 @@ class DetermineBasalFCL @Inject constructor(
 
     ) {
 
-    private val fclMetrics = FCLMetrics(context = context,preferences = preferences,persistenceLayer = persistenceLayer)
     private val fclActivityModule = FCLActivityModule(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
     private val bgHistoryProvider = FCLvNextBgHistoryProvider(iobCobCalculator, dateUtil)
     private val fclRealDoseTracker = FclRealDoseTracker(persistenceLayer)
@@ -444,16 +443,6 @@ class DetermineBasalFCL @Inject constructor(
                 if (isNight) preferences.get(DoubleKey.max_bolus_night)
                 else preferences.get(DoubleKey.max_bolus_day)
 
-// 1) Log elke cycle (lichtgewicht)
-            fclMetrics.onFiveMinuteTick(
-                currentBG = bgNowMmol,          // ✅ mmol/L (zeker correct)
-                currentIOB = currentIOB,        // U
-                target = targetMgdl / 18.0      // mmol/L
-            )
-
-
-
-
             val statusFormatter =
                 FCLvNextStatusFormatter(
                     prefs = preferences,
@@ -477,7 +466,6 @@ class DetermineBasalFCL @Inject constructor(
                 ui = uiSnapshot,
                 activityLog = activity.log,
                 resistanceLog = resistanceLog,
-                metricsText = fclMetrics.getUserStatsString(isNight),
                 activeConfig = fclvNext.lastActiveConfig,
                 history = deliveryHistory,
             )

@@ -285,28 +285,10 @@ interface FclStrings {
     val geenResistentieLog: String
     val nogGeenData: String
     val autoSensHeader: String
-    val glucoseStatHeader: String
     val configNogNietBeschikbaar: String
     val expertModeAan: String
     val expertModeUit: String
     val fijnafstemming: String
-    val statistiekenWordenVerzameld: String
-    val tirLabel: String
-    val updatesLabel: String
-    val dataKwaliteitLabel: String
-    val laatste24uLabel: String
-    val laatste7dLabel: String
-    val metingen: String
-    val completeheid: String
-    val metingenPerUur: String
-    val timeInRange: String
-    val timeAboveRange: String
-    val timeBelowRange: String
-    val timeBelowTarget: String
-    val gemiddeldeGlucose: String
-    val gmiLabel: String
-    val variatieLabel: String
-    val laatsteUpdate: String
     val autosensOverdagUit: String
     val autosensUit: String
 
