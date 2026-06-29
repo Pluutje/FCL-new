@@ -235,7 +235,9 @@ data class BatchActionDto(
     // bolus eCarbs split: extended carbs amount, delay, and duration (0 = no eCarbs)
     val eCarbsGrams: Int = 0,
     val eCarbsDelayMinutes: Int = 0,
-    val eCarbsDurationHours: Int = 0
+    val eCarbsDurationHours: Int = 0,
+    // bolus: originating QuickWizard guid (INSULIN/CARBS mode) so the master marks the entry used on commit (lastUsed)
+    val quickWizardGuid: String? = null
 ) {
 
     companion object {

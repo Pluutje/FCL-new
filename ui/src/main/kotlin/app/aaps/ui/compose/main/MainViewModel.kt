@@ -486,14 +486,18 @@ class MainViewModel @Inject constructor(
      * master's exact lines (the contract), then commits. INSULIN now has the client route it previously lacked.
      */
     private suspend fun executeFixedBatch(entry: QuickWizardEntry, actions: List<BatchAction>, label: String, icon: ImageVector) {
-        when (val prepared = batchExecutor.prepare(actions, Sources.QuickWizard, label)) {
+        // Tag the bolus action with the originating QuickWizard guid so the MASTER marks the entry used on a successful
+        // commit (lastUsed cooldown) and republishes it to clients — the master is SOT. The client must NOT call
+        // markAsUsed itself: that writes the Bidirectional QuickWizard pref, which a paired client would push back over
+        // the signed round-trip and collide with this commit → "Update settings … Another action is already in progress".
+        val tagged = actions.map { if (it is BatchAction.Bolus) it.copy(quickWizardGuid = entry.guid()) else it }
+        when (val prepared = batchExecutor.prepare(tagged, Sources.QuickWizard, label)) {
             is ActionProgress.Prepared ->
                 rxBus.send(
                     EventShowDialog.OkCancel(
                         title = entry.buttonText(), message = "", confirmationLines = prepared.lines, icon = icon,
                         onOk = {
                             appScope.launch { batchExecutor.commit(prepared.id, Sources.QuickWizard, label) }
-                            entry.markAsUsed()
                         }
                     )
                 )

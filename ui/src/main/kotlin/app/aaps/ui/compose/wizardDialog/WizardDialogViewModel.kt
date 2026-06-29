@@ -15,13 +15,13 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
+import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
-import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
@@ -64,6 +64,7 @@ class WizardDialogViewModel @Inject constructor(
     val profileUtil: ProfileUtil,
     private val profileRepository: ProfileRepository,
     private val activePlugin: ActivePlugin,
+    private val ch: ConcentrationHelper,
     private val iobCobCalculator: IobCobCalculator,
     private val persistenceLayer: PersistenceLayer,
     private val preferences: Preferences,
@@ -429,7 +430,7 @@ class WizardDialogViewModel @Inject constructor(
                 carbsEquivalent = w.data.carbsEquivalent,
                 calculatedPercentage = w.data.calculatedPercentage,
                 constraintApplied = abs(w.data.insulinAfterConstraints - w.data.calculatedTotalInsulin) >
-                    activePlugin.activePump.pumpDescription.pumpType.determineCorrectBolusStepSize(w.data.insulinAfterConstraints),
+                    ch.bolusStep(w.data.insulinAfterConstraints),
                 isf = w.data.sens,
                 ic = w.data.ic,
                 currentCOB = cob,

@@ -18,6 +18,7 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
+import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.plugin.ActivePlugin
@@ -29,6 +30,7 @@ import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.HardLimits
+import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -55,6 +57,7 @@ class InsulinDialogViewModel @Inject constructor(
     private val profileUtil: ProfileUtil,
     activePlugin: ActivePlugin,
     val activeInsulin: Insulin,
+    private val ch: ConcentrationHelper,
     val insulinManager: InsulinManager,
     val config: Config,
     private val automation: Automation,
@@ -165,7 +168,11 @@ class InsulinDialogViewModel @Inject constructor(
 
     fun addInsulin(increment: Double) {
         val state = uiState.value
-        val newValue = max(0.0, state.insulin + increment).coerceAtMost(state.maxInsulin)
+        // Snap to the deliverable bolus step so a preset increment that isn't a step multiple (e.g. a 0.25 U
+        // button on U200, step 0.10) lands on a deliverable value. ch.bolusStep is amount-aware (Insight) and
+        // concentration-adjusted; evaluated at the target so it matches the pump's grid there. Floor, never up.
+        val target = max(0.0, state.insulin + increment).coerceAtMost(state.maxInsulin)
+        val newValue = Round.floorTo(target, ch.bolusStep(target))
         _uiState.update { it.copy(insulin = newValue) }
     }
 
@@ -283,10 +290,14 @@ class InsulinDialogViewModel @Inject constructor(
                 val mgdl = profileUtil.convertToMgdl(state.eatingSoonTtTarget, units)
                 add(BatchAction.TempTarget(reason = TT.Reason.EATING_SOON.text, lowMgdl = mgdl, highMgdl = mgdl, durationMinutes = state.eatingSoonTtDuration, startOffsetMinutes = 0))
             }
-            if (state.insulin > 0)
+            // Floor to the deliverable bolus step so the confirmed amount equals what the pump delivers (the
+            // concentration boundary floors the converted cU to the native pulse grid). ch.bolusStep is
+            // amount-aware (Insight) + concentration-adjusted. Covers typed entry too.
+            val deliverableInsulin = Round.floorTo(state.insulin, ch.bolusStep(state.insulin))
+            if (deliverableInsulin > 0)
                 add(
                     BatchAction.Bolus(
-                        insulin = state.insulin, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                        insulin = deliverableInsulin, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
                         recordOnly = state.recordOnlyChecked, notes = state.notes, timestamp = state.eventTime, iCfg = iCfg
                     )
                 )

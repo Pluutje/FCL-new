@@ -15,12 +15,14 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
+import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.HardLimits
+import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +43,7 @@ class TreatmentDialogViewModel @Inject constructor(
     constraintChecker: ConstraintsChecker,
     activePlugin: ActivePlugin,
     private val activeInsulin: Insulin,
+    private val ch: ConcentrationHelper,
     private val config: Config,
     val decimalFormatter: DecimalFormatter,
     private val rh: ResourceHelper,
@@ -170,11 +173,15 @@ class TreatmentDialogViewModel @Inject constructor(
      */
     private suspend fun buildActions(state: TreatmentDialogUiState): List<BatchAction> {
         val iCfg = if (state.forcedRecordOnly) profileFunction.getProfile()?.iCfg ?: activeInsulin.iCfg else null
+        // Floor to the deliverable bolus step so the confirmed amount equals what the pump delivers (the
+        // concentration boundary floors the converted cU to the native pulse grid). ch.bolusStep is
+        // amount-aware (Insight) + concentration-adjusted.
+        val deliverableInsulin = Round.floorTo(state.insulin, ch.bolusStep(state.insulin))
         return buildList {
-            if (state.insulin > 0.0 || state.carbs > 0)
+            if (deliverableInsulin > 0.0 || state.carbs > 0)
                 add(
                     BatchAction.Bolus(
-                        insulin = state.insulin, carbs = state.carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                        insulin = deliverableInsulin, carbs = state.carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
                         recordOnly = state.forcedRecordOnly, notes = "", timestamp = 0L, iCfg = iCfg
                     )
                 )

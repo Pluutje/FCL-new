@@ -16,6 +16,17 @@ import org.junit.jupiter.api.Test
 class BatchActionMappingTest {
 
     @Test
+    fun bolusRoundTripsTheQuickWizardGuid() {
+        // The guid lets the master mark the originating QuickWizard used on commit (SOT) — a dropped field would
+        // silently revert to the client-side markAsUsed bug ("Update settings … Another action is already in progress").
+        val original = BatchAction.Bolus(
+            insulin = 1.5, carbs = 20, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+            recordOnly = false, notes = "Lunch", timestamp = 0L, iCfg = null, quickWizardGuid = "abc-123"
+        )
+        assertThat(original.toDto().toDomain()).isEqualTo(original)
+    }
+
+    @Test
     fun tempBasalPercentRoundTrips() {
         val original = BatchAction.TempBasal(rate = 150.0, isPercent = true, durationMinutes = 30)
         assertThat(original.toDto().toDomain()).isEqualTo(original)

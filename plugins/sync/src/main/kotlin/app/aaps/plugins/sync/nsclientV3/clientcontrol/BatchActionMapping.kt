@@ -18,7 +18,8 @@ internal fun BatchAction.toDto(): BatchActionDto = when (this) {
         insulin = insulin, carbs = carbs, carbsTimeOffsetMinutes = carbsTimeOffsetMinutes,
         carbsDurationHours = carbsDurationHours, recordOnly = recordOnly, notes = notes, timestamp = timestamp,
         iCfgJson = iCfg?.toJsonObject()?.toString(),
-        eCarbsGrams = eCarbsGrams, eCarbsDelayMinutes = eCarbsDelayMinutes, eCarbsDurationHours = eCarbsDurationHours
+        eCarbsGrams = eCarbsGrams, eCarbsDelayMinutes = eCarbsDelayMinutes, eCarbsDurationHours = eCarbsDurationHours,
+        quickWizardGuid = quickWizardGuid
     )
 
     is BatchAction.TempTarget          -> BatchActionDto(
@@ -66,7 +67,8 @@ internal fun BatchActionDto.toDomain(): BatchAction? = when (type) {
         insulin = insulin, carbs = carbs, carbsTimeOffsetMinutes = carbsTimeOffsetMinutes,
         carbsDurationHours = carbsDurationHours, recordOnly = recordOnly, notes = notes, timestamp = timestamp,
         iCfg = iCfgJson?.let { j -> runCatching { (Json.parseToJsonElement(j) as? JsonObject)?.let { ICfg.fromJsonObject(it) } }.getOrNull() },
-        eCarbsGrams = eCarbsGrams, eCarbsDelayMinutes = eCarbsDelayMinutes, eCarbsDurationHours = eCarbsDurationHours
+        eCarbsGrams = eCarbsGrams, eCarbsDelayMinutes = eCarbsDelayMinutes, eCarbsDurationHours = eCarbsDurationHours,
+        quickWizardGuid = quickWizardGuid
     )
 
     BatchActionDto.TYPE_TEMP_TARGET           -> reason?.let { BatchAction.TempTarget(it, lowMgdl, highMgdl, durationMinutes, startOffsetMinutes, notes.ifEmpty { null }) }

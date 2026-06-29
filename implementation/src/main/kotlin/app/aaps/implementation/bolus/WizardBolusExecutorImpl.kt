@@ -301,6 +301,10 @@ class WizardBolusExecutorImpl @Inject constructor(
         val ia = actions.filterIsInstance<BatchAction.InsulinActivate>().firstOrNull() // ≤1 by construction
         val tes = actions.filterIsInstance<BatchAction.TherapyEvent>() // ≥0; handled as a list (defensive — clients currently send one per batch)
         val recordOnly = bolus?.recordOnly == true
+        // Originating QuickWizard (INSULIN/CARBS mode), resolved on the MASTER's own store so confirm() can mark it used
+        // (lastUsed cooldown) here — the master is SOT and republishes the pref; the client never writes it. Null for a
+        // dialog/wear batch, or a guid the master hasn't synced yet (graceful → no mark).
+        val entry = bolus?.quickWizardGuid?.takeIf { it.isNotEmpty() }?.let { quickWizard.get(it) }
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
         if (bolus != null && !recordOnly && bolus.insulin > 0.0) {
@@ -396,7 +400,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         val bolusId = dateUtil.now()
         evictStalePending()
         pending[bolusId] = PendingBolus(
-            insulin = insulin, carbs = carbs, bcr = null, bolusId = bolusId, entry = null,
+            insulin = insulin, carbs = carbs, bcr = null, bolusId = bolusId, entry = entry,
             carbTimeMinutes = bolus?.carbsTimeOffsetMinutes ?: 0, notes = bolus?.notes, mode = BolusMode.FIXED,
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
             eCarbsGrams = bolus?.eCarbsGrams ?: 0, eCarbsDelayMinutes = bolus?.eCarbsDelayMinutes ?: 0, eCarbsDurationHours = bolus?.eCarbsDurationHours ?: 0,
@@ -499,6 +503,10 @@ class WizardBolusExecutorImpl @Inject constructor(
             p.extendedBolus?.let { applyExtendedBolus(it, source, onError) }
             if (p.cancelTempBasal) applyCancelTempBasal(source, onError)
             if (p.cancelExtendedBolus) applyCancelExtendedBolus(source, onError)
+            // QuickWizard INSULIN/CARBS: mark the originating entry used HERE on the master (SOT) — the lastUsed write
+            // republishes to clients via the cold-doc sync. The client must NOT do this itself (it would push the synced
+            // QuickWizard pref back over the round-trip and collide with this commit → "Update settings … Busy").
+            p.entry?.markAsUsed()
             return WizardBolusExecutor.ConfirmResult.Delivered
         }
 

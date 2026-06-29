@@ -17,6 +17,9 @@ sealed interface BatchAction {
      * A FIXED bolus/carbs (capped, never recomputed). [recordOnly] persists it without a pump command (a pen
      * bolus the user gave outside AAPS) — and is **not** constraint-capped (a record of what was given). [iCfg]
      * is the logged insulin's config for the record-only case; null for a delivery (the master uses its active).
+     * [quickWizardGuid] tags an INSULIN/CARBS QuickWizard batch with the originating entry so the MASTER marks it
+     * used on a successful commit (lastUsed cooldown) — the master is SOT and republishes it; the client never
+     * writes the synced QuickWizard pref itself. Null for a dialog/wear batch (those don't carry a QuickWizard).
      */
     data class Bolus(
         val insulin: Double,
@@ -29,7 +32,8 @@ sealed interface BatchAction {
         val iCfg: ICfg?,
         val eCarbsGrams: Int = 0,
         val eCarbsDelayMinutes: Int = 0,
-        val eCarbsDurationHours: Int = 0
+        val eCarbsDurationHours: Int = 0,
+        val quickWizardGuid: String? = null
     ) : BatchAction
 
     /**
