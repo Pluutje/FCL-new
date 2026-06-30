@@ -407,6 +407,23 @@ class DetermineBasalFCL @Inject constructor(
             }
             lastCycleTimestampMs = nowMs
 
+            // IOB-lag venster: bolussen die in de laatste 10 minuten zijn gegeven
+            // maar nog niet volledig in de AAPS IOB-teller zijn verwerkt (pomp-lag).
+            // Aparte aanroep met vast 10-minuten venster — onafhankelijk van de
+            // per-cyclus realDelivery hierboven die alleen het síndsdien-venster dekt.
+            // Gebruikt AAPS persistenceLayer (identiek aan IOB-berekening), inclusief
+            // eventuele oref0-fallback SMBs die FCLvNext zelf niet ziet.
+            val realDelivered10min = kotlinx.coroutines.runBlocking {
+                fclRealDoseTracker.deliveredUnits(nowMs - 10 * 60 * 1000L, nowMs)
+            }
+            val realDelivered8min = kotlinx.coroutines.runBlocking {
+                fclRealDoseTracker.deliveredUnits(nowMs - 8 * 60 * 1000L, nowMs)
+            }
+            // pendingBolusU = bolussen gegeven in 0-10 min geleden die nog niet
+            // in 0-8 min geleden zitten (= de 8-10 min bucket die nog niet in IOB staat)
+            val pendingBolusU10min = (realDelivered10min.bolusU - realDelivered8min.bolusU)
+                .coerceAtLeast(0.0)
+
             val fclInput = FCLvNextInput(
                 bgNow = bgNowMmol,
                 bgHistory = bgHistoryMmol,
@@ -418,6 +435,7 @@ class DetermineBasalFCL @Inject constructor(
                 isNight = isNight,
                 realDeliveredBasalU = realDelivery.basalU,
                 realDeliveredBolusU = realDelivery.bolusU,
+                pendingBolusU10min = pendingBolusU10min,
                 profileBasalUH = profile_current_basal,
                 activityActive = activity.isActive,
                 activityInsulinPct = activity.insulinPercentage,

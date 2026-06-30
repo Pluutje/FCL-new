@@ -35,6 +35,11 @@ data class FCLvNextInput(
     // oudere call sites.
     val realDeliveredBasalU: Double = 0.0,
     val realDeliveredBolusU: Double = 0.0,
+    // IOB-lag compensatie: bolussen gegeven in 8-10 min geleden die nog niet
+    // in de AAPS IOB-teller zijn verwerkt (pomp-lag Medtrum ~3-8 min).
+    // Berekend via FclRealDoseTracker (AAPS persistenceLayer), dus inclusief
+    // oref0-fallback SMBs — completer dan FCLvNext's interne deliveryHistory.
+    val pendingBolusU10min: Double = 0.0,
     // Geprogrammeerde profiel-basaalstand (U/h) op dit moment — nodig om
     // realDeliveredBasalU te kunnen beoordelen (boven/op/onder profiel).
     val profileBasalUH: Double = 0.0,
@@ -3327,6 +3332,28 @@ class FCLvNext(
             (input.currentIOB / input.maxIOB).coerceIn(0.0, 1.5)
         } else 0.0
 
+        // ── IOB-lag compensatie via AAPS persistenceLayer ─────────────────────
+        // De Medtrum patch-pomp heeft een vertraging van 3–8 min tussen levering
+        // en verwerking in de AAPS IOB-teller. Bij snelle opeenvolgende commits
+        // loopt de gerapporteerde IOB daardoor sterk achter op de werkelijk
+        // geleverde insuline.
+        //
+        // pendingBolusU10min: berekend in DetermineBasalFCL via FclRealDoseTracker
+        // (AAPS persistenceLayer — identiek aan AAPS IOB-bron, inclusief oref0-SMBs).
+        // = bolussen gegeven 8-10 min geleden minus wat al in 0-8 min staat.
+        // Dit is nauwkeuriger dan FCLvNext's interne deliveryHistory die alleen
+        // FCL-eigen doses bijhoudt (max 7 entries, geen oref0-fallback).
+        //
+        // Analyse 29/06/2026 (Ecko): bij 17:00 UTC was iobRatio=0.21 terwijl
+        // al 5.70U was gegeven. Met pendingBolusU10min=2.62U → effectiveIobRatio=0.46
+        // → commit werd sterk geremd. Zie ook Fix 1 (wffHypoBlokkade).
+        val pendingIob = input.pendingBolusU10min
+
+        val effectiveIobRatio = if (input.maxIOB > 0.0 && pendingIob > 0.05) {
+            val effectiveIob = input.currentIOB + pendingIob
+            (effectiveIob / input.maxIOB).coerceIn(iobRatio, 1.5) // nooit lager dan gerapporteerd
+        } else iobRatio
+
         return FCLvNextContext(
             input = input,
             slope = trends.firstDerivative,
@@ -3334,7 +3361,7 @@ class FCLvNext(
             consistency = trends.consistency,
             recentSlope = trends.recentSlope,
             recentDelta5m = trends.recentDelta5m,
-            iobRatio = iobRatio,
+            iobRatio = effectiveIobRatio,   // lag-gecorrigeerde iobRatio
             deltaToTarget = input.bgNow - input.targetBG
         )
     }
@@ -3463,7 +3490,19 @@ class FCLvNext(
 
         logRow.bgZone = zoneEnum.name
         logRow.iob = input.currentIOB
-        logRow.iobRatio = ctx.iobRatio
+        logRow.iobRatio = ctx.iobRatio   // lag-gecorrigeerd via effectiveIobRatio
+
+        // Log IOB-lag compensatie als die actief is (zichtbaar in decision_reason)
+        val pendingIobLog = input.pendingBolusU10min
+        if (pendingIobLog > 0.05) {
+            val rawIobRatio = if (input.maxIOB > 0.0) input.currentIOB / input.maxIOB else 0.0
+            status.append(
+                "IOB-lag: gerapporteerd=${"%.2f".format(input.currentIOB)}U " +
+                    "pending=${"%.2f".format(pendingIobLog)}U " +
+                    "effectief=${"%.2f".format(input.currentIOB + pendingIobLog)}U " +
+                    "(ratio ${"%.2f".format(rawIobRatio)}→${"%.2f".format(ctx.iobRatio)})\n"
+            )
+        }
 
         logRow.slope = ctx.slope
         logRow.accel = ctx.acceleration
@@ -4365,15 +4404,8 @@ class FCLvNext(
         val effectiveWatchingMaxIobRatio = config.watchingMaxIobRatio - watchingIobAdjustment
         val watchingIobOk = (ctx.iobRatio <= effectiveWatchingMaxIobRatio)
 
-        // Fix C (29/06/2026, Ecko): watchingFrontload mag ook triggeren als
-        // peak.state nog niet WATCHING is maar de stijging al duidelijk bevestigd
-        // is door meerdere metingen (earlyConfirmedRise). Dit lost het probleem op
-        // waarbij de allereerste commit bij lage BG (IN_RANGE) alleen microCap=0.12U
-        // krijgt terwijl de watching-frontload al 2.31U klaar heeft staan maar wacht
-        // op peak.state==WATCHING — die state komt pas ná de eerste commit.
-        //
-        // earlyConfirmedRise: stijging bevestigd door meerdere opeenvolgende metingen,
-        // niet op basis van één sensorpunt (sensorstoring-bescherming).
+        // earlyConfirmedRise: WFF mag ook triggeren vóór peak.state==WATCHING
+        // als meermaals bevestigde stijging aanwezig is (Fix C, 29/06/2026).
         val earlyConfirmedRise =
             mealSignal.state == MealState.CONFIRMED &&
                 ctx.slope >= 2.5 &&
@@ -4381,12 +4413,30 @@ class FCLvNext(
                 ctx.acceleration >= 0.06 &&
                 ctx.iobRatio <= config.watchingMaxIobRatio
 
+        // Vroege hypo-guard voor WFF: als de trend-projectie zónder insuline al
+        // richting hypo wijst, mag de WFF niet triggeren.
+        // hypoNoInsulinProjection is al berekend vóór dit punt (puur trend-projectie,
+        // geen geplande dosis). Bij een actieve hypo-dreiging is elke extra insuline
+        // gevaarlijk, ook als de BG tijdelijk stijgt door snoep of maaltijd.
+        //
+        // Analyse 29/06/2026 (Ecko): WFF vuurde om 17:25 en 17:50 UTC met
+        // hypo_active=True en IOB 4.35-5.93U. De HypoProtection zette commitDose=0
+        // maar watchingTarget=2.39U won via max() — de WFF bypaste de hypo-rem.
+        // Totaal 3.86U extra insuline bij een al hyperinsulinemische situatie →
+        // nadir 3.6 mmol om 20:54 UTC.
+        //
+        // Drempel: hypoNoInsulinProjection < hypoBlockThreshold (standaard 4.8 mmol).
+        // Gebruik de no-insulin projectie zodat we reageren op de daadwerkelijke
+        // IOB-trend, niet op een momentopname van de BG.
+        val wffHypoBlokkade = hypoNoInsulinProjection < config.hypoBlockThreshold
+
         val watchingContextOk =
             ((peak.state == PeakPredictionState.WATCHING) || earlyConfirmedRise) &&
                 !suppressForPeak &&
                 !postPeak.lockout &&
                 !postPeak.sensorBlip &&
-                (zoneEnum != BgZone.LOW)
+                (zoneEnum != BgZone.LOW) &&
+                !wffHypoBlokkade   // WFF geblokkeerd bij dreigende hypo
 
 // 2) Bepaal target (ook als het niet triggert -> handig voor analyse)
         // WFF-target schalen op basis van earlyBoost budget:
@@ -4481,6 +4531,17 @@ class FCLvNext(
         logRow.watchingIobOk = watchingIobOk
         logRow.watchingFrontloadTargetU = watchingFrontloadTargetU
         logRow.watchingFrontloadTriggered = watchingFrontloadTriggered
+
+        // Log WFF hypo-blokkade zodat het zichtbaar is in de CSV
+        if (wffHypoBlokkade) {
+            status.append(
+                "WFF-HYPO-BLOKKADE: proj=${
+                    "%.1f".format(hypoNoInsulinProjection)
+                } < floor=${
+                    "%.1f".format(config.hypoBlockThreshold)
+                } → WFF niet gevuurd\n"
+            )
+        }
 
 // 5) Pas dosing toe als triggered
         if (watchingFrontloadTriggered) {
