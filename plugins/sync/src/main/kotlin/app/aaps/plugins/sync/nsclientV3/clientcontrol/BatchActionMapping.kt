@@ -59,6 +59,11 @@ internal fun BatchAction.toDto(): BatchActionDto = when (this) {
         teType = teType.name, timestamp = timestamp, glucoseMgdl = glucoseMgdl, meterType = glucoseType?.name,
         durationMinutes = durationMinutes, notes = note ?: "", location = location?.name, arrow = arrow?.name, source = source.name
     )
+
+    is BatchAction.TherapyEventEdit    -> BatchActionDto(
+        type = BatchActionDto.TYPE_THERAPY_EVENT_EDIT,
+        teType = teType.name, timestamp = timestamp, notes = note ?: "", location = location?.name, arrow = arrow?.name, source = source.name
+    )
 }
 
 /** Wire [BatchActionDto] → domain [BatchAction] (master receive side); null if the type is unknown. */
@@ -91,5 +96,15 @@ internal fun BatchActionDto.toDomain(): BatchAction? = when (type) {
             source = source?.let { runCatching { Sources.valueOf(it) }.getOrNull() } ?: Sources.NSClient
         )
     }
+    // Unknown/unparseable teType drops the action (the master's no-action guard then rejects an empty batch).
+    BatchActionDto.TYPE_THERAPY_EVENT_EDIT    -> teType?.let { runCatching { TE.Type.valueOf(it) }.getOrNull() }?.let { type ->
+        BatchAction.TherapyEventEdit(
+            teType = type, timestamp = timestamp, note = notes.ifEmpty { null },
+            location = location?.let { runCatching { TE.Location.valueOf(it) }.getOrNull() },
+            arrow = arrow?.let { runCatching { TE.Arrow.valueOf(it) }.getOrNull() },
+            source = source?.let { runCatching { Sources.valueOf(it) }.getOrNull() } ?: Sources.NSClient
+        )
+    }
+
     else                                      -> null
 }

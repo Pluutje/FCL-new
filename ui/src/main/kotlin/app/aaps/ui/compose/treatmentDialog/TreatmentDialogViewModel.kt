@@ -9,6 +9,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -134,7 +135,7 @@ class TreatmentDialogViewModel @Inject constructor(
             when (val prepared = batchExecutor.prepare(actions, Sources.TreatmentDialog, rh.gs(app.aaps.core.ui.R.string.bolus))) {
                 is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
                 is ActionProgress.Rejected -> when (prepared.reason) {
-                    FailureReason.NotReachable -> rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.bolus), message = rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                    FailureReason.NotReachable, FailureReason.ControlDisabled -> rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.bolus), message = rh.gs(prepared.reason.failTextResId())))
                     // No-op after caps (e.g. the bolus was constraint-capped to 0): neutral message, NOT the bolus-error alarm.
                     FailureReason.NoAction     -> _sideEffect.tryEmit(SideEffect.ShowNoActionDialog)
                     else                       -> prepared.detail?.let { detail ->
@@ -155,8 +156,8 @@ class TreatmentDialogViewModel @Inject constructor(
             // Surface a failed commit. NotReachable → the offline message; any other Rejected (ExecutionFailed,
             // NoPendingBolus, …) → the master's detail. Unconfirmed (state unknown) rides the round-trip's app-level modal.
             if (result is ActionProgress.Rejected) {
-                if (result.reason == FailureReason.NotReachable)
-                    rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.bolus), message = rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                if (result.reason == FailureReason.NotReachable || result.reason == FailureReason.ControlDisabled)
+                    rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.bolus), message = rh.gs(result.reason.failTextResId())))
                 else result.detail?.let { detail ->
                     if (config.AAPSCLIENT) rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.bolus), message = detail))
                     else _sideEffect.tryEmit(SideEffect.ShowDeliveryError(detail))

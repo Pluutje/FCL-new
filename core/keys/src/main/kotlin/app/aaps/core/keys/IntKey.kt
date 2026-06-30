@@ -1,9 +1,9 @@
 package app.aaps.core.keys
 
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
+import app.aaps.core.keys.interfaces.ElementVisibility
 import app.aaps.core.keys.interfaces.IntPreferenceKey
 import app.aaps.core.keys.interfaces.PreferenceEnabledCondition
-import app.aaps.core.keys.interfaces.ElementVisibility
 import app.aaps.core.keys.interfaces.SyncChannel
 import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.keys.interfaces.SyncSpec
@@ -312,8 +312,28 @@ enum class IntKey(
         defaultedBySM = true,
         unitType = UnitType.PERCENT
     ),
-    ApsMaxSmbFrequency(key = "smbinterval", defaultValue = 3, min = 1, max = 10, titleResId = R.string.pref_title_smb_frequency, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
-    ApsMaxMinutesOfBasalToLimitSmb(key = "smbmaxminutes", defaultValue = 30, min = 15, max = 120, titleResId = R.string.pref_title_smb_max_minutes, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb, unitType = UnitType.MIN, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
+    ApsMaxSmbFrequency(
+        key = "smbinterval",
+        defaultValue = 3,
+        min = 1,
+        max = 10,
+        titleResId = R.string.pref_title_smb_frequency,
+        defaultedBySM = true,
+        dependency = BooleanKey.ApsUseSmb,
+        unitType = UnitType.MIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
+    ),
+    ApsMaxMinutesOfBasalToLimitSmb(
+        key = "smbmaxminutes",
+        defaultValue = 30,
+        min = 15,
+        max = 120,
+        titleResId = R.string.pref_title_smb_max_minutes,
+        defaultedBySM = true,
+        dependency = BooleanKey.ApsUseSmb,
+        unitType = UnitType.MIN,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
+    ),
     ApsUamMaxMinutesOfBasalToLimitSmb(
         key = "uamsmbmaxminutes", defaultValue = 30, min = 15, max = 120, titleResId = R.string.pref_title_uam_smb_max_minutes, summaryResId = R.string.uam_smb_max_minutes, defaultedBySM = true, dependency = BooleanKey.ApsUseSmb,
         visibility = ElementVisibility { it.preferences.get(BooleanKey.ApsUseUam) },
@@ -417,7 +437,21 @@ enum class IntKey(
     NsClientAlarmStaleData(key = "ns_alarm_stale_data_value", defaultValue = 16, min = 15, max = 120, titleResId = R.string.pref_title_alarm_stale_data, unitType = UnitType.MIN),
     NsClientUrgentAlarmStaleData(key = "ns_alarm_urgent_stale_data_value", defaultValue = 31, min = 30, max = 180, titleResId = R.string.pref_title_urgent_alarm_stale_data, unitType = UnitType.MIN),
 
-    SiteRotationUserProfile(key = "site_rotation_user_profile", defaultValue = 0, min = 0, max = 2, titleResId = R.string.pref_title_site_rotation_profile),
+    SiteRotationUserProfile(
+        key = "site_rotation_user_profile",
+        defaultValue = 0,
+        min = 0,
+        max = 2,
+        titleResId = R.string.pref_title_site_rotation_profile,
+        preferenceType = PreferenceType.LIST,
+        entries = mapOf(
+            0 to R.string.site_rotation_profile_man,
+            1 to R.string.site_rotation_profile_woman,
+            2 to R.string.site_rotation_profile_child
+        ),
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
+    ),
+
     // ── FCL vNext — Groep 2: Hoofdparameters (STV + N) ───────────────────
     // Worden bijgestuurd door FCL Analyzer via config_override.json.
     fcl_vnext_sterkte(key = "fcl_vnext_sterkte", defaultValue = 100, min = 80, max = 125, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.PERCENT),
@@ -429,6 +463,4 @@ enum class IntKey(
     fcl_vnext_commit_cooldown_minutes(key = "fcl_vnext_commit_cooldown_minutes", defaultValue = 13, min = 5, max = 25, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.MIN),
     fcl_vnext_early_boost_max_commits(key = "fcl_vnext_early_boost_max_commits", defaultValue = 2, min = 1, max = 3, titleResId = R.string.fcl_vnext_internal),
     fcl_vnext_sustained_rise_min_target(key = "fcl_vnext_sustained_rise_min_target", defaultValue = 12, min = 5, max = 20, titleResId = R.string.fcl_vnext_internal, unitType = UnitType.MIN),
-
-
 }

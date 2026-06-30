@@ -110,4 +110,23 @@ class BatchActionMappingTest {
         // An unknown/unparseable teType drops the action (the master's no-action guard then rejects an empty batch).
         assertThat(BatchActionDto(type = BatchActionDto.TYPE_THERAPY_EVENT, teType = "NOT_A_TYPE").toDomain()).isNull()
     }
+
+    @Test
+    fun therapyEventEditRoundTrips() {
+        val original = BatchAction.TherapyEventEdit(
+            teType = TE.Type.CANNULA_CHANGE,
+            timestamp = 1_700_000_002_000L,
+            location = TE.Location.SIDE_LEFT_UPPER_ARM,
+            arrow = TE.Arrow.RIGHT,
+            note = "moved",
+            source = Sources.SiteRotationDialog
+        )
+        assertThat(original.toDto().toDomain()).isEqualTo(original)
+    }
+
+    @Test
+    fun therapyEventEditWithUnknownTypeMapsToNull() {
+        // An unknown/unparseable teType drops the action (the master's no-action guard then rejects an empty batch).
+        assertThat(BatchActionDto(type = BatchActionDto.TYPE_THERAPY_EVENT_EDIT, teType = "NOT_A_TYPE").toDomain()).isNull()
+    }
 }

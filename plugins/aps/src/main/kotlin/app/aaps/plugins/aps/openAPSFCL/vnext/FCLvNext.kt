@@ -446,6 +446,13 @@ private var sensorBlipStreakCount: Int = 0
 // Ringebuffer: de laatste 3 ruwe BG-waarden voor de consistenticheck
 private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 
+// ── Peak-brake deceleratie-tracking ──────────────────────────────────────
+// recentSlope (fast lane) van de vórige cyclus, nodig om een knik/afvlakking
+// te detecteren vóórdat ctx.slope (trage lane) zelf al gedaald is.
+// Gebruikt door computePeakBrake() (30/06/2026, Ecko: consolidatie van
+// peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
+private var prevRecentSlopeForBrake: Double? = null
+
 
 private val persistCtrl = PersistentCorrectionController(
     cooldownCycles = 3,        // of 2, jij kiest
@@ -1882,12 +1889,48 @@ private fun computeEarlyDoseDecision(
 // Stage2 eerder als de voorspelde piek groot is
     // Avondmaaltijdanalyse 25/05: stage2 vuurde te laat (pred_peak 9-10, BG al 10.2).
     // Verlaging naar 0.45 bij pred_peak >= 9.5 zodat stage2 ~10 min eerder kan vuren.
-    val stage2Min = when {
+    val stage2MinByPeak = when {
         peak.predictedPeak >= 16.0 -> 0.45
         peak.predictedPeak >= 12.5 -> 0.47
         peak.predictedPeak >=  9.5 -> 0.50  // nieuw: ook bij piek >= 9.5
         else                       -> 0.55
     }
+
+    // ── Stage2 eerder bij bevestigde directe stijging (kip-ei-fix) ────────────
+    // Probleem (30/06/2026, Ecko): predictedPeak is een ballistische extrapolatie
+    // van de HUIDIGE snelheid (bgNow + v×hEff). Aan het begin van een stijging is
+    // v per definitie nog laag, ook al gaat de stijging straks doorzetten — de
+    // extrapolatie kan de toekomstige versnelling niet kennen. Hierdoor blijft
+    // predictedPeak kunstmatig laag (<9.5) net op het moment dat je vroeg wilt
+    // toeslaan, en stage2Min blijft op 0.55 hangen tot de piekvoorspelling
+    // zichzelf "inhaalt" — maar dan is de vroege fase van de stijging al voorbij.
+    //
+    // Voorbeeld 30/06 ontbijt: bij BG=4.5 (05:00 UTC) was predictedPeak nog maar
+    // 5.3 mmol (stage2Min=0.55, conf=0.48 → gesloten). Vijf minuten later bij
+    // BG=6.5 sprong predictedPeak naar 11.2 (stage2Min=0.50) — maar toen was de
+    // vroege fase (BG 4.0-6.5) al voorbij. Resultaat: kleine vroege commits
+    // (0.53+0.08+0.21+0.30=1.12U), gevolgd door 3 grote late commits (7.54U)
+    // tussen BG 6.5-7.3 — laat in de stijging, na de helft van de excursie.
+    //
+    // Oplossing: stage2Min verlagen op basis van het DIRECTE versnellingssignaal
+    // (recentSlope + acceleration), onafhankelijk van de nog-onzekere
+    // piekvoorspelling. Dit vertrouwt op "de stijging versnelt aantoonbaar"
+    // in plaats van te wachten tot de extrapolatie dat zelf concludeert.
+    //
+    // Voorwaarden (bewust strenger dan de stage1-trigger, want dit opent de
+    // GROTE stage2-commit, niet de kleine stage1):
+    //   recentSlope >= 2.5 mmol/h  → duidelijke, actuele stijging
+    //   acceleration >= 0.20       → stijging neemt nog toe, geen afvlakking
+    //   consistency >= minConsistency → geen ruisartefact, sensordata betrouwbaar
+    val stage2MinByAccel = if (
+        ctx.recentSlope >= 2.5 &&
+        ctx.acceleration >= 0.20 &&
+        ctx.consistency >= config.minConsistency
+    ) 0.45 else 1.0  // 1.0 = "doet niet mee" in de minOf() hieronder
+
+    // Laagste van de twee routes wint: predictedPeak-route (zoals voorheen)
+    // OF de nieuwe directe-acceleratie-route, welke ook het eerst opengaat.
+    val stage2Min = minOf(stage2MinByPeak, stage2MinByAccel)
 
 // jouw bestaande fast-carb versneller (blijft bestaan)
     val fastCarbStage1Mul =
@@ -2246,8 +2289,90 @@ private data class PostPeakSummary(
     val reason: String,
     val suppressReason: String,
     val lockoutReason: String,
-    val commitBlockReason: String
+    val commitBlockReason: String,
+    val peakBrake: PeakBrakeResult
 )
+
+// ── Gedeelde piek-naderingsrem (vlak vóór/op de piek geen insuline meer) ──
+// Consolidatie (30/06/2026, Ecko): vervangt drie losse implementaties die
+// allemaal dezelfde zwakte hadden — ze vereisten ctx.slope <= 0.50 vóórdat
+// ze konden ingrijpen, ook bij al torenhoge IOB. Incident 30/06 14:15 UTC:
+// iobRatio=0.57, ctx.slope=3.92 (ver boven 0.50) → geen van de drie remmen
+// kon afgaan, terwijl recentSlope al duidelijk aan het knikken was
+// (5.67→4.55). Resultaat: 1.45U gecommit vlak op de feitelijke piek.
+//
+// Eén gedeelde functie i.p.v. drie aparte plekken — makkelijker te tunen.
+//
+// Twee signalen:
+//  1. IOB-afhankelijke slope-ceiling: bij hogere IOB mag de rem ook bij een
+//     hogere (nog stijgende) slope al ingrijpen, in plaats van te wachten
+//     tot de trage lane zelf bijna vlak is.
+//  2. RecentSlope-deceleratie: een duidelijke knik in de snelle lane
+//     t.o.v. de vorige cyclus telt ook als piek-nadering, los van het
+//     absolute slope-niveau.
+//
+// Twee niveaus:
+//  - softBrake: continue/dynamische taper (severity 0..1), geen harde cliff.
+//  - hardBrake: vanaf lockoutThreshold volledige stop (commandedDose=0),
+//    niet alleen het WFF/consolidatie-deel.
+//
+// LET OP: maxReduction=0.45 en fullBrakeIobRatio/dropMin zijn een eerste,
+// beredeneerde inschatting (geen historische tuning-data voor déze brede
+// ceiling) — kan bij een volgende update nog bijgesteld worden, met name
+// als blijkt dat langzame/vlakke (vet/eiwitrijke) stijgingen hierdoor
+// onderbedeeld raken.
+private data class PeakBrakeResult(
+    val softBrakeFactor: Double,   // 1.0 = geen reductie, lager = taper
+    val hardBrake: Boolean,        // true = commandedDose volledig naar 0
+    val severity: Double,          // 0..1, voor logging/debug
+    val slopeCeiling: Double,      // voor logging/debug
+    val recentSlopeDrop: Double,   // voor logging/debug
+    val reason: String
+)
+
+private fun computePeakBrake(
+    ctx: FCLvNextContext,
+    peak: PeakEstimate,
+    config: FCLvNextConfig,
+    prevRecentSlope: Double?
+): PeakBrakeResult {
+
+    val suppressThreshold = config.peakIobBrakeSuppressThreshold   // nu actief 0.30
+    val lockoutThreshold = config.peakIobBrakeLockoutThreshold     // 0.55
+    val fullBrakeIobRatio = 0.65   // net boven lockoutThreshold — vanaf hier ceiling=max
+    val dropMin = 0.8              // mmol/L/u knik t.o.v. vorige cyclus
+    val maxSlopeCeiling = 6.0
+    val maxReduction = 0.45        // ⚠️ eerste inschatting, evt. bijstellen bij volgende update
+
+    val recentSlopeDrop = (prevRecentSlope ?: ctx.recentSlope) - ctx.recentSlope
+
+    if (peak.state == PeakPredictionState.IDLE || ctx.iobRatio < suppressThreshold) {
+        return PeakBrakeResult(1.0, false, 0.0, 0.50, recentSlopeDrop, "NONE")
+    }
+
+    val t = smooth01((ctx.iobRatio - suppressThreshold) / (fullBrakeIobRatio - suppressThreshold))
+    val slopeCeiling = 0.50 + t * (maxSlopeCeiling - 0.50)
+
+    val decelTriggered = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold
+    val brakeCondition =
+        (ctx.slope <= slopeCeiling || decelTriggered) && ctx.deltaToTarget >= 0.8
+
+    if (!brakeCondition) {
+        return PeakBrakeResult(1.0, false, 0.0, slopeCeiling, recentSlopeDrop, "NONE")
+    }
+
+    val hardBrake = ctx.iobRatio >= lockoutThreshold
+
+    val severity = smooth01(
+        0.5 * ((ctx.iobRatio - suppressThreshold) / (lockoutThreshold - suppressThreshold)) +
+            0.3 * ((slopeCeiling - ctx.slope) / slopeCeiling).coerceIn(0.0, 1.0) +
+            0.2 * (recentSlopeDrop / 2.0).coerceIn(0.0, 1.0)
+    )
+    val softBrakeFactor = 1.0 - severity * maxReduction
+
+    val reason = if (hardBrake) "HARD_BRAKE" else "SOFT_BRAKE"
+    return PeakBrakeResult(softBrakeFactor, hardBrake, severity, slopeCeiling, recentSlopeDrop, reason)
+}
 
 private fun evaluatePostPeak(
     ctx: FCLvNextContext,
@@ -2258,7 +2383,8 @@ private fun evaluatePostPeak(
 
     minutesSinceEpisodeStart: Int = 999,
     sensorBlipStreak: Int = 0,          // huidig aantal opeenvolgende blip-cycli
-    bgRising3Cycles: Boolean = false     // waren de laatste 3 BG-delta's alle positief?
+    bgRising3Cycles: Boolean = false,    // waren de laatste 3 BG-delta's alle positief?
+    prevRecentSlope: Double? = null      // voor computePeakBrake() deceleratie-signaal
 ): PostPeakSummary {
 
     val inAbsorption = isInAbsorptionWindow(now, config)
@@ -2363,17 +2489,10 @@ private fun evaluatePostPeak(
             fastPlateau &&
             !risingAgainTail
 
-    // ✅ NIEUW: Predictieve IOB-rem — vlak voor de piek, stijging vlakt af, IOB al hoog
-    // Doel: stop doseren voordat suppress_for_peak formeel actief wordt.
-    // Bewust GESCHEIDEN van iobOvershoot (die geeft juist ruimte bij echte stijging).
-    val peakIobBrake =
-        episodeLike &&
-            reliable &&
-            peak.state != PeakPredictionState.IDLE &&
-            ctx.iobRatio >= config.peakIobBrakeSuppressThreshold &&
-            ctx.slope <= 0.50 &&
-            ctx.acceleration <= 0.08 &&
-            ctx.deltaToTarget >= 0.8
+    // ✅ GECONSOLIDEERD (30/06/2026): predictieve IOB-rem via computePeakBrake().
+    // Vervangt de oude losse peakIobBrake-conditie (ctx.slope <= 0.50 vaste grens).
+    val peakBrake = computePeakBrake(ctx, peak, config, prevRecentSlope)
+    val peakIobBrake = peakBrake.reason != "NONE"   // soft of hard → telt als brake-signaal
 
 
     // Basale post-peak kenmerken
@@ -2411,7 +2530,7 @@ private fun evaluatePostPeak(
                 // ✅ NIEUW: bij sensorBlip liever hard stoppen met pushen
                 || sensorBlip
                 // ✅ NIEUW: harde stop als IOB echt hoog is vlak voor piek
-                || (peakIobBrake && ctx.iobRatio >= config.peakIobBrakeLockoutThreshold)
+                || peakBrake.hardBrake
             )
 
 
@@ -2480,7 +2599,8 @@ private fun evaluatePostPeak(
         reason = reason,
         suppressReason = suppressReason,
         lockoutReason = lockoutReason,
-        commitBlockReason = commitBlockReason
+        commitBlockReason = commitBlockReason,
+        peakBrake = peakBrake
     )
 
 }
@@ -4018,9 +4138,12 @@ class FCLvNext(
             ctx, mealSignal, peak, now, config,
             episodeMinutesForPostPeak,
             sensorBlipStreak = sensorBlipStreakCount,
-            bgRising3Cycles  = bgRising3Cycles || explosiveRise
+            bgRising3Cycles  = bgRising3Cycles || explosiveRise,
+            prevRecentSlope  = prevRecentSlopeForBrake
         )
         status.append(postPeak.reason + "\n")
+        // bijwerken voor de volgende cyclus (computePeakBrake deceleratie-signaal)
+        prevRecentSlopeForBrake = ctx.recentSlope
 
         // ✅ NIEUW: early reset zodra afremmen/omkeer start
         val earlyResetThisCycle = maybeResetEarlyOnDecel(ctx, peak, now, status)
@@ -5326,23 +5449,15 @@ class FCLvNext(
                     overshootFactor = iobOvershootFactor
                 )
 
-// ✅ NIEUW: piek-nadering IOB taper — gradueel minder ruimte als stijging afvlakt
-            // Compleet los van iobOvershoot: die geeft ruimte bij stijging,
-            // dit neemt ruimte weg bij afvlakking richting piek.
+// ✅ GECONSOLIDEERD (30/06/2026): piek-nadering taper via postPeak.peakBrake
+            // i.p.v. eigen losse conditie (was: ctx.slope in -0.10..0.50, te laat
+            // bij hoge IOB — zie computePeakBrake() voor de volledige toelichting).
+            // hardBrake wordt hier niet apart afgehandeld: postPeak.lockout (dat
+            // peakBrake.hardBrake meeneemt) zet commandedDose elders al op 0 bij
+            // een harde stop; deze taper is alleen voor de softBrake-situatie.
             if (commandedDose > 0.0) {
                 val peakApproachFactor: Double =
-                    if (
-                        peak.state != PeakPredictionState.IDLE &&
-                        ctx.slope in -0.10..0.50 &&
-                        ctx.acceleration <= 0.10 &&
-                        ctx.iobRatio >= config.peakApproachIobThreshold
-                    ) {
-                        val severity = ((ctx.iobRatio - config.peakApproachIobThreshold) /
-                            (0.90 - config.peakApproachIobThreshold)).coerceIn(0.0, 1.0)
-                        1.0 - severity * config.peakApproachMaxReduction
-                    } else {
-                        1.0
-                    }
+                    if (!postPeak.peakBrake.hardBrake) postPeak.peakBrake.softBrakeFactor else 1.0
 
                 logRow.peakApproachFactor = peakApproachFactor
                 if (peakApproachFactor < 1.0 - 1e-9) {
@@ -5353,6 +5468,7 @@ class FCLvNext(
                     if (commandedDose < beforeTaper - 1e-9) {
                         status.append(
                             "PEAK-APPROACH TAPER: iobR=${"%.2f".format(ctx.iobRatio)} " +
+                                "severity=${"%.2f".format(postPeak.peakBrake.severity)} " +
                                 "factor=${"%.2f".format(peakApproachFactor)} " +
                                 "→ dose ${"%.2f".format(beforeTaper)}→${"%.2f".format(commandedDose)}U\n"
                         )
@@ -5712,7 +5828,7 @@ class FCLvNext(
         logRow.episodeCommitNr = episodeCommitCount
         logRow.suppressForPeak = suppressForPeak
         logRow.absorptionActive = isInAbsorptionWindow(now, config)
-        logRow.peakIobBrakeActive = postPeak.suppress && peak.state != PeakPredictionState.IDLE && ctx.iobRatio >= config.peakIobBrakeSuppressThreshold
+        logRow.peakIobBrakeActive = postPeak.peakBrake.reason != "NONE"
         logRow.reentrySignal = reentry
         logRow.decisionReason = decision.reason
 
