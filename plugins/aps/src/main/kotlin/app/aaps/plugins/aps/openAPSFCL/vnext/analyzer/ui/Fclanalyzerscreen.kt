@@ -21,13 +21,14 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.night.NightWindowAnalyzer
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase
 import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
-private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, RESET }
+private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET }
 
 /**
  * Entrypoint van de geïntegreerde FCL Analyzer.
@@ -54,6 +55,9 @@ fun FclAnalyzerScreen(
     var allRows by remember { mutableStateOf<List<LogRow>?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>?>(null) }
     var episodeMetrics by remember { mutableStateOf<List<EpisodeMetrics>?>(null) }
+    var aiAdvisorResult by remember {
+        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorScheduler.latestResult())
+    }
     var classifications by remember { mutableStateOf<List<EpisodeClassifier.EpisodeClassification>?>(null) }
     var nightWindows by remember { mutableStateOf<List<NightWindowEntity>?>(null) }
     var currentAxisState by remember { mutableStateOf<FclAxisState?>(null) }
@@ -328,10 +332,25 @@ fun FclAnalyzerScreen(
                         }
                     }
                 },
-                onOpenReset = { currentScreen = Screen.RESET }
+                onOpenReset = { currentScreen = Screen.RESET },
+                onOpenAiAdvisor = { currentScreen = Screen.AI_ADVISOR }
             )
 
             Screen.RESET -> FclResetScreen(onBack = { currentScreen = Screen.DASHBOARD })
+
+            Screen.AI_ADVISOR -> FclAiAdvisorScreen(
+                runResult = aiAdvisorResult,
+                onBack = { currentScreen = Screen.DASHBOARD },
+                onRefreshNow = {
+                    FclAiAdvisorScheduler.forceRunNow(
+                        context = context,
+                        metrics = episodeMetrics ?: emptyList(),
+                        onDone = { result ->
+                            scope.launch(Dispatchers.Main) { aiAdvisorResult = result }
+                        }
+                    )
+                }
+            )
 
             Screen.ANALYZE -> AnalyzeScreen(
                 allRows = allRows!!,
@@ -449,6 +468,7 @@ private fun DashboardScreen(
     onRefreshData: () -> Unit,
     onOpenEpisodes: () -> Unit,
     onOpenAdvisor: () -> Unit,
+    onOpenAiAdvisor: () -> Unit,
     onOpenReset: () -> Unit
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
@@ -505,6 +525,19 @@ private fun DashboardScreen(
                     "die de automaat heeft gesteld.",
                 knoopTekst = s.episodes,
                 onClick = onOpenEpisodes
+            )
+
+            NavActieKaart(
+                emoji   = "🤖",
+                label   = "AI Advisor",
+                badge   = null,
+                enabled = hasData2,
+                toelichting = "Vraag 1x per dag (of nu handmatig, om te testen) een externe AI " +
+                    "om je geleerde FCLvNext-parameters te controleren. Elk voorstel verschijnt " +
+                    "als losse kaart met reden en bewijs — wordt pas actief na jouw handmatige " +
+                    "goedkeuring per parameter.",
+                knoopTekst = "AI Advisor",
+                onClick = onOpenAiAdvisor
             )
 
             // Ruimte gereserveerd voor eventuele derde inhoudelijke knop

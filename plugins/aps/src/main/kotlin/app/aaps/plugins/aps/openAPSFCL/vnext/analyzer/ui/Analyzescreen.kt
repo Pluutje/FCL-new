@@ -220,7 +220,19 @@ private fun EpisodeOverviewCard(
                 text = when {
                     classification.hyper -> "Glucose steeg te hoog."
                     classification.hypoEarly -> "Vroege hypo – vroege insuline mogelijk te sterk."
-                    classification.hypoLate -> "Late hypo – totale insuline mogelijk te hoog."
+                    classification.hypoLate -> when {
+                        // ✅ RODE DRAAD (01/07/2026): onderscheid "te laat" van "te veel"
+                        // iobRatioAtPeak > 0.55: veel IOB nog actief op de piek — timing-probleem
+                        metrics.iobRatioAtPeak > 0.55 ->
+                            "Late hypo – insuline werkte te laat door. Naar voren schuiven is de oplossing, niet minder geven."
+                        else ->
+                            "Late hypo – totale insuline mogelijk te hoog."
+                    }
+                    // Piek OK maar insuline toch te gespreid: ook melden
+                    !classification.meetsGoal && metrics.iobRatioAtPeak > 0.65 ->
+                        "Glucose bleef acceptabel maar insuline was te laat verdeeld — timing naar voren bijgesteld."
+                    classification.meetsGoal && metrics.iobRatioAtPeak > 0.60 ->
+                        s.glucoseBleefStabiel + " Insuline was wel iets laat verdeeld — timing licht bijgesteld."
                     classification.meetsGoal -> s.glucoseBleefStabiel
                     else -> "Lichte afwijking zonder duidelijke fout."
                 },
@@ -549,11 +561,11 @@ private fun MealTypeCard(entity: EpisodeEntity) {
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 DetectieRij("Slope 0-15 min",
-                    app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
-                        entity.mealTypeSlope0_15, mgdlM))
+                            app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
+                                entity.mealTypeSlope0_15, mgdlM))
                 DetectieRij("Slope 15-30 min",
-                    app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
-                        entity.mealTypeSlope15_30, mgdlM))
+                            app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.formatSlope(
+                                entity.mealTypeSlope15_30, mgdlM))
             }
         }
     }

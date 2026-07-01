@@ -271,6 +271,10 @@ object FclStrings_EN : FclStrings {
             "First dose was slow to start despite an early start — timing shifted further earlier"
         "IOB_SPREAD_TE_LAAT" ->
             "Built-up insulin took effect too late — timing adjusted"
+        "IOB_SPREAD_TE_LAAT_VERSPREID" ->
+            "Insulin spread evenly but should have been shifted forward — timing adjusted"
+        "HYPO_LATE_TIMING" ->
+            "BG too low due to late insulin, not too much — timing shifted earlier"
         "RESCUE_OVERPOWERED" ->
             "Rescue dose needed despite normal buildup — strength reduced"
         "EARLYBOOST_TE_KLEIN" ->

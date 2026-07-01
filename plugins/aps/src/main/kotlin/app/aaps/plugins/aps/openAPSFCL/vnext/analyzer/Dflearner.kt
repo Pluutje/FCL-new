@@ -648,6 +648,26 @@ object DFLearner {
             }
 
             // ── HYPO zonder frontload als oorzaak ────────────────────────────────
+
+            // ✅ RODE DRAAD (01/07/2026, Ecko): "Timing eerst, hoeveelheid daarna."
+            // Vóór elke negatieve D-aanpassing vragen we: was de late timing de
+            // oorzaak van de hypo, niet het totaal? Signaal: iobRatioAtPeak hoog
+            // (veel insuline nog actief op de piek) EN frontload was niet te groot
+            // (anders pakt HYPO_FRONTLOAD hem al). In dat geval is naar voren
+            // schuiven de oplossing, niet minder totaal geven.
+            //
+            // Episode 1 screenshot 30/06 (IOB@piek=0.60, late hypo): triggert nu
+            // HYPO_LATE_TIMING in plaats van HYPO — F omhoog, D neutraal.
+            // Episodekaart-tekst wordt daarmee "Late insuline — naar voren schuiven".
+            hypoStraf > 0.0 && !frontloadTeGroot &&
+                iobRatioAtPeak > 0.55 && !metrics.afterloadWasActive -> {
+                // Sterkte van het timing-signaal: hoe verder boven 0.55, hoe sterker
+                val timingStrength = ((iobRatioAtPeak - 0.55) / 0.20).coerceIn(0.0, 1.0)
+                rawDeltaD = 0.0   // totaal was niet het probleem
+                rawDeltaF = +tp.gammaIobr * 1.5 * timingStrength
+                diagnose  = "HYPO_LATE_TIMING"
+            }
+
             hypoStraf > 0.0 && fracHoog && safeFollowUp -> {
                 val afterloadDemper = if (metrics.afterloadWasActive) 0.5 else 1.0
                 rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier * afterloadDemper
@@ -751,10 +771,23 @@ object DFLearner {
             // daarna met veel kleine watching commits.
             // F omhoog zodat volgende keer eerder een grotere 2e commit wordt gegeven.
             // Geen D-aanpassing: totale dosis was OK, alleen timing was suboptimaal.
+            //
+            // ✅ RODE DRAAD (01/07/2026): ook zonder safeFollowUp triggeren als
+            // iobRatioAtPeak erg hoog is (>0.65). Patroon: 3× gelijke commits
+            // (3×2.38U) — systeem doseerde evenwichtig verspreid maar had moeten
+            // frontloaden (3.38 + 2.38 + 1.38). safeFollowUp=false omdat geen
+            // één commit duidelijk de "grote eerste" was, maar timing was duidelijk te laat.
             !peekHoog && !peekLaag && teGespreid && safeFollowUp -> {
                 rawDeltaD = 0.0
                 rawDeltaF = +tp.gammaIobr * 1.2 * spreadStrength
                 diagnose  = "IOB_SPREAD_TE_LAAT"
+            }
+            !peekHoog && !peekLaag && iobRatioAtPeak > 0.65 && !metrics.hypoDetected -> {
+                // Geen safeFollowUp maar wel duidelijk te laat — zwakker F-signaal
+                val str = ((iobRatioAtPeak - 0.65) / 0.20).coerceIn(0.0, 1.0)
+                rawDeltaD = 0.0
+                rawDeltaF = +tp.gammaIobr * 0.8 * str
+                diagnose  = "IOB_SPREAD_TE_LAAT_VERSPREID"
             }
 
             // ── EARLYBOOST TE KLEIN: frontload naar voren schuiven ────────────

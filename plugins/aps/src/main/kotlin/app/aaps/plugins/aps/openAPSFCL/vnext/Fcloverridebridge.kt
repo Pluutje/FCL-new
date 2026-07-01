@@ -20,12 +20,78 @@ object FclOverrideBridge {
     private val pending = AtomicReference<FCLvNextConfigOverride.Override?>(null)
 
     /**
-     * Aanroepen vanuit de Analyzer zodra de gebruiker een parameter-aanpassing bevestigt.
-     * De override wordt bewaard totdat FCLvNext hem ophaalt via consume().
+     * Aanroepen vanuit de Analyzer (of de AI-advisor) zodra de gebruiker een
+     * parameter-aanpassing bevestigt.
+     *
+     * ✅ GEWIJZIGD (30/06/2026, Ecko): MERGE i.p.v. volledige vervanging.
+     * Reden: bij meerdere losse goedkeuringen vlak na elkaar (bijv. AI-advisor
+     * kaarten één voor één goedkeuren) overschreef post() voorheen de volledige
+     * pending override — een net goedgekeurde parameter kon zo stilzwijgend
+     * verloren gaan vóórdat FCLvNext hem had geconsumeerd. Nu worden alleen de
+     * niet-null velden van de nieuwe override over de bestaande pending override
+     * heen gelegd; overige velden (inclusief eerdere paramOverrides-velden)
+     * blijven behouden.
+     *
+     * `reason` wordt samengevoegd (niet overschreven) zodat de geconsumeerde
+     * override een volledig audit-spoor van alle bijdragende bronnen behoudt.
      */
     fun post(override: FCLvNextConfigOverride.Override) {
-        pending.set(override)
+        pending.updateAndGet { existing ->
+            if (existing == null) override else merge(existing, override)
+        }
     }
+
+    private fun merge(
+        base: FCLvNextConfigOverride.Override,
+        incoming: FCLvNextConfigOverride.Override
+    ): FCLvNextConfigOverride.Override {
+        val mergedParamOverrides = when {
+            base.paramOverrides == null -> incoming.paramOverrides
+            incoming.paramOverrides == null -> base.paramOverrides
+            else -> mergeParamOverrides(base.paramOverrides, incoming.paramOverrides)
+        }
+        val mergedReason = listOfNotNull(base.reason, incoming.reason)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(" | ")
+            .ifBlank { null }
+
+        return FCLvNextConfigOverride.Override(
+            sterkte         = incoming.sterkte         ?: base.sterkte,
+            timing          = incoming.timing          ?: base.timing,
+            volhoudendheid  = incoming.volhoudendheid  ?: base.volhoudendheid,
+            nfLevel         = incoming.nfLevel         ?: base.nfLevel,
+            writtenAt       = incoming.writtenAt       ?: base.writtenAt,
+            basedOnEpisodes = incoming.basedOnEpisodes ?: base.basedOnEpisodes,
+            reason          = mergedReason,
+            paramOverrides  = mergedParamOverrides,
+            iobBrakeLearned = incoming.iobBrakeLearned ?: base.iobBrakeLearned
+        )
+    }
+
+    private fun mergeParamOverrides(
+        base: FCLvNextConfigOverride.ParamOverrides,
+        incoming: FCLvNextConfigOverride.ParamOverrides
+    ): FCLvNextConfigOverride.ParamOverrides =
+        FCLvNextConfigOverride.ParamOverrides(
+            peakPredictionThreshold       = incoming.peakPredictionThreshold       ?: base.peakPredictionThreshold,
+            watchingFrontloadFrac         = incoming.watchingFrontloadFrac         ?: base.watchingFrontloadFrac,
+            watchingMinDeltaToTarget      = incoming.watchingMinDeltaToTarget      ?: base.watchingMinDeltaToTarget,
+            commitCooldownMinutes         = incoming.commitCooldownMinutes         ?: base.commitCooldownMinutes,
+            peakPredictionHorizonH        = incoming.peakPredictionHorizonH        ?: base.peakPredictionHorizonH,
+            iobStart                      = incoming.iobStart                      ?: base.iobStart,
+            peakIobBrakeSuppressThreshold = incoming.peakIobBrakeSuppressThreshold ?: base.peakIobBrakeSuppressThreshold,
+            earlyBoostFactor              = incoming.earlyBoostFactor              ?: base.earlyBoostFactor,
+            earlyBoostMinConfidence       = incoming.earlyBoostMinConfidence       ?: base.earlyBoostMinConfidence,
+            earlyBoostMaxCommits          = incoming.earlyBoostMaxCommits          ?: base.earlyBoostMaxCommits,
+            earlyRiseFracMin              = incoming.earlyRiseFracMin              ?: base.earlyRiseFracMin,
+            peakMaxSlopeWeight            = incoming.peakMaxSlopeWeight            ?: base.peakMaxSlopeWeight,
+            lateCommitDecayFactor         = incoming.lateCommitDecayFactor         ?: base.lateCommitDecayFactor,
+            lateCommitDecayThreshold      = incoming.lateCommitDecayThreshold      ?: base.lateCommitDecayThreshold,
+            sustainedRiseSlopeMin         = incoming.sustainedRiseSlopeMin         ?: base.sustainedRiseSlopeMin,
+            sustainedRiseMinTarget        = incoming.sustainedRiseMinTarget        ?: base.sustainedRiseMinTarget,
+            earlyPeakBiasMmol             = incoming.earlyPeakBiasMmol             ?: base.earlyPeakBiasMmol
+        )
 
     /**
      * Aanroepen vanuit FCLvNextConfigOverride.load().

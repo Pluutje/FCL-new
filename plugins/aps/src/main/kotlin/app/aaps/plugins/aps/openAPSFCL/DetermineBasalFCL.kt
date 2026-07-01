@@ -104,6 +104,23 @@ class DetermineBasalFCL @Inject constructor(
             cycleLogRepository = cycleLogRepository
         )
 
+    init {
+        // ✅ NIEUW (01/07/2026, Ecko): AI-parameteradviseur koppelen aan episode-
+        // afsluiting. FclLearnerLogger.logEpisode() is het exacte moment waarop
+        // alle episode-metrics beschikbaar zijn — logischer dan DetermineBasal-cyclus
+        // (die heeft de EpisodeMetrics niet) of een aparte WorkManager-job.
+        //
+        // De callback registreren we eenmalig bij constructie van DetermineBasalFCL;
+        // daarna vuurt hij automatisch bij elke afgesloten episode.
+        // FclAiAdvisorScheduler.runIfDue() keert direct terug als het interval
+        // (<20u) nog niet verstreken is — goedkoop genoeg voor elke episode.
+        app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.onEpisodeLogged = { metrics ->
+            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorScheduler.runIfDue(
+                context = context,
+                metrics = listOf(metrics)
+            )
+        }
+    }
 
     private val consoleError = mutableListOf<String>()
     private val consoleLog = mutableListOf<String>()

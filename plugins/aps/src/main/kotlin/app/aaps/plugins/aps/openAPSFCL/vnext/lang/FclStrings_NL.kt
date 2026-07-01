@@ -271,6 +271,10 @@ object FclStrings_NL : FclStrings {
             "Eerste dosis kwam ondanks vroege start te laat op gang — timing verder naar voren bijgesteld"
         "IOB_SPREAD_TE_LAAT" ->
             "Opgebouwde insuline werkte te laat door — timing bijgesteld"
+        "IOB_SPREAD_TE_LAAT_VERSPREID" ->
+            "Insuline gelijkmatig verspreid maar had meer naar voren gemoeten — timing bijgesteld"
+        "HYPO_LATE_TIMING" ->
+            "Te lage BG door te late insuline, niet door te veel — timing naar voren bijgesteld"
         "RESCUE_OVERPOWERED" ->
             "Reddingsdosis nodig ondanks normale opbouw — sterkte verlaagd"
         "EARLYBOOST_TE_KLEIN" ->

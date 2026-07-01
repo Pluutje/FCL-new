@@ -31,6 +31,19 @@ object FclLearnerLogger {
     private const val SEP            = ";"
 
     /**
+     * Optionele callback die wordt aangeroepen na elk volledig episode-log.
+     * Geregistreerd door DetermineBasalFCL (die wél een Context heeft) zodat
+     * FclLearnerLogger zelf context-vrij blijft.
+     *
+     * Gebruik: onEpisodeLogged = { metrics -> FclAiAdvisorScheduler.runIfDue(context, listOf(metrics)) }
+     *
+     * (01/07/2026, Ecko): dit is de koppelplek voor de AI-parameter-adviseur.
+     * Episode-afsluiting is het logische moment: alle metrics zijn beschikbaar
+     * en de AI kan per episode beoordelen of er reden is voor een dagrapport.
+     */
+    var onEpisodeLogged: ((EpisodeMetrics) -> Unit)? = null
+
+    /**
      * Volledige, canonieke kolomvolgorde over alle vier regeltypes
      * (EPISODE, EB, FRONTLOAD, V). De header wordt bij de eerste regel
      * uit values.keys opgebouwd — als verschillende types verschillende
@@ -140,6 +153,13 @@ object FclLearnerLogger {
         values["v_cluster_fires"] = ""
 
         append(values)
+
+        // AI-trigger: callback aanroepen na het wegschrijven (niet ervóór — logging
+        // is de definitieve bevestiging dat de episode-data compleet is).
+        // Loopt op de aanroepende thread (doorgaans een achtergrond-werkthread van de
+        // Analyzer); FclAiAdvisorScheduler.runIfDue() keert direct terug als het
+        // interval nog niet verstreken is, of start de AI-call op zijn eigen executor.
+        try { onEpisodeLogged?.invoke(metrics) } catch (_: Exception) { /* niet kritiek */ }
     }
 
     /**
