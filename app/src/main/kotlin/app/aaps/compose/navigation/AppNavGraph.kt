@@ -716,6 +716,9 @@ fun NavGraphBuilder.appNavGraph(
             onManageInsulin = { navController.navigate(AppRoute.InsulinManagement.createRoute()) },
             onManageProfile = { navController.navigate(AppRoute.Profile.createRoute()) },
             onProfileSwitch = { navController.navigate(AppRoute.ProfileActivation.createRoute(0)) },
+            onOpenAuthorizedClients = { navController.navigate(AppRoute.AuthorizedClients.route) },
+            onPairWithMaster = { navController.navigate(AppRoute.PairWithMaster.route) },
+            onOpenNsReceiveSettings = { navController.navigate(AppRoute.PreferenceScreen.createRoute("ns_client_synchronization")) },
             onRunObjectives = {
                 val index = activePlugin.getPluginsList().indexOfFirst { it is Objectives }
                 if (index >= 0) navController.navigate(AppRoute.PluginContent.createRoute(index))

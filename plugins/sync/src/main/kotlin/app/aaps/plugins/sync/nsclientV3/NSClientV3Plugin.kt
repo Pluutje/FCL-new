@@ -53,8 +53,8 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.NSAndroidClientImpl
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
-import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.core.nssdk.remotemodel.LastModified
+import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.core.objects.extensions.freshness
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -805,8 +805,8 @@ class NSClientV3Plugin @Inject constructor(
             // (= na LinearCalibration + UKF smoothing) — dezelfde waarde die FCLvNext gebruikt.
             // Als de waarde niet gevonden wordt (bijv. bij oudere entries) valt terug op GV.value.
             // Probleem: NS-sync triggert direct op DB_CHANGED(GV), maar IobCobCalculator
-            // verwerkt de nieuwe GV asynchroon. Voor recente entries (< 90s oud) wachten
-            // we tot 8 seconden op de bucketed data — daarna fallback naar raw.
+            // verwerkt de nieuwe GV asynchroon. Voor recente entries (< 300s oud) wachten
+            // we tot 10 seconden op de bucketed data — daarna fallback naar raw.
             val recalculatedMgdl: Double = run {
                 val ts = dataPair.value.timestamp
                 val toleranceMs = 150_000L  // ±2.5 minuten: dekt alle xDrip-intervals

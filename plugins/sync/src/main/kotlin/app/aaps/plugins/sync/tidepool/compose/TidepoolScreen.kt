@@ -107,7 +107,7 @@ internal fun TidepoolScreen(
 }
 
 @Composable
-private fun TidepoolScreenContent(
+internal fun TidepoolScreenContent(
     uiState: TidepoolUiState,
     dateUtil: DateUtil? = null,
     modifier: Modifier = Modifier
