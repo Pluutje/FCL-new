@@ -121,6 +121,26 @@ fun FclResetScreen(onBack: () -> Unit) {
 
         HorizontalDivider()
 
+        // AI-aanpassingen resetten (apart blok — geen leerdata, maar AI-overrides)
+        val resetAi = ResetActie(
+            titel = "🤖 AI-aanpassingen resetten",
+            omschrijving = "Verwijdert alle door de AI-advisor goedgekeurde aanpassingen. " +
+                "DFLearner-waarden blijven behouden — de learner herneemt de controle. " +
+                "Gebruik dit als de AI-advisor een waarde heeft gezet die je wilt terugdraaien.",
+            bevestigingsTekst = "Alle AI-goedgekeurde parameter-aanpassingen worden verwijderd. " +
+                "De learner neemt de controle terug. Zeker weten?",
+            uitvoeren = {
+                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorApplier.resetAll(it)
+                // Reset ook de IOB-brake die per ongeluk via AI op 0.35 was gezet
+                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorApplier.resetParam(
+                    "peakIobBrakeSuppressThreshold", 0.30, it
+                )
+            }
+        )
+        ResetKaart(actie = resetAi, onClick = { bevestigReset = resetAi })
+
+        HorizontalDivider()
+
         // Reset alles
         val resetAlles = ResetActie(
             titel = "⚠️ Reset alles",

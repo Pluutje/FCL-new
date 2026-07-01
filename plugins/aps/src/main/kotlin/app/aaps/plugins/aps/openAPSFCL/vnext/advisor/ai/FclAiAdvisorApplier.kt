@@ -1,25 +1,27 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai
 
+import android.content.Context
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclOverrideBridge
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
 import java.time.Instant
 
 /**
- * ============================================================================
- * FCL AI-Advisor — Applier
- * ============================================================================
+ * Past een goedgekeurde AI-suggestie toe via FclAiParamStore (persistente opslag).
  *
- * Bewust GEEN afhankelijkheid van ConfigOverrideWriter (analyzer-package) —
- * de AI-advisor is zelfstandig en praat rechtstreeks met dezelfde
- * FclOverrideBridge die de Analyzer ook gebruikt. Dankzij de merge-fix in
- * FclOverrideBridge.post() (30/06/2026) kunnen meerdere kaarten ná elkaar
- * goedgekeurd worden zonder dat eerdere goedkeuringen verloren gaan, en
- * zonder dat dit een race vormt met een eventuele gelijktijdige
- * Analyzer-override.
+ * ARCHITECTUUR (01/07/2026, Ecko — definitieve versie):
  *
- * Toepassing is ALTIJD het resultaat van een expliciete handmatige
- * goedkeuring per kaart — er is bewust geen pad dat een suggestie automatisch
- * toepast.
+ *   defaults → DFLearner leert → FclAiParamStore (AI past aan) → ConfigOverrideWriter
+ *   leest FclAiParamStore als prioriteit boven DFLearner → FCLvNext gebruikt dit
+ *
+ * FclOverrideBridge wordt NIET meer gebruikt voor AI-waarden — dat was de
+ * fundamentele bug: FclOverrideBridge is een eenmalige one-shot die na één
+ * cyclus verdwijnt, waarna ConfigOverrideWriter de DFLearner-waarden terugschreef.
+ * FclAiParamStore is persistent totdat de gebruiker expliciet reset.
+ *
+ * Voor earlyBoostFactor en watchingFrontloadFrac: ook DFLearner-prefs bijwerken
+ * zodat de DFLearner-evaluator bij de volgende episode niet terugvalt op een
+ * verouderde waarde als startpunt.
  */
 object FclAiAdvisorApplier {
 
@@ -28,41 +30,100 @@ object FclAiAdvisorApplier {
         data class Rejected(val reasonNl: String) : ApplyResult()
     }
 
-    /**
-     * @param suggestion de goedgekeurde suggestie (suggestion.rejected moet false zijn —
-     *                   een al-afgewezen suggestie kan hier niet doorheen, zie check hieronder)
-     */
-    fun approve(suggestion: AiParamSuggestion): ApplyResult {
+    fun approve(suggestion: AiParamSuggestion, context: Context): ApplyResult {
         if (suggestion.rejected) {
             return ApplyResult.Rejected(
-                "Suggestie was al afgewezen door validatie (${suggestion.rejectionReasonNl}) — kan niet alsnog goedgekeurd worden"
+                "Suggestie was al afgewezen door validatie (${suggestion.rejectionReasonNl})"
             )
         }
         val spec = FclAiAdvisorRanges.byKey[suggestion.param]
             ?: return ApplyResult.Rejected("Onbekende parameter '${suggestion.param}'")
 
-        // Laatste-moment her-validatie (defense in depth — de waarde kan in theorie
-        // tussen parse-tijd en goedkeur-tijd niet meer wijzigen, maar dit is goedkoop
-        // en voorkomt dat een toekomstige UI-bug een ongevalideerde waarde doorlaat).
         if (!FclAiAdvisorRanges.isInRange(spec, suggestion.proposedValue)) {
             FclAiAdvisorHistoryRepository.record(suggestion, AiSuggestionStatus.REJECTED)
             return ApplyResult.Rejected("Waarde buiten bereik bij toepassen — niet toegepast")
         }
 
-        val paramOverrides = FclAiAdvisorRanges.singleFieldOverride(suggestion.param, suggestion.proposedValue)
-        val override = FCLvNextConfigOverride.Override(
-            writtenAt = Instant.now().toString(),
-            reason = "AI-advisor: ${suggestion.reasonNl}",
-            paramOverrides = paramOverrides
-        )
-        FclOverrideBridge.post(override)
-        FclAiAdvisorHistoryRepository.record(suggestion, AiSuggestionStatus.APPROVED)
+        // ✅ Stap 1: schrijf naar FclAiParamStore (persistente AI-override laag).
+        // ConfigOverrideWriter pakt deze waarde de volgende keer als prioriteit boven DFLearner.
+        writeToStore(context, suggestion.param, suggestion.proposedValue)
 
+        // ✅ Stap 2: ook DFLearner-prefs bijwerken voor learner-beheerde params,
+        // zodat DFLearner bij de volgende episode-evaluatie niet terugvalt op een
+        // verouderd startpunt (bijv. als de AI earlyBoostFactor verhoogt naar 2.3
+        // maar DFLearner nog 2.20 heeft → DFLearner zou bij volgende episode
+        // vanuit 2.20 evalueren in plaats van vanuit 2.3).
+        when (suggestion.param) {
+            "earlyBoostFactor"      -> DFLearner.syncEarlyBoostFactor(context, suggestion.proposedValue)
+            "watchingFrontloadFrac" -> DFLearner.syncWatchingFrac(context, suggestion.proposedValue)
+        }
+
+        FclAiAdvisorHistoryRepository.record(suggestion, AiSuggestionStatus.APPROVED)
         return ApplyResult.Applied(suggestion.param, suggestion.proposedValue)
     }
 
-    /** Aanroepen als de gebruiker een kaart afwijst — alleen voor het audit-spoor/cooldown. */
     fun reject(suggestion: AiParamSuggestion) {
         FclAiAdvisorHistoryRepository.record(suggestion, AiSuggestionStatus.REJECTED)
+    }
+
+    /**
+     * Reset een parameter naar een opgegeven waarde.
+     * Werkt ook voor parameters die uit FclAiAdvisorRanges.ALL zijn verwijderd
+     * (bijv. peakIobBrakeSuppressThreshold) — die worden direct via FclOverrideBridge
+     * teruggezet en verwijderd uit FclAiParamStore.
+     */
+    fun resetParam(param: String, value: Double, context: Context): ApplyResult {
+        // Verwijder uit FclAiParamStore zodat DFLearner/defaults weer de baas zijn
+        FclAiParamStore.remove(context, param)
+
+        // Zet de waarde terug via FclOverrideBridge (eenmalig, voor deze reset)
+        val paramOverrides = try {
+            FclAiAdvisorRanges.singleFieldOverride(param, value)
+        } catch (_: IllegalStateException) {
+            buildRemovedParamOverride(param, value)
+                ?: return ApplyResult.Rejected(
+                    "Parameter '$param' niet resetbaar via deze route — pas handmatig aan"
+                )
+        }
+        FclOverrideBridge.post(
+            FCLvNextConfigOverride.Override(
+                writtenAt = Instant.now().toString(),
+                reason = "AI-advisor reset: $param → $value",
+                paramOverrides = paramOverrides
+            )
+        )
+        when (param) {
+            "earlyBoostFactor"      -> DFLearner.syncEarlyBoostFactor(context, value)
+            "watchingFrontloadFrac" -> DFLearner.syncWatchingFrac(context, value)
+        }
+        FclAiAdvisorHistoryRepository.deleteParam(param)
+        return ApplyResult.Applied(param, value)
+    }
+
+    /** Verwijder ALLE AI-overrides — na 'Reset AI-aanpassingen' in het resetscherm. */
+    fun resetAll(context: Context) {
+        FclAiParamStore.clear(context)
+        // Geen DFLearner reset — die behoudt zijn geleerde waarden.
+        // Geen history reset — die blijft als audit-trail.
+    }
+
+    // ── Intern ───────────────────────────────────────────────────────────────
+
+    private fun writeToStore(context: Context, param: String, value: Double) {
+        val isInt = FclAiAdvisorRanges.byKey[param]?.type ==
+            FclAiAdvisorRanges.ValueType.INT
+        if (isInt) {
+            FclAiParamStore.putInt(context, param, value.toInt())
+        } else {
+            FclAiParamStore.put(context, param, value)
+        }
+    }
+
+    private fun buildRemovedParamOverride(
+        param: String, value: Double
+    ): FCLvNextConfigOverride.ParamOverrides? = when (param) {
+        "peakIobBrakeSuppressThreshold" ->
+            FCLvNextConfigOverride.ParamOverrides(peakIobBrakeSuppressThreshold = value)
+        else -> null
     }
 }

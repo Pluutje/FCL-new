@@ -43,25 +43,34 @@ object FclAiAdvisorService {
     }
 
     /**
-     * Synchrone aanroep — altijd op een achtergrond-thread (via FclAiAdvisorScheduler).
+     * Synchrone aanroep — altijd op een achtergrond-thread.
+     * Probeert keys in volgorde; bij een fout (HTTP 4xx/5xx, timeout) wordt
+     * de volgende key geprobeerd. Lege keys worden overgeslagen.
      */
     fun callAdvisor(
         provider: FclAiAdvisorSettingsStore.Provider,
-        apiKey: String,
+        apiKeys: List<String>,
         prompt: String,
         model: String
     ): Result {
-        if (apiKey.isBlank()) {
-            return Result.Failure("Geen API-sleutel ingesteld voor de FCL AI-adviseur")
-        }
-        return try {
-            when (provider) {
-                FclAiAdvisorSettingsStore.Provider.CLAUDE -> callClaude(apiKey, prompt, model)
-                FclAiAdvisorSettingsStore.Provider.GEMINI -> callGemini(apiKey, prompt, model)
+        if (apiKeys.isEmpty()) return Result.Failure("Geen API-sleutel ingesteld")
+        var lastError = "Onbekende fout"
+        for (key in apiKeys) {
+            if (key.isBlank()) continue
+            val result = try {
+                when (provider) {
+                    FclAiAdvisorSettingsStore.Provider.CLAUDE -> callClaude(key, prompt, model)
+                    FclAiAdvisorSettingsStore.Provider.GEMINI -> callGemini(key, prompt, model)
+                }
+            } catch (t: Throwable) {
+                Result.Failure("Verbindingsfout (${provider.name}): ${t.message}")
             }
-        } catch (t: Throwable) {
-            Result.Failure("Verbindingsfout met AI-adviseur (${provider.name}): ${t.message}")
+            when (result) {
+                is Result.Success -> return result
+                is Result.Failure -> lastError = result.reasonNl  // probeer volgende key
+            }
         }
+        return Result.Failure(lastError)
     }
 
     // ── Claude ───────────────────────────────────────────────────────────────

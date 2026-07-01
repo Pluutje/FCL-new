@@ -33,7 +33,12 @@ object FclAiAdvisorScheduler {
 
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val LAST_RUN_MARKER = "FCLvNext_AiAdvisorLastRun.txt"
-    private val MIN_INTERVAL = Duration.ofHours(20) // iets onder 24u, voorkomt drift door cycle-jitter
+    private const val LAST_SUCCESS_MARKER = "FCLvNext_AiAdvisorLastSuccess.txt"
+    private val MIN_INTERVAL = Duration.ofHours(20)
+    // Bij een tijdelijke fout (timeout, 503) wordt de run opnieuw geprobeerd
+    // elke RETRY_INTERVAL, totdat er een succesvol rapport is of MIN_INTERVAL
+    // verstreken is voor de volgende dag-run.
+    private val RETRY_INTERVAL = Duration.ofMinutes(15)
 
     private val cachedResult = AtomicReference<AiAdvisorRunResult?>(null)
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -50,38 +55,67 @@ object FclAiAdvisorScheduler {
         return File(dir, LAST_RUN_MARKER)
     }
 
+    private fun successMarkerFile(): File {
+        val dir = File(Environment.getExternalStorageDirectory(), RELATIVE_PATH)
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, LAST_SUCCESS_MARKER)
+    }
+
     private fun lastRunAt(): Instant? {
         val f = markerFile()
         if (!f.exists()) return null
         return try { Instant.parse(f.readText().trim()) } catch (_: Exception) { null }
     }
 
+    private fun lastSuccessAt(): Instant? {
+        val f = successMarkerFile()
+        if (!f.exists()) return null
+        return try { Instant.parse(f.readText().trim()) } catch (_: Exception) { null }
+    }
+
     private fun markRunNow() {
-        try { markerFile().writeText(Instant.now().toString()) } catch (_: Exception) { /* niet kritiek */ }
+        try { markerFile().writeText(Instant.now().toString()) } catch (_: Exception) { }
+    }
+
+    private fun markSuccessNow() {
+        try { successMarkerFile().writeText(Instant.now().toString()) } catch (_: Exception) { }
     }
 
     /**
-     * Aanroepen vanuit FCLvNext.getAdvice() (via DetermineBasalFCL), elke cyclus.
-     * Doet vrijwel niets (één bestands-timestamp-check) als de laatste run nog
-     * geen MIN_INTERVAL geleden was — dus goedkoop genoeg om elke 5 minuten
-     * aan te roepen. Start de echte pipeline NOOIT op de aanroepende thread.
+     * Automatische trigger vanuit de episode-callback (FclLearnerLogger).
      *
-     * @param metrics episode-metrics van vandaag (voor tijd-tot-piek/voorspel-
-     *                fout-evidence) — optioneel, lege lijst als niet beschikbaar
-     *                in deze cyclus context; de collector werkt dan zonder die
-     *                evidence (CSV-gebaseerde TIR/hypo-stats blijven wel werken).
+     * Logica:
+     *  - Als er vandaag al een SUCCESVOL rapport is (lastSuccessAt >= MIN_INTERVAL):
+     *    niets doen.
+     *  - Als er nog nooit een succes was, of de laatste success > 20u geleden:
+     *    starten als er nog geen run loopt.
+     *  - Als de laatste poging mislukte (parseError != null) en de laatste RUN-marker
+     *    >= RETRY_INTERVAL geleden: opnieuw proberen (elke 15 min bij timeout/503).
      */
     fun runIfDue(context: Context, metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()) {
-        val last = lastRunAt()
-        if (last != null && Duration.between(last, Instant.now()) < MIN_INTERVAL) return
-        if (!running.compareAndSet(false, true)) return // vorige run nog bezig, niet dubbel starten
-        markRunNow() // eerst markeren, zodat een falende run niet elke cyclus opnieuw probeert
-        val apiKey   = FclAiAdvisorSettingsStore.getActiveApiKey(context)
+        val now = Instant.now()
+
+        // Al een succesvol rapport vandaag? Dan niets doen.
+        val lastSuccess = lastSuccessAt()
+        if (lastSuccess != null && Duration.between(lastSuccess, now) < MIN_INTERVAL) return
+
+        // Geen succes nodig als de vorige run recent was én succesvol afgerond
+        val lastRun = lastRunAt()
+        val recentFailed = cachedResult.get()?.parseError != null
+        val tooSoonForRetry = lastRun != null && Duration.between(lastRun, now) < RETRY_INTERVAL
+        if (lastRun != null && !recentFailed && Duration.between(lastRun, now) < MIN_INTERVAL) return
+        if (tooSoonForRetry) return
+
+        if (!running.compareAndSet(false, true)) return
+        markRunNow()
+        val apiKeys  = FclAiAdvisorSettingsStore.getActiveKeys(context)
         val model    = FclAiAdvisorSettingsStore.getActiveModel(context)
         val provider = FclAiAdvisorSettingsStore.getProvider(context)
         executor.submit {
             try {
-                cachedResult.set(executePipeline(apiKey, model, metrics, provider))
+                val result = executePipeline(context, apiKeys, model, metrics, provider)
+                cachedResult.set(result)
+                if (result.parseError == null) markSuccessNow()
             } finally {
                 running.set(false)
             }
@@ -96,12 +130,12 @@ object FclAiAdvisorScheduler {
     ) {
         if (!running.compareAndSet(false, true)) return
         markRunNow()
-        val apiKey   = FclAiAdvisorSettingsStore.getActiveApiKey(context)
+        val apiKeys  = FclAiAdvisorSettingsStore.getActiveKeys(context)
         val model    = FclAiAdvisorSettingsStore.getActiveModel(context)
         val provider = FclAiAdvisorSettingsStore.getProvider(context)
         executor.submit {
             try {
-                val result = executePipeline(apiKey, model, metrics, provider)
+                val result = executePipeline(context, apiKeys, model, metrics, provider)
                 cachedResult.set(result)
                 onDone(result)
             } finally {
@@ -111,15 +145,16 @@ object FclAiAdvisorScheduler {
     }
 
     private fun executePipeline(
-        apiKey: String,
+        context: android.content.Context,
+        apiKeys: List<String>,
         model: String?,
         metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics>,
         provider: FclAiAdvisorSettingsStore.Provider
     ): AiAdvisorRunResult {
-        val payload = FclAiAdvisorDataCollector.collect(metrics = metrics)
+        val payload = FclAiAdvisorDataCollector.collect(context = context, metrics = metrics)
         val prompt = FclAiAdvisorPromptBuilder.buildPrompt(payload)
 
-        return when (val r = FclAiAdvisorService.callAdvisor(provider, apiKey, prompt, model ?: FclAiAdvisorSettingsStore.DEFAULT_GEMINI_MODEL)) {
+        return when (val r = FclAiAdvisorService.callAdvisor(provider, apiKeys, prompt, model ?: FclAiAdvisorSettingsStore.DEFAULT_MODEL_ID)) {
             is FclAiAdvisorService.Result.Success -> {
                 val parsed = FclAiAdvisorResponseParser.parse(r.rawText, payload)
                 val accepted = parsed.suggestions.filter { !it.rejected }

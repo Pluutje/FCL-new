@@ -3,157 +3,173 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 
 /**
- * ============================================================================
  * FCL AI-Advisor — Parameter-ranges (eenmalige bron van waarheid)
- * ============================================================================
+ * (01/07/2026, Ecko — herschreven)
  *
- * Dit zijn EXACT de ranges die als comment bij FCLvNextConfigOverride.ParamOverrides
- * staan. Ze worden hier herhaald i.p.v. via reflectie uitgelezen omdat Kotlin
- * geen comments runtime beschikbaar maakt — maar dit bestand is de plek waar
- * ze voortaan samen met die comments bijgewerkt moeten worden.
+ * WIJZIGINGEN t.o.v. vorige versie:
+ *  - 6 parameters verwijderd die de AI NIET mag aanpassen:
+ *      peakIobBrakeSuppressThreshold  → veiligheidsrem, nooit omhoog bij overshoot
+ *      peakPredictionThreshold        → interne peak-detectie, geen timing
+ *      peakPredictionHorizonH         → interne berekening
+ *      peakMaxSlopeWeight             → interne berekening
+ *      earlyPeakBiasMmol              → correctieparam, geen timing
+ *      iobStart                       → IOB-berekening, geen timing
  *
- * Gebruikt door:
- * - FclAiAdvisorPromptBuilder: range in de prompt zodat het model nooit een
- *   waarde buiten bereik hoeft te "raden".
- * - FclAiAdvisorResponseParser: harde validatie — een voorstel buiten range
- *   wordt VERWORPEN (niet geclampt), want dat duidt op een rekenfout van het
- *   model die je wilt zien, niet stilzwijgend laten verdwijnen.
- *
- * LET OP (Ecko, 30/06/2026): als je een range in FCLvNextConfigOverride.kt
- * aanpast, moet die hier handmatig meeveranderen. Geen automatische sync —
- * bewuste keuze om reflectie/codegen te vermijden voor 17 velden.
+ *  - softMax / hardMax (en softMin / hardMin voor min-gebonden params):
+ *      De learner werkt binnen softMax. Bij confidence >= CEILING_BUST_CONFIDENCE
+ *      én currentValue >= softMax - epsilon mag de AI tot hardMax gaan.
+ *      Dit werkt analoog aan de agressiviteitsschuif die ook bovenop de geleerde
+ *      waarde werkt: de AI is een extra laag boven de learner, niet een vervanging.
  */
 object FclAiAdvisorRanges {
 
     enum class ValueType { DOUBLE, INT }
 
+    /** Minimale confidence voor ceiling-busting (voorbij softMax/onder softMin). */
+    const val CEILING_BUST_CONFIDENCE = 0.75
+
     data class ParamSpec(
-        val key: String,                 // moet matchen met ParamOverrides-veldnaam
-        val labelNl: String,              // korte uitleg voor de prompt + UI-kaart
-        val effectNl: String,             // wat verandert er concreet in het dosagegedrag als dit omhoog/omlaag gaat
+        val key: String,
+        val labelNl: String,
+        val effectNl: String,
         val type: ValueType,
-        val min: Double,
-        val max: Double,
-        /** Maximale relatieve stap per voorstel t.o.v. de huidige waarde (bijv. 0.30 = max 30%). */
+        val min: Double,       // absoluut minimum (hardMin)
+        val max: Double,       // absoluut maximum (hardMax)
+        /** Normale maximum die de learner ook gebruikt. AI mag hier alleen overheen
+         *  bij confidence >= CEILING_BUST_CONFIDENCE EN currentValue >= softMax - ε. */
+        val softMax: Double = max,
+        /** Normale minimum. AI mag hier alleen onderzitten bij hoge confidence. */
+        val softMin: Double = min,
         val maxRelativeStep: Double = 0.30
     )
 
     val ALL: List<ParamSpec> = listOf(
-        ParamSpec("peakPredictionThreshold", "Drempel (mmol) waarboven een piek-voorspelling meetelt",
-            "Hoger = de automaat wacht op een hogere voorspelde piek voordat hij die als 'echte' piek meeneemt in dosering; lager = reageert sneller op kleinere voorspelde pieken.",
-            ValueType.DOUBLE, 9.5, 14.0),
-        ParamSpec("watchingFrontloadFrac", "Fractie van de geschatte dosis die als frontload tijdens WATCHING mag",
-            "Hoger = meer insuline vroeg in de maaltijdrespons (frontload); lager = insuline meer gespreid over de hele episode.",
-            ValueType.DOUBLE, 0.40, 0.90),
-        ParamSpec("watchingMinDeltaToTarget", "Minimale afstand tot target (mmol) voor WFF-trigger",
-            "Hoger = frontload start pas bij een grotere afstand boven target (voorzichtiger); lager = frontload triggert al dichter bij target.",
-            ValueType.DOUBLE, 0.5, 3.5),
-        ParamSpec("commitCooldownMinutes", "Minimale tijd (min) tussen twee commits",
-            "Hoger = minder vaak een nieuwe dosis-commit toegestaan (rustiger, trager bijsturen); lager = sneller opeenvolgende commits mogelijk.",
-            ValueType.INT, 5.0, 25.0),
-        ParamSpec("peakPredictionHorizonH", "Hoe ver vooruit (uur) de piek wordt voorspeld",
-            "Hoger = de voorspelling kijkt verder vooruit (kan eerder reageren maar is onzekerder); lager = kortere, preciezere horizon.",
-            ValueType.DOUBLE, 0.8, 1.8),
-        ParamSpec("iobStart", "IOB-ratio waarboven dosering voorzichtiger wordt opgebouwd",
-            "Hoger = de automaat mag meer IOB opbouwen voordat hij voorzichtiger wordt; lager = eerder terughoudend bij oplopende IOB.",
-            ValueType.DOUBLE, 0.25, 0.55),
-        ParamSpec("peakIobBrakeSuppressThreshold", "IOB-ratio waarboven de piek-naderingsrem (soft) ingrijpt",
-            "Hoger = de softBrake grijpt pas bij hogere IOB in (agressiever doseren toegestaan); lager = de rem grijpt eerder in — direct gekoppeld aan het 14:15-incident van vandaag.",
-            ValueType.DOUBLE, 0.28, 0.60),
-        ParamSpec("earlyBoostFactor", "Vermenigvuldiger op earlyTargetU bij Early Confidence Boost",
-            "Hoger = grotere vroege bolus zodra de automaat zeker genoeg is van de stijging; lager = behoudender vroege dosering.",
-            ValueType.DOUBLE, 1.0, 2.0),
-        ParamSpec("earlyBoostMinConfidence", "Minimale confidence om Early Boost te activeren",
-            "Hoger = Early Boost activeert pas bij een hoger zekerheidsniveau (minder vaak, maar betrouwbaarder); lager = activeert sneller, ook bij meer twijfel.",
-            ValueType.DOUBLE, 0.40, 0.85),
-        ParamSpec("earlyBoostMaxCommits", "Maximaal aantal Early Boost-commits per episode",
-            "Hoger = meer opeenvolgende vroege boost-commits toegestaan per episode; lager = beperkt het aantal vroege boosts strikter.",
-            ValueType.INT, 1.0, 5.0),
-        ParamSpec("earlyRiseFracMin", "Minimale stijgingsfractie om als 'vroege stijging' te tellen",
-            "Hoger = een stijging moet relatief sterker zijn voordat hij als 'vroege stijging' telt (voorzichtiger); lager = ook mildere stijgingen tellen al mee.",
-            ValueType.DOUBLE, 0.35, 0.85),
-        ParamSpec("peakMaxSlopeWeight", "Gewicht van max-slope in de piek-schatting",
-            "Hoger = de piek-schatting laat zich sterker leiden door de steilste recente stijging; lager = stabielere, minder slope-gevoelige schatting.",
-            ValueType.DOUBLE, 0.0, 0.60),
-        ParamSpec("lateCommitDecayFactor", "Afbouwfactor voor late commits richting de piek",
-            "Hoger = late commits (dicht bij de piek) worden sterker afgebouwd/verkleind; lager = late commits blijven dichter bij hun oorspronkelijke grootte.",
-            ValueType.DOUBLE, 0.0, 1.0),
-        ParamSpec("lateCommitDecayThreshold", "Drempel waarboven late-commit-afbouw begint",
-            "Hoger = de afbouw start pas later (dichter bij de piek); lager = de afbouw begint eerder in de episode.",
-            ValueType.DOUBLE, 0.30, 0.70),
-        ParamSpec("sustainedRiseSlopeMin", "Minimale slope (mmol/min) voor 'aanhoudende stijging'",
-            "Hoger = er is een steilere stijging nodig voordat iets als 'aanhoudend' geldt; lager = ook geleidelijkere stijgingen tellen mee.",
-            ValueType.DOUBLE, 0.15, 0.80),
-        ParamSpec("sustainedRiseMinTarget", "Minimale duur (min) voor 'aanhoudende stijging'",
-            "Hoger = een stijging moet langer aanhouden voordat hij als 'aanhoudend' telt; lager = kortere stijgingen tellen al mee.",
-            ValueType.INT, 5.0, 20.0),
-        ParamSpec("earlyPeakBiasMmol", "Vroege piek-correctie (mmol)",
-            "Hoger = de piek-voorspelling wordt structureel naar boven bijgesteld (compenseert systematische onderschatting); lager = minder/geen correctie.",
-            ValueType.DOUBLE, 0.0, 1.5)
+
+        // ── Timing & frontload (kern van de rode draad) ───────────────────────
+
+        ParamSpec("watchingFrontloadFrac",
+                  "Fractie van de geschatte dosis die als frontload tijdens WATCHING mag",
+                  "Hoger = meer insuline vroeg in de maaltijdrespons (frontload); lager = meer gespreid.",
+                  ValueType.DOUBLE, min = 0.40, max = 0.95,  // max = hardMax (0.95)
+                  softMax = 0.90   // learner ceiling — AI mag 0.90–0.95 bij hoge confidence
+        ),
+
+        ParamSpec("watchingMinDeltaToTarget",
+                  "Minimale afstand tot target (mmol) voor WFF-trigger",
+                  "Hoger = frontload start pas bij grotere afstand boven target (voorzichtiger); lager = frontload triggert eerder.",
+                  ValueType.DOUBLE, min = 0.5, max = 3.5),
+
+        ParamSpec("commitCooldownMinutes",
+                  "Minimale tijd (min) tussen twee commits",
+                  "Lager = sneller opeenvolgende commits mogelijk (cyclus = 5 min); hoger = rustiger bijsturen.",
+                  ValueType.INT, min = 4.0, max = 25.0,
+                  softMin = 5.0),  // 4 min is hardMin — alleen AI bij hoge confidence; garandeert 2× per 2 cycli
+
+        // ── Early Boost (hoeveel en hoe vroeg) ───────────────────────────────
+
+        ParamSpec("earlyBoostFactor",
+                  "Vermenigvuldiger op earlyTargetU bij Early Confidence Boost",
+                  "Hoger = grotere vroege bolus zodra de automaat zeker genoeg is van de stijging; lager = behoudender vroege dosering.",
+                  ValueType.DOUBLE, min = 1.0, max = 2.50,  // max = hardMax (2.50)
+                  softMax = 2.20  // = EB_BOOST_MAX in DFLearner — AI mag 2.20–2.50 bij hoge confidence EN learner op 2.20
+        ),
+
+        ParamSpec("earlyBoostMinConfidence",
+                  "Minimale confidence om Early Boost te activeren",
+                  "Hoger = Early Boost activeert pas bij hoger zekerheidsniveau; lager = activeert sneller, ook bij meer twijfel.",
+                  ValueType.DOUBLE, min = 0.40, max = 0.85),
+
+        ParamSpec("earlyBoostMaxCommits",
+                  "Maximaal aantal Early Boost-commits per episode",
+                  "Hoger = meer vroege boost-commits toegestaan; lager = striktere beperking.",
+                  ValueType.INT, min = 1.0, max = 6.0,
+                  softMax = 5.0),  // learner ceiling
+
+        ParamSpec("earlyRiseFracMin",
+                  "Minimale stijgingsfractie om als 'vroege stijging' te tellen",
+                  "Hoger = stijging moet relatief sterker zijn (voorzichtiger); lager = ook mildere stijgingen tellen.",
+                  ValueType.DOUBLE, min = 0.35, max = 0.85),
+
+        // ── Late commits & decay (hoe snel afbouwen richting piek) ───────────
+
+        ParamSpec("lateCommitDecayFactor",
+                  "Afbouwfactor voor late commits richting de piek",
+                  "Hoger = late commits sterker verkleind; lager = late commits dichter bij oorspronkelijke grootte.",
+                  ValueType.DOUBLE, min = 0.0, max = 1.0),
+
+        ParamSpec("lateCommitDecayThreshold",
+                  "Drempel waarboven late-commit-afbouw begint",
+                  "Hoger = afbouw start later; lager = afbouw begint eerder in de episode.",
+                  ValueType.DOUBLE, min = 0.30, max = 0.70),
+
+        // ── Vasthoudendheid / aanhoudende stijging (vette maaltijden) ─────────
+
+        ParamSpec("sustainedRiseSlopeMin",
+                  "Minimale slope (mmol/min) voor 'aanhoudende stijging'",
+                  "Lager = ook geleidelijkere (vette/eiwitrijke maaltijd) stijgingen tellen mee; hoger = alleen steile stijgingen.",
+                  ValueType.DOUBLE, min = 0.10, max = 0.80,
+                  softMin = 0.15)  // learner floor — AI mag hier onder bij hoge confidence
     )
 
     val byKey: Map<String, ParamSpec> = ALL.associateBy { it.key }
 
-    fun isInRange(spec: ParamSpec, value: Double): Boolean =
-        value in spec.min..spec.max
+    // ── Validatiehulpers ──────────────────────────────────────────────────────
 
+    /** Valt de waarde binnen het absolute bereik [hardMin, hardMax]? */
+    fun isInRange(spec: ParamSpec, value: Double): Boolean = value in spec.min..spec.max
+
+    /** Is de stap klein genoeg (relatieve stap ≤ maxRelativeStep)? */
     fun withinMaxStep(spec: ParamSpec, currentValue: Double, proposedValue: Double): Boolean {
-        if (currentValue == 0.0) return true // deling-door-nul guard; range-check vangt extremen al af
-        val relChange = kotlin.math.abs(proposedValue - currentValue) / kotlin.math.abs(currentValue)
-        return relChange <= spec.maxRelativeStep
+        if (currentValue == 0.0) return true
+        val rel = kotlin.math.abs(proposedValue - currentValue) / kotlin.math.abs(currentValue)
+        return rel <= spec.maxRelativeStep
     }
 
-    /** Compact, voor de prompt: "key: label — effect [min–max]". */
-    fun rangesAsPromptBlock(): String =
-        ALL.joinToString("\n") { spec ->
-            val unit = if (spec.type == ValueType.INT) "${spec.min.toInt()}–${spec.max.toInt()}" else "${spec.min}–${spec.max}"
-            "- ${spec.key}: ${spec.labelNl}. ${spec.effectNl} [geldig bereik: $unit]"
+    /**
+     * Mag de AI de softMax/softMin overschrijden?
+     * Vereist: confidence >= CEILING_BUST_CONFIDENCE én currentValue al op de soft-grens.
+     */
+    fun isCeilingBustAllowed(
+        spec: ParamSpec,
+        currentValue: Double,
+        proposedValue: Double,
+        confidence: Double
+    ): Boolean {
+        if (confidence < CEILING_BUST_CONFIDENCE) return false
+        val epsilon = 0.001
+        val bustingMax = proposedValue > spec.softMax + epsilon
+        val bustingMin = proposedValue < spec.softMin - epsilon
+        return when {
+            bustingMax -> currentValue >= spec.softMax - epsilon // learner al op ceiling
+            bustingMin -> currentValue <= spec.softMin + epsilon // learner al op floor
+            else -> true // binnen softbereik — altijd OK
         }
-
-    /** Haalt de huidige waarde van een veld op uit ParamOverrides via expliciete when (geen reflectie). */
-    fun currentValue(key: String, params: FCLvNextConfigOverride.ParamOverrides): Double? = when (key) {
-        "peakPredictionThreshold" -> params.peakPredictionThreshold
-        "watchingFrontloadFrac" -> params.watchingFrontloadFrac
-        "watchingMinDeltaToTarget" -> params.watchingMinDeltaToTarget
-        "commitCooldownMinutes" -> params.commitCooldownMinutes?.toDouble()
-        "peakPredictionHorizonH" -> params.peakPredictionHorizonH
-        "iobStart" -> params.iobStart
-        "peakIobBrakeSuppressThreshold" -> params.peakIobBrakeSuppressThreshold
-        "earlyBoostFactor" -> params.earlyBoostFactor
-        "earlyBoostMinConfidence" -> params.earlyBoostMinConfidence
-        "earlyBoostMaxCommits" -> params.earlyBoostMaxCommits?.toDouble()
-        "earlyRiseFracMin" -> params.earlyRiseFracMin
-        "peakMaxSlopeWeight" -> params.peakMaxSlopeWeight
-        "lateCommitDecayFactor" -> params.lateCommitDecayFactor
-        "lateCommitDecayThreshold" -> params.lateCommitDecayThreshold
-        "sustainedRiseSlopeMin" -> params.sustainedRiseSlopeMin
-        "sustainedRiseMinTarget" -> params.sustainedRiseMinTarget?.toDouble()
-        "earlyPeakBiasMmol" -> params.earlyPeakBiasMmol
-        else -> null
     }
 
-    /** Bouwt een ParamOverrides met precies één veld gezet — voor post() naar FclOverrideBridge. */
-    fun singleFieldOverride(key: String, value: Double): FCLvNextConfigOverride.ParamOverrides {
-        val spec = byKey[key] ?: error("Onbekende AI-advisor parameter: $key")
-        return when (key) {
-            "peakPredictionThreshold" -> FCLvNextConfigOverride.ParamOverrides(peakPredictionThreshold = value)
-            "watchingFrontloadFrac" -> FCLvNextConfigOverride.ParamOverrides(watchingFrontloadFrac = value)
-            "watchingMinDeltaToTarget" -> FCLvNextConfigOverride.ParamOverrides(watchingMinDeltaToTarget = value)
-            "commitCooldownMinutes" -> FCLvNextConfigOverride.ParamOverrides(commitCooldownMinutes = value.toInt())
-            "peakPredictionHorizonH" -> FCLvNextConfigOverride.ParamOverrides(peakPredictionHorizonH = value)
-            "iobStart" -> FCLvNextConfigOverride.ParamOverrides(iobStart = value)
-            "peakIobBrakeSuppressThreshold" -> FCLvNextConfigOverride.ParamOverrides(peakIobBrakeSuppressThreshold = value)
-            "earlyBoostFactor" -> FCLvNextConfigOverride.ParamOverrides(earlyBoostFactor = value)
-            "earlyBoostMinConfidence" -> FCLvNextConfigOverride.ParamOverrides(earlyBoostMinConfidence = value)
-            "earlyBoostMaxCommits" -> FCLvNextConfigOverride.ParamOverrides(earlyBoostMaxCommits = value.toInt())
-            "earlyRiseFracMin" -> FCLvNextConfigOverride.ParamOverrides(earlyRiseFracMin = value)
-            "peakMaxSlopeWeight" -> FCLvNextConfigOverride.ParamOverrides(peakMaxSlopeWeight = value)
-            "lateCommitDecayFactor" -> FCLvNextConfigOverride.ParamOverrides(lateCommitDecayFactor = value)
-            "lateCommitDecayThreshold" -> FCLvNextConfigOverride.ParamOverrides(lateCommitDecayThreshold = value)
-            "sustainedRiseSlopeMin" -> FCLvNextConfigOverride.ParamOverrides(sustainedRiseSlopeMin = value)
-            "sustainedRiseMinTarget" -> FCLvNextConfigOverride.ParamOverrides(sustainedRiseMinTarget = value.toInt())
-            "earlyPeakBiasMmol" -> FCLvNextConfigOverride.ParamOverrides(earlyPeakBiasMmol = value)
-            else -> error("Onbekende AI-advisor parameter: ${spec.key}")
+    /** Prompt-blok: key, label, effect, bereik (soft/hard indien van toepassing). */
+    fun rangesAsPromptBlock(): String = ALL.joinToString("\n") { spec ->
+        val range = if (spec.type == ValueType.INT)
+            "${spec.min.toInt()}–${spec.max.toInt()}"
+        else "${spec.min}–${spec.max}"
+        val softNote = buildString {
+            if (spec.softMax < spec.max) append("; softMax=${spec.softMax} (leergrens; overschrijdbaar bij conf≥${CEILING_BUST_CONFIDENCE} en huidige waarde=softMax)")
+            if (spec.softMin > spec.min) append("; softMin=${spec.softMin} (leergrens; onderschrijdbaar bij conf≥${CEILING_BUST_CONFIDENCE} en huidige waarde=softMin)")
         }
+        "- ${spec.key}: ${spec.labelNl}. ${spec.effectNl} [bereik: $range$softNote]"
+    }
+
+    /** Bouwt een ParamOverrides met precies één veld — voor post() naar FclOverrideBridge. */
+    fun singleFieldOverride(key: String, value: Double): FCLvNextConfigOverride.ParamOverrides = when (key) {
+        "watchingFrontloadFrac"   -> FCLvNextConfigOverride.ParamOverrides(watchingFrontloadFrac = value)
+        "watchingMinDeltaToTarget"-> FCLvNextConfigOverride.ParamOverrides(watchingMinDeltaToTarget = value)
+        "commitCooldownMinutes"   -> FCLvNextConfigOverride.ParamOverrides(commitCooldownMinutes = value.toInt())
+        "earlyBoostFactor"        -> FCLvNextConfigOverride.ParamOverrides(earlyBoostFactor = value)
+        "earlyBoostMinConfidence" -> FCLvNextConfigOverride.ParamOverrides(earlyBoostMinConfidence = value)
+        "earlyBoostMaxCommits"    -> FCLvNextConfigOverride.ParamOverrides(earlyBoostMaxCommits = value.toInt())
+        "earlyRiseFracMin"        -> FCLvNextConfigOverride.ParamOverrides(earlyRiseFracMin = value)
+        "lateCommitDecayFactor"   -> FCLvNextConfigOverride.ParamOverrides(lateCommitDecayFactor = value)
+        "lateCommitDecayThreshold"-> FCLvNextConfigOverride.ParamOverrides(lateCommitDecayThreshold = value)
+        "sustainedRiseSlopeMin"   -> FCLvNextConfigOverride.ParamOverrides(sustainedRiseSlopeMin = value)
+        else -> error("Onbekende AI-advisor parameter: $key")
     }
 }

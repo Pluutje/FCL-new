@@ -112,8 +112,6 @@ class FCLvNextStatusFormatter(
 
     private fun buildAnalyzerConfigSectie(activeConfig: FCLvNextConfig?): String {
         val str = FclStrings.get(context)
-        val expertMode = context.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
-            .getBoolean("expert_mode_active", false)
         if (activeConfig == null) return "🔧 ANALYZER-WAARDEN\n─────────────────────\nConfig nog niet beschikbaar (wacht op eerste FCLvNext cyclus)"
 
         // maxSMB volgt direct S% — geen aparte liveMaxSmb berekening nodig
@@ -124,28 +122,11 @@ class FCLvNextStatusFormatter(
             appendLine("🔧 ${str.analyzerConfigHeader}")
             appendLine("─────────────────────")
             appendLine("• ${str.maxSmbDagLabel}        : ${"%.2f".format(liveMaxSmb)} U  (S% × handmatig)")
-            appendLine("• ${str.iobRemdrempel}    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
-            if (expertMode) {
-                appendLine()
-                appendLine("⚙️  ${str.analyzerFijnafstemming}")
-                appendLine("─────────────────────")
-                appendLine("• iobStart          : ${"%.2f".format(activeConfig.iobStart)}")
-                appendLine("• commitCooldown    : ${activeConfig.commitCooldownMinutes} min")
-                appendLine("• peakPredThreshold : ${BgUnits.formatBg(activeConfig.peakPredictionThreshold, mgdl)}")
-                appendLine("• peakHorizon       : ${"%.1f".format(activeConfig.peakPredictionHorizonH)} h")
-                appendLine("• watchingFrac      : ${"%.2f".format(activeConfig.watchingFrontloadFrac)}")
-                appendLine("• watchingDeltaMin  : ${"%.2f".format(activeConfig.watchingMinDeltaToTarget)}")
-                appendLine("• earlyBoostFactor  : ${"%.2f".format(activeConfig.earlyBoostFactor)}")
-                appendLine("• earlyBoostMinConf : ${"%.2f".format(activeConfig.earlyBoostMinConfidence)}")
-                appendLine("• earlyBoostMaxCommits: ${activeConfig.earlyBoostMaxCommits}")
-                appendLine("• earlyRiseFracMin  : ${"%.2f".format(activeConfig.earlyRiseFracMin)}")
-                appendLine("• peakMaxSlopeWeight: ${"%.2f".format(activeConfig.peakMaxSlopeWeight)}")
-                appendLine("• lateDecayFactor   : ${"%.2f".format(activeConfig.lateCommitDecayFactor)}")
-                appendLine("• lateDecayThreshold: ${"%.2f".format(activeConfig.lateCommitDecayThreshold)}")
-                appendLine("• sustainedSlopeMin : ${"%.2f".format(activeConfig.sustainedRiseSlopeMin)}")
-                appendLine("• sustainedMinTarget: ${BgUnits.formatBgValue(activeConfig.sustainedRiseMinTarget.toDouble(), mgdl, 0)} ${BgUnits.unitShort(mgdl)}")
-                append(    "• earlyPeakBias     : +${"%.2f".format(activeConfig.earlyPeakBiasMmol)} ${BgUnits.unitShort(mgdl)}")
-            }
+            append(    "• ${str.iobRemdrempel}    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
+            // FIJNAFSTEMMING-sectie verwijderd (01/07/2026, Ecko): Fijnafstelling-tab
+            // in de Analyzer leest dezelfde waarden van FclActiveConfigBridge en toont
+            // ze overzichtelijker. Dubbele weergave hier achter expert-mode heeft geen
+            // toegevoegde waarde meer.
         }
     }
 
@@ -165,7 +146,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v3.0.0")
+        appendLine(" 🧠 FCL V6 v3.0.4a")
         appendLine("════════════════════════")
         appendLine()
 

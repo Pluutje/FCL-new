@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -30,10 +31,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
+private val LOCAL_FMT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm").withZone(ZoneId.systemDefault())
+
+private fun utcToLocal(utc: String): String = try {
+    LOCAL_FMT.format(Instant.parse(utc))
+} catch (_: Exception) { utc }
 /**
- * ============================================================================
- * FCL AI-Advisor — Scherm
  * ============================================================================
  *
  * Eén kaart per parametersuggestie, los goed te keuren of af te wijzen.
@@ -48,6 +63,7 @@ fun FclAiAdvisorScreen(
     onRefreshNow: () -> Unit,
 ) {
     val context = LocalContext.current
+    var showSettings by remember { mutableStateOf(!FclAiAdvisorSettingsStore.isConfigured(context)) }
 
     Column(
         modifier = Modifier
@@ -55,27 +71,38 @@ fun FclAiAdvisorScreen(
             .systemBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Button(onClick = onBack) { Text("← Terug") }
-
-        Text("AI Parameter-adviseur", style = MaterialTheme.typography.headlineMedium)
-
-        Text("AI Parameter-adviseur", style = MaterialTheme.typography.headlineMedium)
-
-        val ready = FclAiAdvisorSettingsStore.isConfigured(context)
+        // ── Titelbalk: Terug links, ⚙️ rechts op dezelfde regel ──────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Button(onClick = onBack) { Text("← Terug") }
+            TextButton(onClick = { showSettings = !showSettings }) {
+                val modelName = FclAiAdvisorSettingsStore.getSelectedModel(context).displayName
+                    .take(16)  // afkappen zodat het op één regel past
+                Text("⚙️ $modelName", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        Text("AI Parameter-adviseur", style = MaterialTheme.typography.headlineMedium)
+
+        // ── Inklapbaar instellingenblok ──────────────────────────────────────
+        AnimatedVisibility(visible = showSettings) {
+            SettingsSection(context, onSaved = { showSettings = false })
+        }
+
+        val ready = FclAiAdvisorSettingsStore.isConfigured(context)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onRefreshNow, enabled = ready) {
                 Text(if (FclAiAdvisorScheduler.isRunning()) "⏳ Bezig…" else "Nu vernieuwen")
             }
         }
         if (!ready) {
             Text(
-                "Vul eerst een API-sleutel in (zie ⚙️ Instellingen onderaan) om de adviseur te kunnen draaien.",
+                "Vul eerst een API-sleutel in (⚙️ rechtsboven) om de adviseur te draaien.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )
@@ -99,7 +126,7 @@ fun FclAiAdvisorScreen(
                 val rejected = runResult.suggestions.filter { it.rejected }
 
                 Text(
-                    "Rapport van ${runResult.generatedAtUtc} — ${accepted.size} voorstel(len)" +
+                    "Rapport van ${utcToLocal(runResult.generatedAtUtc)} — ${accepted.size} voorstel(len)" +
                         if (rejected.isNotEmpty()) ", ${rejected.size} automatisch verworpen" else "",
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -110,154 +137,233 @@ fun FclAiAdvisorScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
-                accepted.forEach { SuggestionCard(it) }
+                accepted.forEach { SuggestionCard(it, context) }
 
                 if (rejected.isNotEmpty()) {
                     Text("Automatisch verworpen (buiten bereik of onvoldoende onderbouwing):",
-                        fontWeight = FontWeight.Bold)
+                         fontWeight = FontWeight.Bold)
                     rejected.forEach { s ->
                         Text("• ${s.param}: ${s.rejectionReasonNl}",
-                            style = MaterialTheme.typography.bodySmall)
+                             style = MaterialTheme.typography.bodySmall)
                     }
                 }
+
+                // ── Geschiedenis van AI-aanpassingen ──────────────────────────
+                AiHistorySection()
             }
         }
 
-        // ── Instellingen onderaan — weinig opvallend na de eerste keer invullen ──
-        SettingsSection(context)
+        // einde inhoud
+    }
+}
+
+@Composable
+private fun AiHistorySection() {
+    var expanded by remember { mutableStateOf(false) }
+
+    Divider()
+    TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            if (expanded) "▲ Verberg aanpassingsgeschiedenis (AI)"
+            else "▼ Toon aanpassingsgeschiedenis (AI)",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+
+    if (!expanded) return
+
+    val approved = remember { FclAiAdvisorHistoryRepository.readApproved() }
+
+    if (approved.isEmpty()) {
+        Text("Nog geen goedgekeurde aanpassingen geregistreerd.",
+             style = MaterialTheme.typography.bodySmall,
+             modifier = Modifier.padding(horizontal = 4.dp))
+        return
+    }
+
+    val byParam = approved.groupBy { it.param }
+        .mapValues { (_, e) -> e.sortedBy { it.tsUtc } }
+
+    byParam.forEach { (param, entries) ->
+        val spec = FclAiAdvisorRanges.byKey[param]
+        val label = spec?.labelNl ?: param
+        val latest = entries.last()
+        val first = entries.first()
+        val direction = when {
+            latest.proposedValue > first.proposedValue + 0.001 -> "↑ omhoog"
+            latest.proposedValue < first.proposedValue - 0.001 -> "↓ omlaag"
+            else -> "→ stabiel"
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(label,
+                 style = MaterialTheme.typography.titleSmall,
+                 fontWeight = FontWeight.Bold,
+                 modifier = Modifier.weight(1f))
+            Text(
+                "${"%.4f".format(latest.proposedValue)}  $direction",
+                style = MaterialTheme.typography.bodySmall,
+                color = when {
+                    direction.startsWith("↑") -> MaterialTheme.colorScheme.primary
+                    direction.startsWith("↓") -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
+
+        val values = entries.map { it.proposedValue.toFloat() }
+        val minV = (values.min() * 0.95f).coerceAtLeast(spec?.min?.toFloat() ?: 0f)
+        val maxV = (values.max() * 1.05f).coerceAtMost(spec?.max?.toFloat() ?: Float.MAX_VALUE)
+        val range = (maxV - minV).coerceAtLeast(0.001f)
+        val lineColor = androidx.compose.ui.graphics.Color(0xFF7C4DFF)
+
+        Canvas(
+            modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp)
+        ) {
+            val w = size.width; val h = size.height; val n = values.size
+            if (n < 1) return@Canvas
+            val pts = values.mapIndexed { i, v ->
+                Offset(
+                    x = if (n == 1) w / 2f else i * w / (n - 1).toFloat(),
+                    y = h - (v - minV) / range * h
+                )
+            }
+            if (pts.size >= 2) {
+                val path = Path().apply {
+                    moveTo(pts.first().x, h)
+                    pts.forEach { lineTo(it.x, it.y) }
+                    lineTo(pts.last().x, h); close()
+                }
+                drawPath(path, color = lineColor.copy(alpha = 0.15f))
+                for (i in 0 until pts.size - 1) {
+                    drawLine(lineColor, pts[i], pts[i + 1], strokeWidth = 3f, cap = StrokeCap.Round)
+                }
+            }
+            drawCircle(lineColor, radius = 5f, center = pts.last())
+        }
+
+        Text(
+            "${utcToLocal(latest.tsUtc)}  ${"%.4f".format(latest.currentValue)} → ${"%.4f".format(latest.proposedValue)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Divider(modifier = Modifier.padding(top = 8.dp))
     }
 }
 
 // ── Inklapbaar instellingenblok ───────────────────────────────────────────────
 
 @Composable
-private fun SettingsSection(context: Context) {
-    // Start ingeklapt als er al een sleutel is; open als er nog niets is
-    var expanded by remember { mutableStateOf(!FclAiAdvisorSettingsStore.isConfigured(context)) }
-
-    var provider by remember { mutableStateOf(FclAiAdvisorSettingsStore.getProvider(context)) }
-    var claudeKey   by remember { mutableStateOf(FclAiAdvisorSettingsStore.getClaudeKey(context)) }
-    var claudeModel by remember { mutableStateOf(FclAiAdvisorSettingsStore.getClaudeModel(context)) }
-    var geminiKey   by remember { mutableStateOf(FclAiAdvisorSettingsStore.getGeminiKey(context)) }
-    var geminiModel by remember { mutableStateOf(FclAiAdvisorSettingsStore.getGeminiModel(context)) }
+private fun SettingsSection(context: Context, onSaved: () -> Unit = {}) {
+    var selectedModel by remember { mutableStateOf(FclAiAdvisorSettingsStore.getSelectedModel(context)) }
+    var key1 by remember(selectedModel.id) { mutableStateOf(FclAiAdvisorSettingsStore.getKey1(context, selectedModel.id)) }
+    var key2 by remember(selectedModel.id) { mutableStateOf(FclAiAdvisorSettingsStore.getKey2(context, selectedModel.id)) }
+    var expanded by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
-    val activeLabel = when (provider) {
-        FclAiAdvisorSettingsStore.Provider.GEMINI -> "Gemini"
-        FclAiAdvisorSettingsStore.Provider.CLAUDE -> "Claude"
-    }
-    val hasKey = FclAiAdvisorSettingsStore.isConfigured(context)
-
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            // Titelbalk met klapknop
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            Text(
+                "Sleutels worden alleen lokaal op dit toestel opgeslagen (eigen FCLvNext-opslag). Eenmalig invullen.",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            // Model-dropdown
+            OutlinedButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    if (hasKey) "⚙️ Instellingen ($activeLabel)" else "⚙️ Instellingen",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                TextButton(onClick = { expanded = !expanded; saved = false }) {
-                    Text(if (expanded) "Inklappen" else "Wijzigen")
-                }
+                Text("${selectedModel.displayName}  ▾", style = MaterialTheme.typography.bodyMedium)
             }
-
-            AnimatedVisibility(visible = expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(top = 8.dp)) {
-
-                    Text(
-                        "Kies je AI-provider. De sleutel wordt alleen lokaal op dit toestel opgeslagen " +
-                            "(eigen FCLvNext-opslag, niet via AAPS). Eenmalig invullen is voldoende.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    // Provider-keuze
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FclAiAdvisorSettingsStore.Provider.entries.forEach { p ->
-                            val label = if (p == FclAiAdvisorSettingsStore.Provider.GEMINI)
-                                "Gemini (gratis tier)" else "Claude"
-                            if (provider == p) {
-                                Button(onClick = {}) { Text(label) }
-                            } else {
-                                OutlinedButton(onClick = {
-                                    provider = p
-                                    FclAiAdvisorSettingsStore.setProvider(context, p)
+            if (expanded) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        FclAiAdvisorSettingsStore.MODELS.forEach { model ->
+                            TextButton(
+                                onClick = {
+                                    selectedModel = model
+                                    key1 = FclAiAdvisorSettingsStore.getKey1(context, model.id)
+                                    key2 = FclAiAdvisorSettingsStore.getKey2(context, model.id)
+                                    expanded = false
                                     saved = false
-                                }) { Text(label) }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    model.displayName,
+                                    color = if (model.id == selectedModel.id)
+                                        MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                     }
-
-                    // Velden voor de actieve provider
-                    when (provider) {
-                        FclAiAdvisorSettingsStore.Provider.GEMINI -> {
-                            Text("Gratis API-sleutel aanmaken: aistudio.google.com → Get API key",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary)
-                            OutlinedTextField(
-                                value = geminiKey,
-                                onValueChange = { geminiKey = it; saved = false },
-                                label = { Text("Gemini API-sleutel") },
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = geminiModel,
-                                onValueChange = { geminiModel = it; saved = false },
-                                label = { Text("Model (standaard: ${FclAiAdvisorSettingsStore.DEFAULT_GEMINI_MODEL})") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                        FclAiAdvisorSettingsStore.Provider.CLAUDE -> {
-                            Text("API-sleutel aanmaken: console.anthropic.com → API Keys",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary)
-                            OutlinedTextField(
-                                value = claudeKey,
-                                onValueChange = { claudeKey = it; saved = false },
-                                label = { Text("Anthropic API-sleutel") },
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = claudeModel,
-                                onValueChange = { claudeModel = it; saved = false },
-                                label = { Text("Model (standaard: ${FclAiAdvisorSettingsStore.DEFAULT_CLAUDE_MODEL})") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = {
-                            FclAiAdvisorSettingsStore.setProvider(context, provider)
-                            FclAiAdvisorSettingsStore.setClaudeKey(context, claudeKey)
-                            FclAiAdvisorSettingsStore.setClaudeModel(context, claudeModel)
-                            FclAiAdvisorSettingsStore.setGeminiKey(context, geminiKey)
-                            FclAiAdvisorSettingsStore.setGeminiModel(context, geminiModel)
-                            saved = true
-                            expanded = false   // inklappen na opslaan
-                        }) { Text("Opslaan & inklappen") }
-                        if (saved) Text("✅ Opgeslagen", style = MaterialTheme.typography.bodySmall)
-                    }
                 }
+            }
+
+            // Sleutel-instructie per provider
+            val hint = when (selectedModel.provider) {
+                FclAiAdvisorSettingsStore.Provider.GEMINI -> "Sleutel aanmaken: aistudio.google.com → Get API key"
+                FclAiAdvisorSettingsStore.Provider.CLAUDE -> "Sleutel aanmaken: console.anthropic.com → API Keys"
+            }
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+
+            // Sleutel 1
+            OutlinedTextField(
+                value = key1,
+                onValueChange = { key1 = it; saved = false },
+                label = { Text("API-sleutel 1 (primair)") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            // Sleutel 2 (fallback)
+            OutlinedTextField(
+                value = key2,
+                onValueChange = { key2 = it; saved = false },
+                label = { Text("API-sleutel 2 (fallback bij fout — mag leeg)") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = {
+                    FclAiAdvisorSettingsStore.setSelectedModel(context, selectedModel.id)
+                    FclAiAdvisorSettingsStore.setKey1(context, selectedModel.id, key1)
+                    FclAiAdvisorSettingsStore.setKey2(context, selectedModel.id, key2)
+                    saved = true
+                    onSaved()
+                }) { Text("Opslaan") }
+                if (saved) Text("✅ Opgeslagen", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
 }
 
-// ── Suggestiekaart ────────────────────────────────────────────────────────────
+// ── Reset-kaart (voor per ongeluk goedgekeurde waarden) ──────────────────────
 
 @Composable
-private fun SuggestionCard(suggestion: AiParamSuggestion) {
+// ── Suggestiekaart ────────────────────────────────────────────────────────────
+
+private fun SuggestionCard(suggestion: AiParamSuggestion, context: Context) {
+    // Pre-populeer status vanuit history zodat goedkeuring/afwijzing zichtbaar
+    // blijft na navigeren — de Composable wordt anders bij terugkeren opnieuw
+    // aangemaakt met status=PENDING (UI-state is niet persistent).
     var status by remember(suggestion.param, suggestion.proposedValue) {
-        mutableStateOf(AiSuggestionStatus.PENDING)
+        val lastEntry = FclAiAdvisorHistoryRepository.lastEntryFor(suggestion.param)
+        val initial = if (lastEntry != null &&
+            kotlin.math.abs(lastEntry.proposedValue - suggestion.proposedValue) < 0.001) {
+            lastEntry.status
+        } else {
+            AiSuggestionStatus.PENDING
+        }
+        mutableStateOf(initial)
     }
     var resultMessage by remember(suggestion.param, suggestion.proposedValue) {
         mutableStateOf<String?>(null)
@@ -284,17 +390,17 @@ private fun SuggestionCard(suggestion: AiParamSuggestion) {
                 style = MaterialTheme.typography.bodyMedium
             )
             Text("Confidence: ${(suggestion.confidence * 100).toInt()}%",
-                style = MaterialTheme.typography.bodySmall)
+                 style = MaterialTheme.typography.bodySmall)
             Text("Reden: ${suggestion.reasonNl}", style = MaterialTheme.typography.bodyMedium)
             if (suggestion.evidenceFields.isNotEmpty()) {
                 Text("Bewijs: " + suggestion.evidenceFields.joinToString(", "),
-                    style = MaterialTheme.typography.bodySmall)
+                     style = MaterialTheme.typography.bodySmall)
             }
 
             when (status) {
                 AiSuggestionStatus.PENDING -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
-                        val r = FclAiAdvisorApplier.approve(suggestion)
+                        val r = FclAiAdvisorApplier.approve(suggestion, context)
                         if (r is FclAiAdvisorApplier.ApplyResult.Applied) {
                             resultMessage = "Toegepast — actief in de eerstvolgende FCLvNext-cyclus."
                             status = AiSuggestionStatus.APPROVED

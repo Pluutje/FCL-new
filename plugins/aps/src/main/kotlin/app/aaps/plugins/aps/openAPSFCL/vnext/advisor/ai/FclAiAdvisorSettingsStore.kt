@@ -3,86 +3,88 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai
 import android.content.Context
 
 /**
- * Eigen, AAPS-onafhankelijke opslag voor de AI-advisor instellingen.
- * Zelfde mechanisme als "fcl_expert_prefs" (eigen SharedPreferences-bestand).
+ * FCL AI-Advisor Settings — model-selectie + dual API-keys per model.
  *
- * Ondersteunt twee providers: CLAUDE en GEMINI.
- * Sleutel/model per provider opgeslagen zodat wisselen tussen providers
- * geen hertypen vereist.
+ * (01/07/2026, Ecko): uitgebreid met:
+ *  - Hardcoded model-lijst per provider (uitbreidbaar zonder UI-aanpassing)
+ *  - Twee API-keys per model — eerste geprobeerd, bij fout automatisch tweede
+ *  - Lege key-velden worden overgeslagen
  */
 object FclAiAdvisorSettingsStore {
 
     private const val PREFS_NAME = "fcl_ai_advisor_prefs"
 
-    private const val KEY_PROVIDER      = "provider"
-    private const val KEY_CLAUDE_KEY    = "claude_api_key"
-    private const val KEY_CLAUDE_MODEL  = "claude_model"
-    private const val KEY_GEMINI_KEY    = "gemini_api_key"
-    private const val KEY_GEMINI_MODEL  = "gemini_model"
+    private const val KEY_SELECTED_MODEL = "selected_model"
 
-    const val DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
-    const val DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+    // ── Modellen (hardcoded lijst, te zijner tijd uitbreidbaar) ──────────────
+
+    data class ModelOption(
+        val id: String,         // API-model-string
+        val displayName: String,
+        val provider: Provider
+    )
 
     enum class Provider { CLAUDE, GEMINI }
+
+    val MODELS: List<ModelOption> = listOf(
+        // Claude
+        ModelOption("claude-haiku-4-5-20251001", "→ Claude Haiku 4.5", Provider.CLAUDE),
+        ModelOption("claude-sonnet-4-6",  "2 Claude Sonnet 4.6",  Provider.CLAUDE),
+        ModelOption("claude-opus-4-6",    "3 Claude Opus 4.6",    Provider.CLAUDE),
+
+        // Gemini
+        ModelOption("gemini-3.5-flash",   "→ Gemini 3.5", Provider.GEMINI),
+        ModelOption("gemini-3.0-flash",   "2 Gemini 3.0",   Provider.GEMINI),
+        ModelOption("gemini-2.5-flash",     "3 Gemini 2.5",     Provider.GEMINI),
+    )
+
+    val DEFAULT_MODEL_ID = "gemini-3.5-flash"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun getProvider(context: Context): Provider =
-        when (prefs(context).getString(KEY_PROVIDER, Provider.GEMINI.name)) {
-            Provider.CLAUDE.name -> Provider.CLAUDE
-            else                 -> Provider.GEMINI
-        }
+    // ── Model-selectie ────────────────────────────────────────────────────────
 
-    fun setProvider(context: Context, provider: Provider) {
-        prefs(context).edit().putString(KEY_PROVIDER, provider.name).apply()
+    fun getSelectedModel(context: Context): ModelOption =
+        MODELS.find { it.id == prefs(context).getString(KEY_SELECTED_MODEL, DEFAULT_MODEL_ID) }
+            ?: MODELS.first { it.id == DEFAULT_MODEL_ID }
+
+    fun setSelectedModel(context: Context, modelId: String) {
+        prefs(context).edit().putString(KEY_SELECTED_MODEL, modelId).apply()
     }
 
-    // ── Claude ───────────────────────────────────────────────────────────
+    fun getProvider(context: Context): Provider = getSelectedModel(context).provider
 
-    fun getClaudeKey(context: Context): String =
-        prefs(context).getString(KEY_CLAUDE_KEY, "") ?: ""
+    // ── API-keys (2 per model, opgeslagen als "key1_<modelId>" / "key2_<modelId>") ──
 
-    fun setClaudeKey(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_CLAUDE_KEY, value.trim()).apply()
+    private fun keyPref1(modelId: String) = "key1_${modelId.replace("-", "_")}"
+    private fun keyPref2(modelId: String) = "key2_${modelId.replace("-", "_")}"
+
+    fun getKey1(context: Context, modelId: String): String =
+        prefs(context).getString(keyPref1(modelId), "") ?: ""
+
+    fun getKey2(context: Context, modelId: String): String =
+        prefs(context).getString(keyPref2(modelId), "") ?: ""
+
+    fun setKey1(context: Context, modelId: String, value: String) {
+        prefs(context).edit().putString(keyPref1(modelId), value.trim()).apply()
     }
 
-    fun getClaudeModel(context: Context): String =
-        prefs(context).getString(KEY_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL) ?: DEFAULT_CLAUDE_MODEL
-
-    fun setClaudeModel(context: Context, value: String) {
-        prefs(context).edit()
-            .putString(KEY_CLAUDE_MODEL, value.trim().ifBlank { DEFAULT_CLAUDE_MODEL }).apply()
+    fun setKey2(context: Context, modelId: String, value: String) {
+        prefs(context).edit().putString(keyPref2(modelId), value.trim()).apply()
     }
 
-    // ── Gemini ───────────────────────────────────────────────────────────
-
-    fun getGeminiKey(context: Context): String =
-        prefs(context).getString(KEY_GEMINI_KEY, "") ?: ""
-
-    fun setGeminiKey(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_GEMINI_KEY, value.trim()).apply()
+    /** Geeft de actieve keys terug (niet-lege, in volgorde). */
+    fun getActiveKeys(context: Context): List<String> {
+        val model = getSelectedModel(context)
+        return listOf(getKey1(context, model.id), getKey2(context, model.id))
+            .filter { it.isNotBlank() }
     }
 
-    fun getGeminiModel(context: Context): String =
-        prefs(context).getString(KEY_GEMINI_MODEL, DEFAULT_GEMINI_MODEL) ?: DEFAULT_GEMINI_MODEL
+    fun isConfigured(context: Context): Boolean = getActiveKeys(context).isNotEmpty()
 
-    fun setGeminiModel(context: Context, value: String) {
-        prefs(context).edit()
-            .putString(KEY_GEMINI_MODEL, value.trim().ifBlank { DEFAULT_GEMINI_MODEL }).apply()
-    }
+    // ── Legacy-getters voor backward compat (Scheduler gebruikt getActiveApiKey) ──
 
-    // ── Actieve sleutel/model (voor de scheduler) ─────────────────────
-
-    fun getActiveApiKey(context: Context): String = when (getProvider(context)) {
-        Provider.CLAUDE -> getClaudeKey(context)
-        Provider.GEMINI -> getGeminiKey(context)
-    }
-
-    fun getActiveModel(context: Context): String = when (getProvider(context)) {
-        Provider.CLAUDE -> getClaudeModel(context)
-        Provider.GEMINI -> getGeminiModel(context)
-    }
-
-    fun isConfigured(context: Context): Boolean = getActiveApiKey(context).isNotBlank()
+    fun getActiveApiKey(context: Context): String = getActiveKeys(context).firstOrNull() ?: ""
+    fun getActiveModel(context: Context): String = getSelectedModel(context).id
 }

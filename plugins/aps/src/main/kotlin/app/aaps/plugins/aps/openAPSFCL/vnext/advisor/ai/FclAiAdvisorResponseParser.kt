@@ -88,11 +88,37 @@ object FclAiAdvisorResponseParser {
         if (spec == null) return rejected("Onbekende parameter '$param' — niet in toegestane lijst")
         if (proposedValue.isNaN()) return rejected("Ontbrekende of ongeldige proposedValue")
         if (!FclAiAdvisorRanges.isInRange(spec, proposedValue))
-            return rejected("Waarde $proposedValue buiten toegestaan bereik [${spec.min}–${spec.max}]")
+            return rejected("Waarde $proposedValue buiten absoluut bereik [${spec.min}–${spec.max}]")
         if (currentValue.isNaN())
             return rejected("Geen bekende huidige waarde om tegen te valideren")
-        if (!FclAiAdvisorRanges.withinMaxStep(spec, currentValue, proposedValue))
-            return rejected("Stap te groot t.o.v. huidige waarde (max ${(spec.maxRelativeStep * 100).toInt()}% per voorstel)")
+
+        // Ceiling-bust check: is de AI voorbij de softMax/softMin gegaan?
+        // Dat mag alleen bij hoge confidence én de learner al op de soft-grens.
+        if (!FclAiAdvisorRanges.isCeilingBustAllowed(spec, currentValue, proposedValue, confidence)) {
+            val softNote = if (proposedValue > spec.softMax)
+                "softMax=${spec.softMax} — learner nog niet op ceiling (huidig: ${"%.4f".format(currentValue)})"
+            else
+                "softMin=${spec.softMin} — learner nog niet op floor (huidig: ${"%.4f".format(currentValue)})"
+            return rejected("Ceiling-bust niet toegestaan: $softNote of confidence (${(confidence * 100).toInt()}%) < ${(FclAiAdvisorRanges.CEILING_BUST_CONFIDENCE * 100).toInt()}%")
+        }
+        // Stap te groot: inkorten tot max toegestane stap in de juiste richting
+        // (niet afwijzen — als de richting juist is, is de max-toegestane stap beter dan niets).
+        if (!FclAiAdvisorRanges.withinMaxStep(spec, currentValue, proposedValue)) {
+            val maxStep = spec.maxRelativeStep * kotlin.math.abs(currentValue)
+            val direction = if (proposedValue > currentValue) 1.0 else -1.0
+            val clamped = (currentValue + direction * maxStep).coerceIn(spec.min, spec.max)
+            val clampNote = " [Stap ingekort van ${"%.4f".format(proposedValue)} naar ${"%.4f".format(clamped)} (max ${(spec.maxRelativeStep * 100).toInt()}% per voorstel)]"
+            return AiParamSuggestion(
+                param = param,
+                currentValue = currentValue,
+                proposedValue = clamped,
+                confidence = confidence,
+                reasonNl = reason + clampNote,
+                evidenceFields = evidence,
+                rejected = false,
+                rejectionReasonNl = null
+            )
+        }
         if (reason.isBlank())
             return rejected("Geen onderbouwing opgegeven")
         if (evidence.isEmpty())

@@ -38,13 +38,17 @@ object FclAiAdvisorDataCollector {
         File(Environment.getExternalStorageDirectory(), RELATIVE_PATH)
 
     /**
+     * @param context     Android context — nodig om DFLearner-prefs direct uit te lezen
+     *                    voor earlyBoostFactor en watchingFrontloadFrac. Die worden namelijk
+     *                    door de learner in eigen SharedPreferences bijgehouden, los van de
+     *                    AAPS Preferences die active_params.json spiegelt. Door ze hier direct
+     *                    uit de learner te lezen heeft de AI altijd de actuele geleerde waarde
+     *                    als baseline, ook als de AAPS-pref nog niet is bijgewerkt.
      * @param periodHours hoeveel uur terug te kijken (standaard 24, dus "vandaag").
-     * @param metrics     vandaag se EpisodeMetrics (uit dezelfde bron als AdvisorScreen/
-     *                    Analyzescreen) — gebruikt voor tijd-tot-piek, post-piek-drop
-     *                    en voorspelfout. Lege lijst → die drie velden blijven null,
-     *                    de rest van het rapport (TIR/hypo/learner-events) werkt nog steeds.
+     * @param metrics     episode-metrics voor tijd-tot-piek/overshoot/voorspelfout.
      */
     fun collect(
+        context: android.content.Context? = null,
         periodHours: Int = 24,
         metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()
     ): FclDailyReportPayload {
@@ -52,7 +56,22 @@ object FclAiAdvisorDataCollector {
         val nowUtc = Instant.now()
         val cutoff = nowUtc.minusSeconds(periodHours * 3600L)
 
-        val activeParams = readActiveParams(File(dir, ACTIVE_PARAMS_FILE))
+        val activeParams = readActiveParams(File(dir, ACTIVE_PARAMS_FILE)).toMutableMap()
+
+        // ✅ Overschrijf learner-beheerde parameters met de directe learner-waarde (01/07/2026).
+        // De active_params.json spiegelt AAPS Preferences, maar die kunnen achter lopen
+        // op wat de learner al heeft geleerd. DFLearner-prefs zijn altijd actueel.
+        if (context != null) {
+            val liveBoost = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEarlyBoostFactor(context)
+            val liveWatch = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getWatchingFrac(context)
+            activeParams["earlyBoostFactor"] = ActiveParamSnapshot(
+                active = liveBoost, default = 1.0, src = "learner-live"
+            )
+            activeParams["watchingFrontloadFrac"] = ActiveParamSnapshot(
+                active = liveWatch, default = 0.64, src = "learner-live"
+            )
+        }
+
         val (tir, hypoCount, hypoMinutes, _, _, notable) =
             summariseCycleLog(File(dir, CYCLE_LOG_FILE), cutoff)
         val learnerSummary = summariseLearnerLog(File(dir, LEARNER_LOG_FILE), cutoff)

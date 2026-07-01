@@ -1141,8 +1141,37 @@ object DFLearner {
     fun getEarlyBoostFactor(context: android.content.Context): Double =
         prefs(context).getFloat(KEY_EB_BOOST, EB_BOOST_DEFAULT).toDouble()
 
+    /**
+     * Synchroniseer de earlyBoostFactor in de learner-prefs met een extern
+     * vastgestelde waarde (bijv. door de AI-advisor goedgekeurd).
+     *
+     * Waarom nodig (01/07/2026, Ecko): ConfigOverrideWriter bouwt zijn overrides
+     * met `earlyBoostFactor = p.earlyBoostFactor ?: DFLearner.getEarlyBoostFactor(it)`.
+     * Als de AI-advisor `prefs.put(DoubleKey.fcl_vnext_early_boost_factor, 2.0)` zet
+     * maar de learner-prefs nog 1.84 bevatten, overschrijft de volgende
+     * ConfigOverrideWriter-run de AI-waarde met 1.84. Door ook de learner-prefs
+     * bij te werken blijven beide in sync en blijft de AI-waarde persistent.
+     */
+    fun syncEarlyBoostFactor(context: android.content.Context, value: Double) {
+        prefs(context).edit()
+            .putFloat(KEY_EB_BOOST, value.coerceIn(EB_BOOST_MIN, EB_BOOST_MAX).toFloat())
+            .apply()
+    }
+
     fun getWatchingFrac(context: android.content.Context): Double =
         prefs(context).getFloat(KEY_EB_WATCHING, EB_WATCHING_DEFAULT).toDouble()
+
+    /**
+     * Synchroniseer watchingFrontloadFrac in de learner-prefs met een extern vastgestelde
+     * waarde (bijv. door de AI-advisor goedgekeurd). Zelfde reden als syncEarlyBoostFactor:
+     * ConfigOverrideWriter gebruikt DFLearner.getWatchingFrac() als fallback en overschrijft
+     * anders de AI-waarde bij de volgende episode-evaluatie.
+     */
+    fun syncWatchingFrac(context: android.content.Context, value: Double) {
+        prefs(context).edit()
+            .putFloat(KEY_EB_WATCHING, value.coerceIn(EB_WATCHING_MIN, EB_WATCHING_MAX).toFloat())
+            .apply()
+    }
 
     fun getEbStepSize(context: android.content.Context): Double =
         prefs(context).getFloat(KEY_EB_STEP, EB_STEP_DEFAULT).toDouble()

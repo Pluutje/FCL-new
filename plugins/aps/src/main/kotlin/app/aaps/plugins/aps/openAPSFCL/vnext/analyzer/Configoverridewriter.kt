@@ -233,26 +233,44 @@ object ConfigOverrideWriter {
                 if (p.isEmpty()) null else
                     app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride.ParamOverrides(
                         peakPredictionThreshold       = p.peakPredictionThreshold,
-                        // watchingFrontloadFrac: gebruik geleerde waarde uit DFLearner
+                        // ── AI-PARAM-STORE PRIORITEIT (01/07/2026, Ecko) ─────────────────
+                        // Als de AI-advisor een waarde heeft goedgekeurd voor deze parameters,
+                        // wint die altijd boven de DFLearner-fallback. Zo is er één waarheid:
+                        //   defaults → DFLearner leert → AI past aan → dit is de aktieve waarde
+                        //
+                        // Prioriteit per param: explicit p.X → FclAiParamStore → DFLearner/default
                         watchingFrontloadFrac = p.watchingFrontloadFrac
-                            ?: context?.let { DFLearner.getWatchingFrac(it) },
-                        watchingMinDeltaToTarget      = p.watchingMinDeltaToTarget,
-                        commitCooldownMinutes         = p.commitCooldownMinutes,
+                            ?: context?.let {
+                                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_WATCHING_FRONTLOAD_FRAC)
+                                    ?: DFLearner.getWatchingFrac(it)
+                            },
+                        watchingMinDeltaToTarget      = p.watchingMinDeltaToTarget
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_WATCHING_MIN_DELTA) },
+                        commitCooldownMinutes         = p.commitCooldownMinutes
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getInt(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_COMMIT_COOLDOWN_MINUTES) },
                         peakPredictionHorizonH        = p.peakPredictionHorizonH,
                         iobStart                      = p.iobStart,
                         peakIobBrakeSuppressThreshold = p.peakIobBrakeSuppressThreshold,
-                        // earlyBoostFactor: gebruik geleerde waarde uit DFLearner
-                        // als paramOverrides die niet expliciet zet.
                         earlyBoostFactor = p.earlyBoostFactor
-                            ?: context?.let { DFLearner.getEarlyBoostFactor(it) },
-                        earlyBoostMinConfidence       = p.earlyBoostMinConfidence,
-                        earlyBoostMaxCommits          = p.earlyBoostMaxCommits,
-                        earlyRiseFracMin              = p.earlyRiseFracMin,
+                            ?: context?.let {
+                                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_EARLY_BOOST_FACTOR)
+                                    ?: DFLearner.getEarlyBoostFactor(it)
+                            },
+                        earlyBoostMinConfidence = p.earlyBoostMinConfidence
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_EARLY_BOOST_MIN_CONFIDENCE) },
+                        earlyBoostMaxCommits = p.earlyBoostMaxCommits
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getInt(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_EARLY_BOOST_MAX_COMMITS) },
+                        earlyRiseFracMin = p.earlyRiseFracMin
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_EARLY_RISE_FRAC_MIN) },
                         peakMaxSlopeWeight            = p.peakMaxSlopeWeight,
-                        lateCommitDecayFactor         = p.lateCommitDecayFactor,
-                        lateCommitDecayThreshold      = p.lateCommitDecayThreshold,
-                        sustainedRiseSlopeMin         = p.sustainedRiseSlopeMin,
-                        sustainedRiseMinTarget        = p.sustainedRiseMinTarget,
+                        lateCommitDecayFactor = p.lateCommitDecayFactor
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_LATE_COMMIT_DECAY_FACTOR) },
+                        lateCommitDecayThreshold = p.lateCommitDecayThreshold
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_LATE_COMMIT_DECAY_THRESHOLD) },
+                        sustainedRiseSlopeMin = p.sustainedRiseSlopeMin
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getDouble(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_SUSTAINED_RISE_SLOPE_MIN) },
+                        sustainedRiseMinTarget = p.sustainedRiseMinTarget
+                            ?: context?.let { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.getInt(it, app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore.K_SUSTAINED_RISE_MIN_TARGET) },
                         earlyPeakBiasMmol             = p.earlyPeakBiasMmol
                     )
             },
