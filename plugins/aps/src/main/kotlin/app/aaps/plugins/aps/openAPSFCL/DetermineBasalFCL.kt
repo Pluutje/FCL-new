@@ -120,6 +120,28 @@ class DetermineBasalFCL @Inject constructor(
                 metrics = listOf(metrics)
             )
         }
+
+        // ✅ NIEUW (02/07/2026, Ecko): Activiteitslogger koppelen aan episodestart.
+        // FCLvNext heeft geen directe dependency op PersistenceLayer; de callback
+        // stuurt de benodigde stap-opvraag via DetermineBasalFCL die wél
+        // persistenceLayer heeft.
+        // RetentieWaarde van FCLActivityModule: die heeft FCLvNext niet rechtstreeks,
+        // dus we lezen die separaat via een getter op fclActivityModule.
+        fclvNext.onEpisodeStarted = { episodeId, bgMmol, targetMmol, iobRatio, iobAbsU, isNight ->
+            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclActivityLogger.logEpisodeStart(
+                episodeId            = episodeId,
+                nowMs                = System.currentTimeMillis(),
+                bgStartMmol          = bgMmol,
+                targetMmol           = targetMmol,
+                iobRatio             = iobRatio,
+                iobAbsU              = iobAbsU,
+                isNight              = isNight,
+                activityModuleActief = fclActivityModule.isCurrentlyActive(),
+                activityRetention    = fclActivityModule.getCurrentRetention(),
+                activityInsulinPct   = fclActivityModule.getCurrentInsulinPct(),
+                persistenceLayer     = persistenceLayer
+            )
+        }
     }
 
     private val consoleError = mutableListOf<String>()

@@ -101,6 +101,19 @@ class FCLActivityModule(
      * @param iobRatio  huidige IOB / maxIOB, meegegeven door DetermineBasalFCL.
      *                  Geef 0.0 mee als niet beschikbaar (veilige fallback).
      */
+    /**
+     * Getters voor FclActivityLogger — geven de huidige interne toestand terug
+     * zonder een volledige evaluate()-cyclus te triggeren.
+     * (02/07/2026, Ecko — activiteitslogger fase 1)
+     */
+    fun isCurrentlyActive(): Boolean = loadRetention() > 0
+    fun getCurrentRetention(): Int   = loadRetention()
+    fun getCurrentInsulinPct(): Double {
+        val retention = loadRetention()
+        if (retention == 0) return 100.0
+        return INSULIN_PERCENT + (100.0 - INSULIN_PERCENT) * (1.0 - retention.toDouble() / MAX_RETENTION)
+    }
+
     fun evaluate(iobRatio: Double = 0.0): ActivityResult {
 
         val enabled = preferences.get(StringKey.fcl_vnext_activity_behavior) != "OFF"
