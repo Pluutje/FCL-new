@@ -225,6 +225,7 @@ class FCLCycleLogRepository @Inject constructor(
                         "eb=${"%.2f".format(refEb)} " +
                         "peakBias=${"%.2f".format(refPeakBias)} " +
                         "lcd=${"%.2f".format(refLcd)}",
+                    context        = context,
                     episodeCount   = episodeMetrics.size
                 )
         }

@@ -2065,6 +2065,28 @@ private fun computeEarlyDoseDecision(
             minutesSinceLastFire >= 8 &&
             earlyDose.boostCommitCount < effectiveMaxCommits
 
+    // ── Slope-gebaseerd hoog-BG pad (01/07/2026, Ecko) ──────────────────────
+    // Incident 01/07: BG=10.4, slope=8.93, recentSlope=14.58, maar highBg-
+    // Continuation triggerde niet omdat bgNow (10.4) < 12.0.
+    // Bij extreme stijging (slope > 6) op BG ≥ 9.5 is doorpompen even
+    // gerechtvaardigd als bij 12.0 mmol + slope ≥ 2.0 — de TREND is het signaal,
+    // niet alleen de absolute BG. BG van 9.5→14 in 20 min is ernstiger dan
+    // BG van 12.0 met een vlakke slope van 2.0.
+    //
+    // Extra voorwaarde: recentSlope > slope (stijging versnelt of houdt aan)
+    // om neerwaartse buigpunten te weren.
+    //
+    // ⚠️ Eerste inschatting — slope-drempel 6.0 en bgFloor 9.5 kunnen bijgesteld
+    // worden op basis van praktijkobservaties.
+    val highBgContinuationSlopeOverride =
+        earlyDose.stage >= 3 &&
+            ctx.input.bgNow >= 9.5 &&
+            ctx.slope >= 6.0 &&
+            ctx.recentSlope >= ctx.slope * 0.80 &&  // stijging houdt aan, niet al buigend
+            ctx.iobRatio < 0.80 &&
+            minutesSinceLastFire >= 8 &&
+            earlyDose.boostCommitCount < effectiveMaxCommits
+
     // ── Minimale wachttijd stage 1 → stage 2 ────────────────────────────────
     // Standaard 5 minuten. Bij sterke, bevestigde stijging mag dit korter:
     // de wachttijd dient om te voorkomen dat twee grote doses direct na elkaar
@@ -2100,7 +2122,8 @@ private fun computeEarlyDoseDecision(
             minutesSinceLastFire >= minWachttijdStage2 && allowLarge -> 2
         earlyDose.stage == 2 && conf >= stage2Min &&
             minutesSinceLastFire >= 5 && allowStage3 -> 3
-        highBgContinuation -> 3  // hergebruik stage3 factor voor vervolg-commits
+        highBgContinuation          -> 3  // hergebruik stage3 factor voor vervolg-commits
+        highBgContinuationSlopeOverride -> 3  // slope-gebaseerd pad bij extreme stijging < 12 mmol
         else -> 0
     }
     if (earlyDose.stage == 1 && conf >= stage2Min && minutesSinceLastFire >= minWachttijdStage2 && !allowLarge) {
@@ -3926,11 +3949,54 @@ class FCLvNext(
             (ctx.iobRatio / peakIobBoost).coerceAtLeast(0.0)
 
         val iobPower = if (input.isNight) config.iobPowerNight else config.iobPowerDay
-        val iobFactor = iobDampingFactor(
-            iobRatio = boostedIobRatio,
-            config = config,
-            power = iobPower
-        )
+        val iobFactor = run {
+            val raw = iobDampingFactor(
+                iobRatio = boostedIobRatio,
+                config = config,
+                power = iobPower
+            )
+
+            // ── Dynamische iobFactor-vloer (01/07/2026, Ecko) ───────────────
+            // Incident 01/07 17:10: iobRatio=0.76, slope=8.93, recentSlope=14.58
+            // → iobFactor=0.15 → 85% dosis-onderdrukking → BG steeg naar 14 mmol
+            // ondanks dat er ruimte was (iob_headroom=4.36U, iobRatio<0.80).
+            //
+            // De vloer is DYNAMISCH: bij extreme stijging op hoge BG mag de
+            // suppressie minder zijn dan bij dezelfde stijging op lagere BG.
+            // Omgekeerd: bij harde stijging op lage BG blijft de vloer laag
+            // (die situatie is post-piek naijlend, niet een nieuwe golf).
+            //
+            // Twee dimensies die de vloer bepalen:
+            //  1. slope-kracht: hoe harder de stijging, hoe minder suppressie
+            //  2. BG-niveau: hoe hoger de BG, hoe minder suppressie gerechtvaardigd is
+            //
+            // Vloer = slopeFloor × bgFloor, beide 0..1 relatieve bijdragen.
+            // Het resultaat wordt alleen toegepast als het hoger is dan de
+            // raw iobFactor (nooit verslechteren tov zonder vloer).
+            //
+            // ⚠️ Eerste inschatting — mogelijk bijstellen na praktijkobservatie.
+
+            val slopeStrength = ((ctx.slope - 4.0) / 10.0).coerceIn(0.0, 1.0)
+            // 0 bij slope≤4, 1 bij slope≥14 (zoals het incident)
+
+            val bgStrength = when {
+                ctx.input.bgNow >= 12.0 -> 1.00   // EXTREME: maximale vloer
+                ctx.input.bgNow >= 10.0 -> 0.70   // HIGH-approaching
+                ctx.input.bgNow >=  8.5 -> 0.40   // MID-hoog: bescheiden vloer
+                else                    -> 0.00   // laag BG: geen vloer — voorzichtig blijven
+            }
+
+            // Gecombineerde vloer: beide factoren moeten aanwezig zijn
+            // (harde stijging + hoge BG = minder suppressie; één van beiden → klein effect)
+            val dynamicFloor = slopeStrength * bgStrength * 0.45
+            // max vloer 0.45 bij slope=14 + BG≥12 → iobFactor ≥ 0.45 in plaats van 0.10
+
+            val effectiveIobFactor = raw.coerceAtLeast(dynamicFloor)
+            if (effectiveIobFactor > raw + 0.01) {
+                status.append("IOB_FLOOR: raw=${"%.3f".format(raw)} → ${"%.3f".format(effectiveIobFactor)} (slope=${"%.1f".format(ctx.slope)} bgNow=${"%.1f".format(ctx.input.bgNow)})\n")
+            }
+            effectiveIobFactor
+        }
 
         val commitIobFactor = iobDampingFactor(
             iobRatio = ctx.iobRatio,
@@ -4266,7 +4332,12 @@ class FCLvNext(
             ctx.acceleration >= 0.0 &&
             !suppressForPeak &&
             !postPeak.sensorBlip &&
-            !earlyResetThisCycle
+            !earlyResetThisCycle &&
+            // ✅ FIX (02/07/2026, Ecko): hypo-bescherming wint altijd van early floor.
+            // Incident 02/07 05:20: hypo_projected=1.4, commandedDose=0 door hypoProj.active,
+            // maar early floor zette finalDose toch op 2.29U via maxOf(). Dat is fout —
+            // als een hypo verwacht wordt mag EarlyBoost niet overrulen.
+            !logRow.hypoActive
         ) {
 
             val cappedEarly = minOf(early.targetU, accessCap)
@@ -4635,9 +4706,24 @@ class FCLvNext(
         // In het consolidatievenster geldt dezelfde aanpak: geen aparte IOB-penalty,
         // commitIobFactor regelt de IOB-rem consistent voor alle commits.
         val watchingFrontloadTargetU =
-            (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling
-                * watchingConsolidationFactor)
-                .coerceAtMost(config.maxSMB)
+            run {
+                val baseTarget = config.maxSMB * config.watchingFrontloadFrac *
+                    wffBudgetScaling * watchingConsolidationFactor
+                // ✅ FIX (02/07/2026, Ecko): WFF-target daalt per volgende commit.
+                // Rode draad: eerste commit groot, elke volgende kleiner.
+                // Incident 02/07: commit 5 had WFF-target 1.28U maar EarlyBoost
+                // gaf toch 2.85U (gefixt in Fix 2). Maar ook de WFF-target zelf
+                // moet structureel dalen: bij commit 3+ is IOB al hoog en moet
+                // de bijdrage kleiner zijn, niet gelijk of groter.
+                // Afbouw: commit1 → 1.0×, commit2 → 0.85×, commit3 → 0.70×, commit4+ → 0.55×
+                val commitDecay = when (earlyDose.boostCommitCount) {
+                    0    -> 1.00
+                    1    -> 0.85
+                    2    -> 0.70
+                    else -> 0.55
+                }
+                (baseTarget * commitDecay).coerceAtMost(config.maxSMB)
+            }
 
 // 3) Echte triggerconditie
         val watchingFrontloadTriggered =
@@ -4672,6 +4758,22 @@ class FCLvNext(
             if (finalDose < watchingFrontloadTargetU) {
                 status.append(
                     "WATCHING FRONTLOAD: " +
+                        "${"%.2f".format(finalDose)}→${"%.2f".format(watchingFrontloadTargetU)}U\n"
+                )
+                finalDose = watchingFrontloadTargetU
+            }
+
+            // ✅ FIX (02/07/2026, Ecko): WFF-target als ceiling op EarlyBoost bij latere commits.
+            // Incident 02/07: commit 5 (episode_commit_nr=5) had early_target_u=3.74 en
+            // WFF-target=1.28, maar EarlyBoost overrulete de WFF-taakdeling → 2.85U geleverd.
+            // Bij commit ≥ 2 mag EarlyBoost het WFF-target niet overschrijden: het WFF-mechanisme
+            // berekent precies hoeveel nog past zonder de gewenste insulinedeling te verstoren.
+            // Eerste commit (nr=1) is uitgezonderd want dat IS de grote frontload.
+            // Tweede commit ook want die is een directe WFF-vervolg in hetzelfde venster.
+            val isLateCommit = (earlyDose.boostCommitCount) >= 2
+            if (isLateCommit && finalDose > watchingFrontloadTargetU + 0.05) {
+                status.append(
+                    "WFF-CEILING op EarlyBoost (commit≥3): " +
                         "${"%.2f".format(finalDose)}→${"%.2f".format(watchingFrontloadTargetU)}U\n"
                 )
                 finalDose = watchingFrontloadTargetU

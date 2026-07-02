@@ -58,18 +58,48 @@ object FclAiAdvisorDataCollector {
 
         val activeParams = readActiveParams(File(dir, ACTIVE_PARAMS_FILE)).toMutableMap()
 
-        // ✅ Overschrijf learner-beheerde parameters met de directe learner-waarde (01/07/2026).
-        // De active_params.json spiegelt AAPS Preferences, maar die kunnen achter lopen
-        // op wat de learner al heeft geleerd. DFLearner-prefs zijn altijd actueel.
+        // ✅ Prioriteitsketen voor activeParams (02/07/2026, Ecko):
+        // 1. FclAiParamStore (AI-goedgekeurde waarden) — meest actueel
+        // 2. DFLearner-prefs (voor learner-beheerde params)
+        // 3. active_params.json (AAPS Preferences — kan achter lopen)
+        //
+        // Zonder deze override ziet de AI verouderde waarden uit active_params.json,
+        // waardoor hij telkens opnieuw dezelfde aanpassing voorstelt (circulair probleem).
         if (context != null) {
-            val liveBoost = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEarlyBoostFactor(context)
-            val liveWatch = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getWatchingFrac(context)
-            activeParams["earlyBoostFactor"] = ActiveParamSnapshot(
-                active = liveBoost, default = 1.0, src = "learner-live"
-            )
-            activeParams["watchingFrontloadFrac"] = ActiveParamSnapshot(
-                active = liveWatch, default = 0.64, src = "learner-live"
-            )
+            val store = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiParamStore
+
+            // Alle AI-beheerde parameters: FclAiParamStore wint altijd als er een waarde is
+            fun overrideIfPresent(key: String, defaultVal: Double) {
+                val aiVal = store.getDouble(context, key) ?: return
+                activeParams[key] = ActiveParamSnapshot(active = aiVal, default = defaultVal, src = "ai-store")
+            }
+            fun overrideIntIfPresent(key: String, defaultVal: Double) {
+                val aiVal = store.getInt(context, key)?.toDouble() ?: return
+                activeParams[key] = ActiveParamSnapshot(active = aiVal, default = defaultVal, src = "ai-store")
+            }
+
+            overrideIfPresent(store.K_EARLY_BOOST_FACTOR, 1.0)
+            overrideIfPresent(store.K_WATCHING_FRONTLOAD_FRAC, 0.64)
+            overrideIfPresent(store.K_WATCHING_MIN_DELTA, 1.5)
+            overrideIntIfPresent(store.K_COMMIT_COOLDOWN_MINUTES, 13.0)
+            overrideIfPresent(store.K_EARLY_BOOST_MIN_CONFIDENCE, 0.5)
+            overrideIntIfPresent(store.K_EARLY_BOOST_MAX_COMMITS, 2.0)
+            overrideIfPresent(store.K_EARLY_RISE_FRAC_MIN, 0.35)
+            overrideIfPresent(store.K_LATE_COMMIT_DECAY_FACTOR, 0.0)
+            overrideIfPresent(store.K_LATE_COMMIT_DECAY_THRESHOLD, 0.55)
+            overrideIfPresent(store.K_SUSTAINED_RISE_SLOPE_MIN, 0.4)
+            overrideIntIfPresent(store.K_SUSTAINED_RISE_MIN_TARGET, 12.0)
+
+            // Voor DFLearner-beheerde params: als FclAiParamStore leeg is, gebruik DFLearner-prefs
+            // (die zijn altijd actueler dan AAPS Preferences / active_params.json)
+            if (store.getDouble(context, store.K_EARLY_BOOST_FACTOR) == null) {
+                val liveBoost = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getEarlyBoostFactor(context)
+                activeParams["earlyBoostFactor"] = ActiveParamSnapshot(active = liveBoost, default = 1.0, src = "learner-live")
+            }
+            if (store.getDouble(context, store.K_WATCHING_FRONTLOAD_FRAC) == null) {
+                val liveWatch = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getWatchingFrac(context)
+                activeParams["watchingFrontloadFrac"] = ActiveParamSnapshot(active = liveWatch, default = 0.64, src = "learner-live")
+            }
         }
 
         val (tir, hypoCount, hypoMinutes, _, _, notable) =

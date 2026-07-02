@@ -392,6 +392,7 @@ fun FclAnalyzerScreen(
                                 paramOverrides = DFMapping.toParamOverrides(d, f,
                                                                             aggLevel = DFLearner.getAggressiveness(context)),
                                 reason       = "Initiële param-sync: earlyBoost nog op default",
+                                context      = context,
                                 episodeCount = episodes?.size ?: 0
                             )
                         }
@@ -423,6 +424,7 @@ fun FclAnalyzerScreen(
                                                                             refLcd = DFLearner.getRefLcd(context),
                                                                             aggLevel = DFLearner.getAggressiveness(context)),
                                 reason = result.summary,
+                                context      = context,
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
@@ -441,6 +443,7 @@ fun FclAnalyzerScreen(
                                 stvMap = stvMap,
                                 paramOverrides = params,
                                 reason = "D/F leer-systeem via analyzer",
+                                context      = context,
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
@@ -865,6 +868,7 @@ private suspend fun runAdvisorFlow(
                         aggLevel = DFLearner.getAggressiveness(context)
                     ),
                     reason         = "D/F: ${step!!.reason}",
+                    context        = context,
                     episodeCount   = filteredMetrics.size
                 )
             }
