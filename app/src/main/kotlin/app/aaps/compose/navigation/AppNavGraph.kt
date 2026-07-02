@@ -599,6 +599,7 @@ fun NavGraphBuilder.appNavGraph(
         app.aaps.ui.compose.configuration.PluginCategoryScreen(
             category = category,
             hardwarePumpConfirmation = configState.hardwarePumpConfirmation,
+            pluginSwitchConfirmation = configState.pluginSwitchConfirmation,
             onNavigateBack = { navController.safePopBackStack() },
             onNavigate = { request -> onNavigationRequest(request, navController) },
             onPluginEnableToggle = { pluginId, type, enabled ->
@@ -609,7 +610,12 @@ fun NavGraphBuilder.appNavGraph(
                 configurationViewModel.confirmHardwarePumpSwitch()
                 onRefreshPermissions()
             },
-            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() }
+            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() },
+            onConfirmPluginSwitch = {
+                configurationViewModel.confirmPluginSwitch()
+                onRefreshPermissions()
+            },
+            onDismissPluginSwitch = { configurationViewModel.dismissPluginSwitchDialog() }
         )
     }
 

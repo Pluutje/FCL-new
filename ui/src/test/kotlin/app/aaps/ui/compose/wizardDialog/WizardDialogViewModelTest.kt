@@ -1,6 +1,7 @@
 package app.aaps.ui.compose.wizardDialog
 
 import androidx.lifecycle.SavedStateHandle
+import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -53,6 +54,7 @@ internal class WizardDialogViewModelTest {
     @Mock private lateinit var decimalFormatter: DecimalFormatter
     @Mock private lateinit var aapsLogger: AAPSLogger
     @Mock private lateinit var runningModeGuard: RunningModeGuard
+    @Mock private lateinit var automation: Automation
     @Mock private lateinit var wizardExecutor: WizardExecutor
     @Mock private lateinit var rxBus: RxBus
 
@@ -69,7 +71,7 @@ internal class WizardDialogViewModelTest {
         sut = WizardDialogViewModel(
             SavedStateHandle(), bolusWizardProvider, constraintChecker, profileFunction, profileUtil,
             profileRepository, activePlugin, ch, iobCobCalculator, persistenceLayer, preferences, config,
-            rh, dateUtil, decimalFormatter, aapsLogger, runningModeGuard, wizardExecutor, rxBus,
+            rh, dateUtil, decimalFormatter, aapsLogger, runningModeGuard, automation, wizardExecutor, rxBus,
             CoroutineScope(UnconfinedTestDispatcher())
         )
     }
