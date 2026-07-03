@@ -408,17 +408,14 @@ class DetermineBasalFCL @Inject constructor(
                 null
             }
 
-        // Minimaal 7 punten (≈ 35 minuten BG-geschiedenis) voor FCLvNext.
-        // Was 10 (50 minuten) — verlaagd 23/06/2026 (Ecko): bij FSL-2 via
-        // Juggluco→xDrip+ markeerde AAPS kortdurende NFC/BLE-overlaps als
-        // filledGap, waardoor het puntenaantal kunstmatig laag was. De
-        // filledGap-filter in FCLvNextBgHistoryProvider is nu aangepast
-        // (korte gaten ≤10 min worden meegenomen), maar als veiligheidsnet
-        // is de drempel ook verlaagd: 7 goede punten geven voldoende
-        // trend-signatuur voor slope + acceleratie. Bij minder dan 7 punten
-        // skipt FCLvNext wél, want met 5-6 punten is de acceleratieschatting
-        // te onzeker voor verantwoorde dosisbeslissingen.
-        if (bgHistoryPoints.size >= 7) {
+        // ✅ VERLAAGD (02/07/2026, Ecko): Samsung A36 + FSL-2 + Juggluco→xDrip+ geeft
+        // regelmatig reeksen waarbij 5-6 goede punten overblijven na gap-filtering.
+        // Was 7 (35 min); verlaagd naar 5 (≈25 min) samen met MAX_GAP_MINUTES=15
+        // in FCLvNextBgHistoryProvider. Met 5 goede punten is slope en eerste
+        // afgeleid van acceleratie betrouwbaar genoeg voor een dosisbeslissing.
+        // Bij minder dan 5 punten skipt FCLvNext nog steeds — dan is de dataset
+        // echt te smal voor een verantwoord advies.
+        if (bgHistoryPoints.size >= 5) {
             val bgHistoryMmol = bgHistoryPoints.map { it.timestamp to it.bg }
             val bgNowMmol = bgHistoryMmol.last().second
 
@@ -538,7 +535,7 @@ class DetermineBasalFCL @Inject constructor(
 
 
         } else {
-            consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/7 (min 35 min history)")
+            consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/5 (min 25 min history)")
         }
 
 

@@ -26,7 +26,7 @@ object FclAiAdvisorRanges {
     enum class ValueType { DOUBLE, INT }
 
     /** Minimale confidence voor ceiling-busting (voorbij softMax/onder softMin). */
-    const val CEILING_BUST_CONFIDENCE = 0.75
+    const val CEILING_BUST_CONFIDENCE = 0.55   // ⚠️ TESTFASE: was 0.75 — terugzetten voor productie
 
     data class ParamSpec(
         val key: String,

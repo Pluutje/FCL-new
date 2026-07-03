@@ -51,7 +51,15 @@ class FCLvNextBgHistoryProvider(
      * bleef en FCLvNext ten onrechte skipte. Het echte timing-interval
      * (5m ± 6s zoals zichtbaar in xDrip) is geen probleem.
      */
-    private val MAX_GAP_MINUTES = 10L   // één gemiste Libre-scan = ~5 min, marge naar 10
+    // ✅ VERHOOGD (02/07/2026, Ecko): Samsung A36 + FSL-2 + Juggluco→xDrip+→AAPS
+    // geeft soms aaneengesloten reeksen van filledGap-punten wanneer de BLE-verbinding
+    // kort wegvalt (typisch 10-20 minuten). Met MAX_GAP_MINUTES=10 werd één zo'n
+    // reeks al afgewezen terwijl de punten er wel gewoon inzaten als interpolatie.
+    // Bij Libre2-sensoren via Juggluco is interpolatie over ≤15 minuten acceptabel
+    // voor trendberekening (de slope verandert niet explosief in 15 min).
+    // De teller van opeenvolgende filledGap-punten (cumulativeGapMinutes) zorgt dat
+    // een aaneengesloten reeks van >15 min wél wordt afgewezen.
+    private val MAX_GAP_MINUTES = 15L   // één Libre-scan-cyclus + marge
 
     fun getLastHours(hoursBack: Int): List<BgPoint> {
         val data = iobCobCalculator.ads.getBucketedDataTableCopy()
