@@ -65,6 +65,13 @@ fun FclAiAdvisorScreen(
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(!FclAiAdvisorSettingsStore.isConfigured(context)) }
 
+    // 05/07/2026 (Ecko): NIET meer automatisch dismissen bij het openen van dit
+    // scherm — alleen bekijken is niet hetzelfde als beoordelen. De melding
+    // blijft nu terugkomen (elke cyclus, via FclAiAdvisorScheduler.runIfDue())
+    // zolang er nog voorstellen openstaan, en verdwijnt vanzelf zodra alles
+    // is goed- of afgekeurd (stillPendingCount bereikt 0 → showPendingAdvice(0)
+    // dismisst 'm). De gebruiker beslist zelf of hij negeert of afwijst.
+
     Column(
         modifier = Modifier
             .fillMaxSize()

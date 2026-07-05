@@ -41,6 +41,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice
 
 
 import org.joda.time.DateTime
+import org.joda.time.DateTimeZone
 
 import android.content.Context
 
@@ -127,7 +128,7 @@ class DetermineBasalFCL @Inject constructor(
         // persistenceLayer heeft.
         // RetentieWaarde van FCLActivityModule: die heeft FCLvNext niet rechtstreeks,
         // dus we lezen die separaat via een getter op fclActivityModule.
-        fclvNext.onEpisodeStarted = { episodeId, bgMmol, targetMmol, iobRatio, iobAbsU, isNight ->
+        fclvNext.onEpisodeStarted = { episodeId, bgMmol, targetMmol, iobRatio, iobAbsU, isNight, externalBolusU ->
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclActivityLogger.logEpisodeStart(
                 episodeId            = episodeId,
                 nowMs                = System.currentTimeMillis(),
@@ -136,6 +137,7 @@ class DetermineBasalFCL @Inject constructor(
                 iobRatio             = iobRatio,
                 iobAbsU              = iobAbsU,
                 isNight              = isNight,
+                externalBolusU       = externalBolusU,
                 activityModuleActief = fclActivityModule.isCurrentlyActive(),
                 activityRetention    = fclActivityModule.getCurrentRetention(),
                 activityInsulinPct   = fclActivityModule.getCurrentInsulinPct(),
@@ -337,6 +339,36 @@ class DetermineBasalFCL @Inject constructor(
 
         // target correctie (mmol → mg/dL)
         targetMgdl += activity.targetAdjust * 18.0
+
+        // ─────────────────────────────────────────────
+        // 🍽️⏰ MAALTIJD-TIJD-ANTICIPATIE (05/07/2026, Ecko)
+        // ─────────────────────────────────────────────
+        // Zelfde pragmatische aanpak als de activiteitscorrectie hierboven:
+        // een kortstondige, lokale aanpassing van targetMgdl vóórdat
+        // FCLvNextInput wordt gebouwd — geen aparte AAPS-tijdelijke-
+        // streefwaarde-entiteit. Bewuste keuze (Ecko, 05/07/2026): dit is een
+        // kortdurende aanpassing (net als activiteit); zou dit uren aanhouden
+        // dan zou een echte TemporaryTarget via persistenceLayer meer voor de
+        // hand liggen, maar voor dit korte venster is dit de pragmatische en
+        // beproefde route.
+        //
+        // Leren (welke tijden, CONFIRMED-episodes) gebeurt in FCLvNext.kt —
+        // hier wordt alleen het resultaat (geleerde modi) gelezen en, indien
+        // het korte anticipatievenster nu actief is, toegepast.
+        val mealTimeHistory = app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.loadFrom(context)
+        val isWeekendNowForMealTime = FCLvNextDayNightHelper.isWeekendDay(
+            DateTime.now().dayOfWeek, preferences.get(StringKey.WeekendDagen)
+        )
+        val localOffsetMsForMealTime = DateTimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong()
+        val mealAnticipationHit = app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.preMealWindow(
+            mealTimeHistory,
+            DateTime.now().minuteOfDay,
+            localOffsetMsForMealTime,
+            isWeekendNowForMealTime
+        )
+        if (mealAnticipationHit != null) {
+            targetMgdl -= app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.TARGET_LOWER_MMOL * 18.0
+        }
 
         target_bg = targetMgdl
         // ─────────────────────────────────────────────

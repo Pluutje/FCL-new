@@ -29,6 +29,11 @@ data class FCLvNextCsvLogRow(
     var recentSlope: Double = 0.0,
     var recentDelta5m: Double = 0.0,
     var consistency: Double = 0.0,
+    // Curve-fit lane (04/07/2026, Ecko) — zie FCLvNextTrends.kt. curveFitR2 is
+    // de fit-kwaliteit (0..1) van de parabool over de laatste ~45 min ruwe BG;
+    // curveAcceleration is de acceleratie (mmol/L/uur²) uit diezelfde fit.
+    var curveFitR2: Double = 0.0,
+    var curveAcceleration: Double = 0.0,
 
     // ── IOB ──
     var iob: Double = 0.0,
@@ -170,6 +175,10 @@ data class FCLvNextCsvLogRow(
     var commitDoseFinal: Double = 0.0,
     var lateDecayMul: Double = 1.0,
     var episodeCommitNr: Int = 0,
+    // Extra decay-steilheid door bevestigde "topping out" (04/07/2026, Ecko) —
+    // 0.0 zolang de curve-fit dit niet bevestigt, dus geen effect op bestaand
+    // gedrag tenzij expliciet aangetoond dat de piek ruim onder 10 mmol blijft.
+    var toppingOutBoost: Double = 0.0,
 
     // ── IOB overshoot ──
     var iobOvershootFactor: Double = 1.0,

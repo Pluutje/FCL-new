@@ -95,6 +95,19 @@ object FclAiAdvisorScheduler {
     fun runIfDue(context: Context, metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()) {
         val now = Instant.now()
 
+        // ── Sticky pending-melding (05/07/2026, Ecko) ───────────────────────
+        // Onafhankelijk van of er nu een NIEUWE AI-run aan de beurt is: zolang
+        // er uit het LAATSTE rapport nog onbeoordeelde voorstellen openstaan,
+        // wordt de melding elke cyclus (~5 min, dus elke keer dat getAdvice()
+        // dit aanroept) opnieuw geplaatst. De gebruiker kan 'm zo negeren
+        // zonder dat hij stilletjes verdwijnt — pas als elk voorstel is goed-
+        // of afgekeurd (stillPendingCount == 0) stopt dit vanzelf, want
+        // showPendingAdvice(0) dismisst 'm dan juist (zie FclAiNotificationHelper).
+        val stillPendingCount = cachedResult.get()?.suggestions
+            ?.count { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it) }
+            ?: 0
+        FclAiNotificationHelper.showPendingAdvice(context, stillPendingCount)
+
         // Al een succesvol rapport vandaag? Dan niets doen.
         val lastSuccess = lastSuccessAt()
         if (lastSuccess != null && Duration.between(lastSuccess, now) < MIN_INTERVAL) return
@@ -115,7 +128,16 @@ object FclAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, metrics, provider)
                 cachedResult.set(result)
-                if (result.parseError == null) markSuccessNow()
+                if (result.parseError == null) {
+                    markSuccessNow()
+                    // Notificatie direct na een verse run — de sticky check bovenaan
+                    // runIfDue() herbevestigt 'm daarna elke volgende cyclus zolang
+                    // er nog iets onbeoordeeld is (05/07/2026, Ecko).
+                    val pendingCount = result.suggestions.count {
+                        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it)
+                    }
+                    FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
+                }
             } finally {
                 running.set(false)
             }
@@ -137,6 +159,9 @@ object FclAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, metrics, provider)
                 cachedResult.set(result)
+                // Notificatie ook bij handmatige run (04/07/2026, Ecko)
+                val pendingCount = result.suggestions.count { !it.rejected }
+                FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
                 onDone(result)
             } finally {
                 running.set(false)

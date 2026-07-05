@@ -958,6 +958,16 @@ class ComposeMainActivity : AppCompatActivity() {
                 } catch (_: Exception) {
                 }
 
+            // 05/07/2026 (Ecko): tik op de FCLvNext AI Advisor-melding →
+            // rechtstreeks naar de FCL-plugin navigeren. Zelfde patroon als
+            // NavigationRequest.Plugin hieronder (opzoeken op class-simpleName,
+            // want er is geen directe plugin-referentie op deze plek).
+            NotificationId.FCL_AI_ADVISOR_READY    -> {
+                val fclPlugin = activePlugin.getPluginsList()
+                    .find { it.javaClass.simpleName == "OpenAPSFCLPlugin" }
+                if (fclPlugin != null) handlePluginClick(fclPlugin)
+            }
+
             else                                   -> Unit
         }
     }

@@ -287,7 +287,7 @@ class FCLCycleLogRepository @Inject constructor(
 
         // ── 14-daags schuifvenster ────────────────────────────────────────
         val rows14d = dao.getSince(now - 14L * 24 * 60 * 60 * 1000L)
-        val bg14d = rows14d.map { it.bg }.filter { it > 0.0 }
+        val bg14d = rows14d.map { it.glucoseIob.bg }.filter { it > 0.0 }
         if (bg14d.size >= 48) {
             val score14d = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
                 .calculateFromBg(bg14d, tsNow)
@@ -299,7 +299,7 @@ class FCLCycleLogRepository @Inject constructor(
 
         // ── 24-uurs dagpunt ───────────────────────────────────────────────
         val rows24h = dao.getSince(now - 24L * 60 * 60 * 1000L)
-        val bg24h = rows24h.map { it.bg }.filter { it > 0.0 }
+        val bg24h = rows24h.map { it.glucoseIob.bg }.filter { it > 0.0 }
         if (bg24h.size >= 24) {
             val score24h = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
                 .calculateFromBg(bg24h, tsNow)
@@ -340,7 +340,7 @@ class FCLCycleLogRepository @Inject constructor(
             // 14d-venster
             val bg14d = allRows
                 .filter { it.timestampMs in (dayEndMs - windowMs14d) until dayEndMs }
-                .map { it.bg }.filter { it > 0.0 }
+                .map { it.glucoseIob.bg }.filter { it > 0.0 }
             if (bg14d.size >= 48) {
                 val s14d = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
                     .calculateFromBg(bg14d, ts)
@@ -352,7 +352,7 @@ class FCLCycleLogRepository @Inject constructor(
             // 24u-dagpunt
             val bg24h = allRows
                 .filter { it.timestampMs in dayStartMs until dayEndMs }
-                .map { it.bg }.filter { it > 0.0 }
+                .map { it.glucoseIob.bg }.filter { it > 0.0 }
             if (bg24h.size >= 24) {
                 val s24h = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.CgpScoreCalculator
                     .calculateFromBg(bg24h, ts)
@@ -379,7 +379,7 @@ class FCLCycleLogRepository @Inject constructor(
             "Documents/AAPS/ANALYSE"
         )
         dir.mkdirs()
-        val file = File(dir, "FCLvNext_Log_v7.csv")
+        val file = File(dir, "FCLvNext_Log_v8.csv")
 
         val sep = ";"
         val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC)
@@ -402,6 +402,11 @@ class FCLCycleLogRepository @Inject constructor(
 }
 
 // ── CSV header — exact gelijk aan FCLvNextCsvLogger ──────────────────────
+// 05/07/2026 (Ecko): FCLCycleLogEntity is herstructureerd in @Embedded-
+// groepen (zie doc-comment bij FCLCycleLogEntity.kt) — de kolomnamen in de
+// CSV blijven ONGEWIJZIGD (Room "plat" de groepen terug uit tot dezelfde
+// kolommen), alleen de Kotlin-veldtoegang hieronder gaat nu via de
+// group-objecten, bijv. `row.slope` is nu `row.trends.slope`.
 
 private fun csvHeader(sep: String): String = listOf(
     "schema_version", "ts_utc",
@@ -419,6 +424,7 @@ private fun csvHeader(sep: String): String = listOf(
     "should_deliver",
     "external_bolus_u",
     "slope", "accel", "recent_slope", "recent_delta5m", "consistency",
+    "curve_fit_r2", "curve_acceleration", "topping_out_boost",
     "effective_isf", "gain", "energy_base", "energy_total",
     "raw_dose", "iob_factor", "normal_dose", "desired_dose_pre_guards",
     "stagnation_active", "stagnation_boost",
@@ -465,7 +471,7 @@ private fun FCLCycleLogEntity.toCsvLine(
     fmt: DateTimeFormatter
 ): String {
     val ts = fmt.format(Instant.ofEpochMilli(timestampMs))
-    val deltaTarget = bg - target
+    val deltaTarget = glucoseIob.bg - glucoseIob.target
 
     fun d2(v: Double) = "%.2f".format(v)
     fun d3(v: Double) = "%.3f".format(v)
@@ -474,58 +480,59 @@ private fun FCLCycleLogEntity.toCsvLine(
 
     return listOf(
         schemaVersion, ts,
-        bool(isNight), sterktePct, timingPct, volhoudendheidPct, nachtFactorPct,
-        doseDistributionStyle, nightResponseStyle,
-        bg1(bg), bg1(target), d2(deltaTarget),
-        d2(iob), d2(iobRatio), bgZone, doseAccess,
-        d2(finalDose), d2(commandedDose), d2(deliveredTotal), d2(bolus), d2(basalRate),
-        d2(realDeliveredBasalU), d2(realDeliveredBolusU), d2(profileBasalUH),
-        bool(activityActive), d2(activityInsulinPct), d2(activityTargetAdjust), d2(aapsMultiplier),
-        d2(nfLevelGeleerd), d2(nfLevelEffectief), nachtAggressiviteit,
-        d3(nightStagnationDeltaMin), d3(nightStagnationEnergyBoost), d3(nightPersistentAggressionMul),
-        nightCooldownMinutes, d2(nightCorrectionHoldDeltaMax), d3(nightAbsorptionDoseFactor),
-        d3(accelDeclineSinceUncertain),
-        bool(shouldDeliver),
-        d2(externalBolusU),
-        d2(slope), d2(accel), d2(recentSlope), d2(recentDelta5m), d2(consistency),
-        d2(effectiveISF), d2(gain), d2(energyBase), d2(energyTotal),
-        d2(rawDose), d2(iobFactor), d2(normalDose), d2(desiredDosePreGuards),
-        bool(stagnationActive), d2(stagnationBoost),
-        bool(guardIobLimited), bool(guardPeakLimited), bool(guardMaxSmbLimited),
-        bool(guardMinDeliverClipped), bool(guardZoneLimited),
-        "fcl_intern", minutesSinceMealStart, d2(riseSinceMealStart),
-        earlyStage, d2(earlyConfidence), d2(earlyTargetU), d2(sustainedHighSlopeMinutes),
-        bool(earlyBoostActive), earlyBoostCount, d2(earlyBoostFactor),
-        mealState, d2(commitFraction), minutesSinceCommit,
-        peakState, bg1(predictedPeak), d2(peakIobBoost), d2(effectiveIobRatio),
-        d2(peakMaxSlope), d2(peakMomentum), d2(peakRiseSinceStart),
-        bool(peakEpisodeActive), bool(suppressForPeak), bool(absorptionActive),
-        bool(reentrySignal), decisionReason,
-        bool(watchingFrontloadTriggered), d2(watchingFrontloadTargetU),
-        bool(watchingSlopeOk), bool(watchingDeltaOk),
-        bool(watchingPeakRiseOk), bool(watchingIobOk),
-        d2(pred60), rescueState, d2(rescueConfidence), rescueReason,
-        d2(reserveU), reserveAction, d2(reserveDeltaU), reserveAgeMin,
-        d2(trajectoryFactor), bool(trajectoryHardBlock),
-        bool(commitAllowed), bool(effectiveCommitAllowed), d2(baseCommitFraction),
-        d2(commitZoneFactor), d2(commitIobFactor), d2(commitPostPeakFactor),
-        d2(commitRawPlateauPenalty), d2(commitAggressionMul),
-        d2(commitDoseRaw), d2(commitDoseFinal), d2(lateDecayMul), episodeCommitNr,
-        d2(iobOvershootFactor),
-        d2(burstDelivered10m), d2(burstCap10m), d2(burstRemaining10m),
-        bool(hypoActive), bg1(hypoProjectedBg), d2(hypoDebtU),
-        bool(topGuardActive), d2(topGuardCapFactor), bool(topPlateauConfirmed),
-        d2(mealAggressionA), d2(mealAggressionMul),
-        bool(peakIobBrakeActive), d2(peakApproachFactor),
-        d2(afterloadFutureDrop60Scale), d2(afterloadHighIobLateScale),
-        suppressReason, lockoutReason, commitBlockReason,
-        d2(iobMarginToBrake), d2(iobMarginToLockout),
-        d2(predMarginToWatching), d2(predMarginToTarget), d2(slopeMarginToBrake),
-        bg1(predictedPeakBallistic), bg1(futureDrop60),
-        bool(peakFloorActive), bg1(peakFloorValue), d2(hEff),
-        d2(iobScaleUsed), d2(vUsed),
-        d2(iobHeadroom), d2(doseSuppressedU),
-        bool(peakApproachActive), bool(earlyResetThisCycle),
-        bool(downtrendLocked), bool(sensorBlipActive)
+        bool(context.isNight), context.sterktePct, context.timingPct, context.volhoudendheidPct, context.nachtFactorPct,
+        context.doseDistributionStyle, context.nightResponseStyle,
+        bg1(glucoseIob.bg), bg1(glucoseIob.target), d2(deltaTarget),
+        d2(glucoseIob.iob), d2(glucoseIob.iobRatio), glucoseIob.bgZone, glucoseIob.doseAccess,
+        d2(delivery.finalDose), d2(delivery.commandedDose), d2(delivery.deliveredTotal), d2(delivery.bolus), d2(delivery.basalRate),
+        d2(delivery.realDeliveredBasalU), d2(delivery.realDeliveredBolusU), d2(delivery.profileBasalUH),
+        bool(delivery.activityActive), d2(delivery.activityInsulinPct), d2(delivery.activityTargetAdjust), d2(delivery.aapsMultiplier),
+        d2(delivery.nfLevelGeleerd), d2(delivery.nfLevelEffectief), delivery.nachtAggressiviteit,
+        d3(delivery.nightStagnationDeltaMin), d3(delivery.nightStagnationEnergyBoost), d3(delivery.nightPersistentAggressionMul),
+        delivery.nightCooldownMinutes, d2(delivery.nightCorrectionHoldDeltaMax), d3(delivery.nightAbsorptionDoseFactor),
+        d3(delivery.accelDeclineSinceUncertain),
+        bool(delivery.shouldDeliver),
+        d2(delivery.externalBolusU),
+        d2(trends.slope), d2(trends.accel), d2(trends.recentSlope), d2(trends.recentDelta5m), d2(trends.consistency),
+        d3(trends.curveFitR2), d2(trends.curveAcceleration), d3(trends.toppingOutBoost),
+        d2(model.effectiveISF), d2(model.gain), d2(model.energyBase), d2(model.energyTotal),
+        d2(model.rawDose), d2(model.iobFactor), d2(model.normalDose), d2(model.desiredDosePreGuards),
+        bool(stagnation.stagnationActive), d2(stagnation.stagnationBoost),
+        bool(guards.guardIobLimited), bool(guards.guardPeakLimited), bool(guards.guardMaxSmbLimited),
+        bool(guards.guardMinDeliverClipped), bool(guards.guardZoneLimited),
+        "fcl_intern", mealEpisode.minutesSinceMealStart, d2(mealEpisode.riseSinceMealStart),
+        mealEpisode.earlyStage, d2(mealEpisode.earlyConfidence), d2(mealEpisode.earlyTargetU), d2(mealEpisode.sustainedHighSlopeMinutes),
+        bool(mealEpisode.earlyBoostActive), mealEpisode.earlyBoostCount, d2(mealEpisode.earlyBoostFactor),
+        mealEpisode.mealState, d2(mealEpisode.commitFraction), mealEpisode.minutesSinceCommit,
+        peak.peakState, bg1(peak.predictedPeak), d2(peak.peakIobBoost), d2(peak.effectiveIobRatio),
+        d2(peak.peakMaxSlope), d2(peak.peakMomentum), d2(peak.peakRiseSinceStart),
+        bool(peak.peakEpisodeActive), bool(peak.suppressForPeak), bool(peak.absorptionActive),
+        bool(peak.reentrySignal), peak.decisionReason,
+        bool(watching.watchingFrontloadTriggered), d2(watching.watchingFrontloadTargetU),
+        bool(watching.watchingSlopeOk), bool(watching.watchingDeltaOk),
+        bool(watching.watchingPeakRiseOk), bool(watching.watchingIobOk),
+        d2(rescue.pred60), rescue.rescueState, d2(rescue.rescueConfidence), rescue.rescueReason,
+        d2(reserve.reserveU), reserve.reserveAction, d2(reserve.reserveDeltaU), reserve.reserveAgeMin,
+        d2(forensic.trajectoryFactor), bool(forensic.trajectoryHardBlock),
+        bool(forensic.commitAllowed), bool(forensic.effectiveCommitAllowed), d2(forensic.baseCommitFraction),
+        d2(forensic.commitZoneFactor), d2(forensic.commitIobFactor), d2(forensic.commitPostPeakFactor),
+        d2(forensic.commitRawPlateauPenalty), d2(forensic.commitAggressionMul),
+        d2(forensic.commitDoseRaw), d2(forensic.commitDoseFinal), d2(forensic.lateDecayMul), forensic.episodeCommitNr,
+        d2(forensic.iobOvershootFactor),
+        d2(burst.burstDelivered10m), d2(burst.burstCap10m), d2(burst.burstRemaining10m),
+        bool(hypo.hypoActive), bg1(hypo.hypoProjectedBg), d2(hypo.hypoDebtU),
+        bool(topGuard.topGuardActive), d2(topGuard.topGuardCapFactor), bool(topGuard.topPlateauConfirmed),
+        d2(aggression.mealAggressionA), d2(aggression.mealAggressionMul),
+        bool(peakBenadering.peakIobBrakeActive), d2(peakBenadering.peakApproachFactor),
+        d2(peakBenadering.afterloadFutureDrop60Scale), d2(peakBenadering.afterloadHighIobLateScale),
+        suppress.suppressReason, suppress.lockoutReason, suppress.commitBlockReason,
+        d2(marges.iobMarginToBrake), d2(marges.iobMarginToLockout),
+        d2(marges.predMarginToWatching), d2(marges.predMarginToTarget), d2(marges.slopeMarginToBrake),
+        bg1(peakInternals.predictedPeakBallistic), bg1(peakInternals.futureDrop60),
+        bool(peakInternals.peakFloorActive), bg1(peakInternals.peakFloorValue), d2(peakInternals.hEff),
+        d2(peakInternals.iobScaleUsed), d2(peakInternals.vUsed),
+        d2(doseerruimte.iobHeadroom), d2(doseerruimte.doseSuppressedU),
+        bool(doseerruimte.peakApproachActive), bool(doseerruimte.earlyResetThisCycle),
+        bool(doseerruimte.downtrendLocked), bool(doseerruimte.sensorBlipActive)
     ).joinToString(sep)
 }

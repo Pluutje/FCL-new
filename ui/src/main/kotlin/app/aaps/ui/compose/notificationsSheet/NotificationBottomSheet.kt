@@ -36,6 +36,7 @@ import app.aaps.core.ui.compose.icons.IcLoopClosed
 import app.aaps.core.ui.compose.icons.IcPluginAutomation
 import app.aaps.core.ui.compose.icons.IcPluginMaintenance
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
+import app.aaps.core.ui.compose.icons.IcPluginOpenAPS
 import app.aaps.core.ui.compose.icons.IcPluginVirtualPump
 import app.aaps.core.ui.compose.icons.IcProfile
 
@@ -156,5 +157,13 @@ fun NotificationCategory.toIcon(): ImageVector = when (this) {
     NotificationCategory.SYNC       -> IcPluginNsClient
     NotificationCategory.SYSTEM     -> IcPluginMaintenance
     NotificationCategory.AUTOMATION -> IcPluginAutomation
+    // 05/07/2026 (Ecko): zelfde icoon als de FCL-plugin in de pluginlijst
+    // (OpenAPSFCLPlugin.kt: .icon(IcPluginOpenAPS)) — bewust GEEN nieuwe
+    // "robot"-achtige Material-icon (bijv. Icons.Filled.SmartToy) gebruikt,
+    // want die zit in "material-icons-extended", een aparte Gradle-dependency
+    // die hier nog niet aanwezig is. Wil je toch dichter bij het 🤖-emoji van
+    // de AI Advisor-knop, dan is dat een bewuste vervolgstap (dependency
+    // toevoegen), niet iets wat ik hier stilzwijgend erbij trek.
+    NotificationCategory.FCL        -> IcPluginOpenAPS
     NotificationCategory.GENERAL    -> Icons.Default.Notifications
 }

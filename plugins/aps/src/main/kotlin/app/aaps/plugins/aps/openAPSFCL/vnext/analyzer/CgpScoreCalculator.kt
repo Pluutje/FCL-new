@@ -92,7 +92,7 @@ object CgpScoreCalculator {
         rows: List<FCLCycleLogEntity>,
         tsUtc: String = java.time.Instant.now().toString()
     ): CgpScore? {
-        val filtered = rows.map { it.bg }.filter { it > 0.0 }
+        val filtered = rows.map { it.glucoseIob.bg }.filter { it > 0.0 }
         if (filtered.size < 288) return null
         return calculateInternal(filtered, tsUtc)
     }

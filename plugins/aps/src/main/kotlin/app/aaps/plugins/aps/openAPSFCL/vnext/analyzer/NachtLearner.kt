@@ -131,14 +131,14 @@ object NachtLearner {
         // nauwkeuriger dan opnieuw uitrekenen met de HUIDIGE instellingen,
         // want die kunnen ondertussen gewijzigd zijn.
         val rows = runBlocking { repository.getRowsInRange(vensterStartMs, System.currentTimeMillis()) }
-            .filter { it.isNight }
+            .filter { it.context.isNight }
 
         if (rows.size < 6) return  // te weinig data
 
         // Laatste BG/IOB/target voor doorbroken-check (target per cyclus, zie kdoc)
-        val laasteBg     = rows.last().bg
-        val laasteIob    = rows.last().iob
-        val laasteTarget = rows.last().target
+        val laasteBg     = rows.last().glucoseIob.bg
+        val laasteIob    = rows.last().glucoseIob.iob
+        val laasteTarget = rows.last().glucoseIob.target
         val delta        = laasteBg - laasteTarget
         val vereist      = deltaVereist(laasteIob)
         val doorbroken   = delta <= vereist
@@ -149,7 +149,7 @@ object NachtLearner {
         var maxReeks = 0
         var lopend   = 0
         for (r in rows) {
-            if (r.bg > r.target + HOOG_DREMPEL) {
+            if (r.glucoseIob.bg > r.glucoseIob.target + HOOG_DREMPEL) {
                 lopend++
                 if (lopend > maxReeks) maxReeks = lopend
             } else {

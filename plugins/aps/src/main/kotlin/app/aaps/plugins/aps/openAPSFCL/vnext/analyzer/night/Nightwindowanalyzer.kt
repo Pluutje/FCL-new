@@ -124,24 +124,24 @@ object NightWindowAnalyzer {
         val last = sortedRows.last()
 
         val rowCount = sortedRows.size
-        val avgBg = sortedRows.map { it.entity.bg }.average()
-        val avgTarget = sortedRows.map { it.entity.target }.average()
-        val minBg = sortedRows.minOf { it.entity.bg }
-        val maxBg = sortedRows.maxOf { it.entity.bg }
-        val bgDelta = last.entity.bg - first.entity.bg
+        val avgBg = sortedRows.map { it.entity.glucoseIob.bg }.average()
+        val avgTarget = sortedRows.map { it.entity.glucoseIob.target }.average()
+        val minBg = sortedRows.minOf { it.entity.glucoseIob.bg }
+        val maxBg = sortedRows.maxOf { it.entity.glucoseIob.bg }
+        val bgDelta = last.entity.glucoseIob.bg - first.entity.glucoseIob.bg
 
         // Directe TAT/TBT meting per venster (band = ±0.7 mmol/L rond target)
         val tatPct = if (rowCount == 0) 0.0
-        else sortedRows.count { it.entity.bg > avgTarget + 0.7 }.toDouble() / rowCount * 100.0
+        else sortedRows.count { it.entity.glucoseIob.bg > avgTarget + 0.7 }.toDouble() / rowCount * 100.0
         val tbtPct = if (rowCount == 0) 0.0
-        else sortedRows.count { it.entity.bg < avgTarget - 0.7 }.toDouble() / rowCount * 100.0
+        else sortedRows.count { it.entity.glucoseIob.bg < avgTarget - 0.7 }.toDouble() / rowCount * 100.0
 
         val durationHours =
             max(1.0 / 60.0, Duration.between(startInstant, endInstant).toMinutes().toDouble() / 60.0)
         val bgSlopePerHour = bgDelta / durationHours
 
-        val avgIob = sortedRows.map { it.entity.iob }.average()
-        val iobDelta = last.entity.iob - first.entity.iob
+        val avgIob = sortedRows.map { it.entity.glucoseIob.iob }.average()
+        val iobDelta = last.entity.glucoseIob.iob - first.entity.glucoseIob.iob
 
         val maxGapMinutes = sortedRows.zipWithNext { a, b ->
             Duration.between(a.instant, b.instant).toMinutes()
@@ -164,10 +164,10 @@ object NightWindowAnalyzer {
         // Alleen CONFIRMED rescue telt als verstoring — ARMED is een voorzorgsmaatregel
         // die bij nachtelijke lage BG heel gewoon voorkomt en geen echte hypo aangeeft.
         val rescueActive = sortedRows.any {
-            it.entity.rescueState.trim() == "CONFIRMED"
+            it.entity.rescue.rescueState.trim() == "CONFIRMED"
         }
 
-        val repeatedHypoGuard = sortedRows.count { it.entity.hypoActive } >= 3
+        val repeatedHypoGuard = sortedRows.count { it.entity.hypo.hypoActive } >= 3
 
         val classification = when {
             rowCount < 8 -> NightWindowClass.DISTURBED
@@ -233,14 +233,14 @@ object NightWindowAnalyzer {
         val activeProfileBasalUph = resolvedProfile?.basalAtHour?.invoke(effectHour) ?: 0.0
 
         val lastRow = sortedRows.lastOrNull()?.entity
-        val activeSterktePct        = lastRow?.sterktePct        ?: 100
-        val activeTimingPct         = lastRow?.timingPct         ?: 100
-        val activeVolhoudendheidPct = lastRow?.volhoudendheidPct ?: 100
+        val activeSterktePct        = lastRow?.context?.sterktePct        ?: 100
+        val activeTimingPct         = lastRow?.context?.timingPct         ?: 100
+        val activeVolhoudendheidPct = lastRow?.context?.volhoudendheidPct ?: 100
         val activeDoseDistributionStyle =
-            latestNonBlank(sortedRows, { it.doseDistributionStyle }, "UNKNOWN_DOSE_DISTRIBUTION")
+            latestNonBlank(sortedRows, { it.context.doseDistributionStyle }, "UNKNOWN_DOSE_DISTRIBUTION")
 
         val activeNightResponseStyle =
-            latestNonBlank(sortedRows, { it.nightResponseStyle }, "BALANCED")  // legacy-veld; nfLevel via DFLearner
+            latestNonBlank(sortedRows, { it.context.nightResponseStyle }, "BALANCED")  // legacy-veld; nfLevel via DFLearner
 
         val activeSettingsSignature = listOf(
             activeProfileSourceTsUtc.ifBlank { "NO_BASAL_HISTORY" },
@@ -251,20 +251,20 @@ object NightWindowAnalyzer {
 
         val accessLimitedRatio =
             sortedRows.count {
-                it.entity.doseAccess == "BLOCKED" ||
-                    it.entity.doseAccess == "MICRO_ONLY" ||
-                    it.entity.doseAccess == "SMALL"
+                it.entity.glucoseIob.doseAccess == "BLOCKED" ||
+                    it.entity.glucoseIob.doseAccess == "MICRO_ONLY" ||
+                    it.entity.glucoseIob.doseAccess == "SMALL"
             }.toDouble() / rowCount.toDouble()
 
         val guardLimitedRatio =
             sortedRows.count {
-                it.entity.guardIobLimited ||
-                    it.entity.guardPeakLimited ||
-                    it.entity.guardMaxSmbLimited ||
-                    it.entity.guardMinDeliverClipped ||
-                    it.entity.guardZoneLimited ||
-                    it.entity.trajectoryHardBlock ||
-                    it.entity.topGuardActive
+                it.entity.guards.guardIobLimited ||
+                    it.entity.guards.guardPeakLimited ||
+                    it.entity.guards.guardMaxSmbLimited ||
+                    it.entity.guards.guardMinDeliverClipped ||
+                    it.entity.guards.guardZoneLimited ||
+                    it.entity.forensic.trajectoryHardBlock ||
+                    it.entity.topGuard.topGuardActive
             }.toDouble() / rowCount.toDouble()
 
         val riseDespiteIobScore =
@@ -273,13 +273,13 @@ object NightWindowAnalyzer {
                     (if (bgDelta > 0.3) 0.20 else 0.0) +
                     (if (iobDelta > 0.10) 0.20 else 0.0) +
                     (if (accessLimitedRatio >= 0.33) 0.20 else 0.0) +
-                    (if (sortedRows.any { it.entity.pred60 > it.entity.bg + 0.4 }) 0.15 else 0.0)
+                    (if (sortedRows.any { it.entity.rescue.pred60 > it.entity.glucoseIob.bg + 0.4 }) 0.15 else 0.0)
                 ).coerceIn(0.0, 1.0)
 
         val lateOvershootRiskScore =
             (
-                (if (sortedRows.any { it.entity.hypoActive && it.entity.bg > it.entity.target + 1.0 }) 0.45 else 0.0) +
-                    (if (sortedRows.any { it.entity.hypoProjectedBg in 0.1..4.6 && it.entity.bg > it.entity.target + 1.5 }) 0.35 else 0.0) +
+                (if (sortedRows.any { it.entity.hypo.hypoActive && it.entity.glucoseIob.bg > it.entity.glucoseIob.target + 1.0 }) 0.45 else 0.0) +
+                    (if (sortedRows.any { it.entity.hypo.hypoProjectedBg in 0.1..4.6 && it.entity.glucoseIob.bg > it.entity.glucoseIob.target + 1.5 }) 0.35 else 0.0) +
                     (if (avgIob >= 0.8 && bgDelta < -0.5) 0.20 else 0.0)
                 ).coerceIn(0.0, 1.0)
 
@@ -399,7 +399,7 @@ object NightWindowAnalyzer {
             score += 0.20
         }
 
-        if (rows.any { it.entity.peakEpisodeActive || it.entity.mealState.contains("WATCH", ignoreCase = true) }) {
+        if (rows.any { it.entity.peak.peakEpisodeActive || it.entity.mealEpisode.mealState.contains("WATCH", ignoreCase = true) }) {
             score += 0.10
         }
 
@@ -648,7 +648,7 @@ object NightWindowAnalyzer {
         var current = mutableListOf<ParsedRow>()
 
         rows.forEach { row ->
-            if (row.entity.isNight) {
+            if (row.entity.context.isNight) {
                 current += row
             } else if (current.isNotEmpty()) {
                 result += current

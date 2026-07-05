@@ -41,7 +41,8 @@ private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET }
  */
 @Composable
 fun FclAnalyzerScreen(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    startOnAiAdvisor: Boolean = false
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
@@ -51,7 +52,17 @@ fun FclAnalyzerScreen(
     // Android terugknop sluit de analyzer
     BackHandler { onDismiss() }
 
-    var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+    // 05/07/2026 (Ecko): als de gebruiker via de actieknop van de native AAPS-
+    // notificatie hierheen kwam, direct op het AI Advisor-tabblad openen i.p.v.
+    // het dashboard. HERZIEN (05/07/2026): het one-shot vlag zelf wordt nu
+    // ÉÉN keer, hogerop, in FCLComposeContent.kt gelezen (dat bepaalt ook al
+    // welke buitenste tab — Status/Analyzer/Statistics/Settings — actief
+    // wordt) en hier als parameter doorgegeven. Nogmaals consumeNavigateRequest()
+    // aanroepen zou het vlag al verbruikt hebben gevonden (false), omdat het
+    // een get-and-reset is — vandaar geen eigen aanroep meer hier.
+    var currentScreen by remember {
+        mutableStateOf(if (startOnAiAdvisor) Screen.AI_ADVISOR else Screen.DASHBOARD)
+    }
     var allRows by remember { mutableStateOf<List<LogRow>?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>?>(null) }
     var episodeMetrics by remember { mutableStateOf<List<EpisodeMetrics>?>(null) }
@@ -89,9 +100,9 @@ fun FclAnalyzerScreen(
                 withContext(Dispatchers.IO) {
                     AdviceLifecycleStore.onProfileObserved(
                         context = context,
-                        sterkte = row.sterktePct,
-                        timing = row.timingPct,
-                        volhoudendheid = row.volhoudendheidPct
+                        sterkte = row.context.sterktePct,
+                        timing = row.context.timingPct,
+                        volhoudendheid = row.context.volhoudendheidPct
                     )
                 }
             }
@@ -479,6 +490,18 @@ private fun DashboardScreen(
     val advisorEnabled = episodes?.isNotEmpty() == true && metrics?.isNotEmpty() == true
     val hasData2 = hasData && (allRows?.isNotEmpty() == true)
 
+    // ✅ Openstaande AI-voorstellen tellen voor badge/notificatie (02/07/2026, Ecko)
+    // 05/07/2026, Ecko — bugfix: readPendingFromLastRun() gaf altijd 0 (zie
+    // toelichting in FclAiAdvisorHistoryRepository.kt). Nu via de daadwerkelijke
+    // laatste run + isStillPending() per suggestie.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pendingAiCount = remember {
+        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorScheduler.latestResult()
+            ?.suggestions
+            ?.count { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it) }
+            ?: 0
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -531,15 +554,20 @@ private fun DashboardScreen(
             )
 
             NavActieKaart(
-                emoji   = "🤖",
-                label   = "AI Advisor",
-                badge   = null,
+                emoji   = if (pendingAiCount > 0) "🤖" else "🤖",
+                label   = if (pendingAiCount > 0) "AI Advisor  ·  $pendingAiCount wacht" else "AI Advisor",
+                badge   = if (pendingAiCount > 0) "$pendingAiCount" else null,
                 enabled = hasData2,
-                toelichting = "Vraag 1x per dag (of nu handmatig, om te testen) een externe AI " +
-                    "om je geleerde FCLvNext-parameters te controleren. Elk voorstel verschijnt " +
-                    "als losse kaart met reden en bewijs — wordt pas actief na jouw handmatige " +
-                    "goedkeuring per parameter.",
-                knoopTekst = "AI Advisor",
+                toelichting = if (pendingAiCount > 0)
+                    "⚠️ Er ${if (pendingAiCount == 1) "staat 1 voorstel" else "staan $pendingAiCount voorstellen"} klaar om te beoordelen. " +
+                        "Tik om ze te bekijken — elk voorstel toont de reden en het bewijs. " +
+                        "Pas actief na jouw handmatige goedkeuring per parameter."
+                else
+                    "Vraag 2× per dag (of nu handmatig, om te testen) een externe AI " +
+                        "om je geleerde FCLvNext-parameters te controleren. Elk voorstel verschijnt " +
+                        "als losse kaart met reden en bewijs — wordt pas actief na jouw handmatige " +
+                        "goedkeuring per parameter.",
+                knoopTekst = if (pendingAiCount > 0) "Bekijk voorstellen →" else "AI Advisor",
                 onClick = onOpenAiAdvisor
             )
 

@@ -10,9 +10,9 @@ object CurrentAxisStateResolver {
      */
     fun fromLogRow(row: FCLCycleLogEntity): StvState =
         StvState(
-            sterkte        = row.sterktePct.coerceIn(80, 125),
-            timing         = row.timingPct.coerceIn(80, 120),
-            volhoudendheid = row.volhoudendheidPct.coerceIn(70, 130)
+            sterkte        = row.context.sterktePct.coerceIn(80, 125),
+            timing         = row.context.timingPct.coerceIn(80, 120),
+            volhoudendheid = row.context.volhoudendheidPct.coerceIn(70, 130)
         )
 
     // Bereken de effectieve S/T/V zoals ze worden gebruikt na toepassing

@@ -15,7 +15,22 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
         NightWindowEntity::class,
         BasalProfileHistoryEntity::class
     ],
-    version = 13,
+    // v13→v15 (05/07/2026, Ecko): +curveFitR2/+curveAcceleration/+toppingOutBoost
+    // (in TrendsFields), en FCLCycleLogEntity herstructureerd in @Embedded-
+    // groepen om de eerdere VerifyError-crash (registerlimiet op de platte
+    // ~150-parameter constructor) structureel uit te sluiten.
+    //
+    // BEWUST v15, NIET v14: een eerdere, teruggedraaide poging declareerde al
+    // versie 14 (met de kapotte platte constructor). Room's schema-creatie
+    // (CREATE TABLE) gebeurt via annotatie-metadata, niet via de Kotlin-
+    // constructor — dus die stap kan toen best geslaagd zijn vóórdat de
+    // VerifyError bij het eerste schrijfmoment optrad. Het toestel kan dus al
+    // ergens op user_version=14 staan. Room vergelijkt alleen het versienummer
+    // met wat er nu gedeclareerd is; bij een match slaat het de migratie
+    // (en dus fallbackToDestructiveMigration) gewoon OVER. v15 garandeert een
+    // echte version-mismatch en dus een gegarandeerde schone migratie,
+    // ongeacht de staat waarin het toestel nu verkeert.
+    version = 15,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {

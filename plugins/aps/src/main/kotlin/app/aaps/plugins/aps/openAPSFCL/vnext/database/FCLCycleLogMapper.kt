@@ -6,200 +6,230 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextCsvLogRow
  * Top-level extensiefunctie — buiten elk object zodat deze importeerbaar is
  * vanuit FCLvNext.kt via:
  *   import app.aaps.plugins.aps.openAPSFCL.vnext.database.toEntity
+ *
+ * 05/07/2026 (Ecko): herschreven om per @Embedded-groep een klein sub-object
+ * te bouwen i.p.v. één platte aanroep met alle ~150 velden. Zie de doc-
+ * comment bij FCLCycleLogEntity voor waarom (registerlimiet invoke-direct/
+ * range, veroorzaakte een VerifyError-crash met de oude platte structuur).
  */
 fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
     // META
-    schemaVersion          = "6",
+    schemaVersion          = "8",
     timestampMs            = ts.millis,
 
-    // CONTEXT
-    isNight                = isNight,
-    sterktePct             = sterktePct,
-    timingPct              = timingPct,
-    volhoudendheidPct      = volhoudendheidPct,
-    nachtFactorPct         = nachtFactorPct,
-    doseDistributionStyle  = doseDistributionStyle,
-    nightResponseStyle     = nightResponseStyle,
+    context = ContextFields(
+        isNight                = isNight,
+        sterktePct             = sterktePct,
+        timingPct              = timingPct,
+        volhoudendheidPct      = volhoudendheidPct,
+        nachtFactorPct         = nachtFactorPct,
+        doseDistributionStyle  = doseDistributionStyle,
+        nightResponseStyle     = nightResponseStyle
+    ),
 
-    // GLUCOSE / IOB
-    bg                     = bg,
-    target                 = target,
-    iob                    = iob,
-    iobRatio               = iobRatio,
-    bgZone                 = bgZone,
-    doseAccess             = doseAccess,
+    glucoseIob = GlucoseIobFields(
+        bg       = bg,
+        target   = target,
+        iob      = iob,
+        iobRatio = iobRatio,
+        bgZone   = bgZone,
+        doseAccess = doseAccess
+    ),
 
-    // DELIVERY / EXECUTION
-    finalDose              = finalDose,
-    commandedDose          = commandedDose,
-    deliveredTotal         = deliveredTotal,
-    bolus                  = bolus,
-    basalRate              = basalRate,
-    realDeliveredBasalU    = realDeliveredBasalU,
-    realDeliveredBolusU    = realDeliveredBolusU,
-    profileBasalUH         = profileBasalUH,
-    activityActive         = activityActive,
-    activityInsulinPct     = activityInsulinPct,
-    activityTargetAdjust   = activityTargetAdjust,
-    aapsMultiplier         = aapsMultiplier,
-    nfLevelGeleerd                = nfLevelGeleerd,
-    nfLevelEffectief              = nfLevelEffectief,
-    nachtAggressiviteit           = nachtAggressiviteit,
-    nightStagnationDeltaMin       = nightStagnationDeltaMin,
-    nightStagnationEnergyBoost    = nightStagnationEnergyBoost,
-    nightPersistentAggressionMul  = nightPersistentAggressionMul,
-    nightCooldownMinutes          = nightCooldownMinutes,
-    nightCorrectionHoldDeltaMax   = nightCorrectionHoldDeltaMax,
-    nightAbsorptionDoseFactor     = nightAbsorptionDoseFactor,
-    accelDeclineSinceUncertain               = accelDeclineSinceUncertain,
-    shouldDeliver          = shouldDeliver,
-    externalBolusU         = externalBolusU,
+    delivery = DeliveryFields(
+        finalDose              = finalDose,
+        commandedDose          = commandedDose,
+        deliveredTotal         = deliveredTotal,
+        bolus                  = bolus,
+        basalRate              = basalRate,
+        realDeliveredBasalU    = realDeliveredBasalU,
+        realDeliveredBolusU    = realDeliveredBolusU,
+        profileBasalUH         = profileBasalUH,
+        activityActive         = activityActive,
+        activityInsulinPct     = activityInsulinPct,
+        activityTargetAdjust   = activityTargetAdjust,
+        aapsMultiplier         = aapsMultiplier,
+        nfLevelGeleerd                = nfLevelGeleerd,
+        nfLevelEffectief              = nfLevelEffectief,
+        nachtAggressiviteit           = nachtAggressiviteit,
+        nightStagnationDeltaMin       = nightStagnationDeltaMin,
+        nightStagnationEnergyBoost    = nightStagnationEnergyBoost,
+        nightPersistentAggressionMul  = nightPersistentAggressionMul,
+        nightCooldownMinutes          = nightCooldownMinutes,
+        nightCorrectionHoldDeltaMax   = nightCorrectionHoldDeltaMax,
+        nightAbsorptionDoseFactor     = nightAbsorptionDoseFactor,
+        accelDeclineSinceUncertain    = accelDeclineSinceUncertain,
+        shouldDeliver          = shouldDeliver,
+        externalBolusU         = externalBolusU
+    ),
 
-    // TRENDS
-    slope                  = slope,
-    accel                  = accel,
-    recentSlope            = recentSlope,
-    recentDelta5m          = recentDelta5m,
-    consistency            = consistency,
+    trends = TrendsFields(
+        slope             = slope,
+        accel             = accel,
+        recentSlope       = recentSlope,
+        recentDelta5m     = recentDelta5m,
+        consistency       = consistency,
+        curveFitR2        = curveFitR2,
+        curveAcceleration = curveAcceleration,
+        toppingOutBoost   = toppingOutBoost
+    ),
 
-    // MODEL
-    effectiveISF           = effectiveISF,
-    gain                   = gain,
-    energyBase             = energyBase,
-    energyTotal            = energyTotal,
-    rawDose                = rawDose,
-    iobFactor              = iobFactor,
-    normalDose             = normalDose,
-    desiredDosePreGuards   = desiredDosePreGuards,
+    model = ModelFields(
+        effectiveISF           = effectiveISF,
+        gain                   = gain,
+        energyBase             = energyBase,
+        energyTotal            = energyTotal,
+        rawDose                = rawDose,
+        iobFactor              = iobFactor,
+        normalDose             = normalDose,
+        desiredDosePreGuards   = desiredDosePreGuards
+    ),
 
-    // STAGNATION
-    stagnationActive       = stagnationActive,
-    stagnationBoost        = stagnationBoost,
+    stagnation = StagnationFields(
+        stagnationActive = stagnationActive,
+        stagnationBoost  = stagnationBoost
+    ),
 
-    // GUARDS
-    guardIobLimited        = guardIobLimited,
-    guardPeakLimited       = guardPeakLimited,
-    guardMaxSmbLimited     = guardMaxSmbLimited,
-    guardMinDeliverClipped = guardMinDeliverClipped,
-    guardZoneLimited       = guardZoneLimited,
+    guards = GuardsFields(
+        guardIobLimited        = guardIobLimited,
+        guardPeakLimited       = guardPeakLimited,
+        guardMaxSmbLimited     = guardMaxSmbLimited,
+        guardMinDeliverClipped = guardMinDeliverClipped,
+        guardZoneLimited       = guardZoneLimited
+    ),
 
-    // MEAL EPISODE
-    mealEpisodeId          = mealEpisodeId,
-    minutesSinceMealStart  = minutesSinceMealStart,
-    riseSinceMealStart     = riseSinceMealStart,
-    earlyStage             = earlyStage,
-    earlyConfidence        = earlyConfidence,
-    earlyTargetU           = earlyTargetU,
-    sustainedHighSlopeMinutes = sustainedHighSlopeMinutes,
-    earlyBoostActive       = earlyBoostActive,
-    earlyBoostCount        = earlyBoostCount,
-    earlyBoostFactor       = earlyBoostFactor,
-    mealState              = mealState,
-    commitFraction         = commitFraction,
-    minutesSinceCommit     = minutesSinceCommit,
+    mealEpisode = MealEpisodeFields(
+        mealEpisodeId          = mealEpisodeId,
+        minutesSinceMealStart  = minutesSinceMealStart,
+        riseSinceMealStart     = riseSinceMealStart,
+        earlyStage             = earlyStage,
+        earlyConfidence        = earlyConfidence,
+        earlyTargetU           = earlyTargetU,
+        sustainedHighSlopeMinutes = sustainedHighSlopeMinutes,
+        earlyBoostActive       = earlyBoostActive,
+        earlyBoostCount        = earlyBoostCount,
+        earlyBoostFactor       = earlyBoostFactor,
+        mealState              = mealState,
+        commitFraction         = commitFraction,
+        minutesSinceCommit     = minutesSinceCommit
+    ),
 
-    // PEAK / PREDICTION
-    peakState              = peakState,
-    predictedPeak          = predictedPeak,
-    peakIobBoost           = peakIobBoost,
-    effectiveIobRatio      = effectiveIobRatio,
-    peakMaxSlope           = peakMaxSlope,
-    peakMomentum           = peakMomentum,
-    peakRiseSinceStart     = peakRiseSinceStart,
-    peakEpisodeActive      = peakEpisodeActive,
-    suppressForPeak        = suppressForPeak,
-    absorptionActive       = absorptionActive,
-    reentrySignal          = reentrySignal,
-    decisionReason         = decisionReason,
+    peak = PeakFields(
+        peakState              = peakState,
+        predictedPeak          = predictedPeak,
+        peakIobBoost           = peakIobBoost,
+        effectiveIobRatio      = effectiveIobRatio,
+        peakMaxSlope           = peakMaxSlope,
+        peakMomentum           = peakMomentum,
+        peakRiseSinceStart     = peakRiseSinceStart,
+        peakEpisodeActive      = peakEpisodeActive,
+        suppressForPeak        = suppressForPeak,
+        absorptionActive       = absorptionActive,
+        reentrySignal          = reentrySignal,
+        decisionReason         = decisionReason
+    ),
 
-    // WATCHING FRONTLOAD
-    watchingFrontloadTriggered = watchingFrontloadTriggered,
-    watchingFrontloadTargetU   = watchingFrontloadTargetU,
-    watchingSlopeOk            = watchingSlopeOk,
-    watchingDeltaOk            = watchingDeltaOk,
-    watchingPeakRiseOk         = watchingPeakRiseOk,
-    watchingIobOk              = watchingIobOk,
+    watching = WatchingFields(
+        watchingFrontloadTriggered = watchingFrontloadTriggered,
+        watchingFrontloadTargetU   = watchingFrontloadTargetU,
+        watchingSlopeOk            = watchingSlopeOk,
+        watchingDeltaOk            = watchingDeltaOk,
+        watchingPeakRiseOk         = watchingPeakRiseOk,
+        watchingIobOk              = watchingIobOk
+    ),
 
-    // RESCUE
-    pred60                 = pred60,
-    rescueState            = rescueState,
-    rescueConfidence       = rescueConfidence,
-    rescueReason           = rescueReason,
+    rescue = RescueFields(
+        pred60                 = pred60,
+        rescueState            = rescueState,
+        rescueConfidence       = rescueConfidence,
+        rescueReason           = rescueReason
+    ),
 
-    // RESERVE
-    reserveU               = reserveU,
-    reserveAction          = reserveAction,
-    reserveDeltaU          = reserveDeltaU,
-    reserveAgeMin          = reserveAgeMin,
+    reserve = ReserveFields(
+        reserveU               = reserveU,
+        reserveAction          = reserveAction,
+        reserveDeltaU          = reserveDeltaU,
+        reserveAgeMin          = reserveAgeMin
+    ),
 
-    // FORENSIC / TRAJECTORY
-    trajectoryFactor       = trajectoryFactor,
-    trajectoryHardBlock    = trajectoryHardBlock,
-    commitAllowed          = commitAllowed,
-    effectiveCommitAllowed = effectiveCommitAllowed,
-    baseCommitFraction     = baseCommitFraction,
-    commitZoneFactor       = commitZoneFactor,
-    commitIobFactor        = commitIobFactor,
-    commitPostPeakFactor   = commitPostPeakFactor,
-    commitRawPlateauPenalty = commitRawPlateauPenalty,
-    commitAggressionMul    = commitAggressionMul,
-    commitDoseRaw          = commitDoseRaw,
-    commitDoseFinal        = commitDoseFinal,
-    lateDecayMul           = lateDecayMul,
-    episodeCommitNr        = episodeCommitNr,
-    iobOvershootFactor     = iobOvershootFactor,
+    forensic = ForensicFields(
+        trajectoryFactor       = trajectoryFactor,
+        trajectoryHardBlock    = trajectoryHardBlock,
+        commitAllowed          = commitAllowed,
+        effectiveCommitAllowed = effectiveCommitAllowed,
+        baseCommitFraction     = baseCommitFraction,
+        commitZoneFactor       = commitZoneFactor,
+        commitIobFactor        = commitIobFactor,
+        commitPostPeakFactor   = commitPostPeakFactor,
+        commitRawPlateauPenalty = commitRawPlateauPenalty,
+        commitAggressionMul    = commitAggressionMul,
+        commitDoseRaw          = commitDoseRaw,
+        commitDoseFinal        = commitDoseFinal,
+        lateDecayMul           = lateDecayMul,
+        episodeCommitNr        = episodeCommitNr,
+        iobOvershootFactor     = iobOvershootFactor
+    ),
 
-    // BURST CAP
-    burstDelivered10m      = burstDelivered10m,
-    burstCap10m            = burstCap10m,
-    burstRemaining10m      = burstRemaining10m,
+    burst = BurstFields(
+        burstDelivered10m      = burstDelivered10m,
+        burstCap10m            = burstCap10m,
+        burstRemaining10m      = burstRemaining10m
+    ),
 
-    // HYPO
-    hypoActive             = hypoActive,
-    hypoProjectedBg        = hypoProjectedBg,
-    hypoDebtU              = hypoDebtU,
+    hypo = HypoFields(
+        hypoActive             = hypoActive,
+        hypoProjectedBg        = hypoProjectedBg,
+        hypoDebtU              = hypoDebtU
+    ),
 
-    // TOP GUARD
-    topGuardActive         = topGuardActive,
-    topGuardCapFactor      = topGuardCapFactor,
-    topPlateauConfirmed    = topPlateauConfirmed,
+    topGuard = TopGuardFields(
+        topGuardActive         = topGuardActive,
+        topGuardCapFactor      = topGuardCapFactor,
+        topPlateauConfirmed    = topPlateauConfirmed
+    ),
 
-    // AGGRESSION
-    mealAggressionA        = mealAggressionA,
-    mealAggressionMul      = mealAggressionMul,
+    aggression = AggressionFields(
+        mealAggressionA        = mealAggressionA,
+        mealAggressionMul      = mealAggressionMul
+    ),
 
-    // PEAK BENADERING
-    peakIobBrakeActive     = peakIobBrakeActive,
-    peakApproachFactor          = peakApproachFactor,
-    afterloadFutureDrop60Scale  = afterloadFutureDrop60Scale,
-    afterloadHighIobLateScale   = afterloadHighIobLateScale,
+    peakBenadering = PeakBenaderingFields(
+        peakIobBrakeActive     = peakIobBrakeActive,
+        peakApproachFactor          = peakApproachFactor,
+        afterloadFutureDrop60Scale  = afterloadFutureDrop60Scale,
+        afterloadHighIobLateScale   = afterloadHighIobLateScale
+    ),
 
-    // SUPPRESS / LOCKOUT
-    suppressReason         = suppressReason,
-    lockoutReason          = lockoutReason,
-    commitBlockReason      = commitBlockReason,
+    suppress = SuppressFields(
+        suppressReason         = suppressReason,
+        lockoutReason          = lockoutReason,
+        commitBlockReason      = commitBlockReason
+    ),
 
-    // MARGES TOT DREMPELS
-    iobMarginToBrake       = iobMarginToBrake,
-    iobMarginToLockout     = iobMarginToLockout,
-    predMarginToWatching   = predMarginToWatching,
-    predMarginToTarget     = predMarginToTarget,
-    slopeMarginToBrake     = slopeMarginToBrake,
+    marges = MargesFields(
+        iobMarginToBrake       = iobMarginToBrake,
+        iobMarginToLockout     = iobMarginToLockout,
+        predMarginToWatching   = predMarginToWatching,
+        predMarginToTarget     = predMarginToTarget,
+        slopeMarginToBrake     = slopeMarginToBrake
+    ),
 
-    // PEAK INTERNALS
-    predictedPeakBallistic = predictedPeakBallistic,
-    futureDrop60           = futureDrop60,
-    peakFloorActive        = peakFloorActive,
-    peakFloorValue         = peakFloorValue,
-    hEff                   = hEff,
-    iobScaleUsed           = iobScaleUsed,
-    vUsed                  = vUsed,
+    peakInternals = PeakInternalsFields(
+        predictedPeakBallistic = predictedPeakBallistic,
+        futureDrop60           = futureDrop60,
+        peakFloorActive        = peakFloorActive,
+        peakFloorValue         = peakFloorValue,
+        hEff                   = hEff,
+        iobScaleUsed           = iobScaleUsed,
+        vUsed                  = vUsed
+    ),
 
-    // DOSEERRUIMTE CONTEXT
-    iobHeadroom            = iobHeadroom,
-    doseSuppressedU        = doseSuppressedU,
-    peakApproachActive     = peakApproachActive,
-    earlyResetThisCycle    = earlyResetThisCycle,
-    downtrendLocked        = downtrendLocked,
-    sensorBlipActive       = sensorBlipActive
+    doseerruimte = DoseerruimteFields(
+        iobHeadroom            = iobHeadroom,
+        doseSuppressedU        = doseSuppressedU,
+        peakApproachActive     = peakApproachActive,
+        earlyResetThisCycle    = earlyResetThisCycle,
+        downtrendLocked        = downtrendLocked,
+        sensorBlipActive       = sensorBlipActive
+    )
 )

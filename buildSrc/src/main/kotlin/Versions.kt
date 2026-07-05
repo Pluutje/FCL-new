@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 object Versions {
 
     // On change edit aaps-ci.yml
-    const val appVersion = "4.0-FCL-dev-a"
+    const val appVersion = "4.0-FCL-V7"
     const val versionCode = 1500
 
     const val compileSdk = 37

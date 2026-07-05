@@ -82,6 +82,54 @@ object FclAiAdvisorHistoryRepository {
     /** Alleen goedgekeurde entries — voor de parameter-tijdlijn. */
     fun readApproved(): List<HistoryEntry> = readAll().filter { it.status == AiSuggestionStatus.APPROVED }
 
+    /**
+     * Is dit voorstel nog onbeoordeeld? (05/07/2026, Ecko — bugfix)
+     *
+     * PROBLEEM: [readPendingFromLastRun] filtert op status==PENDING, maar
+     * [record] wordt in de praktijk NOOIT met PENDING aangeroepen — alleen
+     * met APPROVED of REJECTED, ná een expliciete Goedkeuren/Afwijzen-klik
+     * (zie FclAiAdvisorApplier.kt). Er wordt dus nooit een PENDING-regel
+     * weggeschreven, waardoor [readPendingFromLastRun] altijd leeg was —
+     * dit verklaart mede waarom de melding niet terugkwam.
+     *
+     * JUISTE CHECK: een voorstel is nog onbeoordeeld als er GEEN eerdere
+     * geschiedenis-entry voor deze parameter bestaat die bij de huidige
+     * voorgestelde waarde hoort — exact dezelfde logica als SuggestionCard
+     * in FclAiAdvisorScreen.kt al gebruikt om de knoppen te tonen/verbergen,
+     * hier alleen ook bruikbaar buiten dat scherm (voor de badge/notificatie).
+     */
+    fun isStillPending(suggestion: AiParamSuggestion): Boolean {
+        val last = lastEntryFor(suggestion.param) ?: return true
+        return kotlin.math.abs(last.proposedValue - suggestion.proposedValue) >= 0.001
+    }
+
+    /**
+     * Openstaande (nog niet beoordeelde) voorstellen uit het laatste rapport.
+     * Gebruikt door het Analyzer-dashboard om een badge/notificatie te tonen.
+     * "Laatste rapport" = alle PENDING entries met de meest recente ts_utc.
+     * Zo zie je alleen de batch van de laatste run, niet oeroude PENDING's.
+     * (02/07/2026, Ecko)
+     *
+     * LET OP (05/07/2026, Ecko): deze functie levert door de hierboven
+     * beschreven reden altijd een lege lijst. Bewust NIET verwijderd (kan nog
+     * ergens gebruikt worden voor toekomstige history-weergave), maar voor
+     * "is er nog iets te beoordelen" moet [isStillPending] gebruikt worden,
+     * toegepast op de suggesties uit FclAiAdvisorScheduler.latestResult().
+     */
+    fun readPendingFromLastRun(): List<HistoryEntry> {
+        val all = readAll().filter { it.status == AiSuggestionStatus.PENDING }
+        if (all.isEmpty()) return emptyList()
+        val parsed = all.mapNotNull { e ->
+            runCatching { Instant.parse(e.tsUtc) to e }.getOrNull()
+        }
+        if (parsed.isEmpty()) return emptyList()
+        val newestTs = parsed.maxOf { it.first }
+        val twoMin = java.time.Duration.ofMinutes(2)
+        return parsed
+            .filter { java.time.Duration.between(it.first, newestTs).abs() <= twoMin }
+            .map { it.second }
+    }
+
     /** Laatste entry per parameter, voor cooldown-check. */
     fun lastEntryFor(param: String): HistoryEntry? {
         val f = file()

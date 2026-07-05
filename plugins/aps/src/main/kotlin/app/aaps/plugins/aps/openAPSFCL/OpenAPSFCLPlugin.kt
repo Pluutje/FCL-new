@@ -24,6 +24,7 @@ import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
 import app.aaps.core.interfaces.plugin.PluginDescription
@@ -94,6 +95,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
     private val determineBasalFCL: DetermineBasalFCL,
     private val profiler: Profiler,
     private val sp: SP,
+    private val notificationManager: NotificationManager,
     private val apsResultProvider: Provider<APSResult>
 ) : PluginBaseWithPreferences(
     PluginDescription()
@@ -118,6 +120,13 @@ open class OpenAPSFCLPlugin @Inject constructor(
     ownPreferences = emptyList(),
     aapsLogger, rh, preferences
 ), APS, PluginConstraints {
+
+    init {
+        // Eén keer bij plugin-constructie: maakt de DI-geïnjecteerde
+        // NotificationManager beschikbaar voor FclAiNotificationHelper
+        // (dat zelf geen constructor-injectie heeft, zie FclNotificationManagerBridge.kt).
+        app.aaps.plugins.aps.openAPSFCL.vnext.FclNotificationManagerBridge.set(notificationManager)
+    }
 
     // last values
     override var lastAPSRun: Long = 0

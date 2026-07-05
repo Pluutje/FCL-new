@@ -42,7 +42,15 @@ class FCLComposeContent(
         onNavigateBack: () -> Unit,
         onSettings: (() -> Unit)?
     ) {
-        var selectedTab by remember { mutableIntStateOf(0) }
+        // 05/07/2026 (Ecko): één keer, hier op het hoogste niveau, de one-shot
+        // navigatievlag lezen (get-and-reset) — bepaalt zowel welke buitenste
+        // tab initieel actief is (Analyzer i.p.v. Status) als, doorgegeven aan
+        // FclAnalyzerScreen, welk tabblad DAARBINNEN opent (AI Advisor i.p.v.
+        // dashboard). Nogmaals lezen verderop zou altijd false opleveren.
+        val navigateToAiAdvisor = remember {
+            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiNotificationHelper.consumeNavigateRequest()
+        }
+        var selectedTab by remember { mutableIntStateOf(if (navigateToAiAdvisor) 1 else 0) }
         val scope = rememberCoroutineScope()
         val viewModel = remember {
             OpenAPSViewModel(
@@ -84,7 +92,7 @@ class FCLComposeContent(
                     state = state.value,
                     onRefresh = viewModel::onRefresh
                 )
-                1 -> FclAnalyzerScreen(onDismiss = { selectedTab = 0 })
+                1 -> FclAnalyzerScreen(onDismiss = { selectedTab = 0 }, startOnAiAdvisor = navigateToAiAdvisor)
                 2 -> FclStatisticsScreen()
                 3 -> FCLSettingsScreen(preferences = preferences, sp = sp)
             }

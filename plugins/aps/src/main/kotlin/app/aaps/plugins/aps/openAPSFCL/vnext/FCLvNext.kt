@@ -4,6 +4,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext
 import android.annotation.SuppressLint
 import org.joda.time.DateTime
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.DoubleKey
 
 import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextParameterLogger
@@ -63,6 +64,11 @@ data class FCLvNextContext(
     // ✅ NEW short-term trend
     val recentSlope: Double,     // mmol/L per uur (laatste segment)
     val recentDelta5m: Double,   // mmol/L per 5 min
+
+    // ✅ NEW curve-fit confidence (04/07/2026, Ecko) — zie FCLvNextTrends.kt
+    // voor de uitleg waarom dit apart staat van `consistency`.
+    val curveFitR2: Double,          // 0..1
+    val curveAcceleration: Double,   // mmol/L per uur²
 
     // relatieve veiligheid
     val iobRatio: Double,       // currentIOB / maxIOB
@@ -405,6 +411,27 @@ private const val FAST_ABORT_ACCEL = -0.05
 
 private const val FAST_MICRO_MIN_U = 0.08
 private const val FAST_MICRO_MAX_U = 0.15
+
+// ─────────────────────────────────────────────
+// Curve-fit confidence (04/07/2026, Ecko)
+// Gebruikt door computeEarlyBoostFactor() (peakPressureBonus, eerder/sterker
+// bij bevestigde stijging) en de late-commit-decay (eerder/steiler afbouwen
+// bij bevestigde, veilige afvlakking). Zie FCLvNextTrends.kt voor de fit zelf.
+// ─────────────────────────────────────────────
+private const val CURVE_FIT_MIN_R2 = 0.90            // onder deze R² wordt de fit niet vertrouwd
+private const val CURVE_FIT_EARLY_TRIGGER_MMOL = 1.5 // max. vervroeging van de piekdruk-drempel
+private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit doel.txt
+private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
+private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op effectiveDecay
+
+// ─────────────────────────────────────────────
+// WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
+// Vervangt de harde aan/uit-drempel op deltaToTarget door een kwadratische
+// ease-in-opbouw, zodat de dosis vlak over de drempel laag begint en pas
+// verderop (over WATCHING_DELTA_RAMP_WIDTH mmol) naar 100% doorgroeit.
+// ─────────────────────────────────────────────
+private const val WATCHING_DELTA_RAMP_WIDTH = 0.60 // mmol vanaf de drempel tot volle 100%
+private const val WATCHING_DELTA_RAMP_FLOOR = 0.10 // fractie direct op de drempel (voorkomt harde sprong)
 
 // ─────────────────────────────────────────────
 // Veiligheid / gating
@@ -2202,17 +2229,39 @@ private fun computeEarlyDoseDecision(
         // Maximale bonus: +0.35 op de boost-extra (d.w.z. bij earlyBoostFactor=1.75
         // en piekdruk = max: 0.75 + 0.35 = 1.10 extra boven 1.0 → totaal 2.10).
         // Gekoppeld aan dezelfde IOB-ceiling als heightEscalation had (0.35).
+        //
+        // ── Curve-fit confidence-boost (04/07/2026, Ecko) ──────────────────
+        // Bij een overtuigend schone, bevestigd VERSNELLENDE curve (hoge
+        // curveFitR2 én curveAcceleration > 0) mag de piekdrukbonus eerder
+        // aanslaan — dus bij een lagere predictedPeak dan de vaste 11.0 mmol
+        // drempel — en iets sterker uitpakken. Dit werkt uitsluitend
+        // VERSTERKEND: fitConfidenceBoost is 0.0 zodra de fit zwak is of de
+        // curve niet aantoonbaar versnelt, en dan verandert er niets t.o.v.
+        // het bestaande gedrag hierboven. Er is geen pad waarlangs dit de
+        // bonus kan verzwakken of vertragen — dat is expliciet de eis: nooit
+        // remmen tijdens een bevestigde stijging.
+        val fitConfident = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration > 0.0
+        val fitConfidenceBoost = if (fitConfident)
+            smooth01((ctx.curveFitR2 - CURVE_FIT_MIN_R2) / (0.98 - CURVE_FIT_MIN_R2))
+        else 0.0
+        // Drempel zakt tot max CURVE_FIT_EARLY_TRIGGER_MMOL eerder (1.5 mmol)
+        // bij volledig vertrouwen in de fit — nooit hoger dan de basis 11.0.
+        val peakPressureThreshold = 11.0 - CURVE_FIT_EARLY_TRIGGER_MMOL * fitConfidenceBoost
+
         val peakPressureBonus = if (earlyDose.boostCommitCount == 0 &&
-            peak.predictedPeak >= 11.0 &&
+            peak.predictedPeak >= peakPressureThreshold &&
             ctx.iobRatio <= config.peakPressureBonusMaxIob
         ) {
-            val peakPressure = smooth01((peak.predictedPeak - 11.0) / (17.0 - 11.0))
+            val peakPressure = smooth01((peak.predictedPeak - peakPressureThreshold) / (17.0 - peakPressureThreshold))
             val momentumScore = run {
                 val slopeS   = smooth01((ctx.slope        - 0.35) / (1.40 - 0.35))
                 val accelS   = smooth01((ctx.acceleration - 0.05) / (0.35 - 0.05))
                 val deltaS   = smooth01((ctx.deltaToTarget - 0.8) / (3.50 - 0.80))
                 val consSc   = smooth01((ctx.consistency  - 0.45) / (0.80 - 0.45))
-                0.35 * slopeS + 0.35 * accelS + 0.15 * deltaS + 0.15 * consSc
+                // fitConfidenceBoost telt hier extra mee, bovenop de bestaande
+                // vier signalen — het meet iets anders (curve-fit-kwaliteit
+                // i.p.v. segment-consistentie) en vervangt dus geen van hen.
+                0.30 * slopeS + 0.30 * accelS + 0.13 * deltaS + 0.12 * consSc + 0.15 * fitConfidenceBoost
             }
             // Alleen piekdrukbonus als het momentum ook overtuigend is
             peakPressure * momentumScore * 0.35
@@ -2992,11 +3041,46 @@ class FCLvNext(
      * (02/07/2026, Ecko — activiteitslogger fase 1)
      */
     var onEpisodeStarted: ((episodeId: Long, bgMmol: Double, targetMmol: Double,
-                            iobRatio: Double, iobAbsU: Double, isNight: Boolean) -> Unit)? = null
+                            iobRatio: Double, iobAbsU: Double, isNight: Boolean,
+                            externalBolusU: Double) -> Unit)? = null
 
-    private var mealEpisodeCounter: Long = 0
+    // ── Episode-teller (04/07/2026, Ecko) ──────────────────────────────────
+    // Was: private var mealEpisodeCounter: Long = 0
+    // Probleem: elke AAPS-herstart reset de teller → duplicate episode_ids
+    // in de ActivityLogger → koppeling aan LearnerLog onmogelijk.
+    // Fix: teller wordt persistent opgeslagen in SharedPreferences en
+    // opgehaald bij initialisatie. Elke herstart gaat verder waar hij gebleven was.
+    private val EPISODE_PREFS = "fcl_episode_counter"
+    private val EPISODE_KEY   = "meal_episode_counter"
+
+    private fun loadEpisodeCounter(): Long =
+        context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getLong(EPISODE_KEY, 0L)
+
+    private fun saveEpisodeCounter(value: Long) =
+        context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putLong(EPISODE_KEY, value).apply()
+
+    private var mealEpisodeCounter: Long = loadEpisodeCounter()
     private var activeMealEpisodeId: Long = -1
     private var mealEpisodeStartTime: DateTime? = null
+
+    // ── Maaltijd-anticipatie geschiedenis (05/07/2026, Ecko) ────────────────
+    // Opslag zelf leeft in FclMealTimeAnticipation.kt (gedeeld met
+    // DetermineBasalFCL.kt, die de daadwerkelijke target-verlaging toepast —
+    // zie de toelichting daar). FCLvNext.kt is hier alleen de SCHRIJVER: het
+    // legt een nieuw event vast zodra een episode voor het eerst CONFIRMED is.
+    private fun loadMealTimeHistory(): FclMealTimeAnticipation.History =
+        FclMealTimeAnticipation.loadFrom(context)
+
+    private fun saveMealTimeHistory(h: FclMealTimeAnticipation.History) =
+        FclMealTimeAnticipation.saveTo(context, h)
+
+    private var mealTimeHistory: FclMealTimeAnticipation.History = loadMealTimeHistory()
+
+    // Voorkomt dat dezelfde episode meerdere cycli achter elkaar (zolang hij
+    // CONFIRMED blijft) opnieuw wordt vastgelegd — precies één event per episode.
+    private var lastRecordedMealTimeEpisodeId: Long = -1
     private var mealEpisodeStartBg: Double? = null
     // Frontload-shift tracking: bijgehouden per episode
     private var episodeCommitCount: Int = 0    // volgnummer commit (1=eerste)
@@ -3491,6 +3575,8 @@ class FCLvNext(
             consistency = trends.consistency,
             recentSlope = trends.recentSlope,
             recentDelta5m = trends.recentDelta5m,
+            curveFitR2 = trends.curveFitR2,
+            curveAcceleration = trends.curveAcceleration,
             iobRatio = effectiveIobRatio,   // lag-gecorrigeerde iobRatio
             deltaToTarget = input.bgNow - input.targetBG
         )
@@ -3576,6 +3662,21 @@ class FCLvNext(
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────
+        // 🍽️⏰ Maaltijd-tijd-anticipatie — ALLEEN de leerkant zit hier
+        // (05/07/2026, Ecko, herzien na architectuurcorrectie) ──────────────
+        // De daadwerkelijke target-verlaging gebeurt in DetermineBasalFCL.kt,
+        // exact zoals FCLActivityModule dat al doet voor activiteit: lokaal
+        // op targetMgdl toegepast vóórdat FCLvNextInput wordt gebouwd — dus
+        // input.targetBG komt hier al aangepast binnen als het venster actief
+        // is. FCLvNext.kt hoeft dat venster dus niet zelf opnieuw te
+        // evalueren; het bewaart alleen `isWeekendNow` voor de opname-hook
+        // verderop (die legt vast WANNEER een CONFIRMED maaltijd plaatsvond,
+        // los van of de anticipatie deze cyclus toevallig actief was).
+        val isWeekendNow = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper.isWeekendDay(
+            now.dayOfWeek, preferences.get(StringKey.WeekendDagen)
+        )
+
+        // ─────────────────────────────────────────────
 
         val ctx = buildContext(input, config)
         var pred60 = predictBg60(ctx)
@@ -3639,6 +3740,8 @@ class FCLvNext(
         logRow.recentSlope = ctx.recentSlope
         logRow.recentDelta5m = ctx.recentDelta5m
         logRow.consistency = ctx.consistency
+        logRow.curveFitR2 = ctx.curveFitR2
+        logRow.curveAcceleration = ctx.curveAcceleration
 
         logRow.watchingFrontloadTriggered = false
         logRow.watchingFrontloadTargetU = 0.0
@@ -3767,6 +3870,7 @@ class FCLvNext(
 
             mealEpisodeCounter += 1
             activeMealEpisodeId = mealEpisodeCounter
+            saveEpisodeCounter(mealEpisodeCounter)   // persistent — overleeft herstart
             mealEpisodeStartTime = now
             mealEpisodeStartBg = ctx.input.bgNow
             episodeCommitCount = 0
@@ -3783,10 +3887,11 @@ class FCLvNext(
                 onEpisodeStarted?.invoke(
                     activeMealEpisodeId,
                     ctx.input.bgNow,
-                    input.targetBG,              // al in mmol/L
+                    input.targetBG,
                     ctx.iobRatio,
                     input.currentIOB,
-                    input.isNight
+                    input.isNight,
+                    input.externalBolusU
                 )
             } catch (_: Exception) { /* stil falen */ }
         }
@@ -3805,6 +3910,29 @@ class FCLvNext(
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
+        }
+
+        // ── Maaltijd-anticipatie: episode vastleggen zodra CONFIRMED (05/07/2026, Ecko) ──
+        // Precies één keer per episode (dedupe via lastRecordedMealTimeEpisodeId),
+        // op het moment dat mealSignal voor het eerst CONFIRMED is — niet bij
+        // UNCERTAIN, om te voorkomen dat een later weer wegvallende hypothese
+        // het geleerde patroon vervuilt. Gebruikt mealEpisodeStartTime (het
+        // begin van de stijging) als het te leren tijdstip, niet het moment
+        // waarop het algoritme zeker werd — dat laatste kan bij een langzame
+        // stijging aanzienlijk later liggen.
+        if (mealSignal.state == MealState.CONFIRMED &&
+            activeMealEpisodeId != -1L &&
+            activeMealEpisodeId != lastRecordedMealTimeEpisodeId &&
+            mealEpisodeStartTime != null
+        ) {
+            mealTimeHistory = FclMealTimeAnticipation.record(
+                mealTimeHistory,
+                mealEpisodeStartTime!!.millis,
+                isWeekendNow
+            )
+            saveMealTimeHistory(mealTimeHistory)
+            lastRecordedMealTimeEpisodeId = activeMealEpisodeId
+            status.append("MAALTIJD-ANTICIPATIE: episode $activeMealEpisodeId vastgelegd voor tijdpatroon-leren\n")
         }
 
         // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
@@ -4661,6 +4789,25 @@ class FCLvNext(
                 * watchingConsolidationFactor)
                 .coerceAtMost(config.maxSMB)
 
+        // ── Delta-to-target ramp (05/07/2026, Ecko) ──────────────────────
+        // WatchingFrontload sprong voorheen in één cyclus van 0 naar de volle
+        // watchingFrontloadTargetU zodra deltaToTarget de drempel passeerde —
+        // een harde aan/uit-drempel. Vervangen door een kwadratische ease-in-
+        // opbouw: vlak na de drempel blijft de dosis laag (WATCHING_DELTA_RAMP_FLOOR),
+        // en pas naarmate deltaToTarget verder oploopt (over WATCHING_DELTA_RAMP_WIDTH
+        // mmol) bouwt de dosis versneld op naar 100%. Dat geeft bedenktijd vlak over
+        // de drempel (kan ruis/een tijdelijke uitschieter zijn) zonder de reactie bij
+        // een duidelijke, aanhoudende stijging te vertragen.
+        //
+        // Alleen de DOSISHOOGTE wordt geraamd. De trigger zelf (watchingDeltaOk,
+        // dus WANNEER WFF in aanmerking komt) blijft op dezelfde drempel — de
+        // andere WFF-gates (slope/peakRise/iob) zijn hier niet door geraakt.
+        val watchingDeltaRampX = ((ctx.deltaToTarget - config.watchingMinDeltaToTarget) / WATCHING_DELTA_RAMP_WIDTH)
+            .coerceIn(0.0, 1.0)
+        val watchingDeltaRampFrac = WATCHING_DELTA_RAMP_FLOOR +
+            (1.0 - WATCHING_DELTA_RAMP_FLOOR) * watchingDeltaRampX * watchingDeltaRampX
+        val watchingFrontloadTargetUEffective = watchingFrontloadTargetU * watchingDeltaRampFrac
+
 // 3) Echte triggerconditie
         val watchingFrontloadTriggered =
             watchingContextOk &&
@@ -4674,7 +4821,9 @@ class FCLvNext(
         logRow.watchingDeltaOk = watchingDeltaOk
         logRow.watchingPeakRiseOk = watchingPeakRiseOk
         logRow.watchingIobOk = watchingIobOk
-        logRow.watchingFrontloadTargetU = watchingFrontloadTargetU
+        // Logt de daadwerkelijk toegepaste (na-ramp) waarde — het ceiling-bedrag
+        // vóór de ramp staat in de status-tekst hieronder voor analysedoeleinden.
+        logRow.watchingFrontloadTargetU = watchingFrontloadTargetUEffective
         logRow.watchingFrontloadTriggered = watchingFrontloadTriggered
 
         // Log WFF hypo-blokkade zodat het zichtbaar is in de CSV
@@ -4691,12 +4840,13 @@ class FCLvNext(
 // 5) Pas dosing toe als triggered
         if (watchingFrontloadTriggered) {
 
-            if (finalDose < watchingFrontloadTargetU) {
+            if (finalDose < watchingFrontloadTargetUEffective) {
                 status.append(
                     "WATCHING FRONTLOAD: " +
-                        "${"%.2f".format(finalDose)}→${"%.2f".format(watchingFrontloadTargetU)}U\n"
+                        "${"%.2f".format(finalDose)}→${"%.2f".format(watchingFrontloadTargetUEffective)}U " +
+                        "(ceiling=${"%.2f".format(watchingFrontloadTargetU)}U ramp=${"%.0f".format(watchingDeltaRampFrac * 100)}%)\n"
                 )
-                finalDose = watchingFrontloadTargetU
+                finalDose = watchingFrontloadTargetUEffective
             }
         }
 
@@ -4939,7 +5089,33 @@ class FCLvNext(
                 val commitNr = episodeCommitCount + 1
                 val budgetDecay = (episodeBoostBudgetU / (config.maxSMB * 2.0))
                     .coerceIn(0.0, 0.50)
-                val effectiveDecay = (config.lateCommitDecayFactor + budgetDecay)
+
+                // ── Curve-fit "topping out"-bonus (04/07/2026, Ecko) ─────────
+                // Spiegelbeeld van de fitConfidenceBoost in computeEarlyBoostFactor:
+                // waar die de VROEGE dosis eerder/harder maakt bij een bevestigde
+                // stijging, maakt dit de AFBOUW eerder/steiler bij een bevestigde,
+                // veilige daling. Voorwaarden (alle drie vereist):
+                //   1. curveFitR2 overtuigend hoog — geen ruis, één schone curve
+                //   2. curveAcceleration <= 0 — de parabool-fit zelf toont al
+                //      afvlakking/daling, niet alleen de EWMA-slope
+                //   3. predictedPeak blijft ruim (>=1.5 mmol marge) onder de
+                //      primaire streefgrens van 10 mmol (doel.txt)
+                // Voorwaarde 2 sluit een actieve maaltijdstijging per definitie
+                // uit (die heeft per definitie curveAcceleration > 0 zolang hij
+                // aan de gang is), dus dit kan de stijging zelf nooit vertragen —
+                // het versnelt alleen de afbouw ná een bevestigde piek.
+                val toppingOutConfident = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
+                    ctx.curveAcceleration <= 0.0 &&
+                    peak.predictedPeak <= (TOPPING_OUT_HYPER_REF_MMOL - TOPPING_OUT_MARGIN_MMOL)
+                val toppingOutBoost = if (toppingOutConfident) {
+                    val fitScore = smooth01((ctx.curveFitR2 - CURVE_FIT_MIN_R2) / (0.98 - CURVE_FIT_MIN_R2))
+                    val marginScore = smooth01(
+                        ((TOPPING_OUT_HYPER_REF_MMOL - TOPPING_OUT_MARGIN_MMOL) - peak.predictedPeak) / TOPPING_OUT_MARGIN_MMOL
+                    )
+                    fitScore * marginScore * TOPPING_OUT_MAX_DECAY_BOOST
+                } else 0.0
+
+                val effectiveDecay = (config.lateCommitDecayFactor + budgetDecay + toppingOutBoost)
                     .coerceIn(0.0, 0.70)
                 val lateDecayActive = effectiveDecay > 0.01 && commitNr > 1
 
@@ -4978,9 +5154,13 @@ class FCLvNext(
                         .coerceIn(decayFloor, 1.0)
                 } else 1.0
 
+                logRow.toppingOutBoost = toppingOutBoost
                 if (lateDecayActive) {
+                    val toppingOutSuffix = if (toppingOutBoost > 0.001)
+                        " toppingOut=+${"%.2f".format(toppingOutBoost)}(R²=${"%.2f".format(ctx.curveFitR2)})"
+                    else ""
                     status.append(
-                        "COMMIT DECAY ×${"%.2f".format(lateDecayMul)} (#$commitNr decay=${"%.2f".format(effectiveDecay)} budget=${"%.2f".format(episodeBoostBudgetU)}U)\n"
+                        "COMMIT DECAY ×${"%.2f".format(lateDecayMul)} (#$commitNr decay=${"%.2f".format(effectiveDecay)} budget=${"%.2f".format(episodeBoostBudgetU)}U$toppingOutSuffix)\n"
                     )
                 }
                 logRow.commitPostPeakFactor = postPeak.commitFactor

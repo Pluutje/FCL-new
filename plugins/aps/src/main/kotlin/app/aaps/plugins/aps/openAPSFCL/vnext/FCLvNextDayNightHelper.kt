@@ -34,16 +34,24 @@ class FCLvNextDayNightHelper(
         )
     }
 
-    private fun isWeekendDay(dayOfWeek: Int): Boolean {
-        val dayMapping = mapOf(
-            1 to "ma", 2 to "di", 3 to "wo", 4 to "do",
-            5 to "vr", 6 to "za", 7 to "zo"
-        )
-        val currentDayAbbr = dayMapping[dayOfWeek] ?: return false
-        val weekendDagen = preferences.get(StringKey.WeekendDagen)
+    /** Instance-gemak: leest de WeekendDagen-instelling zelf uit preferences. */
+    fun isWeekendDay(dayOfWeek: Int): Boolean =
+        isWeekendDay(dayOfWeek, preferences.get(StringKey.WeekendDagen))
 
-        return weekendDagen.split(",").any {
-            it.trim().equals(currentDayAbbr, ignoreCase = true)
+    companion object {
+        // 05/07/2026 (Ecko): losgetrokken uit de instance-methode zodat andere
+        // modules (FclMealTimeAnticipation.kt) exact dezelfde weekend-definitie
+        // kunnen hergebruiken zonder een eigen Preferences-afhankelijkheid nodig
+        // te hebben en zonder de dag-afkortingen-mapping te dupliceren.
+        fun isWeekendDay(dayOfWeek: Int, weekendDagenCsv: String): Boolean {
+            val dayMapping = mapOf(
+                1 to "ma", 2 to "di", 3 to "wo", 4 to "do",
+                5 to "vr", 6 to "za", 7 to "zo"
+            )
+            val currentDayAbbr = dayMapping[dayOfWeek] ?: return false
+            return weekendDagenCsv.split(",").any {
+                it.trim().equals(currentDayAbbr, ignoreCase = true)
+            }
         }
     }
 

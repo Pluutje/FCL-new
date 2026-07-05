@@ -146,7 +146,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V6 v3.0.9")
+        appendLine(" 🧠 FCL V7 v0.0.1")
         appendLine("════════════════════════")
         appendLine()
 
@@ -162,8 +162,8 @@ class FCLvNextStatusFormatter(
         appendLine("─────────────────────")
         appendLine(activityLog ?: str.geenActiviteitdata)
 
-        // AutoSens-sectie verwijderd (18/06/2026)
-        // Glucose statistieken verwijderd (29/06/2026): zie Statistics-tabblad
+        // AutoSens-sectie verwijderd (18/06/2026)     POST_NOTIFICATIONS
+        // Glucose statistieken verwijderd (29/06/2026): zie Statistics-tabblad    onNotificationActionClick
 
         append(buildAnalyzerConfigSectie(activeConfig))
     }

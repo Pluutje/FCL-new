@@ -81,13 +81,10 @@ object FclActivityLogger {
         .ofPattern("dd-MM-yyyy HH:mm")
         .withZone(ZoneId.systemDefault())
 
-    private val DOW_FMT = DateTimeFormatter
-        .ofPattern("u")   // 1=Monday … 7=Sunday (ISO)
-        .withZone(ZoneId.systemDefault())
-
     private val HEADERS = listOf(
         "ts_utc", "ts_local", "episode_id", "is_night", "day_of_week",
         "bg_start_mmol", "target_mmol", "iob_ratio", "iob_abs_u",
+        "has_manual_correction",
         "stap_h1", "stap_h2", "stap_h3", "stap_h4",
         "stap_h5", "stap_h6", "stap_h7", "stap_h8",
         "stap_totaal_4h", "stap_totaal_8h",
@@ -124,6 +121,7 @@ object FclActivityLogger {
         iobRatio:               Double,
         iobAbsU:                Double,
         isNight:                Boolean,
+        externalBolusU:         Double,
         activityModuleActief:   Boolean,
         activityRetention:      Int,
         activityInsulinPct:     Double,
@@ -133,17 +131,28 @@ object FclActivityLogger {
             val instant = Instant.ofEpochMilli(nowMs)
             val hourMs  = 3_600_000L
 
-            // Stappen ophalen per uur-venster via getStepsCountFromTimeToTime —
-            // DB-side filtering is efficiënter en correcter dan app-side filter.
+            // ── Stappen ophalen per uur-venster ──────────────────────────────
+            // StepsCount bevat kant-en-klare aggregaties per tijdvenster op elk record.
+            // steps60min = stappen in de 60 minuten vóór de timestamp van dat record.
+            //
+            // Aanpak: per uur-grens de meest recente record VÓÓR dat tijdstip opvragen
+            // en steps60min direct aflezen. Dat geeft de uuractiviteit zonder
+            // optelling of dubbeltelling. (04/07/2026, Ecko — fix voor >100k-bug)
+            //
+            // h1 = steps60min van de laatste record vóór nowMs         (= afgelopen uur)
+            // h2 = steps60min van de laatste record vóór nowMs - 1u    (= uur daarvoor)
+            // enz.
             val stepsPerHour = (1..8).map { h ->
-                val to   = nowMs - (h - 1) * hourMs
-                val from = nowMs - h * hourMs
+                val boundary = nowMs - (h - 1) * hourMs
                 try {
                     kotlinx.coroutines.runBlocking {
-                        persistenceLayer.getStepsCountFromTimeToTime(from, to)
-                            .sumOf { it.steps5min }
+                        // Geef de laatste record die eindigt vóór of op de uurgrens
+                        persistenceLayer.getLastStepsCountFromTimeToTime(
+                            startTime = boundary - hourMs,
+                            endTime   = boundary
+                        )?.steps60min ?: 0
                     }
-                } catch (_: Exception) { -1 }  // -1 = geen data beschikbaar
+                } catch (_: Exception) { -1 }
             }
 
             val totaal4h = stepsPerHour.take(4).filter { it >= 0 }.sum()
@@ -165,11 +174,12 @@ object FclActivityLogger {
                 LOCAL_FMT.format(instant),
                 episodeId.toString(),
                 isNight.toString(),
-                DOW_FMT.format(instant),
+                java.time.ZonedDateTime.ofInstant(instant, ZoneId.systemDefault()).dayOfWeek.value.toString(),  // 1=ma…7=zo
                 "%.2f".format(bgStartMmol),
                 "%.2f".format(targetMmol),
                 "%.3f".format(iobRatio),
                 "%.2f".format(iobAbsU),
+                if (externalBolusU > 0.05) "1" else "0",
                 stepsPerHour[0].toString(),
                 stepsPerHour[1].toString(),
                 stepsPerHour[2].toString(),

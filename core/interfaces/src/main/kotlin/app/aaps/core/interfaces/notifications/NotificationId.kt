@@ -2,6 +2,7 @@ package app.aaps.core.interfaces.notifications
 
 import app.aaps.core.interfaces.notifications.NotificationCategory.AUTOMATION
 import app.aaps.core.interfaces.notifications.NotificationCategory.CGM
+import app.aaps.core.interfaces.notifications.NotificationCategory.FCL
 import app.aaps.core.interfaces.notifications.NotificationCategory.LOOP
 import app.aaps.core.interfaces.notifications.NotificationCategory.PROFILE
 import app.aaps.core.interfaces.notifications.NotificationCategory.PUMP
@@ -129,6 +130,19 @@ enum class NotificationId(
     CARBS_REQUIRED(NORMAL, LOOP),
     SMB_FALLBACK(NORMAL, LOOP),
     DYN_ISF_FALLBACK(NORMAL, LOOP),
+
+    // FCLvNext (05/07/2026, Ecko) — AI Advisor heeft nieuwe parametervoorstellen
+    // klaarstaan. Eigen categorie (FCL) i.p.v. AUTOMATION zodat dit niet het
+    // icoon en de klik-navigatie van de losstaande Automation-plugin deelt/
+    // hijackt — zie handleNotificationAction() in ComposeMainActivity.kt en
+    // NotificationCategory.toIcon() in NotificationBottomSheet.kt.
+    //
+    // Niveau INFO (herzien 05/07/2026, Ecko): eerst NORMAL, maar dat gaf een
+    // rode meldingsbel — te dringend ogend voor "er staan parametervoorstellen
+    // klaar om rustig te beoordelen". INFO is dezelfde classificatie als
+    // PROFILE_SET_OK/PUMP_EMULATOR_DISPLAY hieronder — informatief, geen actie
+    // vereist op korte termijn.
+    FCL_AI_ADVISOR_READY(INFO, FCL),
 
     // Sync — Nightscout
     OLD_NS(IMPORTANT, SYNC),
