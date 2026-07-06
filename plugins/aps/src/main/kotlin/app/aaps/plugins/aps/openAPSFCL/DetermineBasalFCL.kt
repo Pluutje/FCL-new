@@ -536,12 +536,50 @@ class DetermineBasalFCL @Inject constructor(
                 )
 
 
+            // 06/07/2026 (Ecko) — laatste-uur activiteitsindicatie voor de status-
+            // formatter (Activiteit-sectie). Zelfde patroon/bron als
+            // FclActivityLogger.kt, maar bewust hier apart en licht gehouden:
+            // dit draait elke cyclus (i.p.v. alleen bij episodestart) en toont
+            // uitsluitend het laatste uur, niet de volle 8-uurs-geschiedenis.
+            val nowMsForActivity = System.currentTimeMillis()
+            val recentSteps1h = try {
+                kotlinx.coroutines.runBlocking {
+                    persistenceLayer.getLastStepsCountFromTimeToTime(
+                        startTime = nowMsForActivity - 60L * 60_000L,
+                        endTime = nowMsForActivity
+                    )?.steps60min ?: -1
+                }
+            } catch (e: Exception) { -1 }
+            val recentCalories1h = try {
+                app.aaps.plugins.aps.openAPSFCL.vnext.logging.EstimatedCaloriesCalculator.caloriesInWindow(
+                    persistenceLayer = persistenceLayer,
+                    stepsInWindow = recentSteps1h.coerceAtLeast(0),
+                    startMs = nowMsForActivity - 60L * 60_000L,
+                    endMs = nowMsForActivity
+                )
+            } catch (e: Exception) { -1.0 }
+            val recentHr1h = try {
+                kotlinx.coroutines.runBlocking {
+                    val list = persistenceLayer.getHeartRatesFromTimeToTime(
+                        nowMsForActivity - 60L * 60_000L, nowMsForActivity
+                    )
+                    if (list.isEmpty()) -1.0 else list.map { it.beatsPerMinute }.average()
+                }
+            } catch (e: Exception) { -1.0 }
+
             val uiSnapshot = FclUiSnapshot(
                 bgNow = bgNowMmol,
                 iob = currentIOB,
                 delta5m = trendAnalysis?.recentDelta5m,
                 slopeHr = trendAnalysis?.firstDerivative,
-                predictedPeak = advice.predictedPeak
+                predictedPeak = advice.predictedPeak,
+                // 06/07/2026 (Ecko) — zelfde bron/pad als FCLvNext zelf gebruikt
+                // voor trends/slope (zie FCLvNextBgHistoryProvider.kt), dus dit
+                // toont daadwerkelijk wat FCLvNext ziet, niet een aparte/losse lookup.
+                last3DbPoints = bgHistoryProvider.getLastHours(1).takeLast(3),
+                recentSteps1h = recentSteps1h,
+                recentCalories1h = recentCalories1h,
+                recentHr1h = recentHr1h
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,

@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter
  * FCLvNext toch al schrijft naar Documents/AAPS/ANALYSE/:
  *  - FCLvNext_active_params.json   (huidige geleerde parameterwaarden)
  *  - FCLvNext_LearnerLog_v1.csv    (wat de learners vandaag besloten/waarom)
- *  - FCLvNext_Log_v7.csv           (5-min cyclus-log, alléén voor TIR/hypo/
+ *  - FCLvNext_Log_v8.csv           (5-min cyclus-log, alléén voor TIR/hypo/
  *                                    piek-statistiek — ruwe rijen gaan NOOIT
  *                                    naar het model, alleen de samenvatting)
  *
@@ -29,7 +29,7 @@ object FclAiAdvisorDataCollector {
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val ACTIVE_PARAMS_FILE = "FCLvNext_active_params.json"
     private const val LEARNER_LOG_FILE = "FCLvNext_LearnerLog_v1.csv"
-    private const val CYCLE_LOG_FILE = "FCLvNext_Log_v7.csv"
+    private const val CYCLE_LOG_FILE = "FCLvNext_Log_v8.csv"
     private const val MAX_NOTABLE_EPISODES = 5
 
     private val isoFmt = DateTimeFormatter.ISO_INSTANT
@@ -175,7 +175,7 @@ object FclAiAdvisorDataCollector {
         }
     }
 
-    // ── FCLvNext_Log_v7.csv → TIR / hypo / piek-statistiek ─────────────────
+    // ── FCLvNext_Log_v8.csv → TIR / hypo / piek-statistiek ─────────────────
 
     private data class CycleSummary(
         val timeInRangePct: Double,

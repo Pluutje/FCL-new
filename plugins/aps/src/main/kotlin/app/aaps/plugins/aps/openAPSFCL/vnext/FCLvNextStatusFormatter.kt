@@ -13,7 +13,22 @@ data class FclUiSnapshot(
     val iob: Double,
     val delta5m: Double?,
     val slopeHr: Double?,
-    val predictedPeak: Double?
+    val predictedPeak: Double?,
+    // 06/07/2026 (Ecko) — verificatieblok: laat de laatste 3 BG-waarden zien
+    // exact zoals FCLvNextBgHistoryProvider ze aanlevert (dus .recalculated —
+    // gecalibreerd + gesmooth, na LinearCalibration + UKF), zodat in één
+    // oogopslag te zien is of FCLvNext met dezelfde waarden rekent als het
+    // hoofdscherm. Zie de kdoc bovenaan FCLvNextBgHistoryProvider.kt voor
+    // de achtergrond (calibratie-discussie met de hoofdontwikkelaar).
+    val last3DbPoints: List<FCLvNextBgHistoryProvider.BgPoint> = emptyList(),
+    // 06/07/2026 (Ecko) — korte activiteitsindicatie ("laatste uur") voor de
+    // Activiteit-sectie. -1.0/-1 als er geen data beschikbaar is (zelfde
+    // conventie als de kolommen in FCLvNext_ActivityLog_v2.csv). Bewust een
+    // apart, licht opvraagje per cyclus — dit toont alleen het laatste uur,
+    // niet de volle 8-uurs-geschiedenis die de CSV-logger bijhoudt.
+    val recentSteps1h: Int = -1,
+    val recentCalories1h: Double = -1.0,
+    val recentHr1h: Double = -1.0
 )
 
 class FCLvNextStatusFormatter(
@@ -60,6 +75,19 @@ class FCLvNextStatusFormatter(
             appendLine("─────────────────────")
             appendLine("• ${str.glucose}:  ${BgUnits.formatBg(ui.bgNow, mgdl)}$deltaStr")
             appendLine("• ${str.iob}:     ${"%.2f".format(ui.iob)} U")
+            // 06/07/2026 (Ecko) — verificatieblok calibratie: toont de laatste 3
+            // waarden EXACT zoals FCLvNextBgHistoryProvider ze levert (dus na
+            // LinearCalibration + UKF-smoothing, .recalculated), zodat direct
+            // zichtbaar is of FCLvNext met dezelfde waarden rekent als het
+            // hoofdscherm. Bewust altijd getoond (geen aparte instelling) — bij
+            // twijfel over de calibratie-pijplijn moet dit blijvend te
+            // controleren zijn, niet alleen tijdens een debug-sessie.
+            if (ui.last3DbPoints.isNotEmpty()) {
+                appendLine("• Laatste 3 (DB, gecalibreerd):")
+                for (p in ui.last3DbPoints.asReversed()) {
+                    appendLine("   ${p.time.toString("HH:mm:ss")}  ${BgUnits.formatBg(p.bgMmol, mgdl)}")
+                }
+            }
             if (peakLine.isNotEmpty()) appendLine("• ${str.fclPiek}: $peakLine")
         }
     }
@@ -146,7 +174,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v0.0.2")
+        appendLine(" 🧠 FCL V7 v0.0.5")
         appendLine("════════════════════════")
         appendLine()
 
@@ -160,6 +188,12 @@ class FCLvNextStatusFormatter(
 
         appendLine("🏃 ${str.activiteit}")
         appendLine("─────────────────────")
+        // 06/07/2026 (Ecko) — korte indicatie laatste uur, los van de uitgebreide
+        // 8-uurs-geschiedenis die alleen in FCLvNext_ActivityLog_v2.csv staat.
+        val stepsTxt = if (ui.recentSteps1h >= 0) "${ui.recentSteps1h}" else "–"
+        val calTxt = if (ui.recentCalories1h >= 0.0) "${"%.0f".format(ui.recentCalories1h)} kcal" else "–"
+        val hrTxt = if (ui.recentHr1h >= 0.0) "${"%.0f".format(ui.recentHr1h)} bpm" else "–"
+        appendLine("• Laatste uur: 👣 $stepsTxt  🔥 $calTxt  ❤ $hrTxt")
         appendLine(activityLog ?: str.geenActiviteitdata)
 
         // AutoSens-sectie verwijderd (18/06/2026)     POST_NOTIFICATIONS

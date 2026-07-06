@@ -60,6 +60,23 @@ import java.time.format.DateTimeFormatter
  *   stap_piek_waarde    — aantal stappen in het drukste uur
  *   laatste_actief_uur  — hoeveelste uur geleden was het laatste uur met >300 stappen (0=geen)
  *
+ * [Calorieën-historie 8 uur terug] (06/07/2026, Ecko — activiteitsonderzoek fase 2)
+ * Zelfde uurindeling als stappen, maar als SCHATTING via EstimatedCaloriesCalculator.kt
+ * (HR-gebaseerde MET-schatting waar hartslagdata beschikbaar is, anders terugval op
+ * een kcal-per-stap-vuistregel) — niet via Health Connect (bleek voor dit toestel
+ * een doodlopende weg, zie de kdoc bij EstimatedCaloriesCalculator.kt). -1.0 alleen
+ * bij een onverwachte fout in de opvraag zelf.
+ *   cal_h1..cal_h8      — geschatte kcal per uur-venster, zelfde grenzen als stap_h1..stap_h8
+ *   cal_totaal_4h       — som cal_h1..cal_h4
+ *   cal_totaal_8h       — som cal_h1..cal_h8
+ *
+ * [Hartslag-historie 8 uur terug] (06/07/2026, Ecko)
+ * Gemiddelde hartslag per uur-venster, zelfde grenzen als stap_h1..stap_h8 —
+ * de ruwe meting zelf, los van de calorie-schatting die 'm intern ook gebruikt.
+ * -1.0 als er geen hartslagdata in dat uur-venster was (horloge niet gedragen,
+ * geen signaal) of bij een onverwachte fout in de opvraag.
+ *   hr_h1..hr_h8        — gemiddelde bpm per uur-venster
+ *
  * [Huidige activiteitsstatus]
  *   activity_module_actief  — is FCLActivityModule momenteel actief (ON/OFF)
  *   activity_retention      — huidige retentieteller (0-5)
@@ -73,7 +90,14 @@ import java.time.format.DateTimeFormatter
  */
 object FclActivityLogger {
 
-    private const val FILE_NAME      = "FCLvNext_ActivityLog_v1.csv"
+    // 06/07/2026 (Ecko): v1 → v2. v1 had een header met 26 kolommen (vóór de
+    // calorie-toevoeging); doordat het bestand al bestond, schreef de bestaande
+    // append-only logica géén nieuwe header toen de cal_*-kolommen erbij kwamen
+    // — vanaf dat punt hadden nieuwe rijen 36 velden onder een header van 26.
+    // Nieuwe bestandsnaam ipv de header handmatig repareren: v1 blijft
+    // ongewijzigd en leesbaar staan (geen dataverlies), v2 begint schoon met
+    // de header die al vanaf regel 1 bij de 36-koloms-data past.
+    private const val FILE_NAME      = "FCLvNext_ActivityLog_v2.csv"
     private const val RELATIVE_PATH  = "Documents/AAPS/ANALYSE"
     private const val SEP            = ";"
 
@@ -89,6 +113,11 @@ object FclActivityLogger {
         "stap_h5", "stap_h6", "stap_h7", "stap_h8",
         "stap_totaal_4h", "stap_totaal_8h",
         "stap_piek_uur", "stap_piek_waarde", "laatste_actief_uur",
+        "cal_h1", "cal_h2", "cal_h3", "cal_h4",
+        "cal_h5", "cal_h6", "cal_h7", "cal_h8",
+        "cal_totaal_4h", "cal_totaal_8h",
+        "hr_h1", "hr_h2", "hr_h3", "hr_h4",
+        "hr_h5", "hr_h6", "hr_h7", "hr_h8",
         "activity_module_actief", "activity_retention", "activity_insulin_pct"
     )
 
@@ -111,7 +140,7 @@ object FclActivityLogger {
      * @param activityModuleActief  FCLActivityModule actief?
      * @param activityRetention   retentieteller (0-5)
      * @param activityInsulinPct  insulinepercentage uit ActivityModule
-     * @param persistenceLayer    voor stap-opvraag (per uur-venster)
+     * @param persistenceLayer    voor stap- én hartslag-opvraag (per uur-venster)
      */
     fun logEpisodeStart(
         episodeId:              Long,
@@ -169,6 +198,41 @@ object FclActivityLogger {
                 .indexOfFirst { it >= ACTIEF_DREMPEL }
                 .let { if (it == -1) 0 else it + 1 }
 
+            // ── Calorieën schatten per uur-venster (06/07/2026, Ecko) ────────
+            // Zelfde uurgrenzen als stappen hierboven. Zie EstimatedCaloriesCalculator.kt
+            // voor de methode (HR-gebaseerde MET-schatting, terugval op stappen).
+            val caloriesPerHour = (1..8).map { h ->
+                val boundary = nowMs - (h - 1) * hourMs
+                try {
+                    EstimatedCaloriesCalculator.caloriesInWindow(
+                        persistenceLayer = persistenceLayer,
+                        stepsInWindow = stepsPerHour[h - 1],
+                        startMs = boundary - hourMs,
+                        endMs = boundary
+                    )
+                } catch (_: Exception) { -1.0 }
+            }
+            val calTotaal4h = caloriesPerHour.take(4).filter { it >= 0.0 }.sum()
+            val calTotaal8h = caloriesPerHour.filter { it >= 0.0 }.sum()
+
+            // ── Ruwe hartslag per uur-venster (06/07/2026, Ecko) ──────────────
+            // Los van de calorie-schatting: de gemiddelde hartslag zelf is ook
+            // gewoon nuttige ruwe data om te hebben, niet alleen een tussenstap
+            // richting kcal. Zelfde uurgrenzen als stappen/calorieën. Bewust een
+            // eigen, simpele opvraag hier (i.p.v. de HR-lijst uit
+            // EstimatedCaloriesCalculator hergebruiken) — houdt de twee functies
+            // onafhankelijk leesbaar; de extra opvraag kost weinig, want dit
+            // loopt alleen bij episodestart, niet elke cyclus.
+            val hrPerHour = (1..8).map { h ->
+                val boundary = nowMs - (h - 1) * hourMs
+                try {
+                    val list = kotlinx.coroutines.runBlocking {
+                        persistenceLayer.getHeartRatesFromTimeToTime(boundary - hourMs, boundary)
+                    }
+                    if (list.isEmpty()) -1.0 else list.map { it.beatsPerMinute }.average()
+                } catch (_: Exception) { -1.0 }
+            }
+
             val row = listOf(
                 instant.toString(),
                 LOCAL_FMT.format(instant),
@@ -193,6 +257,24 @@ object FclActivityLogger {
                 peekUur.toString(),
                 peekWaarde.toString(),
                 laatste.toString(),
+                "%.1f".format(caloriesPerHour[0]),
+                "%.1f".format(caloriesPerHour[1]),
+                "%.1f".format(caloriesPerHour[2]),
+                "%.1f".format(caloriesPerHour[3]),
+                "%.1f".format(caloriesPerHour[4]),
+                "%.1f".format(caloriesPerHour[5]),
+                "%.1f".format(caloriesPerHour[6]),
+                "%.1f".format(caloriesPerHour[7]),
+                "%.1f".format(calTotaal4h),
+                "%.1f".format(calTotaal8h),
+                "%.0f".format(hrPerHour[0]),
+                "%.0f".format(hrPerHour[1]),
+                "%.0f".format(hrPerHour[2]),
+                "%.0f".format(hrPerHour[3]),
+                "%.0f".format(hrPerHour[4]),
+                "%.0f".format(hrPerHour[5]),
+                "%.0f".format(hrPerHour[6]),
+                "%.0f".format(hrPerHour[7]),
                 if (activityModuleActief) "1" else "0",
                 activityRetention.toString(),
                 "%.1f".format(activityInsulinPct)
