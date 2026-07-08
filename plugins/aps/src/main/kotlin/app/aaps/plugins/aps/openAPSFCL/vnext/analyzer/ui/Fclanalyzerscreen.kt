@@ -112,16 +112,35 @@ fun FclAnalyzerScreen(
 
             // Filter nutteloze episodes: toon en sla alleen episodes op waarbij
             // FCLvNext minimaal 1 keer een echte maaltijdbolus heeft gegeven
-            // (>= 80% van maxSMB). Episodes met alleen kleine correcties (zoals
-            // nachtcorrecties of sensor-artefacten) zijn niet nuttig voor de
-            // learner en verwarren de gebruiker in de episode viewer.
+            // (>= 50% van maxSMB in minstens 1 cyclus) ÉN voldoende totaal
+            // geleverd over de hele episode (>= 100% van maxSMB, opgeteld).
+            // Episodes met alleen kleine correcties (zoals nachtcorrecties of
+            // sensor-artefacten) zijn niet nuttig voor de learner en verwarren
+            // de gebruiker in de episode viewer.
             // De meest recente (nog actieve) episode wordt altijd getoond.
-            val significantDoseThreshold = manualMaxSmb * 0.80
+            //
+            // HERZIEN 07/07/2026 (Ecko): was uitsluitend een piek-eis (>= 80%
+            // van maxSMB in ÉÉN cyclus). Naarmate FCLvNext geleidelijker is
+            // gaan doseren (curve-fit-confidence-gates, de WatchingFrontload-
+            // ease-in-curve — zie FCLvNext.kt), bereikt een cyclus die piek
+            // steeds minder vaak, ook bij een daadwerkelijk substantiële
+            // maaltijd: de dosis wordt nu vaker over meerdere kleinere commits
+            // verspreid in plaats van in één klap gegeven. Een zuiver piek-
+            // gebaseerd filter beloont dus onbedoeld "spits" doseren en straft
+            // "geleidelijk" doseren — precies het tegenovergestelde van wat we
+            // met die wijzigingen beoogden. Vandaar nu een combinatie: nog
+            // steeds een (verlaagde) piek-eis, mét een totaal-eis, zodat een
+            // episode ook meetelt als de dosis verspreid maar substantieel was.
+            val singleDoseThreshold = manualMaxSmb * 0.50
+            val totalDoseThreshold = manualMaxSmb * 1.00
             val allCleaned = if (detected.size > 1) detected.drop(1) else emptyList()
             val lastEpisode = allCleaned.lastOrNull()
             val cleanedEpisodes = allCleaned.filter { ep ->
                 ep == lastEpisode ||   // meest recente altijd tonen
-                    ep.rows.any { it.deliveredTotal >= significantDoseThreshold }
+                    (
+                        ep.rows.any { it.deliveredTotal >= singleDoseThreshold } &&
+                            ep.rows.sumOf { it.deliveredTotal } >= totalDoseThreshold
+                        )
             }
             episodes = cleanedEpisodes
 

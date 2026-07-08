@@ -141,7 +141,8 @@ class DetermineBasalFCL @Inject constructor(
                 activityModuleActief = fclActivityModule.isCurrentlyActive(),
                 activityRetention    = fclActivityModule.getCurrentRetention(),
                 activityInsulinPct   = fclActivityModule.getCurrentInsulinPct(),
-                persistenceLayer     = persistenceLayer
+                persistenceLayer     = persistenceLayer,
+                context              = context
             )
         }
     }
@@ -552,6 +553,7 @@ class DetermineBasalFCL @Inject constructor(
             } catch (e: Exception) { -1 }
             val recentCalories1h = try {
                 app.aaps.plugins.aps.openAPSFCL.vnext.logging.EstimatedCaloriesCalculator.caloriesInWindow(
+                    context = context,
                     persistenceLayer = persistenceLayer,
                     stepsInWindow = recentSteps1h.coerceAtLeast(0),
                     startMs = nowMsForActivity - 60L * 60_000L,
@@ -567,6 +569,13 @@ class DetermineBasalFCL @Inject constructor(
                 }
             } catch (e: Exception) { -1.0 }
 
+            // 06/07/2026 (Ecko) — meest recente gedetecteerde activiteit, voor de
+            // status-formatter. "Latest" (niet vensterspecifiek) omdat dit de
+            // huidige/laatst-bekende toestand toont, niet een terugkijkend uur.
+            val recentActivity = try {
+                app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclActivityTypeCache.latest(context)
+            } catch (e: Exception) { null }
+
             val uiSnapshot = FclUiSnapshot(
                 bgNow = bgNowMmol,
                 iob = currentIOB,
@@ -579,7 +588,9 @@ class DetermineBasalFCL @Inject constructor(
                 last3DbPoints = bgHistoryProvider.getLastHours(1).takeLast(3),
                 recentSteps1h = recentSteps1h,
                 recentCalories1h = recentCalories1h,
-                recentHr1h = recentHr1h
+                recentHr1h = recentHr1h,
+                recentActivityType = recentActivity?.activityType,
+                recentActivityConfidencePct = recentActivity?.confidencePct ?: 0
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,

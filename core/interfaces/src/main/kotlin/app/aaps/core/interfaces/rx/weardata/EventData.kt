@@ -160,6 +160,26 @@ sealed class EventData : Event() {
             "HR ${beatsPerMinute.toInt()} at ${Date(timestamp)} for ${duration / 1000.0}sec $device"
     }
 
+    // 06/07/2026 (Ecko) — automatische activiteitsherkenning (fietsen/lopen/stil/etc.),
+    // via Android's ActivityRecognitionClient op het horloge. Los van ActionStepsRate/
+    // ActionHeartRate omdat dit een discrete classificatie is (met betrouwbaarheid),
+    // geen continue meetwaarde. @Serializable, zelfde als ActionStepsRate — nodig voor
+    // correcte overdracht via de Wear Data Layer.
+    @Serializable
+    data class ActionActivityType(
+        val timestamp: Long,
+        /** DetectedActivity-typenaam, bijv. "ON_BICYCLE", "WALKING", "RUNNING", "STILL",
+         *  "IN_VEHICLE", "TILTING", "UNKNOWN" — als String i.p.v. de Google-int-constante,
+         *  zodat deze module geen afhankelijkheid van play-services-location nodig heeft. */
+        val activityType: String,
+        val confidencePct: Int,
+        val device: String
+    ) : EventData() {
+
+        override fun toString() =
+            "ACTIVITY $activityType (${confidencePct}%) at ${Date(timestamp)} $device"
+    }
+
     @Serializable
     data class ActionStepsRate(
         val duration: Long,

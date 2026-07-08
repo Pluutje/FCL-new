@@ -358,6 +358,20 @@ class DataHandlerMobile @Inject constructor(
                     .onErrorComplete()
             }
             .subscribe()
+        // 06/07/2026 (Ecko) — automatische activiteitsherkenning (fietsen/lopen/stil/etc.).
+        // Bewust GEEN persistenceLayer-opslag (zie FclDetectedActivityCache.kt) — dit is
+        // een lichte, FCLvNext-eigen cache i.p.v. een nieuwe Room-Entity/Dao/Transaction,
+        // om geen wijzigingen aan core:database/core:interfaces nodig te maken.
+        disposable += rxBus
+            .toObservable(EventData.ActionActivityType::class.java)
+            .publish { shared -> shared.buffer(shared.debounce(HEALTH_EVENT_QUIET_PERIOD_MS, TimeUnit.MILLISECONDS, aapsSchedulers.io)) }
+            .observeOn(aapsSchedulers.io)
+            .concatMapCompletable {
+                rxCompletable { handleActivityTypeBatch(it) }
+                    .doOnError(fabricPrivacy::logException)
+                    .onErrorComplete()
+            }
+            .subscribe()
         onEventSync<EventData.ActionGetCustomWatchface>(detail = { " watchface=${it.customWatchface}" }) { handleGetCustomWatchface(it) }
     }
 
@@ -1617,6 +1631,56 @@ class DataHandlerMobile @Inject constructor(
             )
         }
         persistenceLayer.insertOrUpdateStepsCounts(rows)
+    }
+
+    // 06/07/2026 (Ecko) — zie de subscriptie hierboven voor de reden dat dit NIET
+    // via persistenceLayer/Room gaat.
+    //
+    // BELANGRIJK: dit bestand (package app.aaps.plugins.sync.wear.wearintegration)
+    // zit in de :plugins:sync-module, terwijl FclActivityTypeCache.kt in de
+    // FCLvNext-plugin zit (:plugins:aps) — sync hoort architecturaal niet van
+    // een specifieke aps-plugin af te hangen (en andersom, aps hangt al van
+    // sync af, dus een omgekeerde dependency zou circulair zijn). Vandaar: GEEN
+    // aanroep van de FCLvNext-klasse hier, maar rechtstreeks naar dezelfde
+    // SharedPreferences schrijven — bestandsnaam en JSON-vorm moeten dus exact
+    // gelijk blijven aan wat FclActivityTypeCache.kt aan de leeskant verwacht
+    // ("fcl_activity_type_cache", sleutel "history_json", vorm
+    // {"events":[{"ts":..,"type":"..","conf":..}, ...]}).
+    private fun handleActivityTypeBatch(events: List<EventData.ActionActivityType>) {
+        aapsLogger.debug(LTag.WEAR, "Activity type batch received: ${events.size} event(s)")
+        if (events.isEmpty()) return
+
+        val prefs = context.getSharedPreferences("fcl_activity_type_cache", Context.MODE_PRIVATE)
+        val existing = try {
+            val raw = prefs.getString("history_json", "") ?: ""
+            if (raw.isBlank()) org.json.JSONArray()
+            else org.json.JSONObject(raw).optJSONArray("events") ?: org.json.JSONArray()
+        } catch (e: Exception) {
+            org.json.JSONArray()
+        }
+
+        val merged = org.json.JSONArray()
+        for (i in 0 until existing.length()) merged.put(existing.get(i))
+        for (e in events) {
+            merged.put(
+                org.json.JSONObject()
+                    .put("ts", e.timestamp)
+                    .put("type", e.activityType)
+                    .put("conf", e.confidencePct)
+            )
+        }
+
+        // Zelfde rollend venster (24u) als FclActivityTypeCache.kt aanhoudt.
+        val cutoff = (events.maxOf { it.timestamp }) - 24L * 60L * 60_000L
+        val trimmed = org.json.JSONArray()
+        for (i in 0 until merged.length()) {
+            val o = merged.getJSONObject(i)
+            if (o.optLong("ts", 0L) >= cutoff) trimmed.put(o)
+        }
+
+        prefs.edit()
+            .putString("history_json", org.json.JSONObject().put("events", trimmed).toString())
+            .apply()
     }
 
     private fun handleGetCustomWatchface(command: EventData.ActionGetCustomWatchface) {

@@ -148,6 +148,10 @@ dependencies {
     implementation(libs.androidx.wear.compose.foundation)
 
     implementation(libs.com.google.android.gms.playservices.wearable)
+    // FCLvNext (06/07/2026, Ecko): automatische activiteitsherkenning
+    // (ActivityTypeListener.kt) — ActivityRecognitionClient/DetectedActivity
+    // zitten in play-services-location, niet in play-services-wearable hierboven.
+    implementation(libs.com.google.android.gms.playservices.location)
     implementation(files("${rootDir}/wear/libs/hellocharts-library-1.5.8.aar"))
 
     ksp(libs.com.google.dagger.android.processor)
@@ -157,4 +161,5 @@ dependencies {
     // runner, so the vintage engine bridges those tests onto the JUnit Platform alongside the Jupiter tests.
     testImplementation(libs.org.robolectric)
     testRuntimeOnly(libs.org.junit.vintage.engine)
+
 }

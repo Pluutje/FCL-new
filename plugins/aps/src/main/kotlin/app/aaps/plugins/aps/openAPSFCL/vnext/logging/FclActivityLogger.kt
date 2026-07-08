@@ -118,6 +118,10 @@ object FclActivityLogger {
         "cal_totaal_4h", "cal_totaal_8h",
         "hr_h1", "hr_h2", "hr_h3", "hr_h4",
         "hr_h5", "hr_h6", "hr_h7", "hr_h8",
+        "act_h1", "act_h2", "act_h3", "act_h4",
+        "act_h5", "act_h6", "act_h7", "act_h8",
+        "act_conf_h1", "act_conf_h2", "act_conf_h3", "act_conf_h4",
+        "act_conf_h5", "act_conf_h6", "act_conf_h7", "act_conf_h8",
         "activity_module_actief", "activity_retention", "activity_insulin_pct"
     )
 
@@ -141,6 +145,8 @@ object FclActivityLogger {
      * @param activityRetention   retentieteller (0-5)
      * @param activityInsulinPct  insulinepercentage uit ActivityModule
      * @param persistenceLayer    voor stap- én hartslag-opvraag (per uur-venster)
+     * @param context             nodig voor EstimatedCaloriesCalculator (fiets-
+     *                            correctie via FclActivityTypeCache, 06/07/2026, Ecko)
      */
     fun logEpisodeStart(
         episodeId:              Long,
@@ -154,7 +160,8 @@ object FclActivityLogger {
         activityModuleActief:   Boolean,
         activityRetention:      Int,
         activityInsulinPct:     Double,
-        persistenceLayer:       PersistenceLayer
+        persistenceLayer:       PersistenceLayer,
+        context:                android.content.Context
     ) {
         try {
             val instant = Instant.ofEpochMilli(nowMs)
@@ -205,6 +212,7 @@ object FclActivityLogger {
                 val boundary = nowMs - (h - 1) * hourMs
                 try {
                     EstimatedCaloriesCalculator.caloriesInWindow(
+                        context = context,
                         persistenceLayer = persistenceLayer,
                         stepsInWindow = stepsPerHour[h - 1],
                         startMs = boundary - hourMs,
@@ -231,6 +239,19 @@ object FclActivityLogger {
                     }
                     if (list.isEmpty()) -1.0 else list.map { it.beatsPerMinute }.average()
                 } catch (_: Exception) { -1.0 }
+            }
+
+            // ── Gedetecteerd activiteitstype per uur-venster (06/07/2026, Ecko) ──
+            // Zelfde bron als EstimatedCaloriesCalculator gebruikt voor de MET-keuze
+            // (FclActivityTypeCache.dominantInWindow) — dus het gelogde type en het
+            // kcal-getal kunnen nooit uit de pas lopen. "" (leeg) als er in dat uur
+            // niets is gedetecteerd, i.p.v. -1 (dit is tekst, geen getal).
+            val actTypePerHour = (1..8).map { h ->
+                val boundary = nowMs - (h - 1) * hourMs
+                try {
+                    app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclActivityTypeCache
+                        .dominantInWindow(context, boundary - hourMs, boundary)
+                } catch (_: Exception) { null }
             }
 
             val row = listOf(
@@ -275,6 +296,22 @@ object FclActivityLogger {
                 "%.0f".format(hrPerHour[5]),
                 "%.0f".format(hrPerHour[6]),
                 "%.0f".format(hrPerHour[7]),
+                actTypePerHour[0]?.activityType ?: "",
+                actTypePerHour[1]?.activityType ?: "",
+                actTypePerHour[2]?.activityType ?: "",
+                actTypePerHour[3]?.activityType ?: "",
+                actTypePerHour[4]?.activityType ?: "",
+                actTypePerHour[5]?.activityType ?: "",
+                actTypePerHour[6]?.activityType ?: "",
+                actTypePerHour[7]?.activityType ?: "",
+                actTypePerHour[0]?.confidencePct?.toString() ?: "",
+                actTypePerHour[1]?.confidencePct?.toString() ?: "",
+                actTypePerHour[2]?.confidencePct?.toString() ?: "",
+                actTypePerHour[3]?.confidencePct?.toString() ?: "",
+                actTypePerHour[4]?.confidencePct?.toString() ?: "",
+                actTypePerHour[5]?.confidencePct?.toString() ?: "",
+                actTypePerHour[6]?.confidencePct?.toString() ?: "",
+                actTypePerHour[7]?.confidencePct?.toString() ?: "",
                 if (activityModuleActief) "1" else "0",
                 activityRetention.toString(),
                 "%.1f".format(activityInsulinPct)

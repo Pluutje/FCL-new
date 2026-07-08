@@ -34,11 +34,11 @@ object FclAiAdvisorScheduler {
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val LAST_RUN_MARKER = "FCLvNext_AiAdvisorLastRun.txt"
     private const val LAST_SUCCESS_MARKER = "FCLvNext_AiAdvisorLastSuccess.txt"
-    private val MIN_INTERVAL = Duration.ofHours(12)  // Productie (05/07/2026, Ecko): max. 2×/dag — was 4u testfase
+    private val MIN_INTERVAL = Duration.ofHours(8)  // Productie (08/07/2026, Ecko): max. 3×/dag — was 12u na de 4 uur testfase
     // Bij een tijdelijke fout (timeout, 503) wordt de run opnieuw geprobeerd
     // elke RETRY_INTERVAL, totdat er een succesvol rapport is of MIN_INTERVAL
     // verstreken is voor de volgende dag-run.
-    private val RETRY_INTERVAL = Duration.ofMinutes(15)
+    private val RETRY_INTERVAL = Duration.ofMinutes(10)
 
     private val cachedResult = AtomicReference<AiAdvisorRunResult?>(null)
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)

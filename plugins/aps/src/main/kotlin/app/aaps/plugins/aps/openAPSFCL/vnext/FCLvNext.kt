@@ -3085,6 +3085,12 @@ class FCLvNext(
     // Frontload-shift tracking: bijgehouden per episode
     private var episodeCommitCount: Int = 0    // volgnummer commit (1=eerste)
     private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
+    // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
+    // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
+    // Mag GROEIEN als een latere commit terecht groter is (echte, doorzettende
+    // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
+    // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
+    private var episodePeakCommitU: Double = 0.0
 
     // ── Snelle-afremming guard (zie updateRapidDecelGate) ──────────────────
     // Houdt de hoogste recentSlope sinds episode-start bij, om een relatieve
@@ -3291,6 +3297,7 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodePeakCommitU = 0.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -3875,6 +3882,7 @@ class FCLvNext(
             mealEpisodeStartBg = ctx.input.bgNow
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodePeakCommitU = 0.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -3906,6 +3914,7 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodePeakCommitU = 0.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -4439,17 +4448,24 @@ class FCLvNext(
                 early.confidence >= config.earlyBoostMinConfidence) {
                 earlyDose.boostCommitCount++
             }
-            // Budget bijhouden: extra units boven wat er zonder earlyBoost gegeven zou zijn.
-            // Gebruik finalDose (na alle caps) zodat het budget altijd de werkelijk
-            // afgegeven extra insuline reflecteert — ook na de earlyBoost cap-verruiming.
-            // baseTargetU = wat de commit zou zijn geweest zonder boost (factor=1.0)
-            val baseTargetU = (cappedEarly / config.earlyBoostFactor.coerceAtLeast(1.0))
-                .coerceAtMost(config.maxSMB)  // zonder boost nooit boven normale maxSMB
-            val boostExtraU = (finalDose - maxOf(before, baseTargetU)).coerceAtLeast(0.0)
-            if (boostExtraU > 0.01) {
-                episodeBoostBudgetU += boostExtraU
+            // Budget bijhouden voor de late-commit-decay (07/07/2026, Ecko — herzien).
+            //
+            // WAS: alleen het EarlyBoost-toeschrijfbare deel (boostExtraU) telde mee.
+            // Zodra EarlyBoost zelf stopte met bijdragen (bijv. earlyBoostMaxCommits
+            // bereikt), stopte deze teller met groeien — óók als er via de
+            // basis-energieformule of highBgContinuation gewoon insuline bleef
+            // toegediend. Gevolg, teruggevonden in de praktijkdata: bij episodes met
+            // 5-6 commits na elkaar bleef effectiveDecay/lateDecayMul steken op
+            // ongeveer hetzelfde niveau — vrijwel geen afname tussen de eerste en
+            // de laatste commit, ook al bleef er in totaal veel insuline bijkomen.
+            //
+            // NU: telt de VOLLEDIGE, daadwerkelijk toegediende dosis deze cyclus
+            // (finalDose), ongeacht welk mechanisme 'm veroorzaakte — zodat de
+            // afbouw altijd een compleet beeld heeft van "hoeveel is er al gegeven".
+            if (finalDose > 0.01) {
+                episodeBoostBudgetU += finalDose
                 status.append(
-                    "BOOST BUDGET +${"%.2f".format(boostExtraU)}U " +
+                    "BOOST BUDGET +${"%.2f".format(finalDose)}U " +
                         "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
                 )
             }
@@ -5087,7 +5103,12 @@ class FCLvNext(
                 //   commit 2: ×0.71  commit 3: ×0.42
 
                 val commitNr = episodeCommitCount + 1
-                val budgetDecay = (episodeBoostBudgetU / (config.maxSMB * 2.0))
+                // Noemer verhoogd van maxSMB*2.0 naar maxSMB*4.0 (07/07/2026, Ecko):
+                // episodeBoostBudgetU telt nu de VOLLEDIGE toegediende dosis (zie
+                // hierboven), niet meer alleen het kleine EarlyBoost-extra-deel — een
+                // grote maaltijd kan makkelijk 5-10U cumulatief bereiken. Zonder deze
+                // aanpassing zou budgetDecay al na 1-2 commits verzadigen op 0.50.
+                val budgetDecay = (episodeBoostBudgetU / (config.maxSMB * 4.0))
                     .coerceIn(0.0, 0.50)
 
                 // ── Curve-fit "topping out"-bonus (04/07/2026, Ecko) ─────────
@@ -5140,7 +5161,7 @@ class FCLvNext(
                 // al voldoende; de decayFloor mag hier niet de bottleneck zijn.
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
                     ctx.input.bgNow > ctx.input.targetBG + 3.0
-                val decayFloor = if (bgStijgtNogFors) {
+                val decayFloorBase = if (bgStijgtNogFors) {
                     // Stijgende BG ver boven target: hogere vloer
                     // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18
                     (0.45 * (1.0 - ctx.iobRatio * 1.0)).coerceIn(0.18, 0.40)
@@ -5148,6 +5169,17 @@ class FCLvNext(
                     // Normaal: IOB-afhankelijke vloer
                     (0.35 * (1.0 - ctx.iobRatio * 1.2)).coerceIn(0.10, 0.35)
                 }
+                // Vloer blijft meebewegen met het aantal commits (07/07/2026, Ecko).
+                // BEVINDING: de vloer hierboven hangt alleen af van iobRatio, niet van
+                // commitNr. Zodra de berekende decay (1 - effectiveDecay*(commitNr-1))
+                // onder deze vloer zakt — vaak al bij commit 2-3 — kregen ALLE
+                // volgende commits letterlijk dezelfde waarde: geen verder onderscheid
+                // tussen commit 3, 4, 5 en 6, ook al liep de episode nog lang door.
+                // Kleine, aflopende correctie per extra commit (max 5×0.02=0.10) zorgt
+                // dat er ook ná het bereiken van de vloer nog een geleidelijke afbouw
+                // blijft plaatsvinden, zonder de vloer als veiligheidsgrens los te laten.
+                val decayFloor = (decayFloorBase - (commitNr - 1).coerceAtMost(5) * 0.02)
+                    .coerceAtLeast(0.10)
 
                 lateDecayMul = if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
@@ -5171,12 +5203,39 @@ class FCLvNext(
                     else 0.0
                 logRow.commitDoseRaw = commitDose
 
+                // ── Voorkom dat finalDose de late-commit-afbouw omzeilt (08/07/2026, Ecko) ──
+                // PROBLEEM: committedDose = maxOf(finalDose, commitDose) liet finalDose
+                // (het basis-energiemodel — weet niets van commit-nummer of afbouw)
+                // altijd winnen zodra de BG genoeg was gestegen, wat bij een echte
+                // maaltijd al snel gebeurt. lateDecayMul daalde intussen keurig
+                // (zichtbaar in de logs), maar had in de praktijk geen effect omdat
+                // finalDose het gewoon overnam — de afbouw was daardoor decoratief.
+                //
+                // OPLOSSING, met Ecko's kanttekening verwerkt: alleen als de stijging
+                // daadwerkelijk nog doorzet (bgStijgtNogFors — dezelfde voorwaarde die
+                // decayFloor hierboven al verhoogt) mag finalDose een NIEUW, hoger
+                // piekpunt zetten. Commit 2 mag dus best groter zijn dan commit 1 als
+                // de versnelling dat rechtvaardigt — maar zonder die doorzettende
+                // stijging wordt finalDose begrensd op het hoogste punt dat deze
+                // episode al is bereikt (episodePeakCommitU) keer lateDecayMul, zodat
+                // de afbouw daadwerkelijk bindend wordt. Na een eventuele nieuwe piek
+                // (bij een echte versnelling) gaat de afbouw van latere commits weer
+                // verder vanaf dát nieuwe, hogere punt — niet vanaf de oorspronkelijke
+                // eerste commit. De eerste commit zelf (commitNr <= 1) wordt nooit
+                // begrensd door deze regel.
+                val cappedFinalDose = if (bgStijgtNogFors || commitNr <= 1) {
+                    finalDose
+                } else {
+                    finalDose.coerceAtMost(episodePeakCommitU * lateDecayMul)
+                }
+
                 val committedDose =
                     if (peakCategory >= PeakCategory.HIGH)
-                        maxOf(finalDose, commitDose * 1.15)
+                        maxOf(cappedFinalDose, commitDose * 1.15)
                     else
-                        maxOf(finalDose, commitDose)
+                        maxOf(cappedFinalDose, commitDose)
                 logRow.commitDoseFinal = committedDose
+                episodePeakCommitU = maxOf(episodePeakCommitU, committedDose)
 
 
                 val effectiveMinCommitDose = when {

@@ -28,7 +28,11 @@ data class FclUiSnapshot(
     // niet de volle 8-uurs-geschiedenis die de CSV-logger bijhoudt.
     val recentSteps1h: Int = -1,
     val recentCalories1h: Double = -1.0,
-    val recentHr1h: Double = -1.0
+    val recentHr1h: Double = -1.0,
+    // 06/07/2026 (Ecko) — gedetecteerd activiteitstype (ON_BICYCLE/WALKING/
+    // RUNNING/STILL/IN_VEHICLE/TILTING/ON_FOOT), null als er niets recents is.
+    val recentActivityType: String? = null,
+    val recentActivityConfidencePct: Int = 0
 )
 
 class FCLvNextStatusFormatter(
@@ -174,7 +178,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v0.0.5a")
+        appendLine(" 🧠 FCL V7 v0.1.0")
         appendLine("════════════════════════")
         appendLine()
 
@@ -194,6 +198,19 @@ class FCLvNextStatusFormatter(
         val calTxt = if (ui.recentCalories1h >= 0.0) "${"%.0f".format(ui.recentCalories1h)} kcal" else "–"
         val hrTxt = if (ui.recentHr1h >= 0.0) "${"%.0f".format(ui.recentHr1h)} bpm" else "–"
         appendLine("• Laatste uur: 👣 $stepsTxt  🔥 $calTxt  ❤ $hrTxt")
+        // 06/07/2026 (Ecko) — gedetecteerd activiteitstype, apart van de meetwaarden
+        // hierboven, zodat direct zichtbaar is WELK type de kcal-schatting beïnvloedt.
+        val actIcon = when (ui.recentActivityType) {
+            "ON_BICYCLE" -> "🚴"
+            "RUNNING"    -> "🏃"
+            "WALKING", "ON_FOOT" -> "🚶"
+            "IN_VEHICLE" -> "🚗"
+            "STILL"      -> "🧍"
+            else         -> "❔"
+        }
+        if (ui.recentActivityType != null) {
+            appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
+        }
         appendLine(activityLog ?: str.geenActiviteitdata)
 
         // AutoSens-sectie verwijderd (18/06/2026)     POST_NOTIFICATIONS

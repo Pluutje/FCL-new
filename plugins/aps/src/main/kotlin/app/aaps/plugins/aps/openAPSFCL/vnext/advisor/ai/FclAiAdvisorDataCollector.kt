@@ -102,7 +102,7 @@ object FclAiAdvisorDataCollector {
             }
         }
 
-        val (tir, hypoCount, hypoMinutes, _, _, notable) =
+        val (tir, hypoCount, hypoMinutes, _, _, notable, multiCommitEpisodeCount, flatTaperEpisodeCount) =
             summariseCycleLog(File(dir, CYCLE_LOG_FILE), cutoff)
         val learnerSummary = summariseLearnerLog(File(dir, LEARNER_LOG_FILE), cutoff)
         val episodeStats = summariseEpisodeMetrics(metrics, cutoff)
@@ -118,7 +118,9 @@ object FclAiAdvisorDataCollector {
             avgPredictionErrorMmol = episodeStats.avgPredictionErrorMmol,
             activeParams = activeParams,
             learnerEventsSummary = learnerSummary,
-            notableEpisodes = notable
+            notableEpisodes = notable,
+            multiCommitEpisodeCount = multiCommitEpisodeCount,
+            flatTaperEpisodeCount = flatTaperEpisodeCount
         )
     }
 
@@ -183,19 +185,26 @@ object FclAiAdvisorDataCollector {
         val hypoMinutes: Int,
         val avgTimeToPeakMin: Double?,
         val avgOvershootAfterPeakMmol: Double?,
-        val notableEpisodes: List<String>
+        val notableEpisodes: List<String>,
+        // 08/07/2026 (Ecko) — zie de kdoc bij FclDailyReportPayload voor de reden.
+        val multiCommitEpisodeCount: Int,
+        val flatTaperEpisodeCount: Int
     )
 
     private fun summariseCycleLog(file: File, cutoff: Instant): CycleSummary {
-        if (!file.exists()) return CycleSummary(0.0, 0, 0, null, null, emptyList())
+        if (!file.exists()) return CycleSummary(0.0, 0, 0, null, null, emptyList(), 0, 0)
 
-        data class Row(val ts: Instant, val bg: Double, val target: Double, val iobRatio: Double, val bolus: Double)
+        data class Row(
+            val ts: Instant, val bg: Double, val target: Double, val iobRatio: Double, val bolus: Double,
+            // 08/07/2026 (Ecko) — voor de taper-diagnostiek hieronder.
+            val episodeCommitNr: Int, val commitDoseFinal: Double
+        )
 
         val rows = mutableListOf<Row>()
         file.forEachLine { line ->
             if (line.startsWith("schema_version")) return@forEachLine
             val cols = line.split(";")
-            if (cols.size < 20) return@forEachLine
+            if (cols.size < 116) return@forEachLine
             try {
                 val ts = Instant.parse(cols[1])
                 if (ts.isBefore(cutoff)) return@forEachLine
@@ -204,11 +213,13 @@ object FclAiAdvisorDataCollector {
                     bg = cols[9].toDouble(),
                     target = cols[10].toDouble(),
                     iobRatio = cols[13].toDoubleOrNull() ?: 0.0,
-                    bolus = cols[19].toDoubleOrNull() ?: 0.0
+                    bolus = cols[19].toDoubleOrNull() ?: 0.0,
+                    commitDoseFinal = cols[113].toDoubleOrNull() ?: 0.0,
+                    episodeCommitNr = cols[115].toIntOrNull() ?: 0
                 )
             } catch (_: Exception) { /* corrupte/onvolledige regel overslaan */ }
         }
-        if (rows.isEmpty()) return CycleSummary(0.0, 0, 0, null, null, emptyList())
+        if (rows.isEmpty()) return CycleSummary(0.0, 0, 0, null, null, emptyList(), 0, 0)
 
         // TIR: 3.9–10.0 mmol, vaste klinische range (bewust niet target-relatief — TIR is per definitie absoluut)
         val inRange = rows.count { it.bg in 3.9..10.0 }
@@ -239,7 +250,54 @@ object FclAiAdvisorDataCollector {
         // Tijd-tot-piek / overshoot / voorspelfout worden NIET hier berekend — die komen
         // uit summariseEpisodeMetrics() (EpisodeMetrics, dezelfde bron als AdvisorScreen),
         // niet gedupliceerd vanuit de ruwe CSV.
-        return CycleSummary(tir, hypoCount, hypoMinutes, null, null, notable)
+        // ── Taper-diagnostiek (08/07/2026, Ecko) ────────────────────────────
+        // AANLEIDING: de AI-adviseur stelde eerder voor om earlyBoostFactor te
+        // verlagen en earlyBoostMinConfidence te verhogen na een aantal hypo's
+        // — een redelijke maar verkeerde conclusie, want de eigenlijke oorzaak
+        // bleek een falende late-commit-afbouw (latere commits werden niet
+        // kleiner dan eerdere). De AI kon dat niet zien: er zat geen signaal
+        // in de payload dat iets zegt over hoe de dosis zich BINNEN een
+        // episode ontwikkelt — alleen geaggregeerde uitkomsten (TIR, hypo's,
+        // gemiddelde overshoot).
+        //
+        // METHODE: groepeer rijen tot episodes via aaneengesloten reeksen met
+        // episodeCommitNr >= 1 (reset naar 0 = einde episode — zelfde signaal
+        // dat FCLvNext.kt zelf gebruikt, geen nieuwe/aparte detectie). Een
+        // episode telt als "multi-commit" bij >= 3 verschillende commit-
+        // nummers met commitDoseFinal > 0. Zo'n episode is "vlakke afbouw"
+        // als de LAATSTE commit niet merkbaar kleiner is dan de HOOGSTE
+        // eerdere commit (>= 80% daarvan) — dezelfde 80%-vuistregel als
+        // elders in dit bestand voor "substantieel" wordt gebruikt.
+        var multiCommitEpisodeCount = 0
+        var flatTaperEpisodeCount = 0
+        run {
+            val sorted = rows.sortedBy { it.ts }
+            var episodeRows = mutableListOf<Row>()
+            fun flushEpisode() {
+                val commits = episodeRows.filter { it.episodeCommitNr >= 1 && it.commitDoseFinal > 0.01 }
+                val distinctNrs = commits.map { it.episodeCommitNr }.distinct()
+                if (distinctNrs.size >= 3) {
+                    multiCommitEpisodeCount++
+                    val lastNr = distinctNrs.max()
+                    val lastDose = commits.filter { it.episodeCommitNr == lastNr }.maxOf { it.commitDoseFinal }
+                    val peakBeforeLast = commits.filter { it.episodeCommitNr < lastNr }.maxOfOrNull { it.commitDoseFinal } ?: 0.0
+                    if (peakBeforeLast > 0.01 && lastDose >= 0.80 * peakBeforeLast) {
+                        flatTaperEpisodeCount++
+                    }
+                }
+                episodeRows = mutableListOf()
+            }
+            for (r in sorted) {
+                if (r.episodeCommitNr == 0 && episodeRows.isNotEmpty()) flushEpisode()
+                episodeRows.add(r)
+            }
+            if (episodeRows.isNotEmpty()) flushEpisode()
+        }
+
+        return CycleSummary(
+            tir, hypoCount, hypoMinutes, null, null, notable,
+            multiCommitEpisodeCount, flatTaperEpisodeCount
+        )
     }
 
     // ── FCLvNext_LearnerLog_v1.csv → korte samenvattingsregels ─────────────

@@ -3,6 +3,8 @@ package app.aaps.plugins.aps.openAPSFCL
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import java.io.File
 import androidx.annotation.StringRes
 import app.aaps.core.data.aps.SMBDefaults
 import app.aaps.core.data.model.GlucoseUnit
@@ -13,6 +15,7 @@ import app.aaps.core.interfaces.aps.AutosensResult
 import app.aaps.core.interfaces.aps.CurrentTemp
 import app.aaps.core.interfaces.aps.GlucoseStatus
 import app.aaps.core.interfaces.aps.OapsProfileFCL
+import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.Constraint
@@ -126,12 +129,37 @@ open class OpenAPSFCLPlugin @Inject constructor(
         // NotificationManager beschikbaar voor FclAiNotificationHelper
         // (dat zelf geen constructor-injectie heeft, zie FclNotificationManagerBridge.kt).
         app.aaps.plugins.aps.openAPSFCL.vnext.FclNotificationManagerBridge.set(notificationManager)
+
+        // 08/07/2026 (Ecko) — waarborgt dat Documents/AAPS/ANALYSE bestaat, vóórdat
+        // welke van de acht onafhankelijke schrijvers/lezers dan ook (FCLCycleLogRepository,
+        // FclActivityLogger, FCLvNextParameterLogger, FclLearnerLogger,
+        // FCLvNextActiveParamsWriter, FCLvNextConfigOverride, FclAiAdvisorDataCollector,
+        // FclAiAdvisorHistoryRepository, FclAiAdvisorScheduler — elk met hun EIGEN
+        // RELATIVE_PATH-constante, geen gedeelde helper) voor het eerst iets probeert
+        // te lezen/schrijven. Draait bij elke plugin-constructie (dus ook na een verse
+        // installatie of na het wissen van appdata) — mkdirs() is bewust idempotent:
+        // bestaat de map al, dan doet dit niets.
+        try {
+            val analyseDir = File(Environment.getExternalStorageDirectory(), "Documents/AAPS/ANALYSE")
+            if (!analyseDir.exists()) {
+                val created = analyseDir.mkdirs()
+                aapsLogger.info(LTag.APS, "FCLvNext: ANALYSE-map ontbrak, aangemaakt=$created (${analyseDir.absolutePath})")
+            }
+        } catch (e: Exception) {
+            aapsLogger.error(LTag.APS, "FCLvNext: kon ANALYSE-map niet controleren/aanmaken: ${e.message}")
+        }
     }
 
     // last values
     override var lastAPSRun: Long = 0
     override val algorithm = APSResult.Algorithm.FCL
     override var lastAPSResult: APSResult? = null
+
+    // 08/07/2026 (Ecko) — zie invoke(): bij het EERSTE cyclus zonder glucosedata
+    // (glucoseStatus == null) wordt de lopende tijdelijke basaal eenmalig
+    // veiliggesteld (neutraal/nul); volgende, aaneengesloten cycli zonder
+    // glucosedata worden overgeslagen (geen herhaalde ingreep nodig/gewenst).
+    private var lastCycleHadMissingGlucose: Boolean = false
 
     override fun getGlucoseStatusData(allowOldData: Boolean): GlucoseStatus? =
         glucoseStatusCalculatorFCL.getGlucoseStatusData(allowOldData)
@@ -168,11 +196,65 @@ open class OpenAPSFCLPlugin @Inject constructor(
             aapsLogger.debug(LTag.APS, rh.gs(R.string.openapsma_disabled))
             return
         }
+
+        // 08/07/2026 (Ecko) — naar voren gehaald: hangt alleen af van profile
+        // (hierboven al non-null gecontroleerd) en dateUtil/processedTbrEbData,
+        // niet van glucoseStatus. Nodig vóór de glucose-null-check hieronder,
+        // om bij ontbrekende glucosedata alsnog een lopende hoge tijdelijke
+        // basaal te kunnen corrigeren.
+        val now = dateUtil.now()
+        val tb = processedTbrEbData.getTempBasalIncludingConvertedExtended(now)
+        val currentTemp = CurrentTemp(
+            duration = tb?.plannedRemainingMinutes ?: 0,
+            rate = tb?.convertedToAbsolute(now, profile) ?: 0.0,
+            minutesrunning = tb?.getPassedDurationToTimeInMinutes(now)
+        )
+
         if (glucoseStatus == null) {
             rxBus.send(EventResetOpenAPSGui(rh.gs(R.string.openapsma_no_glucose_data)))
             aapsLogger.debug(LTag.APS, rh.gs(R.string.openapsma_no_glucose_data))
+
+            // 08/07/2026 (Ecko) — veiligheidsfix: zonder glucosedata deed deze
+            // functie voorheen NIETS behalve loggen en returnen — een op dat
+            // moment lopende tijdelijke basaal (bijv. een hoge WatchingFrontload-
+            // temp) bleef dan ongewijzigd doorlopen, mogelijk een half uur of
+            // langer bij een aanhoudende sensor-uitval. Eenmalig, bij de EERSTE
+            // cyclus zonder glucosedata, wordt een lopende hoge temp nu
+            // vervangen door een neutrale/nul-temp — dezelfde aanpak als het
+            // bestaande "CGM is calibrating/stale"-vangnet in DetermineBasalFCL.kt
+            // (regel ~274), hier toegepast voor het geval dat glucoseStatus
+            // zelf helemaal null is (dus dat vangnet nooit wordt bereikt, want
+            // determine_basal() zelf wordt dan niet eens aangeroepen).
+            // Bewust maar ÉÉN keer: aanhoudende cycli zonder glucosedata worden
+            // daarna overgeslagen (geen herhaalde ingreep), zoals gevraagd.
+            if (!lastCycleHadMissingGlucose && currentTemp.rate > 0.0) {
+                val safeRt = RT(
+                    algorithm = APSResult.Algorithm.FCL,
+                    runningDynamicIsf = false,
+                    timestamp = now,
+                    consoleLog = mutableListOf(),
+                    consoleError = mutableListOf()
+                )
+                safeRt.reason.append(
+                    "Geen glucosedata beschikbaar — lopende tijdelijke basaal " +
+                        "(${currentTemp.rate} U/u) eenmalig veiliggesteld naar neutraal/nul."
+                )
+                safeRt.deliverAt = now
+                safeRt.duration = 30
+                safeRt.rate = 0.0
+
+                val safeResult = apsResultProvider.get().with(safeRt)
+                safeResult.currentTemp = currentTemp
+                lastAPSResult = safeResult
+                lastAPSRun = now
+                aapsLogger.warn(LTag.APS, "FCLvNext: geen glucosedata, lopende temp (${currentTemp.rate} U/u) veiliggesteld naar 0.")
+                rxBus.send(EventAPSCalculationFinished())
+                rxBus.send(EventOpenAPSUpdateGui())
+            }
+            lastCycleHadMissingGlucose = true
             return
         }
+        lastCycleHadMissingGlucose = false
 
         val inputConstraints = ConstraintObject(0.0, aapsLogger)
 
@@ -188,13 +270,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         if (!hardLimits.checkHardLimits(profile.getMaxDailyBasal(), app.aaps.core.ui.R.string.profile_max_daily_basal_value, 0.02, hardLimits.maxBasal())) return
         if (!hardLimits.checkHardLimits(pump.baseBasalRate.cU, app.aaps.core.ui.R.string.current_basal_value, 0.01, hardLimits.maxBasal())) return
 
-        val now = dateUtil.now()
-        val tb = processedTbrEbData.getTempBasalIncludingConvertedExtended(now)
-        val currentTemp = CurrentTemp(
-            duration = tb?.plannedRemainingMinutes ?: 0,
-            rate = tb?.convertedToAbsolute(now, profile) ?: 0.0,
-            minutesrunning = tb?.getPassedDurationToTimeInMinutes(now)
-        )
+        // now/tb/currentTemp: zie hierboven, vóór de glucose-null-check verplaatst (08/07/2026, Ecko)
         var minBg = hardLimits.verifyHardLimits(Round.roundTo(profile.getTargetLowMgdl(), 0.1), app.aaps.core.ui.R.string.profile_low_target, HardLimits.LIMIT_MIN_BG[0], HardLimits.LIMIT_MIN_BG[1])
         var maxBg = hardLimits.verifyHardLimits(Round.roundTo(profile.getTargetHighMgdl(), 0.1), app.aaps.core.ui.R.string.profile_high_target, HardLimits.LIMIT_MAX_BG[0], HardLimits.LIMIT_MAX_BG[1])
         var targetBg = hardLimits.verifyHardLimits(profile.getTargetMgdl(), app.aaps.core.ui.R.string.temp_target_value, HardLimits.LIMIT_TARGET_BG[0], HardLimits.LIMIT_TARGET_BG[1])

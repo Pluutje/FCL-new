@@ -48,7 +48,18 @@ data class FclDailyReportPayload(
     /** Korte samenvattingsregels uit FCLvNext_LearnerLog_v1.csv van vandaag (geen ruwe rijen). */
     val learnerEventsSummary: List<String>,
     /** Korte, genummerde episode-incidenten (zoals het 14:15U-incident) — max ~5/dag om prompt compact te houden. */
-    val notableEpisodes: List<String>
+    val notableEpisodes: List<String>,
+    /** Aantal episodes deze periode met >= 3 verschillende commit-nummers
+     *  (>= 3 losse doseermomenten binnen één maaltijdepisode). Noemer voor
+     *  flatTaperEpisodeCount hieronder. (08/07/2026, Ecko) */
+    val multiCommitEpisodeCount: Int,
+    /** Van die multi-commit-episodes: hoeveel hadden een "vlakke afbouw" —
+     *  de LAATSTE commit was nog >= 80% van de hoogste eerdere commit, dus
+     *  geen merkbare afname ondanks meerdere commits. Hoog t.o.v.
+     *  multiCommitEpisodeCount = de afbouw werkte niet, ook al lijkt de
+     *  vroege trigger (earlyBoostFactor/earlyBoostMinConfidence) misschien
+     *  "te agressief" op basis van hypoCount alleen. (08/07/2026, Ecko) */
+    val flatTaperEpisodeCount: Int
 )
 
 data class ActiveParamSnapshot(

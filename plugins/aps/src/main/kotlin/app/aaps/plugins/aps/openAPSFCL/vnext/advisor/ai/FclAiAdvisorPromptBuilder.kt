@@ -50,6 +50,18 @@ verhoogt (zoals een IOB-drempel omhoog). Stel in plaats daarvan timing-parameter
 die insuline verder naar voren halen (earlyBoostFactor, watchingFrontloadFrac,
 commitCooldownMinutes omlaag).
 
+## Hypo's: check eerst de afbouw, niet automatisch de vroege trigger (08/07/2026)
+multiCommitEpisodeCount en flatTaperEpisodeCount beschrijven of latere commits binnen een
+episode daadwerkelijk kleiner worden dan eerdere ("afbouw") of niet ("vlakke afbouw").
+Als flatTaperEpisodeCount een aanzienlijk deel van multiCommitEpisodeCount is (grofweg
+de helft of meer), dan is een falende afbouw een minstens zo waarschijnlijke oorzaak van
+hypo's als een te agressieve vroege trigger — de latere commits blijven dan onnodig groot,
+niet de eerste. Stel in dat geval GEEN verlaging van earlyBoostFactor of verhoging van
+earlyBoostMinConfidence voor puur op basis van hypoCount/hypoMinutesTotal; noem in de
+reason expliciet of flatTaperEpisodeCount al dan niet is uitgesloten als oorzaak. Is
+flatTaperEpisodeCount laag of nul terwijl er wél hypo's zijn, dan is de vroege trigger
+een geldiger aandachtspunt.
+
 ## Hoe jij werkt ten opzichte van de interne learner
 De interne learner past parameters stap-voor-stap aan na elke maaltijdepisode — vergelijk
 het met een agressiviteitsschuif die de geleerde waarden proportioneel verschuift. Jij werkt
@@ -122,6 +134,8 @@ geen voorstel aan.
             })
             put("learnerEventsSummary", payload.learnerEventsSummary)
             put("notableEpisodes", payload.notableEpisodes)
+            put("multiCommitEpisodeCount", payload.multiCommitEpisodeCount)
+            put("flatTaperEpisodeCount", payload.flatTaperEpisodeCount)
         }
         return """
 # INPUT DATA

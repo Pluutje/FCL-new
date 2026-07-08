@@ -141,6 +141,11 @@
 
         <service android:name=".wearStepCount.StepCountListener" />
 
+        <!-- FCLvNext (06/07/2026, Ecko): automatische activiteitsherkenning
+             (fietsen/lopen/stil), zie ActivityTypeListener.kt. Zelfde
+             registratiepatroon als de twee bovenstaande listeners. -->
+        <service android:name=".activitytype.ActivityTypeListener" />
+
         <service
             android:name=".complications.LongStatusComplication"
             android:exported="true"

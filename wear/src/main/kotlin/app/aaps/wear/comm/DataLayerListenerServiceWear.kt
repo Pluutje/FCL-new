@@ -62,6 +62,9 @@ class DataLayerListenerServiceWear : WearableListenerService() {
     private val disposable = CompositeDisposable()
     private var heartRateListener: HeartRateListener? = null
     private var stepCountListener: StepCountListener? = null
+    // 06/07/2026 (Ecko) — automatische activiteitsherkenning (fietsen e.d.), zie
+    // ActivityTypeListener.kt. Zelfde aan/uit-patroon als de twee bovenstaande.
+    private var activityTypeListener: app.aaps.wear.activitytype.ActivityTypeListener? = null
 
     private val rxPath get() = getString(app.aaps.core.interfaces.R.string.path_rx_bridge)
     private val rxDataPath get() = getString(app.aaps.core.interfaces.R.string.path_rx_data_bridge)
@@ -90,10 +93,17 @@ class DataLayerListenerServiceWear : WearableListenerService() {
             .subscribe { event: EventWearPreferenceChange ->
                 if (event.changedKey == getString(R.string.key_heart_rate_sampling)) updateHeartRateListener()
                 if (event.changedKey == getString(R.string.key_steps_sampling)) updateStepsCountListener()
+                // 06/07/2026 (Ecko) — TODO: key_activity_type_sampling bestaat nog niet als
+                // stringresource; toevoegen aan strings.xml zodra dit ook een eigen
+                // aan/uit-instelling moet krijgen. Tot die tijd hergebruikt
+                // updateActivityTypeListener() bewust key_steps_sampling (zelfde aan/uit-
+                // moment als stappen, want beide komen uit dezelfde sensorbron-gedachte).
+                if (event.changedKey == getString(R.string.key_steps_sampling)) updateActivityTypeListener()
             }
 
         updateHeartRateListener()
         updateStepsCountListener()
+        updateActivityTypeListener()
     }
 
     override fun onCapabilityChanged(p0: CapabilityInfo) {
@@ -192,6 +202,30 @@ class DataLayerListenerServiceWear : WearableListenerService() {
             stepCountListener?.let { scl ->
                 disposable.remove(scl)
                 stepCountListener = null
+            }
+        }
+    }
+
+    // 06/07/2026 (Ecko) — zelfde aan/uit-patroon als hierboven. Hergebruikt
+    // key_steps_sampling (zie de TODO bij onCreate) tot er een eigen instelling is.
+    // 07/07/2026 (Ecko) — extra verdedigingslaag: ongeacht wat er in
+    // ActivityTypeListener zelf misgaat, mag het aanmaken ervan deze service
+    // (en daarmee de hele wear→telefoon-verbinding) nooit kunnen meeslepen.
+    private fun updateActivityTypeListener() {
+        if (sp.getBoolean(R.string.key_steps_sampling, false)) {
+            if (activityTypeListener == null) {
+                try {
+                    activityTypeListener = app.aaps.wear.activitytype.ActivityTypeListener(
+                        this, aapsLogger
+                    ).also { atl -> disposable += atl }
+                } catch (e: Exception) {
+                    aapsLogger.error(LTag.WEAR, "Kon ActivityTypeListener niet starten: ${e.message}")
+                }
+            }
+        } else {
+            activityTypeListener?.let { atl ->
+                disposable.remove(atl)
+                activityTypeListener = null
             }
         }
     }
