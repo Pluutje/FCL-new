@@ -1681,6 +1681,48 @@ class DataHandlerMobile @Inject constructor(
         prefs.edit()
             .putString("history_json", org.json.JSONObject().put("events", trimmed).toString())
             .apply()
+
+        // ── Activiteits-overgangslog (09/07/2026, Ecko) ─────────────────────
+        // Aparte, TRANSITIE-gebaseerde log naast de bestaande uur-snapshots in
+        // FCLvNext_ActivityLog_v2.csv. Die laatste bewaart alleen wat er per
+        // afgerond uur is gebeurd — een wijziging bínnen dat uur (bijv. 10 min
+        // STILL gevolgd door 50 min ON_BICYCLE, allebei in hetzelfde uur-
+        // venster) is daaruit niet meer te herleiden. Deze log schrijft een
+        // regel bij ELKE wijziging van activiteitstype, ongeacht hoe kort, dus
+        // de exacte tijdlijn blijft behouden voor een fijnmaziger analyse van
+        // het effect van activiteit op insulinebehoefte.
+        var previousType: String = if (existing.length() > 0) {
+            existing.getJSONObject(existing.length() - 1).optString("type", "")
+        } else ""
+        for (e in events.sortedBy { it.timestamp }) {
+            if (e.activityType != previousType) {
+                appendActivityTransition(e.timestamp, e.activityType, e.confidencePct)
+                previousType = e.activityType
+            }
+        }
+    }
+
+    // 09/07/2026 (Ecko) — schrijft naar Documents/AAPS/ANALYSE/FCLvNext_ActivityTransitions_v1.csv.
+    // Kale SharedPreferences/File-toegang, geen FCLvNext-klasse-afhankelijkheid — zelfde reden als
+    // bij handleActivityTypeBatch hierboven (dit bestand zit in :plugins:sync, niet :plugins:aps).
+    private fun appendActivityTransition(tsMs: Long, activityType: String, confidencePct: Int) {
+        try {
+            val dir = java.io.File(android.os.Environment.getExternalStorageDirectory(), "Documents/AAPS/ANALYSE")
+            if (!dir.exists()) dir.mkdirs()
+            val file = java.io.File(dir, "FCLvNext_ActivityTransitions_v1.csv")
+            val isNew = !file.exists()
+            val tsUtc = java.time.Instant.ofEpochMilli(tsMs).toString()
+            val tsLocal = java.text.SimpleDateFormat("dd-MM-yyyy HH:mm:ss", java.util.Locale.getDefault())
+                .format(java.util.Date(tsMs))
+            file.appendText(
+                buildString {
+                    if (isNew) append("ts_utc;ts_local;activity_type;confidence_pct\n")
+                    append("$tsUtc;$tsLocal;$activityType;$confidencePct\n")
+                }
+            )
+        } catch (e: Exception) {
+            aapsLogger.error(LTag.WEAR, "Kon activiteits-transitie niet loggen: ${e.message}")
+        }
     }
 
     private fun handleGetCustomWatchface(command: EventData.ActionGetCustomWatchface) {

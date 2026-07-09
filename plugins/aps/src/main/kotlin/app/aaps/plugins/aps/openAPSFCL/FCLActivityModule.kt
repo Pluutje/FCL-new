@@ -65,6 +65,16 @@ class FCLActivityModule(
     private val INSULIN_PERCENT  = 60.0   // % bij volledig actieve retentie
     private val TARGET_ADJUST    = 2.0    // mmol/L bij volledig actieve retentie
 
+    // 09/07/2026 (Ecko) — onderscheid korte wandelingen (hond uitlaten, 2-4x/dag,
+    // ~15-20 min) van lange wandelingen (1x/1-2 weken, doel van deze functie: een
+    // koek/banaan tijdens het lopen mag niet als een echte maaltijd worden
+    // gecorrigeerd, wat later een hypo zou geven). De ISF-afbouw (insulinPerc)
+    // blijft bij ELKE herkende activiteit direct actief — alleen de TARGET-
+    // verhoging wacht tot de wandeling dit lang heeft aangehouden. Bewust een
+    // vaste vuistwaarde, geen aparte instelling — kan later alsnog een eigen
+    // preference worden als dit in de praktijk bijstelling nodig blijkt.
+    private val LONG_WALK_MIN_DURATION_MIN = 30L
+
     // ─────────────────────────────────────────
     // RESULT
     // ─────────────────────────────────────────
@@ -190,6 +200,10 @@ class FCLActivityModule(
             }
 
             if (consecutiveStepTriggers >= needed && retention < MAX_RETENTION) {
+                if (retention == 0) {
+                    // 09/07/2026 (Ecko) — nieuwe, aaneengesloten activiteit begint hier.
+                    saveActivityStartTime(DateTime.now().millis)
+                }
                 retention++
                 consecutiveStepTriggers = 0
                 saveRetention(retention)
@@ -205,7 +219,10 @@ class FCLActivityModule(
             if (retention > 0 && consecutiveLowTriggers >= lowNeeded) {
                 retention--
                 saveRetention(retention)
-                if (retention == 0) saveRetentionEndTime(DateTime.now().millis)
+                if (retention == 0) {
+                    saveRetentionEndTime(DateTime.now().millis)
+                    saveActivityStartTime(0L)
+                }
                 log.append("↘ Retentie verlaagd naar $retention (lowNeeded=$lowNeeded)\n")
             }
         }
@@ -233,8 +250,25 @@ class FCLActivityModule(
             iobRatio > 0.25 &&
             minSinceRetentionEnd < POST_ACTIVITY_BUFFER_MIN
 
+        // 09/07/2026 (Ecko) — de target-verhoging is bedoeld om bij een LANGE
+        // wandeling een koek/banaan voor een iets te hoge IOB niet als een
+        // echte maaltijd te laten corrigeren (wat later een hypo zou geven).
+        // Bij een korte wandeling (bijv. de hond uitlaten, 2-4x/dag) is die
+        // bescherming niet nodig en verhindert 'm juist een terechte reactie
+        // op een echte maaltijd die toevallig tijdens/vlak na zo'n korte
+        // wandeling begint. Vandaar: pas van kracht zodra de HUIDIGE,
+        // aaneengesloten activiteit al minstens LONG_WALK_MIN_DURATION_MIN
+        // aanhoudt. De ISF-afbouw (insulinPerc) hierboven is hier bewust NIET
+        // aan gekoppeld — die blijft bij elke herkende activiteit direct gelden.
+        val activityStartTime = loadActivityStartTime()
+        val minutesSinceActivityStart = if (isActive && activityStartTime > 0L)
+            (DateTime.now().millis - activityStartTime) / (1000 * 60)
+        else
+            0L
+        val isLongWalk = isActive && minutesSinceActivityStart >= LONG_WALK_MIN_DURATION_MIN
+
         val targetAdj = when {
-            isActive           -> TARGET_ADJUST
+            isLongWalk         -> TARGET_ADJUST
             postActivityBuffer -> 0.5
             else               -> 0.0
         }
@@ -245,7 +279,9 @@ class FCLActivityModule(
         )
         log.append(
             "Target: +${"%.1f".format(targetAdj)} mmol/L" +
-                (if (postActivityBuffer)
+                (if (isActive && !isLongWalk)
+                    " (wandeling ${minutesSinceActivityStart}min bezig, nog geen ${LONG_WALK_MIN_DURATION_MIN}min → geen target-verhoging)"
+                 else if (postActivityBuffer)
                     " (post-buffer iobRatio=${"%.2f".format(iobRatio)} ${minSinceRetentionEnd}min geleden)"
                 else "") + "\n"
         )
@@ -306,9 +342,15 @@ class FCLActivityModule(
     private fun saveRetention(value: Int)         { prefs.edit().putInt("retention", value).apply() }
     private fun loadRetentionEndTime(): Long       = prefs.getLong("retention_end_time", 0L)
     private fun saveRetentionEndTime(ts: Long)    { prefs.edit().putLong("retention_end_time", ts).apply() }
+    // 09/07/2026 (Ecko) — wanneer de HUIDIGE, aaneengesloten activiteit begon
+    // (retentie 0→1). Nodig om lange wandelingen van korte te onderscheiden,
+    // zie LONG_WALK_MIN_DURATION_MIN hierboven. 0L = geen actieve wandeling.
+    private fun loadActivityStartTime(): Long      = prefs.getLong("activity_start_time", 0L)
+    private fun saveActivityStartTime(ts: Long)   { prefs.edit().putLong("activity_start_time", ts).apply() }
 
     private fun reset() {
         saveRetention(0)
+        saveActivityStartTime(0L)
         consecutiveStepTriggers = 0
         consecutiveLowTriggers  = 0
     }

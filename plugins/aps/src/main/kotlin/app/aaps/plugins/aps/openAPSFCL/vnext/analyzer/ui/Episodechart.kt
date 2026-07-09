@@ -66,7 +66,15 @@ fun EpisodeChart(
     val hasPredPeak = sorted.any { it.predictedPeak != null && it.predictedPeak > 0.0 }
 
     val rawMaxIob = sorted.maxOf { it.iob }
-    val rawMaxDose = sorted.maxOf { if (it.shouldDeliver) it.finalDose else 0.0 }
+    // BUGFIX (09/07/2026, Ecko): was it.finalDose — de RUWE, niet-geplafonneerde
+    // waarde vóór de maxOf(finalDose,commitDose)-afbouwlogica (zie FCLvNext.kt).
+    // deliveredTotal is de daadwerkelijk afgegeven/gecommandeerde dosis. Beide
+    // waren vroeger meestal gelijk (finalDose won de maxOf() bijna altijd), dus
+    // deze verkeerde veldverwijzing was onzichtbaar — sinds de decay-bypass-fix
+    // van 08/07/2026 (die finalDose en deliveredTotal bewust laat afwijken bij
+    // een falende afbouw) werd 'm zichtbaar: de staven toonden de ongeplafonneerde
+    // waarde, niet wat er echt is gegeven.
+    val rawMaxDose = sorted.maxOf { if (it.shouldDeliver) it.deliveredTotal else 0.0 }
     // BUGFIX (20/06/2026): de dosis-staven moeten dezelfde rechter-as
     // (insuline, U) delen als de IOB-lijn, anders klopt de afgelezen
     // absolute waarde niet — alleen de onderlinge verhouding tussen de
@@ -173,9 +181,11 @@ fun EpisodeChart(
         // rechter-as-labels hieronder, zodat de absolute hoogte klopt met
         // wat er op de as staat (was voorheen los geschaald op maxDose,
         // zie bugfix-comment bij maxIob hierboven).
-        sorted.filter { it.shouldDeliver && it.finalDose > 0.0 }.forEach { row ->
+        // BUGFIX (09/07/2026, Ecko): finalDose → deliveredTotal, zie toelichting
+        // bij rawMaxDose hierboven.
+        sorted.filter { it.shouldDeliver && it.deliveredTotal > 0.0 }.forEach { row ->
             val x = xOf(row.timestamp)
-            val yTop = yIob(row.finalDose)
+            val yTop = yIob(row.deliveredTotal)
             val barH = (topPad + plotH) - yTop
             drawRect(
                 color = AapsDoseBlue.copy(alpha = 0.90f),
