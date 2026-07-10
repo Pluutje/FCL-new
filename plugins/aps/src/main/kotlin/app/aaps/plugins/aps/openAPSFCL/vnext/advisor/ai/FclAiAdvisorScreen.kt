@@ -95,6 +95,12 @@ fun FclAiAdvisorScreen(
         }
 
         Text("AI Parameter-adviseur", style = MaterialTheme.typography.headlineMedium)
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(
+            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.getMode(context)
+        )
+
+        // Aan/uit + automatisch/handmatig staat sinds 10/07/2026 bij
+        // Settings → Analyser Automaat / AI Advisor, niet meer hier.
 
         // ── Inklapbaar instellingenblok ──────────────────────────────────────
         AnimatedVisibility(visible = showSettings) {

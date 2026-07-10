@@ -232,33 +232,31 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         }
 
         FCLSection(
-            title = "🤖 Analyser Automaat",
+            title = "🤖 Analyser Automaat / AI Advisor",
             expanded = expandedAnalyserAutomaat,
             onToggle = { expandedAnalyserAutomaat = !expandedAnalyserAutomaat }
         ) {
-            var autoEnabled by remember { mutableStateOf(DFLearner.isAutoEnabled(ctx)) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Automaat leert",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
-                    )
-                    Text(
-                        if (autoEnabled) "Past instellingen automatisch aan (dag en nacht)"
-                        else "Handmatig — automaat berekent maar past niet aan",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = autoEnabled, onCheckedChange = {
-                    autoEnabled = it
-                    DFLearner.setAutoEnabled(ctx, it)
-                })
+            // 10/07/2026 (Ecko) — beide aan/uit + automatisch/handmatig-
+            // schakelaars samengevoegd op één plek. Voorheen stond hier alleen
+            // de oude "Automaat leert"-knop (nu vervangen door de Learner-kaart
+            // hieronder), en stonden de nieuwe kaarten los in het Learner- resp.
+            // AI-tabblad zelf — daar staat nu alleen nog de inhoud (het
+            // openstaande voorstel), de bediening staat hier bij elkaar.
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeSelectorCard(
+                    title = "Learner",
+                    initialMode = DFLearner.getMode(ctx),
+                    autoDescription = "Past D/F/timing automatisch aan na elke maaltijdepisode",
+                    manualDescription = "Berekent een voorstel, past pas toe na jouw goedkeuring",
+                    onModeChange = { DFLearner.setMode(ctx, it) }
+                )
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeSelectorCard(
+                    title = "AI-adviseur",
+                    initialMode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.getMode(ctx),
+                    autoDescription = "Past goedgekeurde parameters automatisch toe, geen melding",
+                    manualDescription = "Meldt nieuwe voorstellen, past pas toe na jouw goedkeuring",
+                    onModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.setMode(ctx, it) }
+                )
             }
         }
 

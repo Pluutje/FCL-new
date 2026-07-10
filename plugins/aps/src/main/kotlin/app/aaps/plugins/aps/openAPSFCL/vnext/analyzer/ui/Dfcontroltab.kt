@@ -128,6 +128,11 @@ fun DFControlTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
+        // ── 0. Openstaand voorstel (10/07/2026, Ecko) ────────────────────
+        // Aan/uit + automatisch/handmatig staat sinds 10/07/2026 bij
+        // Settings → Analyser Automaat / AI Advisor, niet meer hier.
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.LearnerProposalCard(context)
+
         // ── 1. Agressiviteitsschaal + Toepassen in AAPS ────────────────────
         AggressiviteitsKaart(
             niveau = aggressiveness,
@@ -165,6 +170,16 @@ fun DFControlTab(
             applyResult = applyResult,
             applyTs = applyTs
         )
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context))
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerAdvies.getLatest(context)?.let { advies ->
+            Text(
+                "💡 F staat al ${advies.episodes} episodes tegen zijn plafond " +
+                    "(${"%.2f".format(advies.f)}) — mogelijk is het plafond zelf aan " +
+                    "verhoging toe (zie Expert modus).",
+                style = MaterialTheme.typography.labelSmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE08A2E)
+            )
+        }
 
         // ── Advisor-assenkaarten: Sterkte, Timing, Vasthoudendheid, Frontload-timing ──
         // Vervangt het oude "Actuele parameters"-blok (percentages + losse

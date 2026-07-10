@@ -163,8 +163,18 @@ class FCLCycleLogRepository @Inject constructor(
         // evaluate() logt altijd (ook bij AUTO_DISABLED/COOLDOWN/etc) via
         // FclLearnerLogger, en past D/F alleen toe als isAutoEnabled=true.
         val latestMetrics = episodeMetrics.lastOrNull()
-        if (latestMetrics != null) {
-            DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb)
+        // 10/07/2026 (Ecko) — OFF-modus: evaluate() zelf overslaan, niet alleen
+        // het toepassen. Voorheen rekende/logde evaluate() altijd, ook bij
+        // isAutoEnabled=false — dat voldeed niet meer aan "doet dan echt niks
+        // meer" zodra er een expliciete OFF-stand bijkomt naast AUTO/MANUAL.
+        //
+        // HERZIEN (10/07/2026, Ecko) — de return-waarde (LearningStep?) werd
+        // hier altijd genegeerd. Die bevat de diagnose-code en oude D/F-
+        // waarden, nodig voor een leesbare uitleg bij het MANUAL-voorstel
+        // (zie FclLearnerUitleg.kt) — vastgelegd in learningStep hieronder.
+        var learningStep: DFLearner.LearningStep? = null
+        if (latestMetrics != null && DFLearner.isEvaluationEnabled(context)) {
+            learningStep = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb)
             // Losse leeras voor refLcd (laatste-commit-demping) — zie kdoc
             // bij DFMapping.REF_LCD_DEFAULT en DFLearner.evaluateLateCommitDecay.
             // Bewust een eigen aanroep, niet ondergebracht in evaluate()
@@ -193,7 +203,15 @@ class FCLCycleLogRepository @Inject constructor(
         // refEb bijwerkt maar die waarde nooit in loadFCLvNextConfig()
         // terechtkwam. De "Toepassen in AAPS"-knop blijft alleen voor
         // de agressiviteits-override.
-        if (DFLearner.isAutoEnabled(context)) {
+        //
+        // HERZIEN (10/07/2026, Ecko — Fase 2, Learner MANUAL-modus): de
+        // getters hieronder lopen nu buiten de mode-check, want ze zijn
+        // hoe dan ook nodig (ook om een voorstel te bouwen bij MANUAL).
+        // Alleen het TOEPASSEN (AUTO) vs. VOORSTELLEN (MANUAL) vertakt.
+        // OFF: evaluate() zelf draaide al niet (zie isEvaluationEnabled
+        // hierboven), dus hier is dan simpelweg niets te doen.
+        val learnerMode = DFLearner.getMode(context)
+        if (learnerMode != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) {
             val d      = DFLearner.getD(context)
             val f      = DFLearner.getF(context)
             val vExtra = DFLearner.getVExtra(context)
@@ -203,50 +221,76 @@ class FCLCycleLogRepository @Inject constructor(
             val refPeakBias = DFLearner.getRefPeakBias(context)
             val refLcd = DFLearner.getRefLcd(context)
             val agg    = DFLearner.getAggressiveness(context)
+            val reason = "D=${"%.3f".format(d)} " +
+                "F=${"%.3f".format(f)} " +
+                "wmd=${"%.2f".format(refWmd)} " +
+                "wff=${"%.2f".format(refWff)} " +
+                "eb=${"%.2f".format(refEb)} " +
+                "peakBias=${"%.2f".format(refPeakBias)} " +
+                "lcd=${"%.2f".format(refLcd)}"
 
-            val po = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
-                .toParamOverrides(
-                    d = d, f = f,
-                    refWmd = refWmd, refWff = refWff, refEb = refEb,
-                    refPeakBias = refPeakBias, refLcd = refLcd,
-                    vExtra = vExtra, aggLevel = agg
-                )
-            val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
-                .toStvMap(d, f, 85.0, vExtra, aggLevel = agg)
+            if (learnerMode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO) {
+                val po = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
+                    .toParamOverrides(
+                        d = d, f = f,
+                        refWmd = refWmd, refWff = refWff, refEb = refEb,
+                        refPeakBias = refPeakBias, refLcd = refLcd,
+                        vExtra = vExtra, aggLevel = agg
+                    )
+                val stvMap = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping
+                    .toStvMap(d, f, 85.0, vExtra, aggLevel = agg)
 
-            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
-                .writeWithStvAndParams(
-                    stvMap         = stvMap,
-                    paramOverrides = po,
-                    reason         = "auto-learner: D=${"%.3f".format(d)} " +
-                        "F=${"%.3f".format(f)} " +
-                        "wmd=${"%.2f".format(refWmd)} " +
-                        "wff=${"%.2f".format(refWff)} " +
-                        "eb=${"%.2f".format(refEb)} " +
-                        "peakBias=${"%.2f".format(refPeakBias)} " +
-                        "lcd=${"%.2f".format(refLcd)}",
-                    context        = context,
-                    episodeCount   = episodeMetrics.size
-                )
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter
+                    .writeWithStvAndParams(
+                        stvMap         = stvMap,
+                        paramOverrides = po,
+                        reason         = "auto-learner: $reason",
+                        context        = context,
+                        episodeCount   = episodeMetrics.size
+                    )
 
-            // 10/07/2026 (Ecko) — zachte convergentie voor de 7 AI-aanpasbare
-            // parameters zonder eigen dedicated evaluator (zie kdoc bij
-            // DFLearner.convergeTrackedParams). Hergebruikt de po die hierboven
-            // toch al vers is berekend — geen dubbele DFMapping-aanroep nodig.
-            // Draait alleen binnen deze isAutoEnabled-gate, dus vanzelf stil
-            // (bevroren tracked-waarden) als de Learner-automaat uitstaat.
-            DFLearner.convergeTrackedParams(
-                context,
-                mapOf(
-                    "watchingMinDeltaToTarget" to (po.watchingMinDeltaToTarget ?: 0.0),
-                    "commitCooldownMinutes"    to (po.commitCooldownMinutes?.toDouble() ?: 0.0),
-                    "earlyBoostMinConfidence"  to (po.earlyBoostMinConfidence ?: 0.0),
-                    "earlyBoostMaxCommits"     to (po.earlyBoostMaxCommits?.toDouble() ?: 0.0),
-                    "earlyRiseFracMin"         to (po.earlyRiseFracMin ?: 0.0),
-                    "lateCommitDecayThreshold" to (po.lateCommitDecayThreshold ?: 0.0),
-                    "sustainedRiseSlopeMin"    to (po.sustainedRiseSlopeMin ?: 0.0)
+                // 10/07/2026 (Ecko) — zachte convergentie voor de 7 AI-aanpasbare
+                // parameters zonder eigen dedicated evaluator (zie kdoc bij
+                // DFLearner.convergeTrackedParams). Hergebruikt de po die hierboven
+                // toch al vers is berekend — geen dubbele DFMapping-aanroep nodig.
+                DFLearner.convergeTrackedParams(
+                    context,
+                    mapOf(
+                        "watchingMinDeltaToTarget" to (po.watchingMinDeltaToTarget ?: 0.0),
+                        "commitCooldownMinutes"    to (po.commitCooldownMinutes?.toDouble() ?: 0.0),
+                        "earlyBoostMinConfidence"  to (po.earlyBoostMinConfidence ?: 0.0),
+                        "earlyBoostMaxCommits"     to (po.earlyBoostMaxCommits?.toDouble() ?: 0.0),
+                        "earlyRiseFracMin"         to (po.earlyRiseFracMin ?: 0.0),
+                        "lateCommitDecayThreshold" to (po.lateCommitDecayThreshold ?: 0.0),
+                        "sustainedRiseSlopeMin"    to (po.sustainedRiseSlopeMin ?: 0.0)
+                    )
                 )
-            )
+            } else {
+                // MANUAL (10/07/2026, Ecko — Fase 2): voorstel opslaan i.p.v.
+                // direct toepassen, en de gebruiker via dezelfde native-
+                // notificatie-methode als de AI-adviseur op de hoogte stellen.
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.save(
+                    context,
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.Proposal(
+                        tsMs = System.currentTimeMillis(),
+                        d = d, f = f, vExtra = vExtra,
+                        refWmd = refWmd, refWff = refWff, refEb = refEb,
+                        refPeakBias = refPeakBias, refLcd = refLcd,
+                        agg = agg, episodeCount = episodeMetrics.size,
+                        reason = reason,
+                        // 10/07/2026 (Ecko) — voor de leesbare uitleg in de kaart
+                        // (FclLearnerUitleg). learningStep is null als evaluate()
+                        // deze cyclus geblokkeerd werd (cooldown/manual-correction/
+                        // te weinig episodes) — dan vallen oldD/oldF terug op de
+                        // huidige d/f (geen zichtbare verandering te tonen).
+                        diagnose = learningStep?.diagnose ?: "",
+                        oldD = learningStep?.oldD ?: d,
+                        oldF = learningStep?.oldF ?: f
+                    )
+                )
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerNotificationHelper
+                    .showPendingProposal(context)
+            }
         }
 
         // ── Stap 8: NachtLearner (NF-schaal, 1-9) ───────────────────────────

@@ -50,7 +50,14 @@ class FCLComposeContent(
         val navigateToAiAdvisor = remember {
             app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiNotificationHelper.consumeNavigateRequest()
         }
-        var selectedTab by remember { mutableIntStateOf(if (navigateToAiAdvisor) 1 else 0) }
+        // 10/07/2026 (Ecko) — zelfde one-shot-patroon voor de Learner's
+        // MANUAL-melding. Beide vlaggen worden hier één keer gelezen; ze
+        // kunnen nooit allebei tegelijk true zijn (elke melding zet alleen
+        // haar eigen vlag), dus geen prioriteitsconflict tussen de twee.
+        val navigateToLearner = remember {
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerNotificationHelper.consumeNavigateRequest()
+        }
+        var selectedTab by remember { mutableIntStateOf(if (navigateToAiAdvisor || navigateToLearner) 1 else 0) }
         val scope = rememberCoroutineScope()
         val viewModel = remember {
             OpenAPSViewModel(
@@ -92,7 +99,11 @@ class FCLComposeContent(
                     state = state.value,
                     onRefresh = viewModel::onRefresh
                 )
-                1 -> FclAnalyzerScreen(onDismiss = { selectedTab = 0 }, startOnAiAdvisor = navigateToAiAdvisor)
+                1 -> FclAnalyzerScreen(
+                    onDismiss = { selectedTab = 0 },
+                    startOnAiAdvisor = navigateToAiAdvisor,
+                    startOnLearner = navigateToLearner
+                )
                 2 -> FclStatisticsScreen()
                 3 -> FCLSettingsScreen(preferences = preferences, sp = sp)
             }

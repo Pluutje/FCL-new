@@ -28,6 +28,11 @@ object DFLearner {
     private const val KEY_EP_COUNT       = "df_episode_count_since_last"
     private const val KEY_ACCUM_D         = "df_accum_d"   // geaccumuleerde rawΔD over wachtepisodes
     private const val KEY_ACCUM_F         = "df_accum_f"   // geaccumuleerde rawΔF over wachtepisodes
+    // 10/07/2026 (Ecko) — telt aaneengesloten episodes waarbij F al tegen
+    // zijn plafond (DFMapping.F_MAX) zit terwijl er nog steeds extra
+    // potentie nodig was (rawDeltaD > 0). Zie de "F eerst, D als vluchtoptie"
+    // redirect-logica in evaluate(). Reset naar 0 zodra F weer ruimte heeft.
+    private const val KEY_F_CEILING_STUCK_COUNT = "df_f_ceiling_stuck_count"
     private const val KEY_HISTORY         = "df_history"   // laatste 20 aanpassingen
     private const val KEY_V_EXTRA = "df_v_extra"
 
@@ -187,11 +192,55 @@ object DFLearner {
     fun setTempo(context: Context, tempo: Tempo) =
         prefs(context).edit().putString(KEY_TEMPO, tempo.name).apply()
 
-    fun isAutoEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_AUTO, false)
+    // ═══════════════════════════════════════════════════════════════════════
+    // Mode-schakeling (10/07/2026, Ecko) — vervangt het kale aan/uit-boolean
+    // door OFF/AUTO/MANUAL (zie FclSystemMode.kt voor de volledige toelichting).
+    // ═══════════════════════════════════════════════════════════════════════
+    private const val KEY_MODE = "fcl_learner_mode"
 
-    fun setAutoEnabled(context: Context, enabled: Boolean) =
+    /**
+     * Backward-compat: bestaande installaties hebben nog geen KEY_MODE staan,
+     * alleen het oude KEY_AUTO-boolean. isAutoEnabled=false betekende al
+     * "evaluate() rekent en logt, past alleen niet toe" — functioneel bijna
+     * identiek aan MANUAL, dus dat is de eerlijke default-mapping (geen
+     * gedragsverandering voor bestaande gebruikers totdat ze zelf een keuze
+     * maken). isAutoEnabled=true → AUTO, exact het huidige gedrag.
+     */
+    fun getMode(context: Context): app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode {
+        val stored = prefs(context).getString(KEY_MODE, null)
+        if (stored != null) return app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.fromStored(stored)
+        return if (prefs(context).getBoolean(KEY_AUTO, false))
+            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+        else
+            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+    }
+
+    fun setMode(context: Context, mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode) {
+        prefs(context).edit().putString(KEY_MODE, mode.name).apply()
+    }
+
+    /** OFF: sla evaluate()/evaluateLateCommitDecay() volledig over — geen
+     *  berekening, geen log, geen enkel effect. Gebruikt vóór de aanroep. */
+    fun isEvaluationEnabled(context: Context): Boolean =
+        getMode(context) != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
+
+    /**
+     * BUGFIX (10/07/2026, Ecko): leest nu af van getMode() i.p.v. rechtstreeks
+     * het oude KEY_AUTO-boolean — anders zouden bestaande aanroepplekken
+     * (FCLCycleLogRepository.kt, convergeTrackedParams) een verouderde stand
+     * blijven zien zodra iemand via setMode() een nieuwe modus kiest.
+     */
+    fun isAutoEnabled(context: Context): Boolean =
+        getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+
+    /** Legacy setter — schrijft nog naar het oude KEY_AUTO-boolean voor wie
+     *  hier nog rechtstreeks naar verwijst, maar setMode() is nu de bron van
+     *  waarheid (zie getMode()'s fallback-volgorde). Nieuwe code: setMode(). */
+    fun setAutoEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
+        setMode(context, if (enabled) app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+                          else app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL)
+    }
 
     // ── Maaltijdtype-specifieke D/F get/set ──────────────────────────────
 
@@ -925,11 +974,56 @@ object DFLearner {
             }
         }
 
+        // ── RODE DRAAD: "F eerst, D als vluchtoptie" (10/07/2026, Ecko) ──────
+        // Geldt uitsluitend voor OPWAARTSE D-aanpassingen (meer potentie
+        // nodig). Een hypo (D omlaag) hoeft nooit te wachten tot F is
+        // "uitgeprobeerd" — dat zou een hypo onnodig laten voortduren. F
+        // omlaag blijft uitsluitend voorbehouden aan de TERUGSCHROEF-tak
+        // hierboven (frontloadTeGroot — hypo direct na een grote, solo
+        // eerste commit) — die logica staat er al en blijft ongewijzigd.
+        //
+        // Bij rawDeltaD > 0 (in welke tak dan ook hierboven): eerst proberen
+        // of F nog ruimte heeft om te stijgen — insuline eerder geven lost
+        // veel problemen net zo goed op, zonder het totaal te verhogen. Pas
+        // als F al F_CEILING_ADVIES_DREMPEL episodes op rij tegen zijn
+        // plafond (DFMapping.F_MAX) zit én er nog steeds extra potentie
+        // nodig is, mag D alsnog volledig stijgen — én wordt er (uitsluitend
+        // signalerend, niets wordt automatisch toegepast) een advies gelogd
+        // dat het F-plafond zelf verhoogd zou kunnen worden. Dat advies is nu
+        // puur informatief; bij herhaaldelijk voorkomen kan het later een
+        // eigen, handmatige knop onder Expert modus worden — geen nieuwe
+        // compile nodig voor de gebruiker om zoiets te zien aankomen.
+        val fRedirectFractie = 0.70
+        val fCeilingMarge = 0.02
+        val fCeilingAdviesDrempel = 5
+
+        var adjDeltaD = rawDeltaD
+        var adjDeltaF = rawDeltaF
+
+        if (rawDeltaD > 0.0) {
+            val currentF = getF(context)
+            val fRuimte = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFMapping.F_MAX - currentF
+
+            if (fRuimte > fCeilingMarge) {
+                val redirectF = rawDeltaD * fRedirectFractie
+                adjDeltaF = rawDeltaF + redirectF
+                adjDeltaD = rawDeltaD * (1.0 - fRedirectFractie)
+                prefs(context).edit().putInt(KEY_F_CEILING_STUCK_COUNT, 0).apply()
+            } else {
+                val teller = prefs(context).getInt(KEY_F_CEILING_STUCK_COUNT, 0) + 1
+                prefs(context).edit().putInt(KEY_F_CEILING_STUCK_COUNT, teller).apply()
+                if (teller >= fCeilingAdviesDrempel) {
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerAdvies
+                        .logFCeilingAdvies(context, currentF, teller)
+                }
+            }
+        }
+
         // ── Schaal rawDelta met episodeVertrouwen ───────────────────────────
         // Episodes met veel cap/rem-cycli of laag advisorWeight tellen minder
         // zwaar mee — hun uitkomst was mede bepaald door externe limieten.
-        val scaledRawDeltaD = rawDeltaD * episodeVertrouwen
-        val scaledRawDeltaF = rawDeltaF * episodeVertrouwen
+        val scaledRawDeltaD = adjDeltaD * episodeVertrouwen
+        val scaledRawDeltaF = adjDeltaF * episodeVertrouwen
 
         if (diagnose == "SKIP_GEEN_EPISODE") {
             app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(

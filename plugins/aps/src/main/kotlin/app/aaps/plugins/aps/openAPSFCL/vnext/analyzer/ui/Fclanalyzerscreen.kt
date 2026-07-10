@@ -42,7 +42,12 @@ private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET }
 @Composable
 fun FclAnalyzerScreen(
     onDismiss: () -> Unit,
-    startOnAiAdvisor: Boolean = false
+    startOnAiAdvisor: Boolean = false,
+    // 10/07/2026 (Ecko) — zelfde patroon als startOnAiAdvisor, nu voor de
+    // Learner's MANUAL-melding (FclLearnerNotificationHelper). Ook dit vlag
+    // wordt één keer, hogerop in FCLComposeContent.kt, gelezen en hier
+    // doorgegeven — zie de toelichting bij startOnAiAdvisor hieronder.
+    startOnLearner: Boolean = false
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
@@ -60,8 +65,24 @@ fun FclAnalyzerScreen(
     // wordt) en hier als parameter doorgegeven. Nogmaals consumeNavigateRequest()
     // aanroepen zou het vlag al verbruikt hebben gevonden (false), omdat het
     // een get-and-reset is — vandaar geen eigen aanroep meer hier.
+    //
+    // BUGFIX (10/07/2026, Ecko): startOnLearner sprong voorheen DIRECT naar
+    // Screen.ADVISOR — maar dat scherm rendert uitsluitend als
+    // advisorResultState.value niet-null is (advisorResultState.value?.let{}),
+    // en die waarde wordt normaal ALLEEN gezet via de Dashboard-knop
+    // "onOpenAdvisor", die eerst refreshData() + runAdvisorFlow() doorloopt.
+    // Bij een directe sprong bleef advisorResultState.value voor altijd null
+    // → permanent leeg scherm (geen laad-flikkering, gewoon blijvend blanco).
+    // Fix: start op DASHBOARD, en laat een LaunchedEffect hieronder exact
+    // dezelfde pijplijn als die knop doorlopen zodra de data geladen is —
+    // pas ná die pijplijn schakelt currentScreen echt naar Screen.ADVISOR.
     var currentScreen by remember {
-        mutableStateOf(if (startOnAiAdvisor) Screen.AI_ADVISOR else Screen.DASHBOARD)
+        mutableStateOf(
+            when {
+                startOnAiAdvisor -> Screen.AI_ADVISOR
+                else             -> Screen.DASHBOARD
+            }
+        )
     }
     var allRows by remember { mutableStateOf<List<LogRow>?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>?>(null) }
@@ -317,6 +338,33 @@ fun FclAnalyzerScreen(
     }
 
     LaunchedEffect(Unit) { refreshData() }
+
+    // BUGFIX (10/07/2026, Ecko) — zie kdoc bij currentScreen hierboven: dit
+    // repliceert exact dezelfde pijplijn als de Dashboard-knop "onOpenAdvisor"
+    // (regel ~356 verderop), alleen getriggerd door startOnLearner i.p.v. een
+    // klik. Draait één keer; als startOnLearner false is, gebeurt er niets.
+    LaunchedEffect(startOnLearner) {
+        if (!startOnLearner) return@LaunchedEffect
+        refreshData {
+            if (episodes != null && episodeMetrics != null && classifications != null && currentAxisState != null) {
+                scope.launch {
+                    runAdvisorFlow(
+                        context = context,
+                        episodes = episodes!!,
+                        episodeMetrics = episodeMetrics!!,
+                        classifications = classifications!!,
+                        currentAxisState = currentAxisState!!,
+                        allRows = allRows ?: emptyList(),
+                        onMetricsUpdated = { episodeMetrics = it },
+                        onResult = {
+                            advisorResultState.value = it
+                            currentScreen = Screen.ADVISOR
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier

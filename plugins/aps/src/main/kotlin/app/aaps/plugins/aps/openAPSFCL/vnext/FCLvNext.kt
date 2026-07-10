@@ -2402,7 +2402,19 @@ private fun computePeakBrake(
     val t = smooth01((ctx.iobRatio - suppressThreshold) / (fullBrakeIobRatio - suppressThreshold))
     val slopeCeiling = 0.50 + t * (maxSlopeCeiling - 0.50)
 
-    val decelTriggered = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold
+    // BUGFIX (10/07/2026, Ecko): recentSlope is een kort/ruizig signaal — een
+    // tijdelijke knik daarin (bijv. één cyclus lager door meetruis) werd tot nu
+    // toe zonder tegencontrole als "aan het afvlakken" behandeld, ook als de
+    // BG (en het gladdere slope-veld) gewoon stevig bleef doorstijgen. Concreet
+    // voorbeeld: BG 11,3→11,5→11,9→12,8→14,2 mmol, slope bleef 8,6-9,9, maar
+    // recentSlope zakte één cyclus van 12,71 naar 8,79 — genoeg om de rem 2
+    // cycli (10 min) te activeren terwijl curveAcceleration op dat moment nog
+    // gewoon +6,93 was (dus nog altijd versnellend). Zelfde patroon en
+    // dezelfde oplossing als bij bgStijgtNogFors: alleen als de curve-fit
+    // (betrouwbaarder, minder ruizig) de omslag BEVESTIGT, telt de knik mee.
+    val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration <= 0.0
+    val decelTriggered = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold &&
+        curveConfirmtOmslag
     val brakeCondition =
         (ctx.slope <= slopeCeiling || decelTriggered) && ctx.deltaToTarget >= 0.8
 

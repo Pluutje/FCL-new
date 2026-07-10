@@ -56,10 +56,41 @@ object FclAiAdvisorSettingsStore {
     private const val KEY_ENABLED = "ai_advisor_enabled"
 
     fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ENABLED, true)
+        getMode(context) != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
 
-    fun setEnabled(context: Context, enabled: Boolean) =
+    /** Legacy setter — nieuwe code: setMode(). Zet OFF/MANUAL, nooit automatisch
+     *  AUTO: bestaand gedrag was altijd "wacht op goedkeuring", dat blijft zo
+     *  totdat de gebruiker zelf expliciet AUTO kiest. */
+    fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        setMode(context, if (enabled) app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+                          else app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Mode-schakeling (10/07/2026, Ecko) — zie FclSystemMode.kt.
+    // ═══════════════════════════════════════════════════════════════════════
+    private const val KEY_MODE = "fcl_ai_advisor_mode"
+
+    /**
+     * Backward-compat: bestaande installaties hebben nog geen KEY_MODE, alleen
+     * het oude KEY_ENABLED-boolean (default true). Het bestaande gedrag bij
+     * enabled=true was ALTIJD "wacht op expliciete goedkeuring" — er bestond
+     * nog geen automatisch-toepassen-modus — dus de eerlijke default-mapping
+     * is MANUAL, niet AUTO. AUTO is puur een nieuwe, expliciete keuze.
+     */
+    fun getMode(context: Context): app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode {
+        val stored = prefs(context).getString(KEY_MODE, null)
+        if (stored != null) return app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.fromStored(stored)
+        return if (prefs(context).getBoolean(KEY_ENABLED, true))
+            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+        else
+            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
+    }
+
+    fun setMode(context: Context, mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode) {
+        prefs(context).edit().putString(KEY_MODE, mode.name).apply()
+    }
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

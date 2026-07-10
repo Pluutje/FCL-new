@@ -50,6 +50,23 @@ verhoogt (zoals een IOB-drempel omhoog). Stel in plaats daarvan timing-parameter
 die insuline verder naar voren halen (earlyBoostFactor, watchingFrontloadFrac,
 commitCooldownMinutes omlaag).
 
+## Rode draad: timing eerst, hoeveelheid pas als vluchtoptie (10/07/2026)
+Basisprincipe voor ELK voorstel dat "meer potentie" beoogt (niet alleen bij overshoot):
+probeer eerst insuline vroeger te laten geven (earlyBoostFactor omhoog,
+watchingFrontloadFrac omhoog, watchingMinDeltaToTarget/commitCooldownMinutes omlaag)
+vóórdat je een parameter voorstelt die puur de hoeveelheid raakt. Alleen als de
+timing-parameters al dicht bij hun bovengrens zitten (watchingFrontloadFrac >= 0.90,
+earlyBoostFactor al meermaals verhoogd zonder resultaat) én het probleem blijft bestaan,
+is een aanpassing die de hoeveelheid raakt gerechtvaardigd. Vermeld in de reason expliciet
+of timing-parameters al dicht bij hun grens zaten — dat helpt de gebruiker beoordelen of
+dit voorstel de vluchtoptie is of de eerste stap.
+
+Omgekeerd (te veel/hypo) geldt deze volgorde NIET: een hypo vraagt direct om minder
+potentie, zonder eerst timing "uit te proberen" — dat zou de hypo onnodig verlengen.
+Verlaag earlyBoostFactor/watchingFrontloadFrac alleen specifiek als de hypo duidelijk
+direct na de eerste of tweede commit optrad (zie notableEpisodes/flatTaperEpisodeCount)
+— in alle andere hypo-situaties is een aanpassing die de hoeveelheid raakt de juiste.
+
 ## Hypo's: check eerst de afbouw, niet automatisch de vroege trigger (08/07/2026)
 multiCommitEpisodeCount en flatTaperEpisodeCount beschrijven of latere commits binnen een
 episode daadwerkelijk kleiner worden dan eerdere ("afbouw") of niet ("vlakke afbouw").

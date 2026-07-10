@@ -137,13 +137,29 @@ object FclAiAdvisorScheduler {
                 cachedResult.set(result)
                 if (result.parseError == null) {
                     markSuccessNow()
-                    // Notificatie direct na een verse run — de sticky check bovenaan
-                    // runIfDue() herbevestigt 'm daarna elke volgende cyclus zolang
-                    // er nog iets onbeoordeeld is (05/07/2026, Ecko).
-                    val pendingCount = result.suggestions.count {
-                        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it)
+
+                    // 10/07/2026 (Ecko) — AUTO-modus: elk niet-door-veiligheids-
+                    // checks afgewezen voorstel wordt meteen toegepast, geen
+                    // goedkeuring nodig. "Wat en wanneer" blijft zichtbaar via
+                    // de bestaande geschiedenis (FclAiAdvisorApplier.approve()
+                    // schrijft daar sowieso al naartoe) — geen aparte melding
+                    // nodig, er is niets te beslissen.
+                    if (FclAiAdvisorSettingsStore.getMode(context) ==
+                        app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+                    ) {
+                        result.suggestions.filter { !it.rejected }.forEach { suggestion ->
+                            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorApplier
+                                .approve(suggestion, context)
+                        }
+                    } else {
+                        // MANUAL-modus (bestaand gedrag): sticky check bovenaan
+                        // runIfDue() herbevestigt de melding daarna elke volgende
+                        // cyclus zolang er nog iets onbeoordeeld is (05/07/2026, Ecko).
+                        val pendingCount = result.suggestions.count {
+                            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it)
+                        }
+                        FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
                     }
-                    FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
                 }
             } finally {
                 running.set(false)
