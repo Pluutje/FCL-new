@@ -40,6 +40,27 @@ object FclAiAdvisorSettingsStore {
 
     val DEFAULT_MODEL_ID = "gemini-3.5-flash"
 
+    // ── Aan/uit-schakelaar (10/07/2026, Ecko) ────────────────────────────────
+    // Mirroring DFLearner.isAutoEnabled/setAutoEnabled — zelfde patroon, zodat
+    // Learner en AI-adviseur onafhankelijk aan/uit kunnen, zoals besproken.
+    // Default TRUE: bestaand gedrag (AI staat al aan) blijft ongewijzigd voor
+    // wie deze instelling nooit aanraakt.
+    //
+    // BELANGRIJK — wat "uit" NIET doet: FclAiParamStore wordt NIET geleegd.
+    // Eerder goedgekeurde AI-waarden blijven gewoon staan; alleen worden ze
+    // niet langer met prioriteit toegepast (zie ConfigOverrideWriter), en
+    // stopt de scheduler met nieuwe voorstellen genereren. Zo geen abrupte
+    // sprong in de dosering bij het uitzetten — de Learner's tracked-waarden
+    // (zie DFLearner.getTrackedParam) staan door de sync-koppeling al op de
+    // laatst actieve stand en kunnen van daaruit geleidelijk verder evalueren.
+    private const val KEY_ENABLED = "ai_advisor_enabled"
+
+    fun isEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENABLED, true)
+
+    fun setEnabled(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 

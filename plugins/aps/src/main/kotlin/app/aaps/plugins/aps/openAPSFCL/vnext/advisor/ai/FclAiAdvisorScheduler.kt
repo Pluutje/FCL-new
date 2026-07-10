@@ -93,6 +93,13 @@ object FclAiAdvisorScheduler {
      *    >= RETRY_INTERVAL geleden: opnieuw proberen (elke 15 min bij timeout/503).
      */
     fun runIfDue(context: Context, metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()) {
+        // 10/07/2026 (Ecko) — AI-adviseur volledig uit: geen nieuwe runs, geen
+        // sticky-herinnering meer voor nog-openstaande voorstellen (die
+        // beslissing doet er niet meer toe zolang AI niet meer meebeslist —
+        // zie de kdoc bij FclAiAdvisorSettingsStore.isEnabled voor wat "uit"
+        // wél en niet doet met al goedgekeurde waarden).
+        if (!app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.isEnabled(context)) return
+
         val now = Instant.now()
 
         // ── Sticky pending-melding (05/07/2026, Ecko) ───────────────────────

@@ -228,6 +228,25 @@ class FCLCycleLogRepository @Inject constructor(
                     context        = context,
                     episodeCount   = episodeMetrics.size
                 )
+
+            // 10/07/2026 (Ecko) — zachte convergentie voor de 7 AI-aanpasbare
+            // parameters zonder eigen dedicated evaluator (zie kdoc bij
+            // DFLearner.convergeTrackedParams). Hergebruikt de po die hierboven
+            // toch al vers is berekend — geen dubbele DFMapping-aanroep nodig.
+            // Draait alleen binnen deze isAutoEnabled-gate, dus vanzelf stil
+            // (bevroren tracked-waarden) als de Learner-automaat uitstaat.
+            DFLearner.convergeTrackedParams(
+                context,
+                mapOf(
+                    "watchingMinDeltaToTarget" to (po.watchingMinDeltaToTarget ?: 0.0),
+                    "commitCooldownMinutes"    to (po.commitCooldownMinutes?.toDouble() ?: 0.0),
+                    "earlyBoostMinConfidence"  to (po.earlyBoostMinConfidence ?: 0.0),
+                    "earlyBoostMaxCommits"     to (po.earlyBoostMaxCommits?.toDouble() ?: 0.0),
+                    "earlyRiseFracMin"         to (po.earlyRiseFracMin ?: 0.0),
+                    "lateCommitDecayThreshold" to (po.lateCommitDecayThreshold ?: 0.0),
+                    "sustainedRiseSlopeMin"    to (po.sustainedRiseSlopeMin ?: 0.0)
+                )
+            )
         }
 
         // ── Stap 8: NachtLearner (NF-schaal, 1-9) ───────────────────────────

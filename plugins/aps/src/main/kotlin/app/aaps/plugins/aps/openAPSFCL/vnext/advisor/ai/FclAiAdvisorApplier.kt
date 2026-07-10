@@ -53,9 +53,21 @@ object FclAiAdvisorApplier {
         // verouderd startpunt (bijv. als de AI earlyBoostFactor verhoogt naar 2.3
         // maar DFLearner nog 2.20 heeft → DFLearner zou bij volgende episode
         // vanuit 2.20 evalueren in plaats van vanuit 2.3).
+        // 10/07/2026 (Ecko) — sync voor ALLE 10 AI-aanpasbare parameters, niet
+        // alleen de twee met een dedicated evaluator. Zonder deze sync zou de
+        // Learner (indien aan) bij de eerstvolgende episode vanaf een
+        // verouderde referentie evalueren/convergeren, los van waar de AI de
+        // waarde net naartoe heeft gezet. Drie parameters hebben een eigen,
+        // dedicated "ondergrond"-waarde (refEb/refWatching/refLcd) met eigen
+        // evaluatielogica; de overige zeven gebruiken de generieke tracked-
+        // opslag (zie DFLearner.convergeTrackedParams) — ook klaar voor
+        // toekomstige AI/Learner-aanpasbare parameters zonder verdere wijziging
+        // hier nodig te hebben.
         when (suggestion.param) {
             "earlyBoostFactor"      -> DFLearner.syncEarlyBoostFactor(context, suggestion.proposedValue)
             "watchingFrontloadFrac" -> DFLearner.syncWatchingFrac(context, suggestion.proposedValue)
+            "lateCommitDecayFactor" -> DFLearner.syncLateCommitDecayFactor(context, suggestion.proposedValue)
+            else                    -> DFLearner.syncTrackedParam(context, suggestion.param, suggestion.proposedValue)
         }
 
         FclAiAdvisorHistoryRepository.record(suggestion, AiSuggestionStatus.APPROVED)
@@ -95,6 +107,8 @@ object FclAiAdvisorApplier {
         when (param) {
             "earlyBoostFactor"      -> DFLearner.syncEarlyBoostFactor(context, value)
             "watchingFrontloadFrac" -> DFLearner.syncWatchingFrac(context, value)
+            "lateCommitDecayFactor" -> DFLearner.syncLateCommitDecayFactor(context, value)
+            else                    -> DFLearner.syncTrackedParam(context, param, value)
         }
         FclAiAdvisorHistoryRepository.deleteParam(param)
         return ApplyResult.Applied(param, value)

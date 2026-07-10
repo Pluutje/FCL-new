@@ -5159,8 +5159,23 @@ class FCLvNext(
                 // i.p.v. naar 0.10 te zakken terwijl BG nog naar 13-14 gaat.
                 // De IOB-rem (commitIobFactor) en de afterload remmen het totaal
                 // al voldoende; de decayFloor mag hier niet de bottleneck zijn.
+                //
+                // BUGFIX (09/07/2026, Ecko): ctx.slope is een traag/gemiddeld
+                // signaal — bij een omslag (piek net gepasseerd) kan het nog 1-2
+                // cycli "nog stijgend" blijven aangeven terwijl de BG zelf al
+                // daalt. Concreet voorbeeld: bij een BG-piek gaf slope=4.37 (ruim
+                // boven de 1.5-drempel) terwijl curveAcceleration al -1.46 was
+                // (met r²=0.96) — de curve-fit had de omslag dus al correct
+                // gezien, maar het trage slope-signaal liet het vluchtventiel
+                // toch nog een grote, ongeplafonneerde dosis doorlaten. Vandaar
+                // nu ook een check op curveAcceleration — dezelfde, elders al
+                // vertrouwde curve-fit-drempel (CURVE_FIT_MIN_R2) als bij
+                // peakPressureBonus/de topping-out-boost, geen nieuw mechanisme.
+                val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
+                    ctx.curveAcceleration <= 0.0
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
-                    ctx.input.bgNow > ctx.input.targetBG + 3.0
+                    ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
+                    !curveConfirmtOmslag
                 val decayFloorBase = if (bgStijgtNogFors) {
                     // Stijgende BG ver boven target: hogere vloer
                     // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18

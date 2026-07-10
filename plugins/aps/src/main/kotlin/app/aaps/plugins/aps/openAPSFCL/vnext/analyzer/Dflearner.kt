@@ -244,6 +244,81 @@ object DFLearner {
     fun setRefLcd(context: Context, v: Double) =
         prefs(context).edit().putFloat(KEY_REF_LCD, v.coerceIn(DFMapping.REF_LCD_MIN, DFMapping.REF_LCD_MAX).toFloat()).apply()
 
+    /**
+     * Synchroniseer lateCommitDecayFactor (refLcd) in de learner-prefs met een extern
+     * vastgestelde waarde (bijv. door de AI-advisor goedgekeurd). Zelfde reden en patroon
+     * als syncEarlyBoostFactor/syncWatchingFrac hierboven: zonder deze sync evalueert
+     * evaluateLateCommitDecay() bij de eerstvolgende episode vanaf een verouderd refLcd,
+     * los van waar de AI de waarde net naartoe heeft gezet.
+     *
+     * Zelfde vereenvoudiging als bij earlyBoostFactor: de volledige AI-waarde wordt direct
+     * in refLcd gezet (niet teruggerekend door de F-afgeleide basisterm eruit te halen) —
+     * niet wiskundig exact, maar consistent met hoe earlyBoostFactor het al doet.
+     */
+    fun syncLateCommitDecayFactor(context: android.content.Context, value: Double) =
+        setRefLcd(context, value)
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Generieke tracked-parameters (10/07/2026, Ecko)
+    // ═══════════════════════════════════════════════════════════════════════
+    // AANLEIDING: earlyBoostFactor/watchingFrontloadFrac/lateCommitDecayFactor
+    // hebben elk een EIGEN, dedicated evaluatiefunctie (evaluateEarlyBoost(),
+    // evaluateLateCommitDecay()) die ze los van D/F geleidelijk bijstuurt — dat
+    // is het mechanisme waarmee de Learner een AI-wijziging na het uitzetten
+    // van de AI-adviseur soepel kan "afbouwen" in plaats van abrupt terug te
+    // vallen op de D/F-formule.
+    //
+    // De overige 7 AI-aanpasbare parameters (watchingMinDeltaToTarget,
+    // commitCooldownMinutes, earlyBoostMinConfidence, earlyBoostMaxCommits,
+    // earlyRiseFracMin, lateCommitDecayThreshold, sustainedRiseSlopeMin) zijn
+    // pure, verse D/F-formule-uitkomsten zonder zo'n eigen tussenstap. Deze
+    // generieke opslag + zachte-convergentie-functie geeft ze dezelfde
+    // soepele overgang, zonder voor elk van de 7 een eigen los functiepaar te
+    // hoeven schrijven — en ligt meteen klaar voor toekomstige, nog te bouwen
+    // AI/Learner-aanpasbare parameters (bijv. een activiteit-gebaseerde
+    // aanpassing), die alleen een sleutel + een regel in ConfigOverrideWriter
+    // en FclAiAdvisorApplier nodig hebben, geen nieuwe infrastructuur.
+    //
+    // WERKING: elke episode-evaluatie (zie aanroep in FCLCycleLogRepository.kt,
+    // naast de bestaande evaluate()/evaluateLateCommitDecay()-aanroepen) trekt
+    // de tracked-waarde TRACKED_CONVERGENCE_RATE (10%) dichter naar de op dat
+    // moment actuele D/F-afgeleide waarde. Bij AI uit + Learner aan groeit de
+    // tracked-waarde dus geleidelijk (~10-20 episodes) terug naar wat D/F puur
+    // zou geven — geen sprong. Staat de Learner ook uit, dan draait deze functie
+    // niet (zie isAutoEnabled-check), en blijft de tracked-waarde bevroren op
+    // zijn laatste stand — conform "laatste waarden blijven staan bij uit".
+    private const val TRACKED_PREFIX = "df_tracked_"
+    private const val TRACKED_CONVERGENCE_RATE = 0.10
+
+    fun getTrackedParam(context: Context, key: String, default: Double): Double =
+        prefs(context).getFloat(TRACKED_PREFIX + key, default.toFloat()).toDouble()
+
+    fun setTrackedParam(context: Context, key: String, value: Double) {
+        prefs(context).edit().putFloat(TRACKED_PREFIX + key, value.toFloat()).apply()
+    }
+
+    /** Aanroepen door FclAiAdvisorApplier bij goedkeuring — zelfde eenvoudige
+     *  directe-overschrijf-patroon als syncEarlyBoostFactor/syncWatchingFrac/
+     *  syncLateCommitDecayFactor, nu generiek voor de overige 7 parameters. */
+    fun syncTrackedParam(context: Context, key: String, value: Double) =
+        setTrackedParam(context, key, value)
+
+    /**
+     * Zachte convergentie voor alle generieke tracked-parameters, één keer per
+     * episode-evaluatie. [dfDerived] bevat de op dit moment actuele D/F-
+     * afgeleide waarde per parameter-sleutel (uit DFMapping.toParamOverrides()).
+     * Doet niets als de Learner-automaat uit staat (isAutoEnabled=false) — dan
+     * blijven tracked-waarden bevroren, net als D/F zelf in dat geval.
+     */
+    fun convergeTrackedParams(context: Context, dfDerived: Map<String, Double>) {
+        if (!isAutoEnabled(context)) return
+        for ((key, dfValue) in dfDerived) {
+            val current = getTrackedParam(context, key, dfValue)
+            val next = current + (dfValue - current) * TRACKED_CONVERGENCE_RATE
+            setTrackedParam(context, key, next)
+        }
+    }
+
     // Agressiviteitsschaal (Stap 1: opslag, Stap 2: koppeling aan params)
     // NachtFactor-niveau (1-9), analoog aan aggressiveness
     private const val KEY_NF_LEVEL = "nf_level"
