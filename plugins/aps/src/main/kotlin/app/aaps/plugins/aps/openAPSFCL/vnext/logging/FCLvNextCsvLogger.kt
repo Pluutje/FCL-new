@@ -175,6 +175,12 @@ data class FCLvNextCsvLogRow(
     var commitDoseFinal: Double = 0.0,
     var lateDecayMul: Double = 1.0,
     var episodeCommitNr: Int = 0,
+    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Zie kdoc
+    // bij lastBgStijgtNogFors in FCLvNext.kt — legt vast of het vluchtventiel
+    // voor de late-commit-afbouw deze cyclus actief was, en met welke commitNr
+    // die beslissing werd genomen (los van eventuele afronding elders).
+    var bgStijgtNogFors: Boolean = false,
+    var commitNrUsed: Int = 0,
     // Extra decay-steilheid door bevestigde "topping out" (04/07/2026, Ecko) —
     // 0.0 zolang de curve-fit dit niet bevestigt, dus geen effect op bestaand
     // gedrag tenzij expliciet aangetoond dat de piek ruim onder 10 mmol blijft.

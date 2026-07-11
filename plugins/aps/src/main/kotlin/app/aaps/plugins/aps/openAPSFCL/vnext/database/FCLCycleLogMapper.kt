@@ -167,6 +167,8 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
         commitDoseFinal        = commitDoseFinal,
         lateDecayMul           = lateDecayMul,
         episodeCommitNr        = episodeCommitNr,
+        bgStijgtNogFors        = bgStijgtNogFors,
+        commitNrUsed           = commitNrUsed,
         iobOvershootFactor     = iobOvershootFactor
     ),
 

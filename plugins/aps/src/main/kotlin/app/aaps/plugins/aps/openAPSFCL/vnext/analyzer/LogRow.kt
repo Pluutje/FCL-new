@@ -86,5 +86,8 @@ data class LogRow(
     val earlyBoostCount: Int = 0,
     val earlyBoostFactor: Double = 1.0,
     val guardMaxSmbLimited: Boolean = false,
-    val episodeCommitNr: Int = 0
+    val episodeCommitNr: Int = 0,
+    // 11/07/2026 (Ecko) — puur diagnostisch, zie kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
+    val bgStijgtNogFors: Boolean = false,
+    val commitNrUsed: Int = 0
 )

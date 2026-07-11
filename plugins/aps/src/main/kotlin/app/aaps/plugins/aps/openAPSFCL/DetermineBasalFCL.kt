@@ -617,6 +617,32 @@ class DetermineBasalFCL @Inject constructor(
 
         } else {
             consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/5 (min 25 min history)")
+            // BUGFIX (11/07/2026, Ecko): deze tak deed voorheen verder niets — een
+            // op dat moment lopende, verhoogde tijdelijke basaal bleef gewoon
+            // doorlopen, want er werd geen rT ingesteld. Zelfde risicoklasse als
+            // de eerdere "glucoseStatus == null"-fix in OpenAPSFCLPlugin.kt, maar
+            // dan voor dit specifieke, latere controlepunt: glucose_status zelf
+            // was hier niet null (die check hierboven was al gepasseerd), maar
+            // bgHistoryProvider.getLastHours() had nog niet genoeg gebucketeerde
+            // punten — waarschijnlijk een kort inhaal-momentje in AAPS' eigen
+            // data-verwerking (iobCobCalculator), los van xDrip+/de sensor zelf,
+            // die typisch binnen 1-2 cycli vanzelf weer bijtrekt (zie het
+            // xDrip+-fragment van 10/07/2026: geen daadwerkelijk gemiste meting,
+            // AAPS had 'm alleen nog niet gebucketeerd op het moment van deze
+            // beslissing).
+            //
+            // Bewust GEEN eenmalig-vlag zoals bij de sensor-uitval-fix: dat
+            // scenario kon uren aanhouden (herhaald ingrijpen dus ongewenst);
+            // dit scenario lost vrijwel altijd al de volgende cyclus vanzelf op,
+            // dus simpelweg bij elke keer dat het zich voordoet een lopende hoge
+            // temp neutraliseren is hier voldoende en simpeler.
+            if (currenttemp.rate > basal) {
+                rT.reason.append(". Onvoldoende BG-geschiedenis (${bgHistoryPoints.size}/5) — lopende temp van ${currenttemp.rate} veiliggesteld naar neutraal ($basal)")
+                rT.deliverAt = deliverAt
+                rT.duration = 30
+                rT.rate = basal
+                return rT
+            }
         }
 
 

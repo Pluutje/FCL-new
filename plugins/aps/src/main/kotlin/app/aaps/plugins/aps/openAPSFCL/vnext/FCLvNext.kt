@@ -3103,6 +3103,13 @@ class FCLvNext(
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
     private var episodePeakCommitU: Double = 0.0
+    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Vastgelegd
+    // zodat een volgend "laat commit slaat de afbouw over"-incident (zoals
+    // 11/07 06:42-07:12) exact te herleiden is uit de CSV, i.p.v. te moeten
+    // reconstrueren uit indirecte signalen. Gezet in het cappedFinalDose-blok,
+    // gelezen bij het wegschrijven van logRow verderop.
+    private var lastBgStijgtNogFors: Boolean = false
+    private var lastCommitNrUsed: Int = 0
 
     // ── Snelle-afremming guard (zie updateRapidDecelGate) ──────────────────
     // Houdt de hoogste recentSlope sinds episode-start bij, om een relatieve
@@ -5188,6 +5195,10 @@ class FCLvNext(
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
                     ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
                     !curveConfirmtOmslag
+                // 11/07/2026 (Ecko) — diagnostisch vastleggen, zie kdoc bij
+                // lastBgStijgtNogFors hierboven.
+                lastBgStijgtNogFors = bgStijgtNogFors
+                lastCommitNrUsed = commitNr
                 val decayFloorBase = if (bgStijgtNogFors) {
                     // Stijgende BG ver boven target: hogere vloer
                     // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18
@@ -6113,7 +6124,17 @@ class FCLvNext(
         logRow.peakEpisodeActive = peakEstimator.active
 
         logRow.lateDecayMul = lateDecayMul
-        logRow.episodeCommitNr = episodeCommitCount
+        // BUGFIX (11/07/2026, Ecko): stond hier als episodeCommitCount (zonder
+        // +1), terwijl de beslissing zelf (cappedFinalDose, decayFloor) intern
+        // commitNr = episodeCommitCount + 1 gebruikt. Het gelogde getal liep
+        // dus structureel 1 achter op wat er echt gebeurde — verwarrend bij
+        // het terugkijken in de CSV (bijv. "commit_nr=4" terwijl er intern al
+        // met commit 5 werd gerekend). Puur een logging-correctie, geen
+        // gedragswijziging: de dosering zelf was hier nooit fout, alleen het
+        // getal dat ervan werd getoond.
+        logRow.episodeCommitNr = episodeCommitCount + 1
+        logRow.bgStijgtNogFors = lastBgStijgtNogFors
+        logRow.commitNrUsed = lastCommitNrUsed
         logRow.suppressForPeak = suppressForPeak
         logRow.absorptionActive = isInAbsorptionWindow(now, config)
         logRow.peakIobBrakeActive = postPeak.peakBrake.reason != "NONE"

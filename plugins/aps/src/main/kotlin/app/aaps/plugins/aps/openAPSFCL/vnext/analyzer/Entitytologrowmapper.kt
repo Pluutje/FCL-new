@@ -88,5 +88,7 @@ fun FCLCycleLogEntity.toLogRow(): LogRow = LogRow(
     earlyBoostCount        = mealEpisode.earlyBoostCount,
     earlyBoostFactor       = mealEpisode.earlyBoostFactor,
     guardMaxSmbLimited     = guards.guardMaxSmbLimited,
-    episodeCommitNr        = forensic.episodeCommitNr
+    episodeCommitNr        = forensic.episodeCommitNr,
+    bgStijgtNogFors         = forensic.bgStijgtNogFors,
+    commitNrUsed            = forensic.commitNrUsed
 )

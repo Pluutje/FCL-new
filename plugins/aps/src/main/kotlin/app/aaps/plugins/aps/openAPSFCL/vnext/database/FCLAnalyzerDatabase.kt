@@ -30,7 +30,27 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
     // (en dus fallbackToDestructiveMigration) gewoon OVER. v15 garandeert een
     // echte version-mismatch en dus een gegarandeerde schone migratie,
     // ongeacht de staat waarin het toestel nu verkeert.
-    version = 15,
+    //
+    // v15→v16 (11/07/2026, Ecko): +bgStijgtNogFors/+commitNrUsed (in
+    // ForensicFields) — twee nieuwe, puur diagnostische kolommen. Ook een
+    // toevoeging met default-waarden vereist een versiebump: fallback-
+    // ToDestructiveMigration werkt op VERSIENUMMER-mismatch, niet op een
+    // inhoudelijke schema-diff — bij een ongewijzigd versienummer had Room de
+    // migratie simpelweg overgeslagen en het oude, incompatibele schema laten
+    // staan (zie de uitleg bij v15 hierboven — exact hetzelfde risico).
+    // GEVOLG: bij de eerste start na deze update wordt de cycle-log/episode/
+    // night-window/basal-profile-geschiedenis in de Room-database gewist
+    // (dropAllTables=true) en leeg opnieuw opgebouwd.
+    //
+    // CORRECTIE (11/07/2026, Ecko): eerdere aanname dat de CSV-bestanden
+    // hierbuiten zouden staan was ONJUIST — exportCsvLast7Days() in
+    // FCLCycleLogRepository.kt bouwt FCLvNext_Log_v8.csv bij elke export
+    // volledig opnieuw op vanuit dao.getSince() (Room als bron, niet als
+    // spiegel). Na deze migratie is Room dus leeg, en de eerstvolgende
+    // exportronde na de wipe overschrijft de bestaande CSV met (aanvankelijk
+    // vrijwel) niets — de meerdaagse geschiedenis in die CSV gaat feitelijk
+    // ook verloren, niet alleen de Room-tabellen zelf.
+    version = 16,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {

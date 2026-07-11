@@ -259,7 +259,11 @@ data class ForensicFields(
     val commitDoseFinal: Double,
     val lateDecayMul: Double,
     val episodeCommitNr: Int,
-    val iobOvershootFactor: Double
+    val iobOvershootFactor: Double,
+    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Zie
+    // kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
+    val bgStijgtNogFors: Boolean = false,
+    val commitNrUsed: Int = 0
 )
 
 // ── BURST CAP ─────────────────────────────────────────────────────────────
