@@ -31,9 +31,11 @@ import javax.inject.Singleton
  * `AlarmSoundServiceHelper` foreground-service-based path.
  *
  * Two alarm modalities:
- *  - [postFullScreenAlarm]: posts on a silent FSI channel; Android auto-launches ErrorActivity
- *    when the device is idle, or shows a heads-up notification when the user is active.
- *    The activity owns audio playback (MediaPlayer + volume ramp).
+ *  - [postFullScreenAlarm]: posts an FSI notification; Android auto-launches ErrorActivity when the
+ *    device is idle, or shows a heads-up notification when the user is active. With volume-ramp on
+ *    and the FSI permission granted the channel is silent and the activity owns audio (MediaPlayer +
+ *    volume ramp); otherwise the channel itself carries the sound so the alarm is audible even when
+ *    the activity can't auto-launch (e.g. USE_FULL_SCREEN_INTENT revoked on Android 14+).
  *  - [postSoundOnlyAlarm]: posts on a sound-bearing channel chosen by the
  *    [BooleanKey.AlertOverrideDoNotDisturb] preference. No activity, system plays channel sound.
  *
@@ -211,22 +213,42 @@ class AlarmNotificationManager @Inject constructor(
      * The activity is responsible for sound playback.
      */
     fun postFullScreenAlarm(status: String, title: String, @RawRes soundId: Int) {
-        // Ramp ON: channel sound is suppressed (setSilent below) so the activity's ramped audio
-        // experience starts cleanly from silence. No deferral needed in the activity.
+        // Ramp ON: channel sound is suppressed so the activity's ramped audio experience starts
+        // cleanly from silence. No deferral needed in the activity.
         // Ramp OFF: channel one-shot plays so the user hears immediate audio cue; the activity
         // defers its loop until the channel sound has finished (avoids double-audio).
         val rampEnabled = preferences.get(BooleanKey.AlertIncreaseVolume)
+
+        // On API 34+ the user can revoke USE_FULL_SCREEN_INTENT — if revoked, Android downgrades the
+        // FSI to a heads-up and never auto-launches ErrorActivity on the lock screen.
+        val fsiAllowed =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || mgr.canUseFullScreenIntent()
+
+        // The silent ramp channel plays NO sound of its own — it relies entirely on ErrorActivity's
+        // ramped MediaPlayer, which only sounds if the FSI actually auto-launches the activity. When
+        // FSI is revoked the activity never launches, so a silent channel would make the alarm
+        // completely inaudible (a silent heads-up only) — e.g. a backgrounded Automation alarm on
+        // Android 14+ where the permission defaults to denied. Fall back to the sound-bearing channel
+        // in that case so the notification itself rings. Trust the silent channel only when the
+        // activity is guaranteed its chance to launch.
+        val useSilentRampChannel = rampEnabled && fsiAllowed
+        if (!fsiAllowed)
+            aapsLogger.warn(
+                LTag.NOTIFICATION,
+                "USE_FULL_SCREEN_INTENT revoked — alarm won't auto-launch on lock screen" +
+                    (if (rampEnabled) "; falling back to a sound-bearing channel so it still rings" else "") +
+                    ". Grant via Settings → Apps → AAPS → Permissions → Full screen notifications."
+            )
 
         val intent = Intent(context, uiInteractionProvider.get().errorHelperActivity).apply {
             putExtra(AlarmIntent.EXTRA_SOUND_ID, soundId)
             putExtra(AlarmIntent.EXTRA_STATUS, status)
             putExtra(AlarmIntent.EXTRA_TITLE, title)
-            // Only stamp the post time when channel sound will actually play — the activity
-            // uses this to compute its deferral. Omitting it tells the activity "no channel
-            // sound, start audio immediately".
-            if (!rampEnabled) {
+            // Stamp the post time whenever a channel one-shot will play (any non-silent channel) —
+            // the activity uses it to defer its loop until that sound finishes (avoids double-audio).
+            // Omitting it tells the activity "no channel sound, start audio immediately".
+            if (!useSilentRampChannel)
                 putExtra(AlarmIntent.EXTRA_POSTED_AT_ELAPSED_REALTIME, SystemClock.elapsedRealtime())
-            }
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -236,25 +258,12 @@ class AlarmNotificationManager @Inject constructor(
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // On API 34+ the user can revoke USE_FULL_SCREEN_INTENT — if revoked, Android silently
-        // downgrades the FSI to a heads-up. For a medical alarm that's a meaningful regression;
-        // log loudly so it shows up in support logs. (The notification still posts and can still
-        // be tapped to open ErrorActivity — just no auto-launch on the lock screen.)
-        val fsiAllowed =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || mgr.canUseFullScreenIntent()
-        if (!fsiAllowed) {
-            aapsLogger.warn(
-                LTag.NOTIFICATION,
-                "USE_FULL_SCREEN_INTENT revoked by user — alarm will not auto-launch on lock screen. " +
-                    "Grant via Settings → Apps → AAPS → Permissions → Full screen notifications."
-            )
-        }
-
         val overrideDnd = preferences.get(BooleanKey.AlertOverrideDoNotDisturb)
-        // Ramp ON → silent channel (no channel sound, but heads-up + vibration still fire).
-        // Ramp OFF → sound-bearing channel matching the requested soundId + DND preference.
+        // Silent ramp channel only when ramp is on AND the activity can auto-launch to play its
+        // ramped audio (see useSilentRampChannel); otherwise a sound-bearing channel matching the
+        // requested soundId + DND preference so the notification itself is audible.
         val channelId =
-            if (rampEnabled) CHANNEL_FULL_SCREEN_SILENT
+            if (useSilentRampChannel) CHANNEL_FULL_SCREEN_SILENT
             else channelIdForSound(soundId, overrideDnd)
 
         val notification = NotificationCompat.Builder(context, channelId)
