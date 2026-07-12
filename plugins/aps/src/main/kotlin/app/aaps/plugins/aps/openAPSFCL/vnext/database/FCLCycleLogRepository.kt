@@ -442,6 +442,18 @@ class FCLCycleLogRepository @Inject constructor(
             "Documents/AAPS/ANALYSE"
         )
         dir.mkdirs()
+        // 11/07/2026 (Ecko): +2 kolommen (bg_stijgt_nog_fors, commit_nr_used).
+        // HERZIEN (12/07/2026, Ecko): eerder hier hernoemd naar v9, zoals de
+        // vaste discipline bij een schema-wijziging voorschrijft (zie
+        // FCLvNext_ActivityLog_v1→v2). Op Ecko's toestel bleek de daadwerkelijk
+        // geïnstalleerde app echter gewoon op v8 te zijn blijven schrijven —
+        // waarschijnlijk doordat niet elke gewijzigde bestand uit die levering
+        // is toegepast, of een eerdere build actief bleef. Op uitdrukkelijk
+        // verzoek TERUGGEZET naar v8: nu alsnog naar v9 hernoemen zou de net
+        // ontstane nieuwe v8-geschiedenis (vannacht/vanochtend) opnieuw
+        // versnipperen over een derde bestand. De twee nieuwe kolommen hierboven
+        // blijven wel gewoon actief in de v8-header — alleen de bestandsnaam zelf
+        // is niet meegegaan.
         val file = File(dir, "FCLvNext_Log_v8.csv")
 
         val sep = ";"

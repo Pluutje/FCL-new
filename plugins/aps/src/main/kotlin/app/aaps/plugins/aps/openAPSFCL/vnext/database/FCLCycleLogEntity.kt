@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Room entity die exact overeenkomt met FCLvNext_Log_v8.csv (133 kolommen).
+ * Room entity die exact overeenkomt met FCLvNext_Log_v8.csv (135 kolommen).
  * Bewaartermijn: 90 dagen. Bewuste keuze om alle velden te bewaren zodat
  * de geïntegreerde FCL Analyzer volledig kan werken zonder informatieverlies.
  *

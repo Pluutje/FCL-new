@@ -1949,9 +1949,16 @@ private fun computeEarlyDoseDecision(
     //   recentSlope >= 2.5 mmol/h  → duidelijke, actuele stijging
     //   acceleration >= 0.20       → stijging neemt nog toe, geen afvlakking
     //   consistency >= minConsistency → geen ruisartefact, sensordata betrouwbaar
+    // Drempel verlaagd 0.20→0.15 (12/07/2026, Ecko): bij een reële, snelle
+    // stijging (recentSlope 3,5-5,4 mmol/u, ruim boven de 2.5-eis hierboven)
+    // bungelde accel structureel net onder 0.20 (0,15-0,19) — de "kip-ei"-fix
+    // ontgrendelde daardoor niet, en stage2Min bleef vasthangen op de hogere,
+    // piek-gebaseerde route totdat predictedPeak zichzelf had ingehaald.
+    // Praktijkvoorbeeld 11/07/2026 avond: 20 minuten kleine commits (0,13-
+    // 0,36U) bij een BG die intussen al van 4,8 naar 6,5 was doorgestegen.
     val stage2MinByAccel = if (
         ctx.recentSlope >= 2.5 &&
-        ctx.acceleration >= 0.20 &&
+        ctx.acceleration >= 0.15 &&
         ctx.consistency >= config.minConsistency
     ) 0.45 else 1.0  // 1.0 = "doet niet mee" in de minOf() hieronder
 

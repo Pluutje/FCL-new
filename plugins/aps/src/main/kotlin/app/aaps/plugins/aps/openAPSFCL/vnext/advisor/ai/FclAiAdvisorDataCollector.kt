@@ -29,6 +29,12 @@ object FclAiAdvisorDataCollector {
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val ACTIVE_PARAMS_FILE = "FCLvNext_active_params.json"
     private const val LEARNER_LOG_FILE = "FCLvNext_LearnerLog_v1.csv"
+    // 12/07/2026 (Ecko): teruggezet naar v8 — zie de kdoc bij het schrijven
+    // in FCLCycleLogRepository.kt (bestandsnaam-verwarring, terug op verzoek).
+    // LET OP (herhaling van de les van 06/07/2026): deze constante moet ALTIJD
+    // in de pas lopen met de daadwerkelijke schrijf-bestandsnaam, anders leest
+    // de AI-adviseur stilzwijgend een niet-bestaand of verouderd bestand en
+    // levert dat TIR=0%/lege statistiek op.
     private const val CYCLE_LOG_FILE = "FCLvNext_Log_v8.csv"
     private const val MAX_NOTABLE_EPISODES = 5
 
