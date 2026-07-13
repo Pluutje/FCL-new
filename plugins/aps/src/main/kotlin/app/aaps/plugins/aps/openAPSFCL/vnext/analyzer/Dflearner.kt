@@ -520,7 +520,19 @@ object DFLearner {
         // RELATIEF aan maxSMB i.p.v. een vast getal — zie controlevraag Ecko
         // 20/06/2026 (minValidInsulinFor() en de OK-tak hieronder gebruiken dit).
         // Default 1.25 = bestaande fallback-waarde elders in het bestand.
-        manualMaxSmb: Double = 1.25
+        manualMaxSmb: Double = 1.25,
+        // 12/07/2026 (Ecko) — nodig om metrics.maxIobRatio (intern altijd
+        // relatief aan max_iob, zie DetermineBasalFCL.kt) terug te kunnen
+        // rekenen naar absolute eenheden — zie controlevraag Ecko 12/07/2026
+        // over de "laagMetNogAanwezigeIob"-check hieronder: een vaste ratio
+        // van max_iob (bijv. 0.30) betekent bij een hoge persoonlijke max-IOB-
+        // instelling een veel te grote absolute hoeveelheid.
+        manualMaxIob: Double = 10.0,
+        // 12/07/2026 (Ecko) — actuele ISF (mmol/L per U), voor de ISF-geschaalde
+        // "laagMetNogAanwezigeIob"-drempel hieronder. Zie controlevraag Ecko
+        // 12/07/2026: i.p.v. één vaste eenheid IOB voor iedereen, nu een
+        // theoretische-verdere-daling-grens die met de persoonlijke ISF meeschaalt.
+        effectiveIsfMmol: Double = 4.0
     ): LearningStep? {
         // Tempo: de Langzaam/Normaal/Snel-keuze is verwijderd uit de UI.
         // Het systeem gebruikt altijd NORMAAL als basis; de effectieve stap-
@@ -739,6 +751,19 @@ object DFLearner {
         val rawDeltaF: Double
         val diagnose: String
 
+        // 12/07/2026 (Ecko) — vóór het when-blok berekend, niet erin: een
+        // when {}-blok mag uitsluitend uit voorwaarde-> actie-branches
+        // bestaan, geen losse val-statements ertussen (BUGFIX 12/07/2026,
+        // Ecko: dit stond eerder abusievelijk tussen de branches, wat een
+        // reeks compile-fouten gaf — "Expecting '->'" bij regel 897 en alle
+        // fouten die daarop volgden). Zie de kdoc bij de PIEK LAAG-branch
+        // hieronder voor de volledige toelichting van deze berekening.
+        val maxTheoretischeDalingMmol = 1.0  // vuistwaarde uit Ecko's voorbeeld, instelbaar
+        val iobDrempelU = maxTheoretischeDalingMmol / effectiveIsfMmol.coerceAtLeast(0.5)
+        val iobAtNadirU = metrics.maxIobRatio * manualMaxIob
+        val laagMetNogAanwezigeIob = metrics.minBgInWindow < 4.5 && iobAtNadirU > iobDrempelU
+        val teLaagGeldigBewijs = metrics.hypoDetected || metrics.rescueConfirmed || laagMetNogAanwezigeIob
+
         when {
             metrics.peakBg < MIN_VALID_PEAK_BG || metrics.totalInsulinDelivered < minValidInsulin -> {
                 rawDeltaD = 0.0; rawDeltaF = 0.0; diagnose = "SKIP_GEEN_EPISODE"
@@ -853,10 +878,35 @@ object DFLearner {
             }
 
             // ── PIEK LAAG ─────────────────────────────────────────────────────────
-            peekLaag -> {
+            // HERZIEN (12/07/2026, Ecko): een lage piek alléén was voorheen al
+            // genoeg om D te verlagen — maar een lage piek is net zo goed het
+            // teken van een GOED gedoseerde maaltijd als van "te sterk gedoseerd".
+            // Alleen bij een van deze twee is een lage piek daadwerkelijk bewijs
+            // dat de sterkte te hoog stond:
+            //   1. Er trad een echte hypo op (hypoDetected).
+            //   2. De BG vlakte laag af terwijl er nog duidelijk IOB actief was
+            //      (minBgInWindow laag + maxIobRatio nog substantieel) — een
+            //      aanwijzing dat er waarschijnlijk is bijgegeten om een hypo te
+            //      voorkomen, of expliciet bevestigd via rescueConfirmed.
+            // Zonder een van deze twee: geen aanpassing, alleen loggen.
+            // De "duidelijk aanwezige IOB"-drempel (iobDrempelU, hierboven vóór
+            // het when-blok berekend) schaalt met de actuele ISF: hoeveel IOB
+            // zou nog een daling van maxTheoretischeDalingMmol kunnen
+            // veroorzaken? Ecko's rekenvoorbeeld: BG 4.5, max 1 mmol verdere
+            // daling gewenst → drempel = 1 / ISF (bij ISF=4 → 0.25U).
+            peekLaag && teLaagGeldigBewijs -> {
                 rawDeltaD = -tp.alphaPiek * 1.5 * abs(peakFout)
                 rawDeltaF = 0.0   // F neutraal: piek laag is een D-kwestie
                 diagnose  = "TE_WEINIG"
+            }
+            peekLaag -> {
+                // Lage piek zonder hypo, zonder bevestigde reddingskoolhydraten en
+                // zonder duidelijke aanwijzing van nog-actieve IOB bij een lage BG:
+                // dit lijkt gewoon een goed gedoseerde maaltijd. Geen aanpassing —
+                // een succesvolle uitkomst mag niet als "te sterk" worden afgestraft.
+                rawDeltaD = 0.0
+                rawDeltaF = 0.0
+                diagnose  = "PIEK_LAAG_GEEN_BEWIJS"
             }
 
             // ── STAART TE GROOT: laatste significante commit te laat/te groot ────

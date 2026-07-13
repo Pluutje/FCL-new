@@ -276,7 +276,11 @@ data class FCLvNextConfig(
 
 fun loadFCLvNextConfig(
     prefs: Preferences,
-    isNight: Boolean
+    isNight: Boolean,
+    // 12/07/2026 (Ecko) — nodig voor de Learner's "laagMetNogAanwezigeIob"-check
+    // (zie Dflearner.kt): een theoretische-verdere-daling-drempel, geschaald
+    // met de actuele ISF i.p.v. een vaste eenheid die voor iedereen gelijk is.
+    effectiveIsfMmol: Double = 4.0
 ): FCLvNextConfig {
 
     // ── Override (geschreven door FCL Analyzer na goedkeuring) ────────────
@@ -546,7 +550,7 @@ fun loadFCLvNextConfig(
         .let { applyDoseDistributionStyle(it) }
         .let { applyNightResponseStyle(it, isNight) }
         .let { applyParamOverrides(it, override?.paramOverrides) }
-        .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nfLevel) }
+        .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nfLevel, effectiveIsfMmol) }
 }
 
 private fun applySTVModel(

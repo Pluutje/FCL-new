@@ -28,7 +28,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
 
-private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET }
+private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET, SAFETY }
 
 /**
  * Entrypoint van de geïntegreerde FCL Analyzer.
@@ -411,10 +411,16 @@ fun FclAnalyzerScreen(
                     }
                 },
                 onOpenReset = { currentScreen = Screen.RESET },
-                onOpenAiAdvisor = { currentScreen = Screen.AI_ADVISOR }
+                onOpenAiAdvisor = { currentScreen = Screen.AI_ADVISOR },
+                onOpenSafetyCheck = { currentScreen = Screen.SAFETY }
             )
 
             Screen.RESET -> FclResetScreen(onBack = { currentScreen = Screen.DASHBOARD })
+
+            Screen.SAFETY -> FclSafetyCheckScreen(
+                episodes = episodes ?: emptyList(),
+                onBack = { currentScreen = Screen.DASHBOARD }
+            )
 
             Screen.AI_ADVISOR -> FclAiAdvisorScreen(
                 runResult = aiAdvisorResult,
@@ -550,7 +556,8 @@ private fun DashboardScreen(
     onOpenEpisodes: () -> Unit,
     onOpenAdvisor: () -> Unit,
     onOpenAiAdvisor: () -> Unit,
-    onOpenReset: () -> Unit
+    onOpenReset: () -> Unit,
+    onOpenSafetyCheck: () -> Unit = {}
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
     val metricCount = metrics?.size ?: 0
@@ -638,7 +645,32 @@ private fun DashboardScreen(
                 onClick = onOpenAiAdvisor
             )
 
-            // Ruimte gereserveerd voor eventuele derde inhoudelijke knop
+            // ✅ Veiligheidscontrole: aantal episodes met een late, te grote
+            // commit vlak op de piek (SafetyInvariantChecker, 12/07/2026, Ecko —
+            // zie kdoc daar voor de exacte regel). Puur informatief, geen
+            // effect op het doseeralgoritme zelf.
+            val safetyViolationCount = remember(episodes) {
+                episodes?.let { app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.SafetyInvariantChecker.checkAll(it) }
+                    ?.count { r -> r.hasViolation } ?: 0
+            }
+            NavActieKaart(
+                emoji   = if (safetyViolationCount > 0) "⚠️" else "🛡️",
+                label   = "Veiligheidscontrole",
+                badge   = if (safetyViolationCount > 0) "$safetyViolationCount" else null,
+                enabled = hasData2,
+                toelichting = if (safetyViolationCount > 0)
+                    "$safetyViolationCount episode(s) met een commit die vlak op de BG-piek " +
+                        "groter was dan verwacht op basis van de afbouw die episode. Bekijk welke " +
+                        "rem (indien enige) op dat moment actief was."
+                else
+                    "Controleert elke episode automatisch op het \"late, te grote commit\"-patroon " +
+                        "(zie overdrachtsdocument §3) — zodat je dit niet handmatig in de CSV hoeft " +
+                        "op te sporen.",
+                knoopTekst = "Check",
+                onClick = onOpenSafetyCheck
+            )
+
+            // Ruimte gereserveerd voor eventuele vierde inhoudelijke knop
             Spacer(modifier = Modifier.height(4.dp))
 
             // ── Scheidingslijn: inhoud / beheer ───────────────────────────

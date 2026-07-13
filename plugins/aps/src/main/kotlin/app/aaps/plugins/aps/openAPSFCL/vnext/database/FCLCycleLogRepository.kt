@@ -127,6 +127,10 @@ class FCLCycleLogRepository @Inject constructor(
         // Verwijder de eerste (mogelijk onvolledige) episode en filter
         // episodes die geen significante dosis bevatten — identiek aan de UI.
         val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
+        // 12/07/2026 (Ecko) — zie kdoc bij Fclactiveconfigbridge.Snapshot.manualMaxIob.
+        val manualMaxIob = FclActiveConfigBridge.get()?.manualMaxIob ?: 10.0
+        // 12/07/2026 (Ecko) — zie kdoc bij Fclactiveconfigbridge.Snapshot.effectiveIsfMmol.
+        val effectiveIsfMmol = FclActiveConfigBridge.get()?.effectiveIsfMmol ?: 4.0
         val significantDoseThreshold = manualMaxSmb * 0.80
 
         val allCleaned = if (detected.size > 1) detected.drop(1) else emptyList()
@@ -174,7 +178,7 @@ class FCLCycleLogRepository @Inject constructor(
         // (zie FclLearnerUitleg.kt) — vastgelegd in learningStep hieronder.
         var learningStep: DFLearner.LearningStep? = null
         if (latestMetrics != null && DFLearner.isEvaluationEnabled(context)) {
-            learningStep = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb)
+            learningStep = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb, manualMaxIob = manualMaxIob, effectiveIsfMmol = effectiveIsfMmol)
             // Losse leeras voor refLcd (laatste-commit-demping) — zie kdoc
             // bij DFMapping.REF_LCD_DEFAULT en DFLearner.evaluateLateCommitDecay.
             // Bewust een eigen aanroep, niet ondergebracht in evaluate()

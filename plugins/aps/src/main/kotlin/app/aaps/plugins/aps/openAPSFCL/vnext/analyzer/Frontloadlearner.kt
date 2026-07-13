@@ -197,6 +197,23 @@ object FrontloadLearner {
             veiligeEpisodes.map { it.firstBigCommitFrac }.average()
         else null
 
+        // ── Extra signaal: Veiligheidscontrole-schendingen (13/07/2026, Ecko) ──
+        // Complementair aan fbc: fbc zegt iets over de EERSTE commit, een
+        // schending (SafetyInvariantChecker, via EpisodeMetrics.hasLateCommit-
+        // Violation) zegt iets over de LAATSTE — een episode kan een prima fbc
+        // hebben en alsnog een te grote, te late afsluitende commit (zie 12/07
+        // 15:12 UTC). Alleen de veilige subset telt mee (zelfde reden als bij
+        // fbc: een schending tijdens een hypo-episode is geen bewijs dat
+        // vroegere insuline veilig kan, eerder het tegenovergestelde). Vereist
+        // een STRUCTUREEL patroon (meer dan de helft van de veilige episodes) —
+        // één keer een schending is geen reden om een levende doseerparameter
+        // aan te passen. Bewust GEEN nieuw, eigen mechanisme: leunt op precies
+        // dezelfde REF_WFF-stap/cooldown/veiligheidsgrenzen die hieronder al
+        // gelden, alleen een extra OR-voorwaarde in de bestaande beslissing.
+        val violatieEpisodes = veiligeEpisodes.filter { it.hasLateCommitViolation }
+        val violatieStructureel = veiligeEpisodes.isNotEmpty() &&
+            violatieEpisodes.size > veiligeEpisodes.size / 2
+
         val gemiddeldeStaartFrac = bruikbaar
             .map { it.lastSignificantCommitFrac }
             .average()
@@ -204,6 +221,18 @@ object FrontloadLearner {
 
         val FBC_TARGET_MIN = 0.45
         val FBC_TARGET_MAX = 0.65
+
+        // (13/07/2026, Ecko) OR blijft de basis: fbc-te-laag EN structurele
+        // schendingen zijn allebei onafhankelijk voldoende voor een WFF-stap
+        // (zie kdoc bij violatieStructureel hierboven). Maar als BEIDE signalen
+        // onafhankelijk hetzelfde wijzen, is dat sterker bewijs dan één signaal
+        // alleen — dan mag de stap iets groter (+25%). Bij precies één van de
+        // twee blijft de normale, voorzichtige stap gelden (géén verandering
+        // t.o.v. het bestaande fbc-alleen-gedreven pad). Nog steeds begrensd
+        // door dezelfde REF_WFF_MIN/MAX als altijd.
+        val fbcTooLow = gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN
+        val beideSignalenWffOmhoog = fbcTooLow && violatieStructureel
+        val stapWffOmhoog = if (beideSignalenWffOmhoog) stapWff * 1.25 else stapWff
 
         // Episoden waarbij een hypo volgde maar er weinig vervolgdoses waren:
         // de frontload was waarschijnlijk te groot.
@@ -221,10 +250,11 @@ object FrontloadLearner {
             // Geen veilige episodes om op te leren: WFF onveranderd
             gemiddeldeFbc == null -> huidigWff
 
-            // fbc structureel te laag én geen hypo: meer vroege insuline
-            // had veilig gemoeten → WFF omhoog
-            gemiddeldeFbc < FBC_TARGET_MIN ->
-                (huidigWff + stapWff).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
+            // fbc structureel te laag, OF herhaalde late/te grote afsluitende
+            // commits (Veiligheidscontrole) — in beide gevallen had meer
+            // insuline vroeg veilig gekund → WFF omhoog.
+            gemiddeldeFbc < FBC_TARGET_MIN || violatieStructureel ->
+                (huidigWff + stapWffOmhoog).coerceIn(DFMapping.REF_WFF_MIN, DFMapping.REF_WFF_MAX)
 
             // Hypo na frontload ZONder vervolgdoses: frontload zelf was te groot
             // → WFF omlaag. Maar alleen als dit een structureel patroon is
@@ -299,9 +329,12 @@ object FrontloadLearner {
         if (peakBiasVeranderd) DFLearner.setRefPeakBias(context, nieuwePeakBias)
         prefs(context).edit().putLong(KEY_LAST_TS, System.currentTimeMillis()).apply()
 
-        val effectiefRichting = if (richting != "GOED") richting
-        else if (gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN) "EERDER"
-        else "GOED"
+        val effectiefRichting = when {
+            richting != "GOED" -> richting
+            gemiddeldeFbc != null && gemiddeldeFbc < FBC_TARGET_MIN -> "EERDER"
+            violatieStructureel -> "EERDER"
+            else -> "GOED"
+        }
 
         val step = FrontloadLearningStep(
             tsUtc            = java.time.Instant.now().toString(),

@@ -126,5 +126,17 @@ data class EpisodeMetrics(
     // insuline gelijktijdig werd afgegeven — insuline kan een BG-stijging
     // toch niet verklaren, dus die eis zou hier het probleem juist
     // uitsluiten in plaats van bevestigen.
-    val nearHypoAverted: Boolean = false
+    val nearHypoAverted: Boolean = false,
+
+    // ── Veiligheidscontrole: late/te grote afsluitende commit ────────────
+    // (13/07/2026, Ecko) Herbruikt SafetyInvariantChecker (Analyzer-UI,
+    // 12/07/2026) als extra, complementair leersignaal voor FrontloadLearner.
+    // firstBigCommitFrac zegt iets over de EERSTE commit; dit zegt iets over
+    // de LAATSTE — een episode kan een prima fbc hebben en alsnog een te
+    // grote, te late afsluitende commit (zie 12/07 15:12 UTC: eerste commit
+    // was niet klein, de opbouw daarna piekte alsnog te laat/te groot).
+    val hasLateCommitViolation: Boolean = false,
+    // grootste schending als fractie van de grootste commit die episode
+    // (episodePeakCommitU) — puur informatief/voor logging, geen leerinput.
+    val lateCommitViolationFraction: Double = 0.0
 )

@@ -261,6 +261,8 @@ object FclStrings_NL : FclStrings {
             "Piek te hoog door onderschatting vroeg in de maaltijd — sterkte verhoogd"
         "TE_WEINIG" ->
             "Piek te laag — sterkte verlaagd"
+        "PIEK_LAAG_GEEN_BEWIJS" ->
+            "Piek laag, maar geen hypo/reddingskoolhydraten — waarschijnlijk gewoon goed gedoseerd, geen aanpassing"
         "TIMING_SPREAD" ->
             "Piek te hoog en dosis te laat verdeeld — timing naar voren bijgesteld"
         "TIMING_SPREAD_VROEG" ->

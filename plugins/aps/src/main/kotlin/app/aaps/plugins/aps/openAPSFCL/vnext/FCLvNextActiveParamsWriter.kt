@@ -66,20 +66,27 @@ object FCLvNextActiveParamsWriter {
         sterkte: Int = Defaults.STERKTE,
         timing: Int = Defaults.TIMING,
         volhoudendheid: Int = Defaults.VOLHOUDENDHEID,
-        nfLevel: Double = Defaults.NF_LEVEL
+        nfLevel: Double = Defaults.NF_LEVEL,
+        // 12/07/2026 (Ecko) — zie kdoc bij Fclactiveconfigbridge.Snapshot.effectiveIsfMmol.
+        effectiveIsfMmol: Double = 4.0
     ) {
         val stvKey = "$sterkte/$timing/$volhoudendheid/NF${nfLevel.toInt()}"
 
         // Snapshot altijd bijwerken — ook als config ongewijzigd is.
         // max_bolus_day kan veranderd zijn terwijl de rest van de config gelijk blijft.
         val manualMaxBolus = prefs?.get(DoubleKey.max_bolus_day) ?: 1.25
+        // 12/07/2026 (Ecko) — analoog aan manualMaxBolus hierboven, zie de kdoc
+        // bij Fclactiveconfigbridge.Snapshot.manualMaxIob voor de reden.
+        val manualMaxIob = prefs?.get(DoubleKey.fcl_vnext_MaxIOB) ?: 10.0
         FclActiveConfigBridge.snapshot(
             config          = config,
             sterkte         = sterkte,
             timing          = timing,
             volhoudendheid  = volhoudendheid,
             nfLevel         = nfLevel,
-            manualMaxBolus = manualMaxBolus
+            manualMaxBolus = manualMaxBolus,
+            manualMaxIob = manualMaxIob,
+            effectiveIsfMmol = effectiveIsfMmol
         )
 
         // Cache-check: sla bestandsschrijving over als niets veranderd is

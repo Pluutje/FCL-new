@@ -53,6 +53,12 @@ object EpisodeMetricsBuilder {
             val avgBg = if (rows.isNotEmpty()) rows.map { it.bg }.average() else episode.startBg
             val endBg = rows.lastOrNull()?.bg ?: episode.startBg
 
+            // (13/07/2026, Ecko) Hergebruik van de Veiligheidscontrole
+            // (SafetyInvariantChecker, Analyzer-UI 12/07/2026) als extra
+            // leersignaal voor FrontloadLearner — zie kdoc bij
+            // hasLateCommitViolation in EpisodeMetrics.kt.
+            val safetyCheck = SafetyInvariantChecker.check(episode)
+
             // FCLvNext eigen doses
             val totalInsulinDelivered = rows.sumOf { it.deliveredTotal }
             // Externe bolussen (handmatig of AAPS SMB) per cyclus gesommeerd
@@ -263,7 +269,9 @@ object EpisodeMetricsBuilder {
                 predFout20_40      = predFout20_40,
                 afterloadWasActive = afterloadWasActive,
                 earlyBoostDeliveredU = earlyBoostDeliveredU,
-                earlyBoostFrac = earlyBoostFrac
+                earlyBoostFrac = earlyBoostFrac,
+                hasLateCommitViolation = safetyCheck.hasViolation,
+                lateCommitViolationFraction = safetyCheck.violations.maxOfOrNull { it.fractionOfPeak } ?: 0.0
             )
         }
     }

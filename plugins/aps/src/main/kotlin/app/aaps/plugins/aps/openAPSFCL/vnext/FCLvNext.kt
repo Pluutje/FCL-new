@@ -480,6 +480,14 @@ private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 // peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
 private var prevRecentSlopeForBrake: Double? = null
 
+// ── Omslag-anticipatie-tracking (12/07/2026, Ecko) ───────────────────────
+// curveAcceleration van de vorige cyclus, nodig om een sterke cycle-op-cycle
+// terugval te detecteren VOORDAT curveAcceleration zelf al <= 0.0 is (de
+// harde, per-definitie-reactieve bevestigingsgrens van curveConfirmtOmslag).
+// Zie gebruik bij bgStijgtNogFors hieronder - zelfde soort "trend, niet
+// alleen niveau"-aanpak als prevRecentSlopeForBrake hierboven.
+private var prevCurveAccelerationForOmslag: Double? = null
+
 
 private val persistCtrl = PersistentCorrectionController(
     cooldownCycles = 3,        // of 2, jij kiest
@@ -3691,7 +3699,7 @@ class FCLvNext(
 
         // ─────────────────────────────────────────────
         // 1️⃣ Config & context (trends, IOB, delta)
-        var config = loadFCLvNextConfig(preferences, input.isNight)
+        var config = loadFCLvNextConfig(preferences, input.isNight, input.effectiveISF)
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────
@@ -4941,6 +4949,15 @@ class FCLvNext(
 
         var commandedDose = finalDose
 
+        // BUGFIX (13/07/2026, Ecko): zie kdoc bij de UNIVERSELE TAPER-CLAMP
+        // verderop — dit vlag onderscheidt "commandedDose komt uit de
+        // commit-tak zelf (al taper-aware)" van "commandedDose is nog de
+        // ongemoeide finalDose-fallback". Nodig omdat de taper-clamp anders
+        // ook een net door de commit-tak zelf goedgekeurde, kleinere dosis
+        // opnieuw (en dan ten onrechte) verder afknijpt tijdens de vroege
+        // frontload-fase van een maaltijd — zie incident 13/07 05:17-05:33 UTC.
+        var commandedDoseIsFromCommit = false
+
         var lateDecayMul = 1.0  // bijgehouden voor logging; wordt in commit-blok ingesteld
 
         // ── Anti-drip: kleine correcties niet elke cyclus ──
@@ -5199,9 +5216,35 @@ class FCLvNext(
                 // peakPressureBonus/de topping-out-boost, geen nieuw mechanisme.
                 val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
                     ctx.curveAcceleration <= 0.0
+
+                // BUGFIX (12/07/2026, Ecko): curveConfirmtOmslag hierboven is een
+                // harde grens (curveAcceleration <= 0.0) die per constructie pas
+                // NA de feitelijke omslag kan bevestigen. Incident 12/07 15:12 UTC:
+                // curveAcceleration liep 22,70 -> 19,99 -> 10,74 (r2=0,989, dus geen
+                // ruis) en pas de cyclus daarna (15:17) naar -2,67 - precies die
+                // laatste cyclus (10,74, nog altijd > 0) liet bgStijgtNogFors nog
+                // een volledig ongeplafonneerde commit (2,89U) door, recht op de
+                // feitelijke piek. Een sterke cycle-op-cycle terugval (>=45%) in
+                // curveAcceleration, terwijl de curve-fit al betrouwbaar is, is een
+                // sterk vroeg signaal dat de omslag er binnen een cyclus aankomt.
+                // Dit is EXTRA op curveConfirmtOmslag (die blijft de definitieve,
+                // harde bevestiging) - geen vervanging, puur een eerdere aftrap van
+                // dezelfde vluchtklep-sluiting. Drempel (0.55x vorige) is een eerste
+                // inschatting, evt. bijstellen als dit elders vals-positief blijkt
+                // bij een reele, grillige doorzettende stijging.
+                val curveAccelDecelerating = prevCurveAccelerationForOmslag?.let { prev ->
+                    ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
+                        ctx.curveAcceleration > 0.0 &&
+                        prev > 0.0 &&
+                        ctx.curveAcceleration <= prev * 0.55
+                } ?: false
+                prevCurveAccelerationForOmslag = ctx.curveAcceleration
+                val omslagBijnaBevestigd = curveAccelDecelerating && !curveConfirmtOmslag
+
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
                     ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
-                    !curveConfirmtOmslag
+                    !curveConfirmtOmslag &&
+                    !omslagBijnaBevestigd
                 // 11/07/2026 (Ecko) — diagnostisch vastleggen, zie kdoc bij
                 // lastBgStijgtNogFors hierboven.
                 lastBgStijgtNogFors = bgStijgtNogFors
@@ -5302,6 +5345,7 @@ class FCLvNext(
                 if (committedDose >= effectiveMinCommitDose) {
 
                     commandedDose = committedDose
+                    commandedDoseIsFromCommit = true
 
                     // Verlengt absorptionWindow alleen bij substantiele commits (>= 0.40U).
                     // Kleine correctie-commits (0.20-0.35U) mogen de suppress-window
@@ -5726,6 +5770,64 @@ class FCLvNext(
 
         }
 
+
+        // ─────────────────────────────────────────────
+        // 🧯 UNIVERSELE TAPER-CLAMP (12/07/2026, Ecko)
+        // ─────────────────────────────────────────────
+        // PROBLEEM (terugkerend §3-patroon): commandedDose kan via meerdere,
+        // ONAFHANKELIJKE paden tot stand komen — de finalDose-fallback bij een
+        // overgeslagen commit (var commandedDose = finalDose hierboven), de
+        // bgStijgtNogFors-vluchtklep, reserve-release, burstcap-reacquire — en
+        // elk pad heeft zijn EIGEN, losse rem. Geen van die remmen is absoluut:
+        // als een pad zelf geen aanleiding ziet om te temperen, gaat de dosis
+        // ongedempt door, ook als de episode allang aan het afbouwen is.
+        //
+        // Incident 12/07 18:17 UTC: de commit-tak sloeg terecht over (committed
+        // dose was maar 0,10U, ver onder minCommitDose — de afbouw zag de
+        // naderende piek dus prima), maar de finalDose-fallback zelf was niet
+        // aan die afbouw gebonden → 1,44U ongedempt geleverd, exact op het
+        // plateau (7,5→7,5→7,2 mmol), ruim vóórdat suppressForPeak/
+        // top_plateau_confirmed een cyclus later alsnog bevestigde.
+        //
+        // OPLOSSING: ÉÉN bovengrens die ALTIJD geldt zodra er al minstens één
+        // commit is geweest deze episode (episodePeakCommitU > 0), ongeacht
+        // welk pad hierboven commandedDose heeft gezet — dezelfde
+        // episodePeakCommitU/lateDecayMul-koppel die de commit-tak al gebruikt
+        // (zie cappedFinalDose), zodat de afbouw niet langer decoratief is voor
+        // paden die niet via de commit-tak lopen. Bewust NIET toegepast als
+        // bgStijgtNogFors (de bewuste, expliciete vluchtklep voor een écht nog
+        // doorzettende stijging) actief is — die mag welbewust een nieuw,
+        // hoger piekpunt zetten; zie kdoc daar.
+        //
+        // BUGFIX (13/07/2026, Ecko): ook NIET toepassen als commandedDose al
+        // via de commit-tak zelf tot stand kwam (commandedDoseIsFromCommit).
+        // Incident 13/07 05:17-05:33 UTC: de commit-tak berekende zelf al
+        // keurig getaperde, oplopende commits (0,52-0,62U) tijdens de vroege,
+        // nog altijd versnellende fase van een maaltijd (peakState nog IDLE,
+        // BG pas 1-2 mmol boven target — bgStijgtNogFors dus nog niet actief,
+        // dat vereist >3 mmol boven target). Zonder dit vlag greep de clamp
+        // hier alsnog in, met dezelfde episodePeakCommitU/lateDecayMul die de
+        // commit-tak net had gebruikt — en dus met een (te) lage, verouderde
+        // vloer nog vóórdat er ook maar een piek in zicht was. Effectief werd
+        // zo elke frontload-commit ná de eerste teruggeknepen naar bijna de
+        // grootte van díe eerste — precies het "frontload komt te laat/te
+        // zwak"-gevoel. De clamp blijft wel volledig actief voor de
+        // finalDose-fallback (commandedDoseIsFromCommit=false; het
+        // oorspronkelijke 18/07-scenario) en voor elk ander pad hieronder.
+        if (commandedDose > 0.0 && episodePeakCommitU > 0.0 &&
+            !lastBgStijgtNogFors && !commandedDoseIsFromCommit) {
+            val taperCeiling = (episodePeakCommitU * lateDecayMul)
+                .coerceAtLeast(config.minCommitDose * 0.5)
+            if (commandedDose > taperCeiling) {
+                val before = commandedDose
+                commandedDose = taperCeiling
+                status.append(
+                    "TAPER CLAMP: ${"%.2f".format(before)}→${"%.2f".format(commandedDose)}U " +
+                        "(episodePeakCommitU=${"%.2f".format(episodePeakCommitU)} " +
+                        "×lateDecayMul=${"%.2f".format(lateDecayMul)})\n"
+                )
+            }
+        }
 
 
         // ─────────────────────────────────────────────
