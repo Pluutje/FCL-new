@@ -450,6 +450,57 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 // ── Fijnafstemming blok (alleen zichtbaar als expert mode aan) ──
                 if (expertModeActive) {
                     Spacer(modifier = Modifier.height(8.dp))
+
+                    // ── T1-versterking (13/07/2026, Ecko) ────────────────────
+                    // Losse, uitzetbare feature-toggle onder Expert modus. Direct
+                    // gelezen door FCLvNext.kt (zelfde "fcl_expert_prefs"-bestand,
+                    // zie isSustainT1BoostActive() aldaar) — geen herstart nodig,
+                    // volgende cyclus leest de nieuwe waarde.
+                    var sustainT1BoostActive by remember {
+                        mutableStateOf(
+                            ctx.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+                                .getBoolean("sustain_t1_boost_active", false)
+                        )
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    s.expertT1BoostTitel,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Switch(
+                                    checked = sustainT1BoostActive,
+                                    onCheckedChange = { active ->
+                                        sustainT1BoostActive = active
+                                        ctx.getSharedPreferences("fcl_expert_prefs", android.content.Context.MODE_PRIVATE)
+                                            .edit().putBoolean("sustain_t1_boost_active", active).apply()
+                                    }
+                                )
+                            }
+                            Text(
+                                s.expertT1BoostUitleg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(

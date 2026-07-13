@@ -480,12 +480,12 @@ private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 // peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
 private var prevRecentSlopeForBrake: Double? = null
 
-// ── Omslag-anticipatie-tracking (12/07/2026, Ecko) ───────────────────────
-// curveAcceleration van de vorige cyclus, nodig om een sterke cycle-op-cycle
-// terugval te detecteren VOORDAT curveAcceleration zelf al <= 0.0 is (de
-// harde, per-definitie-reactieve bevestigingsgrens van curveConfirmtOmslag).
-// Zie gebruik bij bgStijgtNogFors hieronder - zelfde soort "trend, niet
-// alleen niveau"-aanpak als prevRecentSlopeForBrake hierboven.
+// ── Graduele omslag-detectie (13/07/2026, Ecko) ──────────────────────────
+// Vult curveConfirmtOmslag aan: die vereist curveAcceleration <= 0.0 (al
+// negatief). Bij een net-beginnende omslag is curveAcceleration nog positief
+// maar duidelijk aan het afnemen — dit signaal vangt dat eerdere moment op
+// zodat bgStijgtNogFors niet nog een hele cyclus lang een grote, ongeplafonneerde
+// dosis doorlaat terwijl de curve al aan het knikken is.
 private var prevCurveAccelerationForOmslag: Double? = null
 
 
@@ -1818,7 +1818,13 @@ private fun computeEarlyDoseDecision(
     hypoProjectedMinNoInsulin: Double = Double.POSITIVE_INFINITY,
     // Opgebouwde hypo-schuld in huidige episode (achtergehouden insuline door hypo-rem).
     // Wordt als parameter meegegeven omdat deze functie buiten de klasse staat.
-    episodeHypoDebtU: Double = 0.0
+    episodeHypoDebtU: Double = 0.0,
+    // ── Sustain-based T1-versterking (13/07/2026, Ecko) — EXPERT MODE, default UIT ──
+    // Optionele, uitzetbare mechaniek: geeft een bescheiden bonus op de vroege
+    // dosis, maar UITSLUITEND als de stijging al meerdere cycli aanhoudt
+    // (zie sustainT1Confirmed hieronder) — nooit op stage 1 en nooit op een
+    // enkele snelle cyclus. Zie kdoc bij de toepassing verderop in deze functie.
+    sustainT1BoostActive: Boolean = false
 ): EarlyDoseDecision {
 
     if (ctx.consistency < config.episodeMinConsistency) {
@@ -2309,9 +2315,37 @@ private fun computeEarlyDoseDecision(
         minOf(maxBonus, episodeHypoDebtU)           // nooit meer dan de schuld zelf
     } else 0.0
 
+    // ── Sustain-based T1-versterking: toepassing ──────────────────────────
+    // Achtergrond (13/07/2026, Ecko): analyse van 905503de + Ecko-datasets toont
+    // dat episodes die later een lage BG geven, gemiddeld een KLEINER eerste
+    // derde deel (T1) en GROTER middelste derde deel (T2) van de insuline-
+    // verdeling hebben dan episodes zonder dat gevolg — het middelste deel
+    // "vangt" insuline op die eigenlijk eerder had gemogen.
+    //
+    // Risico expliciet benoemd door Ecko: een relatief kleine hoeveelheid zeer
+    // snelle koolhydraten kan in de EERSTE cyclus identiek "snel stijgend" ogen
+    // als het begin van een echte, substantiële maaltijd — pas na een paar
+    // cycli wordt het verschil zichtbaar (een snack-piek vlakt af, een echte
+    // maaltijd houdt de stijging vol). Daarom:
+    //   - NOOIT op stage 1 (stageToFire >= 2 vereist) — de eerste, meest
+    //     onzekere commit blijft ongewijzigd klein.
+    //   - NOOIT op basis van een enkele cyclus — vereist sustainT1Confirmed,
+    //     wat pas oploopt na meerdere cycli aanhoudend hoge slope
+    //     (effectiveSustainScore dicht bij zijn maximum).
+    //   - NOOIT bij een nog onzekere maaltijdherkenning (mealSignal CONFIRMED
+    //     vereist, niet UNCERTAIN).
+    //   - Bescheiden bonus (+15%), gebonden aan dezelfde absolute cap
+    //     (maxSMB × 1.5) en dezelfde IOB-penalty die al op `factor` zit.
+    // Staat standaard UIT; alleen actief als sustainT1BoostActive expliciet is
+    // aangezet onder Expert modus in de instellingen.
+    val sustainT1Confirmed = effectiveSustainScore >= 0.85 &&
+        mealSignal.state == MealState.CONFIRMED
+    val sustainT1Active = sustainT1BoostActive && sustainT1Confirmed && stageToFire >= 2
+    val sustainT1Bonus = if (sustainT1Active) 0.15 else 0.0
+
     val targetU =
         maxOf(
-            config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor + debtCompensationU,
+            config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor * (1.0 + sustainT1Bonus) + debtCompensationU,
             minEarlyU
         ).coerceAtMost(config.maxSMB * 1.5)   // absolute cap: nooit meer dan 1.5× maxSMB
 
@@ -2330,12 +2364,14 @@ private fun computeEarlyDoseDecision(
     val sustainReason = if (effectiveSustainScore > 0.05)
         " SUST=${sustainedHighSlopeMinutes.toInt()}m(×${"%.2f".format(effectiveSustainScore)})" else ""
 
+    val sustainT1Reason = if (sustainT1Active) " T1BOOST+15%" else ""
+
     return EarlyDoseDecision(
         active = true,
         stageToFire = stageToFire,
         confidence = conf,
         targetU = targetU,
-        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)} s2wait=${minWachttijdStage2}m$boostReason$debtReason$sustainReason",
+        reason = "EARLY: stage=$stageToFire conf=${"%.2f".format(conf)} s2wait=${minWachttijdStage2}m$boostReason$debtReason$sustainReason$sustainT1Reason",
         remainingDebtU = remainingDebtU,
         boostActive = boostActive,
         effectiveBoostFactor = effectiveBoostFactor,
@@ -3079,6 +3115,19 @@ class FCLvNext(
     // opgehaald bij initialisatie. Elke herstart gaat verder waar hij gebleven was.
     private val EPISODE_PREFS = "fcl_episode_counter"
     private val EPISODE_KEY   = "meal_episode_counter"
+
+    // ── Expert-modus feature-toggles (13/07/2026, Ecko) ────────────────────
+    // Zelfde SharedPreferences-bestand/sleutel als de Expert-modus aan/uit-
+    // schakelaar in FCLSettingsScreen.kt ("fcl_expert_prefs"/"expert_mode_active"),
+    // plus een nieuwe eigen sleutel voor de sustain-T1-versterking. Rechtstreeks
+    // gelezen, zelfde patroon als EPISODE_PREFS hierboven — geen nieuwe
+    // AAPS-Preferences-key nodig voor een simpele aan/uit-schakelaar.
+    private val EXPERT_PREFS = "fcl_expert_prefs"
+    private val SUSTAIN_T1_BOOST_KEY = "sustain_t1_boost_active"
+
+    private fun isSustainT1BoostActive(): Boolean =
+        context.getSharedPreferences(EXPERT_PREFS, android.content.Context.MODE_PRIVATE)
+            .getBoolean(SUSTAIN_T1_BOOST_KEY, false)
 
     private fun loadEpisodeCounter(): Long =
         context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
@@ -4258,7 +4307,8 @@ class FCLvNext(
             sustainedHighSlopeMinutes = sustainedHighSlopeMinutes,
             accelDeclineSinceUncertain = accelDeclineSinceUncertain,
             hypoProjectedMinNoInsulin = hypoNoInsulinProjection,
-            episodeHypoDebtU = episodeHypoDebtU
+            episodeHypoDebtU = episodeHypoDebtU,
+            sustainT1BoostActive = isSustainT1BoostActive()
         )
         // Schrijf resterende schuld terug — de functie mag klasselid niet muteren
         episodeHypoDebtU = early.remainingDebtU
@@ -4948,14 +4998,10 @@ class FCLvNext(
         status.append("CommitAllowed=${if (commitAllowed) "YES" else "NO"}\n")
 
         var commandedDose = finalDose
-
-        // BUGFIX (13/07/2026, Ecko): zie kdoc bij de UNIVERSELE TAPER-CLAMP
-        // verderop — dit vlag onderscheidt "commandedDose komt uit de
-        // commit-tak zelf (al taper-aware)" van "commandedDose is nog de
-        // ongemoeide finalDose-fallback". Nodig omdat de taper-clamp anders
-        // ook een net door de commit-tak zelf goedgekeurde, kleinere dosis
-        // opnieuw (en dan ten onrechte) verder afknijpt tijdens de vroege
-        // frontload-fase van een maaltijd — zie incident 13/07 05:17-05:33 UTC.
+        // 13/07/2026 (Ecko) — zie taper-clamp hieronder: onderscheidt een dosis die
+        // de taper-aware commit-branch zelf al bewust heeft berekend van de
+        // ongetemperde finalDose-fallback, zodat de universele clamp alleen die
+        // laatste raakt en legitieme vroege ramp-up-commits niet onderdrukt.
         var commandedDoseIsFromCommit = false
 
         var lateDecayMul = 1.0  // bijgehouden voor logging; wordt in commit-blok ingesteld
@@ -5216,22 +5262,11 @@ class FCLvNext(
                 // peakPressureBonus/de topping-out-boost, geen nieuw mechanisme.
                 val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
                     ctx.curveAcceleration <= 0.0
-
-                // BUGFIX (12/07/2026, Ecko): curveConfirmtOmslag hierboven is een
-                // harde grens (curveAcceleration <= 0.0) die per constructie pas
-                // NA de feitelijke omslag kan bevestigen. Incident 12/07 15:12 UTC:
-                // curveAcceleration liep 22,70 -> 19,99 -> 10,74 (r2=0,989, dus geen
-                // ruis) en pas de cyclus daarna (15:17) naar -2,67 - precies die
-                // laatste cyclus (10,74, nog altijd > 0) liet bgStijgtNogFors nog
-                // een volledig ongeplafonneerde commit (2,89U) door, recht op de
-                // feitelijke piek. Een sterke cycle-op-cycle terugval (>=45%) in
-                // curveAcceleration, terwijl de curve-fit al betrouwbaar is, is een
-                // sterk vroeg signaal dat de omslag er binnen een cyclus aankomt.
-                // Dit is EXTRA op curveConfirmtOmslag (die blijft de definitieve,
-                // harde bevestiging) - geen vervanging, puur een eerdere aftrap van
-                // dezelfde vluchtklep-sluiting. Drempel (0.55x vorige) is een eerste
-                // inschatting, evt. bijstellen als dit elders vals-positief blijkt
-                // bij een reele, grillige doorzettende stijging.
+                // Graduele omslag-detectie (13/07/2026, Ecko): curveAcceleration
+                // duidelijk aan het afnemen t.o.v. vorige cyclus (>=45% afname,
+                // nog altijd positief, r² betrouwbaar) telt als "omslag bijna
+                // bevestigd" — voorkomt dat bgStijgtNogFors nog een hele cyclus
+                // lang een grote dosis doorlaat terwijl de curve al aantoonbaar knikt.
                 val curveAccelDecelerating = prevCurveAccelerationForOmslag?.let { prev ->
                     ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
                         ctx.curveAcceleration > 0.0 &&
@@ -5240,7 +5275,6 @@ class FCLvNext(
                 } ?: false
                 prevCurveAccelerationForOmslag = ctx.curveAcceleration
                 val omslagBijnaBevestigd = curveAccelDecelerating && !curveConfirmtOmslag
-
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
                     ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
                     !curveConfirmtOmslag &&
@@ -5771,64 +5805,26 @@ class FCLvNext(
         }
 
 
-        // ─────────────────────────────────────────────
-        // 🧯 UNIVERSELE TAPER-CLAMP (12/07/2026, Ecko)
-        // ─────────────────────────────────────────────
-        // PROBLEEM (terugkerend §3-patroon): commandedDose kan via meerdere,
-        // ONAFHANKELIJKE paden tot stand komen — de finalDose-fallback bij een
-        // overgeslagen commit (var commandedDose = finalDose hierboven), de
-        // bgStijgtNogFors-vluchtklep, reserve-release, burstcap-reacquire — en
-        // elk pad heeft zijn EIGEN, losse rem. Geen van die remmen is absoluut:
-        // als een pad zelf geen aanleiding ziet om te temperen, gaat de dosis
-        // ongedempt door, ook als de episode allang aan het afbouwen is.
-        //
-        // Incident 12/07 18:17 UTC: de commit-tak sloeg terecht over (committed
-        // dose was maar 0,10U, ver onder minCommitDose — de afbouw zag de
-        // naderende piek dus prima), maar de finalDose-fallback zelf was niet
-        // aan die afbouw gebonden → 1,44U ongedempt geleverd, exact op het
-        // plateau (7,5→7,5→7,2 mmol), ruim vóórdat suppressForPeak/
-        // top_plateau_confirmed een cyclus later alsnog bevestigde.
-        //
-        // OPLOSSING: ÉÉN bovengrens die ALTIJD geldt zodra er al minstens één
-        // commit is geweest deze episode (episodePeakCommitU > 0), ongeacht
-        // welk pad hierboven commandedDose heeft gezet — dezelfde
-        // episodePeakCommitU/lateDecayMul-koppel die de commit-tak al gebruikt
-        // (zie cappedFinalDose), zodat de afbouw niet langer decoratief is voor
-        // paden die niet via de commit-tak lopen. Bewust NIET toegepast als
-        // bgStijgtNogFors (de bewuste, expliciete vluchtklep voor een écht nog
-        // doorzettende stijging) actief is — die mag welbewust een nieuw,
-        // hoger piekpunt zetten; zie kdoc daar.
-        //
-        // BUGFIX (13/07/2026, Ecko): ook NIET toepassen als commandedDose al
-        // via de commit-tak zelf tot stand kwam (commandedDoseIsFromCommit).
-        // Incident 13/07 05:17-05:33 UTC: de commit-tak berekende zelf al
-        // keurig getaperde, oplopende commits (0,52-0,62U) tijdens de vroege,
-        // nog altijd versnellende fase van een maaltijd (peakState nog IDLE,
-        // BG pas 1-2 mmol boven target — bgStijgtNogFors dus nog niet actief,
-        // dat vereist >3 mmol boven target). Zonder dit vlag greep de clamp
-        // hier alsnog in, met dezelfde episodePeakCommitU/lateDecayMul die de
-        // commit-tak net had gebruikt — en dus met een (te) lage, verouderde
-        // vloer nog vóórdat er ook maar een piek in zicht was. Effectief werd
-        // zo elke frontload-commit ná de eerste teruggeknepen naar bijna de
-        // grootte van díe eerste — precies het "frontload komt te laat/te
-        // zwak"-gevoel. De clamp blijft wel volledig actief voor de
-        // finalDose-fallback (commandedDoseIsFromCommit=false; het
-        // oorspronkelijke 18/07-scenario) en voor elk ander pad hieronder.
-        if (commandedDose > 0.0 && episodePeakCommitU > 0.0 &&
-            !lastBgStijgtNogFors && !commandedDoseIsFromCommit) {
-            val taperCeiling = (episodePeakCommitU * lateDecayMul)
-                .coerceAtLeast(config.minCommitDose * 0.5)
+
+        // ── Universele taper-clamp (13/07/2026, Ecko) ────────────────────────
+        // Vangt het scenario "grote, late commit vlak op de piek" af, ongeacht
+        // via welk pad commandedDose daar terechtkomt (finalDose-fallback of een
+        // ongetemperd commit-pad). Werkt op episodePeakCommitU × lateDecayMul —
+        // dezelfde afbouwlogica die de commit-branch al gebruikt — zodat de
+        // clamp geen nieuw gedrag introduceert, alleen een bestaande grens
+        // universeel afdwingt.
+        // !commandedDoseIsFromCommit: raakt NOOIT een dosis die de taper-aware
+        // commit-branch zelf al bewust heeft vastgesteld (die branch tempert al).
+        // !lastBgStijgtNogFors: het escape-ventiel voor een echt nog-doorzettende
+        // stijging blijft ongemoeid.
+        if (commandedDose > 0.0 && episodePeakCommitU > 0.0 && !lastBgStijgtNogFors && !commandedDoseIsFromCommit) {
+            val taperCeiling = (episodePeakCommitU * lateDecayMul).coerceAtLeast(config.minCommitDose * 0.5)
             if (commandedDose > taperCeiling) {
                 val before = commandedDose
                 commandedDose = taperCeiling
-                status.append(
-                    "TAPER CLAMP: ${"%.2f".format(before)}→${"%.2f".format(commandedDose)}U " +
-                        "(episodePeakCommitU=${"%.2f".format(episodePeakCommitU)} " +
-                        "×lateDecayMul=${"%.2f".format(lateDecayMul)})\n"
-                )
+                status.append("TAPER CLAMP: ${"%.2f".format(before)}->${"%.2f".format(commandedDose)}U (episodePeakCommitU=${"%.2f".format(episodePeakCommitU)} xlateDecayMul=${"%.2f".format(lateDecayMul)})\n")
             }
         }
-
 
         // ─────────────────────────────────────────────
         // 🛡️ IOB HARD CAP + DYNAMIC OVERSHOOT

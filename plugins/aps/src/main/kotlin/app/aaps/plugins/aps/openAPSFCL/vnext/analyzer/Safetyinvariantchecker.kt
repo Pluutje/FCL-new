@@ -33,6 +33,35 @@ object SafetyInvariantChecker {
     const val DEFAULT_WINDOW_MINUTES = 10
     const val DEFAULT_MAX_FRACTION = 0.50
 
+    // ── Helft-verdeling start→piek (13/07/2026, Ecko) ─────────────────────
+    // AANVULLEND op de piek-nabijheid-check hierboven: die mist episodes
+    // waarbij de insuline wél geconcentreerd (niet verspreid) werd gegeven,
+    // maar niet toevallig vlak bij de piek. Concreet voorbeeld 13/07 08:52
+    // UTC: 88% van de dosis viel in kwart 2 van de stijging (~20-25 min vóór
+    // de piek) — geen schending volgens de piek-check hierboven, maar
+    // evengoed een "alles-in-één-klap"-patroon.
+    //
+    // Referentiepunt voor "start van de stijging" is bewust episode.start —
+    // dezelfde episode-grens die de Analyzer/episode-detector elders al
+    // gebruikt, geen nieuwe eigen tijddefinitie. Splitst in twee helften
+    // (niet vier kwarten): bij een ~Gaussische stijg-curve komt dat
+    // ongeveer overeen met vóór/na het buigpunt, en is met de beperkte
+    // resolutie (5 min/cyclus) van korte episodes betrouwbaarder dan vier
+    // aparte kwarten.
+    //
+    // Vuistregel (Ecko, 13/07/2026): bij een goede frontload zit ruwweg 2/3
+    // van de dosis in de eerste helft, 1/3 in de tweede.
+    // BACKLOADED_THRESHOLD is een eerste, ruime inschatting — pas als
+    // structureel signaal gebruiken (zie EpisodeSafetyResult.isBackloaded)
+    // nadat een aantal episodes is bekeken, nog NIET gekoppeld aan de
+    // learner (bewust stap voor stap, zie overdrachtsdocument §6/§3).
+    const val IDEAL_SECOND_HALF_FRACTION = 1.0 / 3.0
+    const val BACKLOADED_THRESHOLD = 0.45
+    // Minimaal aantal minuten tussen episode.start en de piek om de
+    // helft-splitsing betrouwbaar te achten (bij minder cycli per helft is
+    // één cyclus toeval al genoeg om de fractie compleet te laten kantelen).
+    const val MIN_RISE_MINUTES_FOR_HALVES = 10
+
     fun checkAll(
         episodes: List<Episode>,
         windowMinutes: Int = DEFAULT_WINDOW_MINUTES,
@@ -61,7 +90,9 @@ object SafetyInvariantChecker {
                 peakBg = peakRow?.bg ?: 0.0,
                 peakTimestamp = peakRow?.timestamp,
                 episodePeakCommitU = episodePeakCommitU,
-                violations = emptyList()
+                violations = emptyList(),
+                secondHalfFractionOfDose = null,
+                isBackloaded = false
             )
         }
 
@@ -84,6 +115,24 @@ object SafetyInvariantChecker {
                 )
             }
 
+        // ── Helft-verdeling start→piek — zie kdoc bij MIN_RISE_MINUTES_FOR_HALVES ──
+        val riseMinutes = Duration.between(episode.start, peakRow.timestamp).toMinutes()
+        val secondHalfFractionOfDose: Double?
+        if (riseMinutes >= MIN_RISE_MINUTES_FOR_HALVES) {
+            val midpoint = episode.start.plus(Duration.between(episode.start, peakRow.timestamp).dividedBy(2))
+            val riseRows = rows.filter {
+                !it.timestamp.isBefore(episode.start) && !it.timestamp.isAfter(peakRow.timestamp)
+            }
+            val totalRiseDose = riseRows.sumOf { it.deliveredTotal }
+            secondHalfFractionOfDose = if (totalRiseDose > 0.0) {
+                val secondHalfDose = riseRows.filter { it.timestamp.isAfter(midpoint) }.sumOf { it.deliveredTotal }
+                secondHalfDose / totalRiseDose
+            } else null
+        } else {
+            secondHalfFractionOfDose = null
+        }
+        val isBackloaded = secondHalfFractionOfDose != null && secondHalfFractionOfDose > BACKLOADED_THRESHOLD
+
         return EpisodeSafetyResult(
             episodeId = episode.id,
             episodeStart = episode.start,
@@ -91,7 +140,9 @@ object SafetyInvariantChecker {
             peakBg = peakRow.bg,
             peakTimestamp = peakRow.timestamp,
             episodePeakCommitU = episodePeakCommitU,
-            violations = violations
+            violations = violations,
+            secondHalfFractionOfDose = secondHalfFractionOfDose,
+            isBackloaded = isBackloaded
         )
     }
 
@@ -135,7 +186,13 @@ data class EpisodeSafetyResult(
     val peakBg: Double,
     val peakTimestamp: Instant?,
     val episodePeakCommitU: Double,
-    val violations: List<SafetyViolation>
+    val violations: List<SafetyViolation>,
+    // ── Helft-verdeling (13/07/2026, Ecko) — zie kdoc bij MIN_RISE_MINUTES_FOR_HALVES.
+    // null = episode te kort (< MIN_RISE_MINUTES_FOR_HALVES) om betrouwbaar te splitsen.
+    val secondHalfFractionOfDose: Double? = null,
+    // true als secondHalfFractionOfDose > BACKLOADED_THRESHOLD. Puur diagnostisch —
+    // (nog) niet gekoppeld aan FrontloadLearner, zie kdoc bovenaan dit bestand.
+    val isBackloaded: Boolean = false
 ) {
     val hasViolation: Boolean get() = violations.isNotEmpty()
 }

@@ -107,11 +107,36 @@ fun FclAiAdvisorScreen(
             SettingsSection(context, onSaved = { showSettings = false })
         }
 
+        // 13/07/2026 (Ecko) — directe klik-bevestiging voor "Nu vernieuwen". De
+        // knoptekst hieronder ("⏳ Bezig…") leunt op FclAiAdvisorScheduler.isRunning(),
+        // een plain AtomicBoolean, geen Compose-observable State — die wijzigt in de
+        // praktijk niet betrouwbaar mee in de UI. En bij een eerdere foutmelding
+        // (zoals hierboven bij runResult.parseError) blijft die foutmelding gewoon
+        // ongewijzigd zichtbaar totdat de nieuwe aanvraag klaar is — die kan bij een
+        // 503/timeout lang duren. Resultaat: na klikken lijkt er niets te gebeuren.
+        // Fix: een losse, lokale Compose-state die het moment van klikken vastlegt,
+        // onafhankelijk van hoe lang de aanvraag duurt of hoe hij afloopt. Het
+        // succesvolle-resultaat-scherm zelf blijft ongewijzigd.
+        var lastRequestedAt by remember { mutableStateOf<String?>(null) }
+
         val ready = FclAiAdvisorSettingsStore.isConfigured(context)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onRefreshNow, enabled = ready) {
+            Button(
+                onClick = {
+                    lastRequestedAt = LOCAL_FMT.format(Instant.now())
+                    onRefreshNow()
+                },
+                enabled = ready
+            ) {
                 Text(if (FclAiAdvisorScheduler.isRunning()) "⏳ Bezig…" else "Nu vernieuwen")
             }
+        }
+        lastRequestedAt?.let {
+            Text(
+                "Advies aangevraagd: $it",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         if (!ready) {
             Text(

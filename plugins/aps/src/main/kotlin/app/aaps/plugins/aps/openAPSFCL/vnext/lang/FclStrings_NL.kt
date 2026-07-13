@@ -211,6 +211,8 @@ object FclStrings_NL : FclStrings {
     override val expertModus                    = "Expert modus"
     override val expertModusActief              = "Expertmodus actief."
     override val expertModusMeerOpties          = "Meer opties volgen in een toekomstige versie."
+    override val expertT1BoostTitel              = "T1-versterking (experimenteel)"
+    override val expertT1BoostUitleg             = "Geeft iets meer vroege insuline bij een maaltijd, maar alleen als de stijging al meerdere meetpunten aanhoudt. Grijpt nooit in op de allereerste, nog onzekere dosis. Standaard uit."
     override val expertPin                      = "Voer de pincode in (standaard: 0000)."
     override val expertPinFout                  = "Onjuiste pincode"
     override val pincode                        = "Pincode"

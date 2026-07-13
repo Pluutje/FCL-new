@@ -46,6 +46,12 @@ fun FclSafetyCheckScreen(
         ).sortedByDescending { it.episodeStart }
     }
     val violationCount = results.count { it.hasViolation }
+    // (13/07/2026, Ecko) Complementair aan violationCount: episodes waarbij
+    // de dosis geconcentreerd in de tweede helft van de stijging viel, ook
+    // als dat niet toevallig vlak bij de piek was (zie kdoc bij
+    // MIN_RISE_MINUTES_FOR_HALVES in SafetyInvariantChecker.kt). Puur
+    // diagnostisch, nog niet gekoppeld aan de learner.
+    val backloadedCount = results.count { it.isBackloaded }
 
     Column(
         modifier = Modifier
@@ -72,7 +78,7 @@ fun FclSafetyCheckScreen(
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = if (violationCount > 0)
+                containerColor = if (violationCount > 0 || backloadedCount > 0)
                     MaterialTheme.colorScheme.errorContainer
                 else
                     MaterialTheme.colorScheme.surfaceVariant
@@ -90,6 +96,16 @@ fun FclSafetyCheckScreen(
                 Text(
                     "Regel: geen commit binnen $windowMinutes min van de BG-piek mag groter zijn " +
                         "dan $maxFractionPct% van de grootste commit die episode.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    if (backloadedCount > 0)
+                        "$backloadedCount episode(s) met meer dan " +
+                            "${(SafetyInvariantChecker.BACKLOADED_THRESHOLD * 100).toInt()}% van de dosis in de " +
+                            "tweede helft van de stijging (ideaal: ~33%)."
+                    else
+                        "Helft-verdeling: geen episodes structureel achteraan geladen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -133,7 +149,7 @@ private fun EpisodeSafetyCard(result: EpisodeSafetyResult) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (result.hasViolation)
+            containerColor = if (result.hasViolation || result.isBackloaded)
                 MaterialTheme.colorScheme.errorContainer
             else
                 MaterialTheme.colorScheme.surface
@@ -150,7 +166,7 @@ private fun EpisodeSafetyCard(result: EpisodeSafetyResult) {
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                StatusBadge(ok = !result.hasViolation)
+                StatusBadge(ok = !result.hasViolation && !result.isBackloaded)
             }
             Text(
                 "Piek ${"%.1f".format(result.peakBg)} mmol/L" +
@@ -159,6 +175,28 @@ private fun EpisodeSafetyCard(result: EpisodeSafetyResult) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // ── Helft-verdeling start→piek (13/07/2026, Ecko) ────────────
+            // Complementair aan de schendingen hieronder: dit vangt ook een
+            // "alles-in-één-klap"-patroon dat niet toevallig vlak bij de
+            // piek viel (zie kdoc SafetyInvariantChecker.kt).
+            when (val shf = result.secondHalfFractionOfDose) {
+                null -> Text(
+                    "Helft-verdeling: episode te kort om betrouwbaar te bepalen",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                else -> Text(
+                    "Helft-verdeling: ${(100 - shf * 100).toInt()}% eerste helft / " +
+                        "${(shf * 100).toInt()}% tweede helft (ideaal ~67%/33%)" +
+                        if (result.isBackloaded) " ⚠ achteraan geladen" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (result.isBackloaded) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (result.isBackloaded)
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             result.violations.forEach { v -> ViolationRow(v) }
         }
     }
