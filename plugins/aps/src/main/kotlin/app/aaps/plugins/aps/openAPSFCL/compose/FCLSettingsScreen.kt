@@ -344,6 +344,11 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             // Vereenvoudigd van 4 standen (UIT/LICHT/NORMAAL/STERK) naar AAN/UIT
             // (29/06/2026): intensiteitsdetectie op basis van stappenaantal regelt
             // het effect automatisch — aparte standen voegden geen meerwaarde toe.
+            // 14/07/2026 (Ecko) — hernoemd naar "Kortetermijn activiteit (stappen)"
+            // om deze duidelijk te onderscheiden van de nieuwe AIGF hieronder: dit
+            // blok reageert op stappen NU (real-time, FCLActivityModule), AIGF
+            // kijkt naar het 8-uurs-calorieniveau t.o.v. een glijdend 7-daags
+            // gemiddelde (FclActivitySensitivity).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -352,12 +357,12 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "🚶 Activiteit",
+                        "🚶 Kortetermijn activiteit (stappen)",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
                         if (actBehavior != "OFF")
-                            "Past insuline en target aan op basis van stappenteller."
+                            "Past insuline en target direct aan op basis van de actuele stappenteller."
                         else
                             "Activiteitsdetectie uitgeschakeld.",
                         style = MaterialTheme.typography.bodySmall,
@@ -371,6 +376,113 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                         sp.putString(StringKey.fcl_vnext_activity_behavior.key, actBehavior)
                     }
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            androidx.compose.material3.HorizontalDivider()
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
+            // Bewust EIGEN, niet-expert SharedPreferences-bestand ("fcl_activity_
+            // sensitivity_settings", zie FCLvNext.kt isAigfActive()/getAigfMinPct()/
+            // getAigfMaxPct()) — raw SharedPreferences i.p.v. een officiële AAPS-
+            // Preferences DoubleKey/StringKey, omdat deze plugin geen toegang heeft
+            // om nieuwe entries aan de AAPS-core keys-lijst toe te voegen. Bewust
+            // standaard UIT en met een voorzichtig 95-105%-bereik — pas na een
+            // periode van vertrouwen breder te zetten.
+            var aigfActive by remember {
+                mutableStateOf(
+                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                        .getBoolean("aigf_active", false)
+                )
+            }
+            var aigfMinPctText by remember {
+                mutableStateOf(
+                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                        .getFloat("aigf_min_pct", 95.0f).toString()
+                )
+            }
+            var aigfMaxPctText by remember {
+                mutableStateOf(
+                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                        .getFloat("aigf_max_pct", 105.0f).toString()
+                )
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "📊 AIGF (Activiteits Insuline Gevoeligheidsfactor)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = aigfActive,
+                            onCheckedChange = { active ->
+                                aigfActive = active
+                                ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("aigf_active", active).apply()
+                            }
+                        )
+                    }
+                    Text(
+                        "Vergelijkt de calorieën van de laatste 8 uur met je glijdende 7-daagse gemiddelde. " +
+                            "Actiever dan gemiddeld → gevoeliger voor insuline → extra afbouw ná de eerste grote " +
+                            "commit. Inactiever dan gemiddeld → minder gevoelig → iets meer insuline bij de grote " +
+                            "commit(s) van een maaltijd.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (aigfActive) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = aigfMinPctText,
+                                onValueChange = { txt ->
+                                    aigfMinPctText = txt
+                                    txt.toFloatOrNull()?.let { v ->
+                                        ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                                            .edit().putFloat("aigf_min_pct", v).apply()
+                                    }
+                                },
+                                label = { Text("Min %") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = aigfMaxPctText,
+                                onValueChange = { txt ->
+                                    aigfMaxPctText = txt
+                                    txt.toFloatOrNull()?.let { v ->
+                                        ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                                            .edit().putFloat("aigf_max_pct", v).apply()
+                                    }
+                                },
+                                label = { Text("Max %") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
             }
         }
 

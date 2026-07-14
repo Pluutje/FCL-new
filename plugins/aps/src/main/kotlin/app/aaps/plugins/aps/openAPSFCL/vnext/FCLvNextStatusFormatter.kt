@@ -32,7 +32,13 @@ data class FclUiSnapshot(
     // 06/07/2026 (Ecko) — gedetecteerd activiteitstype (ON_BICYCLE/WALKING/
     // RUNNING/STILL/IN_VEHICLE/TILTING/ON_FOOT), null als er niets recents is.
     val recentActivityType: String? = null,
-    val recentActivityConfidencePct: Int = 0
+    val recentActivityConfidencePct: Int = 0,
+    // 14/07/2026 (Ecko) — Activiteits Insuline Gevoeligheids Factor (AIGF).
+    // null = AIGF staat uit in Settings, of nog geen geldige berekening
+    // beschikbaar (te weinig historie) — dan wordt de regel niet getoond.
+    // 100 = neutraal, 125 = 25% gevoeliger (minder insuline), 75 = 25%
+    // minder gevoelig (meer insuline). Zie FclActivitySensitivity.kt.
+    val aigfPct: Double? = null
 )
 
 class FCLvNextStatusFormatter(
@@ -178,7 +184,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v1.1.1")
+        appendLine(" 🧠 FCL V7 v1.1.3")
         appendLine("════════════════════════")
         appendLine()
 
@@ -210,6 +216,16 @@ class FCLvNextStatusFormatter(
         }
         if (ui.recentActivityType != null) {
             appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
+        }
+        // 14/07/2026 (Ecko) — AIGF-waarde, alleen getoond als de functie aan
+        // staat én er al een geldige berekening is (zie FclUiSnapshot.aigfPct).
+        if (ui.aigfPct != null) {
+            val aigfIcon = when {
+                ui.aigfPct > 100.5 -> "⬆️"
+                ui.aigfPct < 99.5  -> "⬇️"
+                else               -> "➡️"
+            }
+            appendLine("• AIGF: $aigfIcon ${"%.1f".format(ui.aigfPct)}%")
         }
         appendLine(activityLog ?: str.geenActiviteitdata)
 

@@ -50,7 +50,16 @@ data class FCLvNextInput(
     val activityInsulinPct: Double = 100.0,
     val activityTargetAdjust: Double = 0.0,     // mmol/L
     // Schaalt alleen de oref0/SMB-fallback-laag (Laag 2), niet FCLvNext zelf.
-    val aapsMultiplier: Double = 1.0
+    val aapsMultiplier: Double = 1.0,
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
+    // Huidige 8-uurs-calorieschatting, berekend door DetermineBasalFCL.kt via
+    // EstimatedCaloriesCalculator.caloriesInWindow(), zelfde bron als de
+    // bestaande 1-uurs activiteitsvelden hierboven maar dan met een 8u-venster.
+    // -1.0 = nog geen geldige meting beschikbaar (zie FclActivitySensitivity).
+    // Losstaand van activityActive/activityInsulinPct/activityTargetAdjust
+    // hierboven — dat is de kortetermijn-stappen-mechaniek (FCLActivityModule),
+    // dit is de nieuwe langetermijn-baseline-mechaniek (FclActivitySensitivity).
+    val activityCal8h: Double = -1.0
 )
 
 data class FCLvNextContext(
@@ -93,7 +102,16 @@ data class FCLvNextAdvice(
     val secondDerivative: Double,
 
     // debug / UI
-    val statusText: String
+    val statusText: String,
+
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
+    // aigfPct: 100 = neutraal, 125 = 25% gevoeliger (minder insuline nodig),
+    // 75 = 25% minder gevoelig (meer insuline nodig). Voor weergave in de
+    // status formatter en logging; de daadwerkelijke toepassing (afterload-
+    // verlaging bij >100, grote-commit-verhoging bij <100) gebeurt al intern
+    // in FCLvNext vóórdat getAdvice() terugkeert.
+    val aigfPct: Double = 100.0,
+    val aigfActive: Boolean = false
 )
 
 private data class DecisionResult(
@@ -423,6 +441,30 @@ private const val CURVE_FIT_EARLY_TRIGGER_MMOL = 1.5 // max. vervroeging van de 
 private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit doel.txt
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
 private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op effectiveDecay
+
+// ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
+// Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
+// NA een afvlakking, bijv. een 2e gang — zie kdoc bij vroegeStijgingBevestigd
+// verderop). Dit mechanisme lost een ander, veelvoorkomender probleem op:
+// bij een normale, doorlopende stijging (géén meervoudige maaltijd) bleef de
+// "echte" grote commit té laat komen, omdat de afbouw-teller puur op
+// commit-nummer werkt en bgStijgtNogFors pas afgaat zodra BG al absoluut
+// target+3 mmol gepasseerd is — vaak pas ruim ná het moment waarop de
+// stijging allang overtuigend bevestigd was. Zie overdracht 14/07/2026 voor
+// de volledige analyse (maaltijd 05:12-05:52, vervroegde commit ~13-19 min).
+private const val VROEGE_STIJGING_SUSTAIN_MIN = 15.0      // min. aanhoudend hoge slope vereist (sustainedHighSlopeMinutes)
+private const val VROEGE_STIJGING_PLATEAU_SLOPE = 1.0     // mmol/u — onder deze ctx.slope geldt de stijging als afgevlakt; opent de deur weer voor een eventuele 2e gang
+// Hoeveel bgStijgtNogFors nog boven de normale afbouw mag uitkomen ALS hij
+// afgaat vlak na een net-al-vervroegde grote commit, zolang er nog GEEN
+// afvlakking (plateau) is geweest sinds die vervroegde commit — dus nog
+// dezelfde, doorlopende stijging. 1.0 = geen demping (normaal, ongewijzigd
+// gedrag — ook voor een oprecht nieuwe gang ná een plateau).
+// TUNING: dit is de knop om aan te draaien als de gedempte vervolgcommit in
+// de praktijk nog te groot (verhogen richting 1.0) of te klein (verlagen
+// richting 0.0) blijkt. Startwaarde 0.30 gekozen op basis van doorrekening
+// van de 05:37-commit in de maaltijd van 14/07/2026 (Ecko, akkoord gegeven
+// op 30% i.p.v. de eerder doorgerekende 50%).
+private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 
 // ─────────────────────────────────────────────
 // WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
@@ -3129,6 +3171,32 @@ class FCLvNext(
         context.getSharedPreferences(EXPERT_PREFS, android.content.Context.MODE_PRIVATE)
             .getBoolean(SUSTAIN_T1_BOOST_KEY, false)
 
+    // ── AIGF-instellingen (14/07/2026, Ecko) ────────────────────────────────
+    // Bewust EIGEN, niet-expert SharedPreferences-bestand (i.t.t. de
+    // EXPERT_PREFS hierboven): de AIGF-instellingen horen thuis in de
+    // gewone "🚶 Activiteit"-tab in Settings, niet achter de expert-modus
+    // (zie FCLSettingsScreen.kt). Raw SharedPreferences i.p.v. een officiële
+    // AAPS-Preferences DoubleKey/StringKey — deze plugin heeft geen toegang
+    // om nieuwe entries aan de AAPS-core keys-lijst toe te voegen.
+    private val AIGF_PREFS = "fcl_activity_sensitivity_settings"
+    private val AIGF_ACTIVE_KEY = "aigf_active"
+    private val AIGF_MIN_PCT_KEY = "aigf_min_pct"
+    private val AIGF_MAX_PCT_KEY = "aigf_max_pct"
+    private val AIGF_DEFAULT_MIN_PCT = 95.0f
+    private val AIGF_DEFAULT_MAX_PCT = 105.0f
+
+    private fun isAigfActive(): Boolean =
+        context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
+            .getBoolean(AIGF_ACTIVE_KEY, false)
+
+    private fun getAigfMinPct(): Double =
+        context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(AIGF_MIN_PCT_KEY, AIGF_DEFAULT_MIN_PCT).toDouble()
+
+    private fun getAigfMaxPct(): Double =
+        context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(AIGF_MAX_PCT_KEY, AIGF_DEFAULT_MAX_PCT).toDouble()
+
     private fun loadEpisodeCounter(): Long =
         context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
             .getLong(EPISODE_KEY, 0L)
@@ -3174,6 +3242,16 @@ class FCLvNext(
     // gelezen bij het wegschrijven van logRow verderop.
     private var lastBgStijgtNogFors: Boolean = false
     private var lastCommitNrUsed: Int = 0
+    // 14/07/2026 (Ecko) — vroege-stijging-bevestiging, zie kdoc bij
+    // VROEGE_STIJGING_SUSTAIN_MIN hierboven. vroegeStijgingBevestigdUsedThisEpisode:
+    // zorgt dat de afbouw-reset maar ÉÉN keer per episode vuurt (niet elke
+    // cyclus opnieuw zolang de stijging aanhoudt). plateauSinceVroegeStijging:
+    // wordt pas true zodra de stijging na die vervroegde commit écht afvlakt —
+    // vanaf dat moment werkt een latere bgStijgtNogFors weer op volle sterkte
+    // (oprecht nieuwe gang), daarvóór wordt hij gedempt (zelfde, doorlopende
+    // stijging als de al-vervroegde commit).
+    private var vroegeStijgingBevestigdUsedThisEpisode: Boolean = false
+    private var plateauSinceVroegeStijging: Boolean = false
 
     // ── Snelle-afremming guard (zie updateRapidDecelGate) ──────────────────
     // Houdt de hoogste recentSlope sinds episode-start bij, om een relatieve
@@ -3385,6 +3463,8 @@ class FCLvNext(
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
+            vroegeStijgingBevestigdUsedThisEpisode = false
+            plateauSinceVroegeStijging = false
         }
         if (peakEstimator.active && !episodeShouldBeActive) {
             // Originele exit: duidelijke daling of BG dicht bij target
@@ -3773,6 +3853,37 @@ class FCLvNext(
 
         val zoneEnum = computeBgZone(ctx)
 
+        // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
+        // Eén berekening per cyclus, hier al vroeg zodat zowel de afterload-
+        // reductie (verderop, bij afterloadScale) als de grote-commit-
+        // verhoging (verderop, bij committedDose) dezelfde waarde gebruiken.
+        // Standaard UIT (aigfActive=false in Settings) → aigfResult.active=false
+        // en aigf blijft op 100 (neutraal, geen enkel effect op de dosering).
+        // Zie FclActivitySensitivity.kt voor de volledige toelichting op de
+        // formule (vaste referentie-squash → proportionele herschaling naar
+        // het ingestelde min/max-bereik) en waarom de baseline glijdend is.
+        val aigfEnabled = isAigfActive()
+        val aigfResult = if (aigfEnabled) {
+            FclActivitySensitivity.compute(
+                history = FclActivitySensitivity.loadFrom(context),
+                currentCal8h = input.activityCal8h,
+                minPct = getAigfMinPct(),
+                maxPct = getAigfMaxPct()
+            )
+        } else {
+            FclActivitySensitivity.AigfResult(
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = 0
+            )
+        }
+        if (aigfResult.active) {
+            status.append(
+                "AIGF=${"%.1f".format(aigfResult.aigf)} " +
+                    "(ratio=${"%.2f".format(aigfResult.rawRatio)} " +
+                    "baseline=${"%.0f".format(aigfResult.baselineMedian)}kcal " +
+                    "n=${aigfResult.sampleCount})\n"
+            )
+        }
+
         logRow.guardIobLimited = false
         logRow.guardPeakLimited = false
         logRow.guardMaxSmbLimited = false
@@ -3970,6 +4081,8 @@ class FCLvNext(
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
+            vroegeStijgingBevestigdUsedThisEpisode = false
+            plateauSinceVroegeStijging = false
 
             status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
 
@@ -4002,6 +4115,8 @@ class FCLvNext(
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
+            vroegeStijgingBevestigdUsedThisEpisode = false
+            plateauSinceVroegeStijging = false
         }
 
         // ── Maaltijd-anticipatie: episode vastleggen zodra CONFIRMED (05/07/2026, Ecko) ──
@@ -5283,6 +5398,39 @@ class FCLvNext(
                 // lastBgStijgtNogFors hierboven.
                 lastBgStijgtNogFors = bgStijgtNogFors
                 lastCommitNrUsed = commitNr
+
+                // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────
+                // Los van bgStijgtNogFors (die blijft ongewijzigd, bedoeld voor een
+                // hernieuwde stijging NA een afvlakking — bijv. een 2e gang, zie
+                // kdoc bij VROEGE_STIJGING_SUSTAIN_MIN hierboven). Dit signaal
+                // vraagt om MEERDERE cycli bevestigd bewijs (sustainedHighSlopeMinutes,
+                // niet één enkele cyclus — een kleine hoeveelheid zeer snelle
+                // koolhydraten zou dat niet volhouden), i.p.v. een absoluut
+                // BG-niveau. Vuurt maximaal éénmaal per episode (zie
+                // vroegeStijgingBevestigdUsedThisEpisode).
+                val vroegeStijgingBevestigd = sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
+                    ctx.consistency >= config.episodeMinConsistency &&
+                    ctx.acceleration > 0.0
+                val vroegeStijgingNuVoorHetEerst = vroegeStijgingBevestigd && !vroegeStijgingBevestigdUsedThisEpisode
+                if (vroegeStijgingNuVoorHetEerst) {
+                    vroegeStijgingBevestigdUsedThisEpisode = true
+                    status.append(
+                        "VROEGE STIJGING BEVESTIGD: afbouw gereset (sustained=${sustainedHighSlopeMinutes.toInt()}m " +
+                            "consistency=${"%.2f".format(ctx.consistency)} accel=${"%.2f".format(ctx.acceleration)})\n"
+                    )
+                }
+
+                // Plateau-detectie: pas relevant ná een vervroegde commit. Zodra de
+                // stijging écht afvlakt (ctx.slope onder VROEGE_STIJGING_PLATEAU_SLOPE),
+                // werkt een latere bgStijgtNogFors weer op volle sterkte — oprecht
+                // nieuwe gang, geen demping meer nodig.
+                if (vroegeStijgingBevestigdUsedThisEpisode && !plateauSinceVroegeStijging &&
+                    ctx.slope < VROEGE_STIJGING_PLATEAU_SLOPE
+                ) {
+                    plateauSinceVroegeStijging = true
+                    status.append("PLATEAU gedetecteerd na vroege-stijging-commit: bgStijgtNogFors terug op volle sterkte\n")
+                }
+
                 val decayFloorBase = if (bgStijgtNogFors) {
                     // Stijgende BG ver boven target: hogere vloer
                     // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18
@@ -5303,7 +5451,13 @@ class FCLvNext(
                 val decayFloor = (decayFloorBase - (commitNr - 1).coerceAtMost(5) * 0.02)
                     .coerceAtLeast(0.10)
 
-                lateDecayMul = if (lateDecayActive) {
+                lateDecayMul = if (vroegeStijgingNuVoorHetEerst) {
+                    // Eenmalige afbouw-reset: laat de commit-branch-formule (fraction,
+                    // commitIobFactor, prePeakMul, ...) ongehinderd door de
+                    // commit-teller-gebaseerde afbouw uitrekenen, precies zoals bij
+                    // de allereerste commit van de episode.
+                    1.0
+                } else if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
                         .coerceIn(decayFloor, 1.0)
                 } else 1.0
@@ -5345,17 +5499,48 @@ class FCLvNext(
                 // verder vanaf dát nieuwe, hogere punt — niet vanaf de oorspronkelijke
                 // eerste commit. De eerste commit zelf (commitNr <= 1) wordt nooit
                 // begrensd door deze regel.
-                val cappedFinalDose = if (bgStijgtNogFors || commitNr <= 1) {
+                // ── bgStijgtNogFors-demping ná een vervroegde commit (14/07/2026, Ecko) ──
+                // Zie kdoc bij VROEGE_STIJGING_BGSTIJGT_DEMPING. Zonder deze demping
+                // kon bgStijgtNogFors kort ná een net-al-vervroegde grote commit
+                // (zelfde, doorlopende stijging) opnieuw een volledig ongeplafonneerde
+                // finalDose doorlaten — een TWEEDE grote uitschieter bovenop de
+                // eerste, in plaats van een verschuiving in de tijd. Alleen actief
+                // zolang er nog geen plateau is geweest sinds die vervroegde commit;
+                // ná een plateau (oprecht nieuwe gang, bijv. 2e gang van de maaltijd)
+                // werkt bgStijgtNogFors weer volledig ongewijzigd (bypassStrength=1.0).
+                val bgStijgtNogForsBypassStrength = when {
+                    !bgStijgtNogFors -> 0.0
+                    !vroegeStijgingBevestigdUsedThisEpisode -> 1.0
+                    plateauSinceVroegeStijging -> 1.0
+                    else -> VROEGE_STIJGING_BGSTIJGT_DEMPING
+                }
+                val cappedFinalDose = if (commitNr <= 1) {
                     finalDose
+                } else if (bgStijgtNogFors && bgStijgtNogForsBypassStrength >= 1.0) {
+                    finalDose
+                } else if (bgStijgtNogFors) {
+                    finalDose.coerceAtMost(episodePeakCommitU * bgStijgtNogForsBypassStrength)
                 } else {
                     finalDose.coerceAtMost(episodePeakCommitU * lateDecayMul)
                 }
 
+                // ── AIGF-verhoging op de grote commit(s) (14/07/2026, Ecko) ──────
+                // Toegepast op het commit-resultaat zelf (niet op finalDose of
+                // andere doses elders) — dit IS "de grote commit(s)" waar de
+                // gebruiker het over had. Alleen actief als AIGF<100 (minder
+                // gevoelig, meer insuline nodig); AIGF>100 werkt uitsluitend via
+                // de afterload-reductie hieronder (zie aigfAfterloadScale).
+                val aigfCommitBoost = if (aigfResult.active && aigfResult.aigf < 100.0 - 1e-9)
+                    (100.0 / aigfResult.aigf)
+                else 1.0
                 val committedDose =
-                    if (peakCategory >= PeakCategory.HIGH)
+                    (if (peakCategory >= PeakCategory.HIGH)
                         maxOf(cappedFinalDose, commitDose * 1.15)
                     else
-                        maxOf(cappedFinalDose, commitDose)
+                        maxOf(cappedFinalDose, commitDose)) * aigfCommitBoost
+                if (aigfCommitBoost > 1.0 + 1e-9) {
+                    status.append("AIGF COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf=${"%.1f".format(aigfResult.aigf)})\n")
+                }
                 logRow.commitDoseFinal = committedDose
                 episodePeakCommitU = maxOf(episodePeakCommitU, committedDose)
 
@@ -6038,7 +6223,19 @@ class FCLvNext(
                 1.0 - frac * 0.60
             } else 1.0
 
-            val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale * postBigCommitScale
+            // ── AIGF-reductie als extra afterload-laag (14/07/2026, Ecko) ──────
+            // Alleen actief als AIGF>100 (gevoeliger, minder insuline nodig).
+            // Bewust in DEZE laag (i.p.v. rechtstreeks op committedDose): de
+            // afterload-groep is per definitie de "afbouw ná de grote commit"-
+            // fase (futureDrop60/highIobLateWave/lateSecondWave/postBigCommit
+            // werken hier allemaal al zo) — precies zoals de gebruiker vroeg:
+            // "getallen boven de 100 als extra afbouw nadat de eerste echt
+            // grotere commit is geweest". AIGF<100 heeft hier bewust GEEN
+            // effect (dat loopt uitsluitend via aigfCommitBoost hierboven).
+            val aigfAfterloadScale = if (aigfResult.active && aigfResult.aigf > 100.0 + 1e-9)
+                (100.0 / aigfResult.aigf)
+            else 1.0
+            val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale * postBigCommitScale * aigfAfterloadScale
             logRow.afterloadFutureDrop60Scale = futureDrop60Scale
             logRow.afterloadHighIobLateScale  = highIobLateWaveScale
             // lateSecondWaveScale en postBigCommitScale zijn bewust niet
@@ -6324,7 +6521,10 @@ class FCLvNext(
             peakState = peak.state.name,
             secondDerivative = ctx.acceleration,
 
-            statusText = status.toString()
+            statusText = status.toString(),
+
+            aigfPct = aigfResult.aigf,
+            aigfActive = aigfResult.active
         )
     }
 }

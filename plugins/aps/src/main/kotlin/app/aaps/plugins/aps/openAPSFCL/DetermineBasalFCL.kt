@@ -144,6 +144,21 @@ class DetermineBasalFCL @Inject constructor(
                 persistenceLayer     = persistenceLayer,
                 context              = context
             )
+
+            // ✅ NIEUW (14/07/2026, Ecko): AIGF-geschiedenis bijwerken bij elke
+            // episodestart. Zelfde cadans/moment als de ActivityLogger hierboven —
+            // één sample per episode is precies wat de glijdende 7-daagse baseline
+            // nodig heeft (zie FclActivitySensitivity.kt), geen elke-cyclus-opslag.
+            try {
+                val cal8h = computeAigfCal8hTotal(System.currentTimeMillis())
+                if (cal8h >= 0.0) {
+                    val history = app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.loadFrom(context)
+                    val updated = app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.record(
+                        history, System.currentTimeMillis(), cal8h
+                    )
+                    app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.saveTo(context, updated)
+                }
+            } catch (e: Exception) { }
         }
     }
 
@@ -183,6 +198,42 @@ class DetermineBasalFCL @Inject constructor(
         if (rT.reason.toString().isNotEmpty()) rT.reason.append(". ")
         rT.reason.append(msg)
         consoleError.add(msg)
+    }
+
+    // ── AIGF: 8-uurs-calorietotal (14/07/2026, Ecko) ───────────────────────
+    // Zelfde methode/grenzen als FclActivityLogger.logEpisodeStart() gebruikt
+    // voor cal_totaal_8h (8 losse 1-uurs deelvensters, opgeteld) — BEWUST
+    // niet één enkele caloriesInWindow()-aanroep met een 8u-venster: die
+    // functie neemt voor het activiteitstype-onderdeel altijd de MEEST
+    // RECENTE classificatie (FclActivityTypeCache.latest) en vermenigvuldigt
+    // die met de volledige venstertijd — bij één 8u-aanroep zou een korte
+    // fietsrit van 20 min dan over 8 volle uren worden uitgesmeerd. Met 8
+    // losse 1u-deelvensters (zoals hier en in FclActivityLogger) krijgt elk
+    // uur zijn eigen, correcte classificatie.
+    // Retourneert -1.0 als er geen enkel geldig deelvenster was (i.p.v. 0.0,
+    // om "geen data" te kunnen onderscheiden van "écht stilgezeten").
+    private fun computeAigfCal8hTotal(nowMs: Long): Double {
+        val hourMs = 3_600_000L
+        val perHour = (1..8).map { h ->
+            val boundary = nowMs - (h - 1) * hourMs
+            try {
+                val stepsThisHour = kotlinx.coroutines.runBlocking {
+                    persistenceLayer.getLastStepsCountFromTimeToTime(
+                        startTime = boundary - hourMs,
+                        endTime = boundary
+                    )?.steps60min ?: 0
+                }
+                app.aaps.plugins.aps.openAPSFCL.vnext.logging.EstimatedCaloriesCalculator.caloriesInWindow(
+                    context = context,
+                    persistenceLayer = persistenceLayer,
+                    stepsInWindow = stepsThisHour.coerceAtLeast(0),
+                    startMs = boundary - hourMs,
+                    endMs = boundary
+                )
+            } catch (e: Exception) { -1.0 }
+        }
+        val valid = perHour.filter { it >= 0.0 }
+        return if (valid.isEmpty()) -1.0 else valid.sum()
     }
 
     private fun getMaxSafeBasal(profile: OapsProfileFCL): Double =
@@ -493,6 +544,14 @@ class DetermineBasalFCL @Inject constructor(
             val pendingBolusU10min = (realDelivered10min.bolusU - realDelivered8min.bolusU)
                 .coerceAtLeast(0.0)
 
+            // ✅ NIEUW (14/07/2026, Ecko): 8-uurs-calorietotal voor AIGF — elke
+            // cyclus opnieuw berekend (i.t.t. de eenmalige episodestart-opslag
+            // hierboven, die de HISTORIE/baseline bijhoudt). Dit is de "huidige
+            // waarde" die FCLvNext.kt tegen die historische baseline aflegt.
+            val activityCal8h = try {
+                computeAigfCal8hTotal(currentTime)
+            } catch (e: Exception) { -1.0 }
+
             val fclInput = FCLvNextInput(
                 bgNow = bgNowMmol,
                 bgHistory = bgHistoryMmol,
@@ -509,7 +568,8 @@ class DetermineBasalFCL @Inject constructor(
                 activityActive = activity.isActive,
                 activityInsulinPct = activity.insulinPercentage,
                 activityTargetAdjust = activity.targetAdjust,
-                aapsMultiplier = aaps_multiplier
+                aapsMultiplier = aaps_multiplier,
+                activityCal8h = activityCal8h
             )
 
             val advice = fclvNext.getAdvice(fclInput)
@@ -590,7 +650,8 @@ class DetermineBasalFCL @Inject constructor(
                 recentCalories1h = recentCalories1h,
                 recentHr1h = recentHr1h,
                 recentActivityType = recentActivity?.activityType,
-                recentActivityConfidencePct = recentActivity?.confidencePct ?: 0
+                recentActivityConfidencePct = recentActivity?.confidencePct ?: 0,
+                aigfPct = if (advice.aigfActive) advice.aigfPct else null
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,
