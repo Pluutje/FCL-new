@@ -613,7 +613,8 @@ class DataHandlerMobile @Inject constructor(
             useTt = preferences.get(BooleanKey.WearWizardTt),
             useTrend = preferences.get(BooleanKey.WearWizardTrend),
             alarm = false,
-            notes = ""
+            notes = "",
+            source = Sources.Wear
         )
         contacting()
         shipPrepared(
