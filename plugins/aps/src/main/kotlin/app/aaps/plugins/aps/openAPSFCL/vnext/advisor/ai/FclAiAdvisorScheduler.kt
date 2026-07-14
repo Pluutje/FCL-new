@@ -110,8 +110,18 @@ object FclAiAdvisorScheduler {
         // zonder dat hij stilletjes verdwijnt — pas als elk voorstel is goed-
         // of afgekeurd (stillPendingCount == 0) stopt dit vanzelf, want
         // showPendingAdvice(0) dismisst 'm dan juist (zie FclAiNotificationHelper).
+        // 14/07/2026 (Ecko) — bugfix: automatisch door de validatie afgewezen
+        // voorstellen (suggestion.rejected == true, zie "Automatisch verworpen"
+        // in FclAiAdvisorScreen.kt) worden NOOIT naar FclAiAdvisorHistoryRepository
+        // geschreven — er is geen Goedkeuren/Afwijzen-knop voor, de gebruiker kan
+        // ze niet "afhandelen". isStillPending() vond dus nooit een history-entry
+        // voor zo'n voorstel en bleef elke cyclus (~5 min) TRUE teruggeven, ook al
+        // was er niets te doen — de melding "1 voorstel klaar" bleef daardoor
+        // urenlang terugkomen totdat een volgende run cachedResult verving.
+        // Fix: !it.rejected uitsluiten, exact dezelfde filter die forceRunNow()
+        // (de "Nu vernieuwen"-knop) hieronder al wél toepast.
         val stillPendingCount = cachedResult.get()?.suggestions
-            ?.count { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it) }
+            ?.count { !it.rejected && app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it) }
             ?: 0
         FclAiNotificationHelper.showPendingAdvice(context, stillPendingCount)
 
@@ -155,8 +165,11 @@ object FclAiAdvisorScheduler {
                         // MANUAL-modus (bestaand gedrag): sticky check bovenaan
                         // runIfDue() herbevestigt de melding daarna elke volgende
                         // cyclus zolang er nog iets onbeoordeeld is (05/07/2026, Ecko).
+                        // Zelfde bugfix als de sticky-check bovenaan: automatisch
+                        // afgewezen voorstellen (rejected == true) uitsluiten — die zijn
+                        // nooit "af te handelen" en horen dus nooit mee te tellen.
                         val pendingCount = result.suggestions.count {
-                            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it)
+                            !it.rejected && app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorHistoryRepository.isStillPending(it)
                         }
                         FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
                     }

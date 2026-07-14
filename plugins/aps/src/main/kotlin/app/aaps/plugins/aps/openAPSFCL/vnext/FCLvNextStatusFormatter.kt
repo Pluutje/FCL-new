@@ -178,7 +178,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v1.1.0a")
+        appendLine(" 🧠 FCL V7 v1.1.1")
         appendLine("════════════════════════")
         appendLine()
 
