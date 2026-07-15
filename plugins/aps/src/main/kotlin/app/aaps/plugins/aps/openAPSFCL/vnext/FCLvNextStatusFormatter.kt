@@ -38,7 +38,14 @@ data class FclUiSnapshot(
     // beschikbaar (te weinig historie) — dan wordt de regel niet getoond.
     // 100 = neutraal, 125 = 25% gevoeliger (minder insuline), 75 = 25%
     // minder gevoelig (meer insuline). Zie FclActivitySensitivity.kt.
-    val aigfPct: Double? = null
+    val aigfPct: Double? = null,
+    // 14/07/2026 (Ecko) — staat AIGF AAN in Settings? Los van of er deze
+    // cyclus ook een verse berekening was (zie aigfReasonNl). Bepaalt of de
+    // AIGF-regel in de Activiteit-sectie überhaupt getoond wordt.
+    val aigfEnabled: Boolean = false,
+    // Leesbare reden waarom er geen verse berekening was (leeg = wel een
+    // verse berekening, of AIGF staat uit).
+    val aigfReasonNl: String = ""
 )
 
 class FCLvNextStatusFormatter(
@@ -184,7 +191,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v1.1.3")
+        appendLine(" 🧠 FCL V7 v1.1.5")
         appendLine("════════════════════════")
         appendLine()
 
@@ -217,15 +224,23 @@ class FCLvNextStatusFormatter(
         if (ui.recentActivityType != null) {
             appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
         }
-        // 14/07/2026 (Ecko) — AIGF-waarde, alleen getoond als de functie aan
-        // staat én er al een geldige berekening is (zie FclUiSnapshot.aigfPct).
-        if (ui.aigfPct != null) {
-            val aigfIcon = when {
-                ui.aigfPct > 100.5 -> "⬆️"
-                ui.aigfPct < 99.5  -> "⬇️"
-                else               -> "➡️"
+        // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN
+        // staat in Settings, ook als er (nog) geen verse berekening is — dan
+        // toont de regel de reden i.p.v. stilzwijgend niets te laten zien.
+        if (ui.aigfEnabled) {
+            if (ui.aigfReasonNl.isNotEmpty()) {
+                appendLine(" ")
+                appendLine( "• AIGF: AAN — ${ui.aigfReasonNl}"  )
+                appendLine(" ")
+            } else {
+                val pct = ui.aigfPct ?: 100.0
+                val aigfIcon = when {
+                    pct > 100.5 -> "⬆️"
+                    pct < 99.5  -> "⬇️"
+                    else        -> "➡️"
+                }
+                appendLine("• AIGF: $aigfIcon ${"%.1f".format(pct)}%")
             }
-            appendLine("• AIGF: $aigfIcon ${"%.1f".format(ui.aigfPct)}%")
         }
         appendLine(activityLog ?: str.geenActiviteitdata)
 

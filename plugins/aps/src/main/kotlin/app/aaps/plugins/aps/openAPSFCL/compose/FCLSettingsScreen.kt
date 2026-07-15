@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -76,6 +77,36 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var showOchtendPicker        by remember { mutableStateOf(false) }
     var showOchtendWeekendPicker by remember { mutableStateOf(false) }
     var showNachtPicker          by remember { mutableStateOf(false) }
+
+    // ── AIGF-state (14/07/2026, Ecko) ───────────────────────────────────────
+    // BUGFIX (14/07/2026, Ecko): stond eerst genest in de FCLSection("Activiteit")
+    // lambda hieronder — daardoor "Unresolved reference" op de picker-dialogen
+    // verderop in dit bestand, die buiten die lambda staan (zelfde patroon als
+    // showOchtendPicker/showNachtPicker hierboven: top-niveau state, overal in
+    // deze composable bruikbaar). Waarde blijft intern Double (voor precisie/
+    // toekomstbestendigheid), maar de UI toont/scrollt alleen hele procenten
+    // (geen decimalen) via PercentWheelPicker. Min% begrensd 75-100, Max% 100-125
+    // (symmetrisch rond het neutrale punt 100, zie FclActivitySensitivity.kt).
+    var aigfActive by remember {
+        mutableStateOf(
+            ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                .getBoolean("aigf_active", false)
+        )
+    }
+    var aigfMinPct by remember {
+        mutableStateOf(
+            ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                .getFloat("aigf_min_pct", 95.0f).toDouble()
+        )
+    }
+    var aigfMaxPct by remember {
+        mutableStateOf(
+            ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                .getFloat("aigf_max_pct", 105.0f).toDouble()
+        )
+    }
+    var showAigfMinPicker by remember { mutableStateOf(false) }
+    var showAigfMaxPicker by remember { mutableStateOf(false) }
 
     var infoDialogTitle   by remember { mutableStateOf("") }
     var infoDialogText    by remember { mutableStateOf("") }
@@ -390,24 +421,6 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             // om nieuwe entries aan de AAPS-core keys-lijst toe te voegen. Bewust
             // standaard UIT en met een voorzichtig 95-105%-bereik — pas na een
             // periode van vertrouwen breder te zetten.
-            var aigfActive by remember {
-                mutableStateOf(
-                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
-                        .getBoolean("aigf_active", false)
-                )
-            }
-            var aigfMinPctText by remember {
-                mutableStateOf(
-                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
-                        .getFloat("aigf_min_pct", 95.0f).toString()
-                )
-            }
-            var aigfMaxPctText by remember {
-                mutableStateOf(
-                    ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
-                        .getFloat("aigf_max_pct", 105.0f).toString()
-                )
-            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -452,34 +465,18 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedTextField(
-                                value = aigfMinPctText,
-                                onValueChange = { txt ->
-                                    aigfMinPctText = txt
-                                    txt.toFloatOrNull()?.let { v ->
-                                        ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
-                                            .edit().putFloat("aigf_min_pct", v).apply()
-                                    }
-                                },
-                                label = { Text("Min %") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
+                            OutlinedButton(
+                                onClick = { showAigfMinPicker = true },
                                 modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = aigfMaxPctText,
-                                onValueChange = { txt ->
-                                    aigfMaxPctText = txt
-                                    txt.toFloatOrNull()?.let { v ->
-                                        ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
-                                            .edit().putFloat("aigf_max_pct", v).apply()
-                                    }
-                                },
-                                label = { Text("Max %") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
+                            ) {
+                                Text("Min: ${aigfMinPct.toInt()}%")
+                            }
+                            OutlinedButton(
+                                onClick = { showAigfMaxPicker = true },
                                 modifier = Modifier.weight(1f)
-                            )
+                            ) {
+                                Text("Max: ${aigfMaxPct.toInt()}%")
+                            }
                         }
                     }
                 }
@@ -676,6 +673,37 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 sp.putString(StringKey.NachtStart.key, nachtStart)
             },
             onDismiss = { showNachtPicker = false }
+        )
+    }
+
+    // ── AIGF min/max %-pickers (14/07/2026, Ecko) ──────────────────────────
+    // Zelfde "buiten de Column, want Popup"-plaatsing als de tijd-pickers
+    // hierboven. Min% begrensd 75-100, Max% begrensd 100-125 — symmetrisch
+    // rond het neutrale punt 100 (zie FclActivitySensitivity.kt).
+    if (showAigfMinPicker) {
+        PercentWheelPicker(
+            initialValue = aigfMinPct.toInt(),
+            minValue = 75, maxValue = 100,
+            title = "AIGF Min %",
+            onValueSelected = { v ->
+                aigfMinPct = v.toDouble()
+                ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                    .edit().putFloat("aigf_min_pct", v.toFloat()).apply()
+            },
+            onDismiss = { showAigfMinPicker = false }
+        )
+    }
+    if (showAigfMaxPicker) {
+        PercentWheelPicker(
+            initialValue = aigfMaxPct.toInt(),
+            minValue = 100, maxValue = 125,
+            title = "AIGF Max %",
+            onValueSelected = { v ->
+                aigfMaxPct = v.toDouble()
+                ctx.getSharedPreferences("fcl_activity_sensitivity_settings", android.content.Context.MODE_PRIVATE)
+                    .edit().putFloat("aigf_max_pct", v.toFloat()).apply()
+            },
+            onDismiss = { showAigfMaxPicker = false }
         )
     }
 
@@ -919,5 +947,105 @@ private fun FCLTimeRow(
             )
         }
         TextButton(onClick = onWijzig) { Text(s.change) }
+    }
+}
+
+// ── styleNumberPickerText (15/07/2026, Ecko; bijgewerkt 15/07/2026 na
+// Android Studio-waarschuwing over reflectie op API 29+) ────────────────────
+// Bugfix: android.widget.NumberPicker erft zijn tekstkleur van het GLOBALE
+// Activity-thema (light/dark), niet van de Compose MaterialTheme die de
+// omliggende Dialog/Surface hierboven kleurt. Bij Ecko bleek dat op een licht
+// scherm de Surface wit is, maar de NumberPicker-cijfers ook (bijna) wit
+// waren -> onzichtbaar. Twee tekst-bronnen binnen NumberPicker moeten apart
+// gekleurd worden:
+//   1. De GESELECTEERDE waarde: een losse, publiek bereikbare EditText-kind
+//      (altijd via de publieke weg, geen reflectie nodig).
+//   2. De NIET-geselecteerde waarden erboven/eronder: getekend via een
+//      interne Paint (mSelectorWheelPaint). Android 10/API 29 introduceerde
+//      hiervoor de OFFICIËLE publieke methode NumberPicker.setTextColor(),
+//      die gebruiken we vanaf hier — geen reflectie meer nodig op de
+//      apparaten waar de meeste gebruikers op zitten. Reflectie op dat
+//      interne veld is vanaf API 29 bovendien niet gegarandeerd meer
+//      toegankelijk (hidden-API-restricties) en gaf precies daarom de
+//      terechte Android Studio-waarschuwing. Onder API 29 bestaat
+//      setTextColor() niet, dus daar blijft de reflectie-route als
+//      fallback bestaan, met stille no-op als het veld op een OEM-variant
+//      een andere naam heeft (dan blijft alleen de geselecteerde waarde
+//      alsnog zichtbaar, i.p.v. een crash).
+private fun styleNumberPickerText(picker: android.widget.NumberPicker, colorArgb: Int) {
+    for (i in 0 until picker.childCount) {
+        val child = picker.getChildAt(i)
+        if (child is android.widget.EditText) {
+            child.setTextColor(colorArgb)
+        }
+    }
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        picker.setTextColor(colorArgb)
+    } else {
+        try {
+            val paintField = android.widget.NumberPicker::class.java.getDeclaredField("mSelectorWheelPaint")
+            paintField.isAccessible = true
+            (paintField.get(picker) as? android.graphics.Paint)?.color = colorArgb
+        } catch (e: Exception) {
+            // Best-effort — zie kdoc hierboven.
+        }
+    }
+}
+
+// ── PercentWheelPicker (14/07/2026, Ecko) ──────────────────────────────────
+// Scrollbare heel-getal-kiezer voor de AIGF min/max%-instellingen, analoog
+// aan TimeWheelPicker hierboven maar zelfstandig (geen afhankelijkheid van
+// dat bestand — TimeWheelPicker's implementatie zit elders in het project
+// en was niet in de aangeleverde bestanden aanwezig). Gebruikt de klassieke
+// android.widget.NumberPicker via AndroidView: een beproefde, native
+// scrollwiel-widget met ingebouwde grenzen (minValue/maxValue) — voorkomt
+// dat de gebruiker een waarde buiten het toegestane bereik kan intypen,
+// wat met de eerdere vrije-tekst-invoer wél kon.
+@Composable
+private fun PercentWheelPicker(
+    initialValue: Int,
+    minValue: Int,
+    maxValue: Int,
+    title: String,
+    onValueSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var currentValue by remember { mutableStateOf(initialValue.coerceIn(minValue, maxValue)) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(12.dp))
+                val aigfPickerTextColorArgb = MaterialTheme.colorScheme.onSurface.toArgb()
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { context ->
+                        android.widget.NumberPicker(context).apply {
+                            this.minValue = minValue
+                            this.maxValue = maxValue
+                            this.value = currentValue
+                            this.wrapSelectorWheel = false
+                            setOnValueChangedListener { _, _, newVal -> currentValue = newVal }
+                            styleNumberPickerText(this, aigfPickerTextColorArgb)
+                        }
+                    },
+                    update = { picker -> styleNumberPickerText(picker, aigfPickerTextColorArgb) },
+                    modifier = Modifier.wrapContentSize()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Annuleren") }
+                    Button(onClick = { onValueSelected(currentValue); onDismiss() }) { Text("OK") }
+                }
+            }
+        }
     }
 }

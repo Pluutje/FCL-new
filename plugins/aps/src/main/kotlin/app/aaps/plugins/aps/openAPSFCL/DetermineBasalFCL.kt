@@ -651,7 +651,9 @@ class DetermineBasalFCL @Inject constructor(
                 recentHr1h = recentHr1h,
                 recentActivityType = recentActivity?.activityType,
                 recentActivityConfidencePct = recentActivity?.confidencePct ?: 0,
-                aigfPct = if (advice.aigfActive) advice.aigfPct else null
+                aigfPct = if (advice.aigfActive) advice.aigfPct else null,
+                aigfEnabled = advice.aigfActive,
+                aigfReasonNl = advice.aigfReasonNl
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,

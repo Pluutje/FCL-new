@@ -122,7 +122,11 @@ object FclActivitySensitivity {
         // Puur diagnostisch, voor de status-formatter/logging:
         val rawRatio: Double,
         val baselineMedian: Double,
-        val sampleCount: Int
+        val sampleCount: Int,
+        // 14/07/2026 (Ecko) — leesbare reden waarom er GEEN verse berekening is
+        // (active=false); leeg als active=true. Voor de status-formatter, zodat
+        // "AAN maar geen effect" een concrete verklaring krijgt i.p.v. stilte.
+        val reasonNl: String = ""
     )
 
     private fun median(values: List<Double>): Double {
@@ -148,12 +152,24 @@ object FclActivitySensitivity {
         maxPct: Double
     ): AigfResult {
         val usable = history.samples.filter { it.cal8h >= 0.0 }.map { it.cal8h }
-        if (usable.size < MIN_HISTORY_FOR_BASELINE || currentCal8h < 0.0) {
-            return AigfResult(active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size)
+        if (usable.size < MIN_HISTORY_FOR_BASELINE) {
+            return AigfResult(
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size,
+                reasonNl = "nog te weinig meetpunten (${usable.size}/$MIN_HISTORY_FOR_BASELINE)"
+            )
+        }
+        if (currentCal8h < 0.0) {
+            return AigfResult(
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size,
+                reasonNl = "geen geldige huidige calorie-meting deze cyclus"
+            )
         }
         val baselineMedian = median(usable)
         if (baselineMedian <= 0.001) {
-            return AigfResult(active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = baselineMedian, sampleCount = usable.size)
+            return AigfResult(
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = baselineMedian, sampleCount = usable.size,
+                reasonNl = "baseline te laag om te normeren"
+            )
         }
 
         val rawRatio = currentCal8h / baselineMedian

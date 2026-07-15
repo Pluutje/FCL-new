@@ -111,7 +111,13 @@ data class FCLvNextAdvice(
     // verlaging bij >100, grote-commit-verhoging bij <100) gebeurt al intern
     // in FCLvNext vóórdat getAdvice() terugkeert.
     val aigfPct: Double = 100.0,
-    val aigfActive: Boolean = false
+    // aigfActive: staat de functie AAN in Settings (los van of er deze
+    // cyclus ook daadwerkelijk een verse berekening was — zie aigfReasonNl).
+    val aigfActive: Boolean = false,
+    // Leesbare reden waarom er geen verse AIGF-berekening was deze cyclus
+    // (bijv. te weinig historie); leeg als er wel een verse berekening was.
+    // Alleen relevant/gevuld als aigfActive=true — anders altijd leeg.
+    val aigfReasonNl: String = ""
 )
 
 private data class DecisionResult(
@@ -465,6 +471,36 @@ private const val VROEGE_STIJGING_PLATEAU_SLOPE = 1.0     // mmol/u — onder de
 // van de 05:37-commit in de maaltijd van 14/07/2026 (Ecko, akkoord gegeven
 // op 30% i.p.v. de eerder doorgerekende 50%).
 private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
+
+// ── Piek-anker-drempel (15/07/2026, Ecko) ───────────────────────────────────
+// PROBLEEM (ontdekt op de maaltijd van 14/07/2026, 18:32-19:02): episodePeakCommitU
+// — het referentiepunt waar de taper-clamp hieronder (cappedFinalDose) alle
+// latere commits aan afmeet — werd bijgewerkt door ELKE commit, ook de
+// allereerste, kleine (0,64U, ~20% van maxSMB, feitelijk een correctie).
+// Bij een doorlopende, nog versnellende stijging bleef de piek daardoor op
+// dat te-kleine niveau vastzitten: latere cycli wilden via het energiemodel
+// (finalDose) 2,74U geven, maar werden geplafonneerd op ~episodePeakCommitU
+// × lateDecayMul — een kelder in plaats van een plafond op de juiste hoogte.
+//
+// OPLOSSING (Ecko, akkoord 15/07/2026): een commit telt pas als "de piek die
+// de rest afkapt" als hij minstens PEAK_ANCHOR_THRESHOLD_FRAC van maxSMB is —
+// bewust een PERCENTAGE i.p.v. een vast aantal U, zodat dit voor elke
+// gebruiker (elke maxSMB-schaal) hetzelfde betekent. Zolang er nog geen
+// enkele commit deze episode die drempel heeft gehaald, blijft
+// episodePeakCommitU op 0 staan en wordt cappedFinalDose helemaal NIET
+// geplafonneerd (zie cappedFinalDose hieronder) — finalDose mag dan vrij
+// doorstromen, precies zoals bij de allereerste commit van de episode.
+// Pas zodra een commit ≥ 75% van maxSMB daadwerkelijk gebeurt, wordt DIE het
+// nieuwe anker en gaat de afbouw (lateDecayMul) vanaf dát punt werken.
+//
+// TUNING (Ecko's eigen aantekening, 15/07/2026): als in de praktijk blijkt
+// dat er ná het buigpunt (omslag/piek) nog te veel insuline binnenkomt — dus
+// deze drempel laat de "echte" piek te makkelijk aanwijzen — dan eerst hier
+// verlagen (bijv. naar 0.60-0.65), en/of lateDecayMul (effectiveDecay) na
+// het ankeren harder laten aflopen. Nog niet in scherpe productiedata
+// gevalideerd tegen een ná-piek-overdosering-scenario — alleen tegen het
+// hier beschreven te-vroeg-plafonneren-probleem.
+private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
 
 // ─────────────────────────────────────────────
 // WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
@@ -3197,6 +3233,22 @@ class FCLvNext(
         context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
             .getFloat(AIGF_MAX_PCT_KEY, AIGF_DEFAULT_MAX_PCT).toDouble()
 
+    // ── AIGF: vloeiende overgang (14/07/2026, Ecko — na live-observatie dat) ──
+    // een ruwe, direct-berekende AIGF van cyclus op cyclus fors kan springen
+    // (bijv. door een episodegrens die de 8u-inputwaarde in één keer doet
+    // omslaan). lastSmoothedAigfPct is de daadwerkelijk GEBRUIKTE waarde
+    // (voor zowel dosering als status-weergave); die beweegt maximaal
+    // AIGF_MAX_STEP_PER_CYCLE_PCT procentpunt per cyclus richting de nieuw
+    // berekende waarde. Bij ~5 min/cyclus is dat ongeveer 24 procentpunt/uur —
+    // een volledige sprong van 75 naar 125 kost dan ~2 uur i.p.v. één cyclus.
+    // Bewust in-memory (niet gepersisteerd): bij een herstart is 100 (neutraal)
+    // een veilig startpunt, geen reden om dit over herstarts heen te bewaren.
+    // Pas gerust aan indien gewenst — zie ook MIN_HISTORY_FOR_BASELINE in
+    // FclActivitySensitivity.kt voor de samenhang met hoe snel er überhaupt
+    // een eerste berekening beschikbaar komt.
+    private val AIGF_MAX_STEP_PER_CYCLE_PCT = 2.0
+    private var lastSmoothedAigfPct: Double = 100.0
+
     private fun loadEpisodeCounter(): Long =
         context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
             .getLong(EPISODE_KEY, 0L)
@@ -3857,13 +3909,13 @@ class FCLvNext(
         // Eén berekening per cyclus, hier al vroeg zodat zowel de afterload-
         // reductie (verderop, bij afterloadScale) als de grote-commit-
         // verhoging (verderop, bij committedDose) dezelfde waarde gebruiken.
-        // Standaard UIT (aigfActive=false in Settings) → aigfResult.active=false
-        // en aigf blijft op 100 (neutraal, geen enkel effect op de dosering).
-        // Zie FclActivitySensitivity.kt voor de volledige toelichting op de
-        // formule (vaste referentie-squash → proportionele herschaling naar
-        // het ingestelde min/max-bereik) en waarom de baseline glijdend is.
+        // Standaard UIT (aigfEnabled=false in Settings) → geen enkel effect op
+        // de dosering. Zie FclActivitySensitivity.kt voor de volledige
+        // toelichting op de formule (vaste referentie-squash → proportionele
+        // herschaling naar het ingestelde min/max-bereik) en waarom de
+        // baseline glijdend is.
         val aigfEnabled = isAigfActive()
-        val aigfResult = if (aigfEnabled) {
+        val aigfRawResult = if (aigfEnabled) {
             FclActivitySensitivity.compute(
                 history = FclActivitySensitivity.loadFrom(context),
                 currentCal8h = input.activityCal8h,
@@ -3872,16 +3924,34 @@ class FCLvNext(
             )
         } else {
             FclActivitySensitivity.AigfResult(
-                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = 0
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = 0,
+                reasonNl = "AIGF staat uit in Settings"
             )
         }
-        if (aigfResult.active) {
-            status.append(
-                "AIGF=${"%.1f".format(aigfResult.aigf)} " +
-                    "(ratio=${"%.2f".format(aigfResult.rawRatio)} " +
-                    "baseline=${"%.0f".format(aigfResult.baselineMedian)}kcal " +
-                    "n=${aigfResult.sampleCount})\n"
-            )
+        // ── Vloeiende overgang (14/07/2026, Ecko, na gebruikersfeedback) ────────
+        // lastSmoothedAigfPct is de waarde die ECHT gebruikt wordt (dosering +
+        // status), nooit de ruwe aigfRawResult.aigf rechtstreeks. Bij geen
+        // geldige berekening deze cyclus (aigfRawResult.active=false) blijft de
+        // vorige gladde waarde gewoon staan — geen reset naar 100, dat zou zelf
+        // weer een sprong veroorzaken zodra de data terugkomt. Zie
+        // AIGF_MAX_STEP_PER_CYCLE_PCT hierboven voor de stapgrootte.
+        if (aigfRawResult.active) {
+            val delta = (aigfRawResult.aigf - lastSmoothedAigfPct)
+                .coerceIn(-AIGF_MAX_STEP_PER_CYCLE_PCT, AIGF_MAX_STEP_PER_CYCLE_PCT)
+            lastSmoothedAigfPct += delta
+        }
+        val aigfSmoothedPct = lastSmoothedAigfPct
+        if (aigfEnabled) {
+            if (aigfRawResult.active) {
+                status.append(
+                    "AIGF=${"%.1f".format(aigfSmoothedPct)} (ruw=${"%.1f".format(aigfRawResult.aigf)} " +
+                        "ratio=${"%.2f".format(aigfRawResult.rawRatio)} " +
+                        "baseline=${"%.0f".format(aigfRawResult.baselineMedian)}kcal " +
+                        "n=${aigfRawResult.sampleCount})\n"
+                )
+            } else {
+                status.append("AIGF AAN maar geen verse berekening: ${aigfRawResult.reasonNl} (huidig=${"%.1f".format(aigfSmoothedPct)})\n")
+            }
         }
 
         logRow.guardIobLimited = false
@@ -5514,7 +5584,14 @@ class FCLvNext(
                     plateauSinceVroegeStijging -> 1.0
                     else -> VROEGE_STIJGING_BGSTIJGT_DEMPING
                 }
-                val cappedFinalDose = if (commitNr <= 1) {
+                // ── Piek nog niet verankerd (15/07/2026, Ecko) ──────────────────
+                // Zie kdoc bij PEAK_ANCHOR_THRESHOLD_FRAC hierboven. Zolang geen
+                // enkele commit deze episode ≥75% van maxSMB heeft gehaald, is
+                // episodePeakCommitU nog 0 — dan NOOIT plafonneren op basis daarvan
+                // (dat zou alles tot 0 knijpen), gewoon hetzelfde gedrag als de
+                // allereerste commit van de episode.
+                val episodePeakAnchored = episodePeakCommitU > 1e-9
+                val cappedFinalDose = if (commitNr <= 1 || !episodePeakAnchored) {
                     finalDose
                 } else if (bgStijgtNogFors && bgStijgtNogForsBypassStrength >= 1.0) {
                     finalDose
@@ -5530,8 +5607,8 @@ class FCLvNext(
                 // gebruiker het over had. Alleen actief als AIGF<100 (minder
                 // gevoelig, meer insuline nodig); AIGF>100 werkt uitsluitend via
                 // de afterload-reductie hieronder (zie aigfAfterloadScale).
-                val aigfCommitBoost = if (aigfResult.active && aigfResult.aigf < 100.0 - 1e-9)
-                    (100.0 / aigfResult.aigf)
+                val aigfCommitBoost = if (aigfEnabled && aigfSmoothedPct < 100.0 - 1e-9)
+                    (100.0 / aigfSmoothedPct)
                 else 1.0
                 val committedDose =
                     (if (peakCategory >= PeakCategory.HIGH)
@@ -5539,10 +5616,18 @@ class FCLvNext(
                     else
                         maxOf(cappedFinalDose, commitDose)) * aigfCommitBoost
                 if (aigfCommitBoost > 1.0 + 1e-9) {
-                    status.append("AIGF COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf=${"%.1f".format(aigfResult.aigf)})\n")
+                    status.append("AIGF COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf=${"%.1f".format(aigfSmoothedPct)})\n")
                 }
                 logRow.commitDoseFinal = committedDose
-                episodePeakCommitU = maxOf(episodePeakCommitU, committedDose)
+                // ── Piek-anker alleen bij een "echte" commit (15/07/2026, Ecko) ──
+                // Zie kdoc bij PEAK_ANCHOR_THRESHOLD_FRAC hierboven — een kleine
+                // correctie (bijv. 20% van maxSMB) mag het referentiepunt voor de
+                // taper-clamp niet meer vastzetten. Zolang de drempel niet gehaald
+                // is, blijft episodePeakCommitU op 0 (→ cappedFinalDose hierboven
+                // blijft ongeplafonneerd tot een écht grote commit gebeurt).
+                if (committedDose >= config.maxSMB * PEAK_ANCHOR_THRESHOLD_FRAC) {
+                    episodePeakCommitU = maxOf(episodePeakCommitU, committedDose)
+                }
 
 
                 val effectiveMinCommitDose = when {
@@ -6232,8 +6317,8 @@ class FCLvNext(
             // "getallen boven de 100 als extra afbouw nadat de eerste echt
             // grotere commit is geweest". AIGF<100 heeft hier bewust GEEN
             // effect (dat loopt uitsluitend via aigfCommitBoost hierboven).
-            val aigfAfterloadScale = if (aigfResult.active && aigfResult.aigf > 100.0 + 1e-9)
-                (100.0 / aigfResult.aigf)
+            val aigfAfterloadScale = if (aigfEnabled && aigfSmoothedPct > 100.0 + 1e-9)
+                (100.0 / aigfSmoothedPct)
             else 1.0
             val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale * postBigCommitScale * aigfAfterloadScale
             logRow.afterloadFutureDrop60Scale = futureDrop60Scale
@@ -6523,8 +6608,9 @@ class FCLvNext(
 
             statusText = status.toString(),
 
-            aigfPct = aigfResult.aigf,
-            aigfActive = aigfResult.active
+            aigfPct = aigfSmoothedPct,
+            aigfActive = aigfEnabled,
+            aigfReasonNl = if (aigfRawResult.active) "" else aigfRawResult.reasonNl
         )
     }
 }
