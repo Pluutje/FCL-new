@@ -35,6 +35,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper
+import app.aaps.plugins.aps.openAPSFCL.vnext.FclNachtOvergangSettings
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNext
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextInput
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice
@@ -430,6 +431,19 @@ class DetermineBasalFCL @Inject constructor(
         val dayNightHelper = FCLvNextDayNightHelper(preferences)
         val isNight: Boolean = dayNightHelper.isNightNow()
 
+        // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
+        // FCLvNextDayNightHelper.minutesSinceNightStart() en
+        // FclNachtOvergangSettings.kt voor de volledige aanleiding/afweging.
+        // nightTransitionFraction: 0.0 = volledig dag-gedrag, 1.0 = volledig
+        // nacht-gedrag, lineair ertussenin gedurende de ingestelde duur na
+        // NachtStart. Bij duur=0 (of overdag) identiek aan het oude harde
+        // dag/nacht-gedrag.
+        val nachtOvergangMinuten = FclNachtOvergangSettings.get(context)
+        val nightTransitionFraction: Double =
+            if (!isNight) 0.0
+            else (dayNightHelper.minutesSinceNightStart().toDouble() / max(1, nachtOvergangMinuten))
+                .coerceIn(0.0, 1.0)
+
         // AAPS-multiplier: schaalt alleen de AAPS-correcties (Laag 2), niet
         // FCLvNext. Vroeg in de functie berekend (i.p.v. pas vlak voor
         // gebruik verderop) zodat de waarde ook beschikbaar is voor de
@@ -438,9 +452,11 @@ class DetermineBasalFCL @Inject constructor(
         // Dag: hoger = agressievere AAPS micro-bolussen bij hoge BG.
         // Nacht: lager = voorzichtigere AAPS correcties (default 0.9 = 10% minder).
         // Range 0.9-1.5. Heeft geen effect op FCLvNext zelf.
+        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip.
+        val aaps_multiplier_day = preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
+        val aaps_multiplier_night = preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
         val aaps_multiplier =
-            if (isNight) preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
-            else preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
+            aaps_multiplier_day + nightTransitionFraction * (aaps_multiplier_night - aaps_multiplier_day)
 
         // Sla unit-keuze op zodat composables (BgUnits) geen profileFunction nodig hebben
         app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits.setIsMgdl(
@@ -561,6 +577,7 @@ class DetermineBasalFCL @Inject constructor(
                 targetBG = targetMgdl / 18.0,
                 externalBolusU = externalBolusDetected,
                 isNight = isNight,
+                nightTransitionFraction = nightTransitionFraction,
                 realDeliveredBasalU = realDelivery.basalU,
                 realDeliveredBolusU = realDelivery.bolusU,
                 pendingBolusU10min = pendingBolusU10min,
@@ -585,10 +602,13 @@ class DetermineBasalFCL @Inject constructor(
                 if (!shouldDeliver) 0.0
                 else bolusAmount + (basalRate * (cycleMin / 60.0))
 
-            // max bolus uit prefs (zelfde als config maxSMB gebruikt)
+            // max bolus uit prefs (zelfde als config maxSMB gebruikt) — 17/07/2026
+            // (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip, zodat het
+            // getoonde cijfer op het statusscherm klopt met wat er echt gebeurt.
+            val maxBolusU_day = preferences.get(DoubleKey.max_bolus_day)
+            val maxBolusU_night = preferences.get(DoubleKey.max_bolus_night)
             val maxBolusU =
-                if (isNight) preferences.get(DoubleKey.max_bolus_night)
-                else preferences.get(DoubleKey.max_bolus_day)
+                maxBolusU_day + nightTransitionFraction * (maxBolusU_night - maxBolusU_day)
 
             val statusFormatter =
                 FCLvNextStatusFormatter(
@@ -653,10 +673,14 @@ class DetermineBasalFCL @Inject constructor(
                 recentActivityConfidencePct = recentActivity?.confidencePct ?: 0,
                 aigfPct = if (advice.aigfActive) advice.aigfPct else null,
                 aigfEnabled = advice.aigfActive,
-                aigfReasonNl = advice.aigfReasonNl
+                aigfReasonNl = advice.aigfReasonNl,
+                aigfCurrentCal8h = advice.aigfCurrentCal8h,
+                aigfBaselineCal8h = advice.aigfBaselineCal8h,
+                aigfDaysOfHistory = advice.aigfDaysOfHistory
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,
+                nightTransitionFraction = nightTransitionFraction,
                 advice = advice,
                 bolusAmount = bolusAmount,
                 basalRate = basalRate,

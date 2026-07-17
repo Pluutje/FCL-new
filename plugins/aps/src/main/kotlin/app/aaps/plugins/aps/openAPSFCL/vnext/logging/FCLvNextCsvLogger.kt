@@ -242,5 +242,41 @@ data class FCLvNextCsvLogRow(
     var earlyResetThisCycle: Boolean = false,
     var downtrendLocked: Boolean = false,
     var sensorBlipActive: Boolean = false
-)
-
+) {
+    // ── Diagnose-uitbreiding (16/07/2026, Ecko) — v8→v9 schema-bump ────────
+    // BEWUST BUITEN de primaire constructor (i.t.t. alle velden hierboven):
+    // FCLvNextCsvLogRow had al ~70 constructor-parameters. Kotlin genereert
+    // voor een constructor met default-waarden één grote "$default"-bridge-
+    // methode die ALTIJD alle parameters + bitmasks + marker-object meekrijgt,
+    // ongeacht hoeveel er bij de aanroep expliciet worden meegegeven — en die
+    // bridge wordt aangeroepen in FCLvNext.getAdvice(). Deze 6 velden ALS
+    // constructor-parameters duwden die aanroep over een DEX-verifier-
+    // registerlimiet (java.lang.VerifyError: "Rejecting invocation, expected
+    // 6 argument registers, method signature has 8 or more" — exact dezelfde
+    // bugklasse als eerder gedocumenteerd bij FCLCycleLogEntity.kt, "invalid
+    // arg count" in invoke-direct/range). Als gewone class-body-var's tellen
+    // ze NIET mee in die bridge-aanroep — precies zoals de meeste velden
+    // hierboven toch al ná constructie via `logRow.veld = waarde` worden
+    // gezet, niet via de constructor. GEVOLG: deze 6 velden mogen NOOIT terug
+    // de constructor-parameterlijst in — nieuwe velden hier altijd op
+    // dezelfde manier (class body) toevoegen.
+    //
+    // codeVersion: welke FCLvNext.kt-versie (FCL_CODE_VERSION) deze rij heeft
+    // geproduceerd — ANDERS dan het schemaVersion-veld in de Room-laag, dat
+    // volgt de KOLOM-lay-out, dit veld de DOSIS-LOGICA.
+    var codeVersion: String = ""
+    // appRestartThisCycle: true op precies de eerste cyclus na het
+    // (her)starten van het app-proces — zie isFirstCycleSinceInit in
+    // FCLvNext.kt. Aanleiding: 14/07 20:07- en 15/07 19:42-incidenten.
+    var appRestartThisCycle: Boolean = false
+    // AIGF (14/07/2026) — stond tot nu toe in GEEN kolom, ondanks actieve
+    // invloed op dosering (aigfCommitBoost/aigfAfterloadScale in FCLvNext.kt).
+    // aigfPct is de daadwerkelijk TOEGEPASTE (gladgestreken) waarde.
+    var aigfPct: Double = 100.0
+    var aigfActive: Boolean = false
+    var aigfReason: String = ""
+    // episodePeakCommitU: de taper-clamp-ankerwaarde zelf (zie
+    // PEAK_ANCHOR_THRESHOLD_FRAC in FCLvNext.kt) — tot nu toe alleen indirect
+    // af te leiden uit commit_dose_final/late_decay_mul.
+    var episodePeakCommitU: Double = 0.0
+}

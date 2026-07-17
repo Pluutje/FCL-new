@@ -69,6 +69,12 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var expertPinDialogOpen by remember { mutableStateOf(false) }
     val EXPERT_PIN = "0000"
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie FclNachtOvergangSettings.kt.
+    // BUGFIX (17/07/2026): moet NA de ctx-declaratie hierboven staan — ctx
+    // bestond nog niet toen deze regel eerder (per abuis) bij nachtStart stond.
+    var nachtOvergangMinuten by remember {
+        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.FclNachtOvergangSettings.get(ctx))
+    }
     var selectedLocale by remember {
         mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings.loadLocale(ctx))
     }
@@ -107,6 +113,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     }
     var showAigfMinPicker by remember { mutableStateOf(false) }
     var showAigfMaxPicker by remember { mutableStateOf(false) }
+    var showNachtOvergangPicker by remember { mutableStateOf(false) }
 
     var infoDialogTitle   by remember { mutableStateOf("") }
     var infoDialogText    by remember { mutableStateOf("") }
@@ -364,6 +371,48 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 },
                 onWijzig = { showNachtPicker = true }
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // Geleidelijke nacht-overgang (17/07/2026, Ecko): i.p.v. dat alle
+            // nacht-instellingen in één cyclus omklappen zodra Nachtstart
+            // passeert, lopen ze lineair over gedurende deze duur. 0 minuten
+            // = oude harde gedrag (direct omklappen).
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Geleidelijke nacht-overgang", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (nachtOvergangMinuten > 0)
+                            "Nacht-instellingen lopen lineair over gedurende $nachtOvergangMinuten minuten na Nachtstart."
+                        else
+                            "Uit: nacht-instellingen klappen direct om bij Nachtstart (oud gedrag).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = {
+                    showInfo(
+                        "Geleidelijke nacht-overgang",
+                        "Bepaalt hoe lang na Nachtstart het duurt voordat FCL volledig op " +
+                            "nacht-instellingen draait (gain, maxSMB, nacht-responsstijl, IOB-demping, " +
+                            "de persistent-correctiedrempel en de AAPS-multiplier). In plaats van in " +
+                            "één cyclus omklappen, lopen deze lineair over. Aanleiding: bij meerdere " +
+                            "avonden ontstond een onnodig hoge piek doordat een nog-stijgende " +
+                            "maaltijdreactie abrupt werd afgeremd zodra de klok Nachtstart passeerde. " +
+                            "Bereik 0-180 minuten, stappen van 10. 0 = oude, directe gedrag."
+                    )
+                }) {
+                    Icon(Icons.Default.Info, contentDescription = null,
+                         tint = MaterialTheme.colorScheme.primary)
+                }
+                TextButton(onClick = { showNachtOvergangPicker = true }) {
+                    Text("${nachtOvergangMinuten} min")
+                }
+            }
         }
 
         FCLSection(
@@ -706,6 +755,23 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             onDismiss = { showAigfMaxPicker = false }
         )
     }
+    if (showNachtOvergangPicker) {
+        val stapMinuten = 10
+        val aantalStappen = (app.aaps.plugins.aps.openAPSFCL.vnext.FclNachtOvergangSettings.MAX_MINUTEN / stapMinuten) + 1
+        val labels = (0 until aantalStappen).map { (it * stapMinuten).toString() }
+        PercentWheelPicker(
+            initialValue = (nachtOvergangMinuten / stapMinuten).coerceIn(0, aantalStappen - 1),
+            minValue = 0, maxValue = aantalStappen - 1,
+            title = "Nacht-overgang (minuten)",
+            displayedValues = labels,
+            onValueSelected = { indexVal ->
+                val minuten = indexVal * stapMinuten
+                nachtOvergangMinuten = minuten
+                app.aaps.plugins.aps.openAPSFCL.vnext.FclNachtOvergangSettings.set(ctx, minuten)
+            },
+            onDismiss = { showNachtOvergangPicker = false }
+        )
+    }
 
     // ── Info dialoog ──────────────────────────────────────────────────────
     if (showInfoDialog) {
@@ -1007,6 +1073,12 @@ private fun PercentWheelPicker(
     minValue: Int,
     maxValue: Int,
     title: String,
+    // 17/07/2026 (Ecko, nacht-overgang-picker): optionele custom labels per
+    // stap (bijv. "0","10","20",...) i.p.v. de kale index — de NumberPicker
+    // zelf blijft intern op index werken (minValue..maxValue), de aanroeper
+    // rekent de index terug naar de echte waarde. null = ongewijzigd oud
+    // gedrag (kale integers, zoals de AIGF %-pickers).
+    displayedValues: List<String>? = null,
     onValueSelected: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1026,8 +1098,13 @@ private fun PercentWheelPicker(
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { context ->
                         android.widget.NumberPicker(context).apply {
+                            // Android-eigenaardigheid: displayedValues moet leeg zijn vóórdat
+                            // min/max wijzigen, anders kan een oude array met een niet-passende
+                            // lengte een crash geven.
+                            this.displayedValues = null
                             this.minValue = minValue
                             this.maxValue = maxValue
+                            if (displayedValues != null) this.displayedValues = displayedValues.toTypedArray()
                             this.value = currentValue
                             this.wrapSelectorWheel = false
                             setOnValueChangedListener { _, _, newVal -> currentValue = newVal }

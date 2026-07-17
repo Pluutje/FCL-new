@@ -14,7 +14,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextCsvLogRow
  */
 fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
     // META
-    schemaVersion          = "8",
+    schemaVersion          = "9",
     timestampMs            = ts.millis,
 
     context = ContextFields(
@@ -24,7 +24,9 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
         volhoudendheidPct      = volhoudendheidPct,
         nachtFactorPct         = nachtFactorPct,
         doseDistributionStyle  = doseDistributionStyle,
-        nightResponseStyle     = nightResponseStyle
+        nightResponseStyle     = nightResponseStyle,
+        codeVersion            = codeVersion,
+        appRestartThisCycle    = appRestartThisCycle
     ),
 
     glucoseIob = GlucoseIobFields(
@@ -60,7 +62,10 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
         nightAbsorptionDoseFactor     = nightAbsorptionDoseFactor,
         accelDeclineSinceUncertain    = accelDeclineSinceUncertain,
         shouldDeliver          = shouldDeliver,
-        externalBolusU         = externalBolusU
+        externalBolusU         = externalBolusU,
+        aigfPct                = aigfPct,
+        aigfActive              = aigfActive,
+        aigfReason              = aigfReason
     ),
 
     trends = TrendsFields(
@@ -169,7 +174,8 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
         episodeCommitNr        = episodeCommitNr,
         bgStijgtNogFors        = bgStijgtNogFors,
         commitNrUsed           = commitNrUsed,
-        iobOvershootFactor     = iobOvershootFactor
+        iobOvershootFactor     = iobOvershootFactor,
+        episodePeakCommitU     = episodePeakCommitU
     ),
 
     burst = BurstFields(

@@ -45,7 +45,13 @@ data class FclUiSnapshot(
     val aigfEnabled: Boolean = false,
     // Leesbare reden waarom er geen verse berekening was (leeg = wel een
     // verse berekening, of AIGF staat uit).
-    val aigfReasonNl: String = ""
+    val aigfReasonNl: String = "",
+    // 16/07/2026 (Ecko) — voor de uitgebreide AIGF-statusregel: geschatte
+    // kcal afgelopen 8 uur (huidig) en de 7-daagse mediaan-baseline waar dat
+    // tegen afgezet wordt, plus hoeveel dagen die baseline al beslaat.
+    val aigfCurrentCal8h: Double = 0.0,
+    val aigfBaselineCal8h: Double = 0.0,
+    val aigfDaysOfHistory: Double = 0.0
 )
 
 class FCLvNextStatusFormatter(
@@ -63,13 +69,22 @@ class FCLvNextStatusFormatter(
     private fun buildSituatieSectie(
         isNight: Boolean,
         ui: FclUiSnapshot,
-        advice: app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice?
+        advice: app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice?,
+        // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0..1.0. Default
+        // gekoppeld aan isNight zodat oudere aanroepen ongewijzigd blijven.
+        nightTransitionFraction: Double = if (isNight) 1.0 else 0.0
     ): String {
         val str = FclStrings.get(context)
         val mgdl = BgUnits.isMgdl(context)
         val timeStr = org.joda.time.DateTime.now()
             .toString("HH:mm")
         val header = if (isNight) str.situatieNacht else str.situatieOverdag
+        // Alleen tonen tijdens de overgang zelf (niet bij 0% of 100%, dat is
+        // gewoon "dag" resp. "volledig nacht" en spreekt al uit de header).
+        val overgangLine =
+            if (isNight && nightTransitionFraction in 0.001..0.999)
+                "  (nacht-overgang: ${(nightTransitionFraction * 100).toInt()}%)"
+            else ""
         val deltaStr = ui.delta5m?.let { d ->
             val sign = if (d >= 0) "+" else ""
             " ($sign${BgUnits.formatBgValue(d, mgdl)}/5m)"
@@ -88,7 +103,7 @@ class FCLvNextStatusFormatter(
             else -> ""  // IDLE: geen piek-lijn tonen
         }
         return buildString {
-            appendLine("🏃 $header  $timeStr")
+            appendLine("🏃 $header  $timeStr$overgangLine")
             appendLine("─────────────────────")
             appendLine("• ${str.glucose}:  ${BgUnits.formatBg(ui.bgNow, mgdl)}$deltaStr")
             appendLine("• ${str.iob}:     ${"%.2f".format(ui.iob)} U")
@@ -179,6 +194,9 @@ class FCLvNextStatusFormatter(
 
     fun buildStatus(
         isNight: Boolean,
+        // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
+        // buildSituatieSectie()/FCLvNextInput.nightTransitionFraction.
+        nightTransitionFraction: Double = if (isNight) 1.0 else 0.0,
         advice: FCLvNextAdvice?,
         bolusAmount: Double,
         basalRate: Double,
@@ -191,11 +209,11 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v1.1.6")
+        appendLine(" 🧠 FCL V7 v1.2.1")
         appendLine("════════════════════════")
         appendLine()
 
-        appendLine(buildSituatieSectie(isNight, ui, advice))
+        appendLine(buildSituatieSectie(isNight, ui, advice, nightTransitionFraction))
 
         appendLine(buildBeslissingSectie(bolusAmount, basalRate, shouldDeliver))
         appendLine()
@@ -227,11 +245,14 @@ class FCLvNextStatusFormatter(
         // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN
         // staat in Settings, ook als er (nog) geen verse berekening is — dan
         // toont de regel de reden i.p.v. stilzwijgend niets te laten zien.
+        // 16/07/2026 (Ecko) — bijgewerkt: lege regel voor/na in BEIDE paden
+        // (stond eerder alleen bij de reden-tak), leesbare titel i.p.v. de
+        // kale afkorting, en bij een verse berekening ook de 8u-nu/7d-basis
+        // kcal en (zolang de historie nog opbouwt) de opbouw-voortgang.
         if (ui.aigfEnabled) {
+            appendLine()
             if (ui.aigfReasonNl.isNotEmpty()) {
-                appendLine(" ")
-                appendLine( "• AIGF: AAN — ${ui.aigfReasonNl}"  )
-                appendLine(" ")
+                appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): AAN — ${ui.aigfReasonNl}")
             } else {
                 val pct = ui.aigfPct ?: 100.0
                 val aigfIcon = when {
@@ -239,8 +260,14 @@ class FCLvNextStatusFormatter(
                     pct < 99.5  -> "⬇️"
                     else        -> "➡️"
                 }
-                appendLine("• AIGF: $aigfIcon ${"%.1f".format(pct)}%")
+                appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): $aigfIcon ${"%.1f".format(pct)}%")
+                val curTxt = "${"%.0f".format(ui.aigfCurrentCal8h)} kcal"
+                val baseTxt = "${"%.0f".format(ui.aigfBaselineCal8h)} kcal"
+                val opbouwTxt = if (ui.aigfDaysOfHistory < 5.0)
+                    " · opbouw: ${"%.1f".format(ui.aigfDaysOfHistory)}/5,0d" else ""
+                appendLine("   8u nu: $curTxt · 7d-basis: $baseTxt$opbouwTxt")
             }
+            appendLine()
         }
         appendLine(activityLog ?: str.geenActiviteitdata)
 

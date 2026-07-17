@@ -277,6 +277,11 @@ data class FCLvNextConfig(
 fun loadFCLvNextConfig(
     prefs: Preferences,
     isNight: Boolean,
+    // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0 = volledig dag-
+    // gedrag, 1.0 = volledig nacht-gedrag, lineair ertussenin gedurende de
+    // ingestelde overgangsduur na NachtStart. Bij fraction=0.0 identiek aan
+    // het oude harde isNight-gedrag (zie FclNachtOvergangSettings.kt).
+    nightTransitionFraction: Double = if (isNight) 1.0 else 0.0,
     // 12/07/2026 (Ecko) — nodig voor de Learner's "laagMetNogAanwezigeIob"-check
     // (zie Dflearner.kt): een theoretische-verdere-daling-drempel, geschaald
     // met de actuele ISF i.p.v. een vaste eenheid die voor iedereen gelijk is.
@@ -344,26 +349,31 @@ fun loadFCLvNextConfig(
             prefs.put(DoubleKey.fcl_vnext_iob_brake_learned, v)
     }
 
-    // ── Gain = S (dag) of S × N (nacht) ──────────────────────────────────
+    // ── Gain = S (dag) of S × N (nacht), geleidelijk overlopend ────────────
     // Vervangt de afzonderlijke fcl_vnext_gain_day / fcl_vnext_gain_night prefs.
+    // 17/07/2026 (Ecko): dag- EN nacht-variant altijd allebei berekend, en
+    // vervolgens lineair gemengd met nightTransitionFraction — i.p.v. een
+    // harde if(isNight)-knip. Bij fraction=0.0/1.0 identiek aan het oude gedrag.
     val s = sterkte.toDouble()     / 100.0
     val n = nachtFactor.toDouble() / 100.0
-    val gain = if (isNight) (s * n) else s
+    val gainDay = s
+    val gainNight = s * n
+    val gain = gainDay + nightTransitionFraction * (gainNight - gainDay)
 
-    // MaxSMB koppeling aan S%:
+    // MaxSMB koppeling aan S%, zelfde geleidelijke-overgang-principe:
     // maxSMB = manualMaxSmb × (S% / 100). Bij S=100% → maxSMB = handmatige instelling.
     // Bij S=115% → 15% meer cap. MaxSmbLearner is uitgeschakeld.
     // De frontload-override (watching/earlyBoost) blijft intact en kan deze cap overstijgen.
-    val maxSMB =
-        if (isNight) prefs.get(DoubleKey.max_bolus_night)
-        else {
-            val manualMax = prefs.get(DoubleKey.max_bolus_day)
-            (manualMax * (sterkte.toDouble() / 100.0))
-                .coerceIn(
-                    manualMax * 0.50,  // vloer: nooit minder dan 50% van handmatig
-                    manualMax * 1.50   // plafond: nooit meer dan 150% van handmatig
-                )
-        }
+    val maxSMBNight = prefs.get(DoubleKey.max_bolus_night)
+    val maxSMBDay = run {
+        val manualMax = prefs.get(DoubleKey.max_bolus_day)
+        (manualMax * (sterkte.toDouble() / 100.0))
+            .coerceIn(
+                manualMax * 0.50,  // vloer: nooit minder dan 50% van handmatig
+                manualMax * 1.50   // plafond: nooit meer dan 150% van handmatig
+            )
+    }
+    val maxSMB = maxSMBDay + nightTransitionFraction * (maxSMBNight - maxSMBDay)
 
     // IobBrake override — overschrijft de DFMapping waarde voor peakIobBrakeSuppressThreshold
     // Prioriteit: geleerde persistent waarde > DFMapping param_override > prefs default
@@ -545,10 +555,35 @@ fun loadFCLvNextConfig(
         earlyPeakBiasMmol        = po?.earlyPeakBiasMmol       ?: prefs.get(DoubleKey.fcl_vnext_early_peak_bias_mmol),
     )
 
-    return base
+    // Geleidelijke nacht-overgang, vervolg (17/07/2026, Ecko): de zes
+    // parameters die applyNightResponseStyle bij volle nacht aanpast
+    // (stagnationDeltaMin, stagnationEnergyBoost, persistentAggressionMul,
+    // smallCorrectionCooldownMinutes, correctionHoldDeltaMax,
+    // absorptionDoseFactor) worden ook lineair gemengd i.p.v. in één klap
+    // omgezet. dayStyled = ongewijzigd (applyNightResponseStyle(cfg,false) is
+    // een identity-functie); nightStyled = volledig nacht-gestileerd. Alleen
+    // deze zes velden worden overschreven op basis van fraction — alle andere
+    // velden komen sowieso al identiek uit beide varianten (gain/maxSMB zijn
+    // hierboven al gemengd, dus dayStyled/nightStyled verschillen ALLEEN in
+    // deze zes velden).
+    val preStyle = base
         .let { applySTVModel(it, sterkte, timing, volhoudendheid) }
         .let { applyDoseDistributionStyle(it) }
-        .let { applyNightResponseStyle(it, isNight) }
+
+    val dayStyled = preStyle
+    val nightStyled = applyNightResponseStyle(preStyle, true)
+
+    val f = nightTransitionFraction.coerceIn(0.0, 1.0)
+    val blended = dayStyled.copy(
+        stagnationDeltaMin = dayStyled.stagnationDeltaMin + f * (nightStyled.stagnationDeltaMin - dayStyled.stagnationDeltaMin),
+        stagnationEnergyBoost = dayStyled.stagnationEnergyBoost + f * (nightStyled.stagnationEnergyBoost - dayStyled.stagnationEnergyBoost),
+        persistentAggressionMul = dayStyled.persistentAggressionMul + f * (nightStyled.persistentAggressionMul - dayStyled.persistentAggressionMul),
+        smallCorrectionCooldownMinutes = (dayStyled.smallCorrectionCooldownMinutes + f * (nightStyled.smallCorrectionCooldownMinutes - dayStyled.smallCorrectionCooldownMinutes)).roundToInt().coerceAtLeast(1),
+        correctionHoldDeltaMax = dayStyled.correctionHoldDeltaMax + f * (nightStyled.correctionHoldDeltaMax - dayStyled.correctionHoldDeltaMax),
+        absorptionDoseFactor = (dayStyled.absorptionDoseFactor + f * (nightStyled.absorptionDoseFactor - dayStyled.absorptionDoseFactor)).coerceIn(0.08, 0.40)
+    )
+
+    return blended
         .let { applyParamOverrides(it, override?.paramOverrides) }
         .also { FCLvNextActiveParamsWriter.writeIfChanged(it, prefs, sterkte, timing, volhoudendheid, nfLevel, effectiveIsfMmol) }
 }

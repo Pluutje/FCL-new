@@ -55,6 +55,23 @@ object FclActivitySensitivity {
     /** Minstens dit veel eerdere metingen nodig voor een betrouwbare mediaan. */
     private const val MIN_HISTORY_FOR_BASELINE = 5
 
+    // ── Opbouw-vertrouwen o.b.v. gevulde historie (16/07/2026, Ecko) ────────
+    // Aanleiding: bij een verse installatie (of vlak na de 7-daagse window
+    // die net begint te vullen) kan de historie bijv. maar 2 dagen beslaan —
+    // 1 heel actieve en 1 heel rustige dag geeft dan al een extreme mediaan-
+    // afwijking, terwijl dat helemaal geen betrouwbaar "normaal" patroon is.
+    // MIN_HISTORY_FOR_BASELINE hierboven bewaakt alleen het AANTAL metingen,
+    // niet over hoeveel TIJD die verspreid zijn — 5 metingen kunnen ook
+    // allemaal in dezelfde actieve dag vallen. DAYS_FOR_FULL_CONFIDENCE dekt
+    // dat: de afwijking t.o.v. 100 wordt lineair gedempt met hoeveel dagen
+    // de OUDSTE bruikbare meting in het venster al terug ligt — 20% van de
+    // volle afwijking per dag, tot bij 5+ dagen de volle (ongedempte)
+    // waarde. Bijv. bij een berekende 110%: 1 dag → 102%, 2 dagen → 104%,
+    // ... 5+ dagen → 110%. Puur een vertrouwens-demping, GEEN aparte
+    // referentie — de mediaan/ratio-berekening zelf blijft ongewijzigd.
+    private const val DAYS_FOR_FULL_CONFIDENCE = 5.0
+    private const val MS_PER_DAY = 24L * 60L * 60L * 1000L
+
     // Vaste referentie voor ruwe ratio → interne score -1..+1 (14/07/2026,
     // Ecko: bewust NIET instelbaar, zie kdoc hierboven).
     private const val RATIO_REF_LOW = 0.4
@@ -126,7 +143,12 @@ object FclActivitySensitivity {
         // 14/07/2026 (Ecko) — leesbare reden waarom er GEEN verse berekening is
         // (active=false); leeg als active=true. Voor de status-formatter, zodat
         // "AAN maar geen effect" een concrete verklaring krijgt i.p.v. stilte.
-        val reasonNl: String = ""
+        val reasonNl: String = "",
+        // 16/07/2026 (Ecko) — hoeveel dagen de historie in het 7d-venster al
+        // beslaat (oudste bruikbare meting t.o.v. nu), zie
+        // DAYS_FOR_FULL_CONFIDENCE hierboven. Puur diagnostisch/voor de
+        // status-formatter — de demping zelf is al verwerkt in `aigf`.
+        val daysOfHistory: Double = 0.0
     )
 
     private fun median(values: List<Double>): Double {
@@ -149,9 +171,11 @@ object FclActivitySensitivity {
         history: History,
         currentCal8h: Double,
         minPct: Double,
-        maxPct: Double
+        maxPct: Double,
+        nowMs: Long
     ): AigfResult {
-        val usable = history.samples.filter { it.cal8h >= 0.0 }.map { it.cal8h }
+        val usableSamples = history.samples.filter { it.cal8h >= 0.0 }
+        val usable = usableSamples.map { it.cal8h }
         if (usable.size < MIN_HISTORY_FOR_BASELINE) {
             return AigfResult(
                 active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size,
@@ -184,12 +208,24 @@ object FclActivitySensitivity {
 
         // Proportionele herschaling naar het ingestelde bereik (geen clip op
         // de grens — zie kdoc bovenaan). internalScore zelf is al -1..+1.
-        val aigf = if (internalScore >= 0.0) {
+        val rawAigf = if (internalScore >= 0.0) {
             100.0 + internalScore * (maxPct - 100.0)
         } else {
             100.0 + internalScore * (100.0 - minPct)
         }
 
-        return AigfResult(active = true, aigf = aigf, rawRatio = rawRatio, baselineMedian = baselineMedian, sampleCount = usable.size)
+        // Opbouw-vertrouwen (16/07/2026, Ecko) — zie DAYS_FOR_FULL_CONFIDENCE
+        // hierboven. Oudste bruikbare meting bepaalt hoeveel dagen de
+        // historie al beslaat; daaronder wordt de afwijking t.o.v. 100
+        // proportioneel gedempt, nooit versterkt (coerceIn 0..1).
+        val oldestUsableTsMs = usableSamples.minOf { it.tsMs }
+        val daysOfHistory = ((nowMs - oldestUsableTsMs).coerceAtLeast(0L) / MS_PER_DAY.toDouble())
+        val confidence = (daysOfHistory / DAYS_FOR_FULL_CONFIDENCE).coerceIn(0.0, 1.0)
+        val aigf = 100.0 + confidence * (rawAigf - 100.0)
+
+        return AigfResult(
+            active = true, aigf = aigf, rawRatio = rawRatio, baselineMedian = baselineMedian,
+            sampleCount = usable.size, daysOfHistory = daysOfHistory
+        )
     }
 }

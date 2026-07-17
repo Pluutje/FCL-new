@@ -28,6 +28,11 @@ data class FCLvNextInput(
     val effectiveISF: Double,                   // mmol/L per U
     val targetBG: Double,                       // mmol/L
     val isNight: Boolean,
+    // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0..1.0, hoeveel van
+    // de nacht-instellingen al "ingeschoven" zijn t.o.v. de dag-instellingen.
+    // Default gekoppeld aan isNight zodat oudere/andere call sites zonder
+    // wijziging het oude harde dag/nacht-gedrag behouden.
+    val nightTransitionFraction: Double = if (isNight) 1.0 else 0.0,
     val externalBolusU: Double = 0.0,           // gedetecteerde externe bolus (IOB-delta)
     // Werkelijk afgegeven insuline sinds de vorige cyclus (basaal en
     // bolus/SMB apart), via AAPS-behandelhistorie — zie FclRealDoseTracker.
@@ -117,7 +122,16 @@ data class FCLvNextAdvice(
     // Leesbare reden waarom er geen verse AIGF-berekening was deze cyclus
     // (bijv. te weinig historie); leeg als er wel een verse berekening was.
     // Alleen relevant/gevuld als aigfActive=true — anders altijd leeg.
-    val aigfReasonNl: String = ""
+    val aigfReasonNl: String = "",
+    // 16/07/2026 (Ecko) — voor een leesbaardere AIGF-statusregel: de
+    // geschatte calorieën van de afgelopen 8 uur (huidig moment) en de
+    // 7-daagse mediaan-baseline waar dat tegen afgezet wordt, plus hoeveel
+    // dagen die baseline-historie al beslaat (zie DAYS_FOR_FULL_CONFIDENCE
+    // in FclActivitySensitivity.kt). Alleen zinvol als aigfReasonNl leeg is
+    // (dus een verse berekening deze cyclus).
+    val aigfCurrentCal8h: Double = 0.0,
+    val aigfBaselineCal8h: Double = 0.0,
+    val aigfDaysOfHistory: Double = 0.0
 )
 
 private data class DecisionResult(
@@ -3185,6 +3199,27 @@ class FCLvNext(
                             iobRatio: Double, iobAbsU: Double, isNight: Boolean,
                             externalBolusU: Double) -> Unit)? = null
 
+    // ── Code-versie voor CSV/Room-diagnose (16/07/2026, Ecko) ───────────────
+    // BELANGRIJK — BIJWERKEN BIJ ELKE INHOUDELIJKE WIJZIGING aan dit bestand
+    // (of een ander bestand dat dosering beïnvloedt). Aanleiding: herhaalde
+    // onzekerheid tijdens analyse welke versie van de code een bepaalde CSV/
+    // Room-rij daadwerkelijk heeft geproduceerd (zip-tijdstempels/md5's als
+    // enige aanwijzing). Dit is iets ANDERS dan schemaVersion verderop in de
+    // Room-laag: schemaVersion volgt de KOLOM-lay-out van CSV/Room, deze
+    // constante volgt de DOSIS-LOGICA. Formaat vrij, aanbevolen:
+    // "vNN-jjjj-mm-dd-korte-omschrijving".
+    private val FCL_CODE_VERSION = "v11-2026-07-16-diagnose-uitbreiding"
+
+    // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
+    // true op precies de EERSTE cyclus na het (her)starten van dit class-
+    // instance — dus na elke bewuste code-deploy én na elke onvrijwillige
+    // OS-herstart. Aanleiding: de 14/07 20:07- en 15/07 19:42-incidenten,
+    // waar een herstart de taper-clamp-status (episodeCommitCount/
+    // episodePeakCommitU, zie EPISODE_PREFS-analoog verderop) liet resetten
+    // en dit pas achteraf uit gaten/tellersprongen in de CSV was af te leiden.
+    // Nu direct zichtbaar via appRestartThisCycle in de CSV/Room-rij.
+    private var isFirstCycleSinceInit: Boolean = true
+
     // ── Episode-teller (04/07/2026, Ecko) ──────────────────────────────────
     // Was: private var mealEpisodeCounter: Long = 0
     // Probleem: elke AAPS-herstart reset de teller → duplicate episode_ids
@@ -3279,14 +3314,62 @@ class FCLvNext(
     private var lastRecordedMealTimeEpisodeId: Long = -1
     private var mealEpisodeStartBg: Double? = null
     // Frontload-shift tracking: bijgehouden per episode
-    private var episodeCommitCount: Int = 0    // volgnummer commit (1=eerste)
+    // ── Taper-clamp-status persistent (15/07/2026, Ecko) ───────────────────
+    // Aanleiding: maaltijd 15/07 19:07-19:42 — een onvrijwillige Android-herstart
+    // (OS-update) midden in een lopende episode zette episodeCommitCount/
+    // episodePeakCommitU terug naar 0, waardoor het eerstvolgende commit
+    // (19:42, 1,79U) werd behandeld als "2e commit van een verse episode"
+    // i.p.v. een laat commit ná het buigpunt van een episode met al 6+U iob —
+    // precies het scenario waar de 75%-peak-anchor-fix (zie hierboven) tegen
+    // moest beschermen. Bij een BEWUSTE code-deploy (zoals 14/07) was dit
+    // al bekend en geaccepteerd gedrag; een OS-herstart is echter niet
+    // controleerbaar door de gebruiker, dus nu ook over herstarts heen bewaard —
+    // zelfde bewezen patroon als EPISODE_PREFS/mealEpisodeCounter hierboven.
+    // Elke normale episode-einde-reset (3 plekken verderop) schrijft via
+    // dezelfde weg gewoon 0 weg, dus er is geen apart "verval"-mechanisme
+    // nodig: de opgeslagen waarde is altijd exact de laatst bekende in-memory
+    // waarde, of die nu 0 is (episode echt afgelopen) of >0 (herstart
+    // mid-episode). lastSmoothedAigfPct hierboven is bewust WEL alleen
+    // in-memory gebleven — dat raakt de dosering niet, dit wel.
+    private val TAPER_STATE_PREFS = "fcl_taper_state"
+    private val TAPER_STATE_PEAK_COMMIT_U_KEY = "episode_peak_commit_u"
+    private val TAPER_STATE_COMMIT_COUNT_KEY = "episode_commit_count"
+
+    private fun loadEpisodePeakCommitU(): Double =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(TAPER_STATE_PEAK_COMMIT_U_KEY, 0.0f).toDouble()
+
+    private fun saveEpisodePeakCommitU(value: Double) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(TAPER_STATE_PEAK_COMMIT_U_KEY, value.toFloat()).apply()
+
+    private fun loadEpisodeCommitCount(): Int =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getInt(TAPER_STATE_COMMIT_COUNT_KEY, 0)
+
+    private fun saveEpisodeCommitCount(value: Int) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putInt(TAPER_STATE_COMMIT_COUNT_KEY, value).apply()
+
+    // set() hieronder: elke toekenning (ook episodeCommitCount++ en de reset
+    // naar 0 op de 3 episode-grens-plekken verderop) persisteert automatisch —
+    // geen van die bestaande call-sites hoefde daarvoor aangepast te worden.
+    private var episodeCommitCount: Int = loadEpisodeCommitCount()    // volgnummer commit (1=eerste)
+        set(value) {
+            if (field != value) saveEpisodeCommitCount(value)
+            field = value
+        }
     private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
     // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
     // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
     // Mag GROEIEN als een latere commit terecht groter is (echte, doorzettende
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
-    private var episodePeakCommitU: Double = 0.0
+    private var episodePeakCommitU: Double = loadEpisodePeakCommitU()
+        set(value) {
+            if (field != value) saveEpisodePeakCommitU(value)
+            field = value
+        }
     // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Vastgelegd
     // zodat een volgend "laat commit slaat de afbouw over"-incident (zoals
     // 11/07 06:42-07:12) exact te herleiden is uit de CSV, i.p.v. te moeten
@@ -3875,12 +3958,19 @@ class FCLvNext(
             activityTargetAdjust = input.activityTargetAdjust,
             aapsMultiplier = input.aapsMultiplier
         )
+        // codeVersion/appRestartThisCycle zijn BEWUST GEEN constructor-
+        // parameters van FCLvNextCsvLogRow (zie kdoc daar — DEX-registerlimiet-
+        // crash) en worden daarom hier, net als vrijwel alle andere velden,
+        // via een gewone toekenning gezet i.p.v. in de constructor-aanroep.
+        logRow.codeVersion = FCL_CODE_VERSION
+        logRow.appRestartThisCycle = isFirstCycleSinceInit
+        isFirstCycleSinceInit = false
         val status = StringBuilder()
 
 
         // ─────────────────────────────────────────────
         // 1️⃣ Config & context (trends, IOB, delta)
-        var config = loadFCLvNextConfig(preferences, input.isNight, input.effectiveISF)
+        var config = loadFCLvNextConfig(preferences, input.isNight, input.nightTransitionFraction, input.effectiveISF)
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────
@@ -3920,7 +4010,8 @@ class FCLvNext(
                 history = FclActivitySensitivity.loadFrom(context),
                 currentCal8h = input.activityCal8h,
                 minPct = getAigfMinPct(),
-                maxPct = getAigfMaxPct()
+                maxPct = getAigfMaxPct(),
+                nowMs = now.millis
             )
         } else {
             FclActivitySensitivity.AigfResult(
@@ -3947,7 +4038,8 @@ class FCLvNext(
                     "AIGF=${"%.1f".format(aigfSmoothedPct)} (ruw=${"%.1f".format(aigfRawResult.aigf)} " +
                         "ratio=${"%.2f".format(aigfRawResult.rawRatio)} " +
                         "baseline=${"%.0f".format(aigfRawResult.baselineMedian)}kcal " +
-                        "n=${aigfRawResult.sampleCount})\n"
+                        "n=${aigfRawResult.sampleCount} " +
+                        "historie=${"%.1f".format(aigfRawResult.daysOfHistory)}/${"%.0f".format(5.0)}d)\n"
                 )
             } else {
                 status.append("AIGF AAN maar geen verse berekening: ${aigfRawResult.reasonNl} (huidig=${"%.1f".format(aigfSmoothedPct)})\n")
@@ -4352,7 +4444,9 @@ class FCLvNext(
         val boostedIobRatio =
             (ctx.iobRatio / peakIobBoost).coerceAtLeast(0.0)
 
-        val iobPower = if (input.isNight) config.iobPowerNight else config.iobPowerDay
+        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip —
+        // zie kdoc bij FCLvNextInput.nightTransitionFraction.
+        val iobPower = config.iobPowerDay + input.nightTransitionFraction * (config.iobPowerNight - config.iobPowerDay)
         val iobFactor = iobDampingFactor(
             iobRatio = boostedIobRatio,
             config = config,
@@ -4771,8 +4865,10 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 🟦 PERSISTENT CORRECTION LOOP (dag + nacht)
         // ─────────────────────────────────────────────
+        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip —
+        // zie kdoc bij FCLvNextInput.nightTransitionFraction. Dag=1.7, nacht=1.5.
         val baseMinDelta =
-            if (ctx.input.isNight) 1.5 else 1.7
+            1.7 + ctx.input.nightTransitionFraction * (1.5 - 1.7)
 
         val baseConfirmCycles = 2
         val pMul = config.persistentAggressionMul
@@ -6587,6 +6683,15 @@ class FCLvNext(
 
         logRow.shouldDeliver = shouldDeliver
 
+        // Diagnose-uitbreiding (16/07/2026, Ecko) — zie FCL_CODE_VERSION/
+        // isFirstCycleSinceInit hierboven, en de kdoc bij AIGF/
+        // episodePeakCommitU elders in dit bestand. aigfPct is bewust de
+        // TOEGEPASTE (gladgestreken) waarde, niet aigfRawResult.aigf — dat is
+        // ook wat dosering/status daadwerkelijk gebruiken.
+        logRow.aigfPct = aigfSmoothedPct
+        logRow.aigfActive = aigfEnabled
+        logRow.aigfReason = if (aigfRawResult.active) "" else aigfRawResult.reasonNl
+        logRow.episodePeakCommitU = episodePeakCommitU
 
         cycleLogRepository.insert(logRow.toEntity())
 
@@ -6610,7 +6715,10 @@ class FCLvNext(
 
             aigfPct = aigfSmoothedPct,
             aigfActive = aigfEnabled,
-            aigfReasonNl = if (aigfRawResult.active) "" else aigfRawResult.reasonNl
+            aigfReasonNl = if (aigfRawResult.active) "" else aigfRawResult.reasonNl,
+            aigfCurrentCal8h = input.activityCal8h,
+            aigfBaselineCal8h = aigfRawResult.baselineMedian,
+            aigfDaysOfHistory = aigfRawResult.daysOfHistory
         )
     }
 }

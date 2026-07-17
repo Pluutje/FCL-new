@@ -2,7 +2,9 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +94,15 @@ fun TimeInRangeCard(
         summarize(dailyStats)
     }
 
+    // 16/07/2026 (Ecko) — geschat HbA1c o.b.v. het gemiddelde van de ruwe
+    // bg-waarden in HETZELFDE venster (dayWindow) als de TBR/TIR/TAR-balk
+    // hierboven, zodat "7/14/30 dagen" overal in deze kaart hetzelfde
+    // betekent. Zie computeAverageBg/estimateHba1cPct hieronder voor de
+    // (bewust simpele) formule.
+    val avgBgMmol = remember(rows, dayWindow) {
+        computeAverageBg(rows, dayWindow)
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -136,6 +147,47 @@ fun TimeInRangeCard(
                             14   -> "14 dagen ▼"
                             else -> "30 dagen ▲"
                         }
+                    )
+                }
+            }
+
+            // 16/07/2026 (Ecko) — geschat HbA1c, direct boven de TBR/TIR/TAR-balk,
+            // zelfde "ⓘ tap for info"-patroon als de CGP-Scorekaart hieronder
+            // in het scherm. Alleen tonen als er data in het venster is —
+            // anders geen zinvol gemiddelde om op te baseren.
+            if (avgBgMmol != null) {
+                val hba1cPct = estimateHba1cPct(avgBgMmol)
+                val hba1cMmolMol = pctToMmolMol(hba1cPct)
+                var toonHba1cInfo by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { toonHba1cInfo = true },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Geschat HbA1c: ${"%.0f".format(hba1cMmolMol)} mmol/mol " +
+                            "(${"%.1f".format(hba1cPct)}%)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "ⓘ tap for info",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    )
+                }
+
+                if (toonHba1cInfo) {
+                    Hba1cInfoDialog(
+                        pct = hba1cPct,
+                        mmolMol = hba1cMmolMol,
+                        avgBgMmol = avgBgMmol,
+                        dayWindow = dayWindow,
+                        onDismiss = { toonHba1cInfo = false }
                     )
                 }
             }
@@ -558,3 +610,147 @@ private fun minInstant(a: Instant, b: Instant): Instant =
 
 private fun maxInstant(a: Instant, b: Instant): Instant =
     if (a.isAfter(b)) a else b
+
+// ── Geschat HbA1c (16/07/2026, Ecko) ────────────────────────────────────────
+// BEWUST simpele, veelgebruikte formules (geen personalisatie, geen
+// labwaarde) — zie Hba1cInfoDialog hieronder voor de toelichting die de
+// gebruiker ook te zien krijgt.
+//
+// 1. Gemiddelde bg over hetzelfde venster als de TBR/TIR/TAR-balk hierboven
+//    (eenvoudig, ongewogen gemiddelde van de losse metingen — geen
+//    tijdsgewogen interpolatie zoals bij allocateInterval; voor een schatting
+//    is dat bewust niet nodig).
+// 2. eA1c (ADAG-formule, Nathan e.a. 2008 — zelfde formule die Nightscout en
+//    de meeste CGM-apps gebruiken): (gemiddelde_mg/dL + 46.7) / 28.7.
+// 3. Omrekening % (NGSP) → mmol/mol (IFCC): (% - 2.15) × 10.929 — de
+//    internationale standaardconversie.
+private const val MMOL_TO_MGDL = 18.0182
+
+private fun computeAverageBg(rows: List<LogRow>, dayWindow: Int): Double? {
+    val today = LocalDate.now(AmsterdamZone)
+    val startDate = today.minusDays(dayWindow.toLong() - 1)
+    val rangeStart = startDate.atStartOfDay(AmsterdamZone).toInstant()
+    val rangeEnd = today.plusDays(1).atStartOfDay(AmsterdamZone).toInstant()
+
+    val inWindow = rows.filter {
+        it.bg > 0.0 && !it.timestamp.isBefore(rangeStart) && it.timestamp.isBefore(rangeEnd)
+    }
+    if (inWindow.isEmpty()) return null
+    return inWindow.sumOf { it.bg } / inWindow.size
+}
+
+private fun estimateHba1cPct(avgBgMmol: Double): Double {
+    val avgMgdl = avgBgMmol * MMOL_TO_MGDL
+    return (avgMgdl + 46.7) / 28.7
+}
+
+private fun pctToMmolMol(pct: Double): Double = (pct - 2.15) * 10.929
+
+/**
+ * Informatieve popup over de eA1c-schatting. Bewust in het Engels en op
+ * hetzelfde wetenschappelijke niveau als PgrInfoDialog hierboven (16/07/2026,
+ * Ecko, na feedback dat de eerdere NL-versie te informeel was en onnodig naar
+ * Nightscout/CGM-apps verwees i.p.v. naar de onderliggende methode/bron).
+ */
+@Composable
+private fun Hba1cInfoDialog(
+    pct: Double,
+    mmolMol: Double,
+    avgBgMmol: Double,
+    dayWindow: Int,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Estimated HbA1c",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Your estimated HbA1c over the last $dayWindow days is " +
+                        "${"%.0f".format(mmolMol)} mmol/mol (${"%.1f".format(pct)}%), based on " +
+                        "a mean glucose of ${"%.1f".format(avgBgMmol)} mmol/L.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "What is HbA1c?",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Glycated haemoglobin (HbA1c) reflects the proportion of circulating " +
+                        "haemoglobin that has become non-enzymatically bound to glucose. Because " +
+                        "this binding accumulates over the roughly 8\u201312 week lifespan of a " +
+                        "red blood cell, HbA1c is the clinical gold standard for average " +
+                        "glycaemic control over that period, and is normally obtained from a " +
+                        "laboratory blood sample.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "How is this estimate calculated?",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "This app does not measure HbA1c. Instead it derives an estimate (eA1c) " +
+                        "from your mean glucose using the linear regression established by the " +
+                        "A1c-Derived Average Glucose (ADAG) study (Nathan et al., Diabetes Care, " +
+                        "2008):",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "HbA1c (%) = (mean glucose [mg/dL] + 46.7) / 28.7",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                Text(
+                    "The result is converted from the NGSP percentage to the IFCC mmol/mol " +
+                        "unit using the standard international conversion adopted in the 2007 " +
+                        "IFCC-ADA-EASD-IDF consensus statement:",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "HbA1c (mmol/mol) = (HbA1c% \u2212 2.15) \u00d7 10.929",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                Text(
+                    "Reference ranges (ADA diagnostic criteria)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "< 42 mmol/mol   (< 6.0%)   Normal\n" +
+                        "42\u201347 mmol/mol  (6.0\u20136.4%) Prediabetes\n" +
+                        "\u2265 48 mmol/mol   (\u2265 6.5%)   Diabetes (diagnostic threshold)\n" +
+                        "< 53 mmol/mol   (< 7.0%)   Common treatment target",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                Text(
+                    "This is a population-derived estimate, not a laboratory measurement, and " +
+                        "can diverge from a measured HbA1c \u2014 for example due to individual " +
+                        "variation in red blood cell turnover, anaemia, or haemoglobin variants. " +
+                        "Treatment targets are individualised, particularly in type 1 diabetes, " +
+                        "and should be agreed with your care team.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}

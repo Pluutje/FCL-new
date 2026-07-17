@@ -4,9 +4,30 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.BasalProfileHistoryEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
+
+// ── MIGRATION_16_17 (16/07/2026, Ecko) ─────────────────────────────────────
+// Zuiver additief: 6 nieuwe kolommen op de bestaande fcl_cycle_log-tabel.
+// Kolomnamen zijn de Kotlin-veldnamen zelf (geen @ColumnInfo-overrides
+// elders in FCLCycleLogEntity.kt, dus Room mapt 1-op-1). Type-mapping volgt
+// Room's standaardconventie: String→TEXT, Boolean→INTEGER (0/1), Double→REAL.
+// NOT NULL vereist een DEFAULT bij ADD COLUMN op een tabel met bestaande
+// rijen — vandaar de expliciete defaults, die exact overeenkomen met de
+// Kotlin-defaultwaarden in FCLCycleLogEntity.kt (val ... = "" / false / 0.0).
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN codeVersion TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN appRestartThisCycle INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN aigfPct REAL NOT NULL DEFAULT 100.0")
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN aigfActive INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN aigfReason TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN episodePeakCommitU REAL NOT NULL DEFAULT 0.0")
+    }
+}
 
 @Database(
     entities = [
@@ -50,7 +71,24 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
     // exportronde na de wipe overschrijft de bestaande CSV met (aanvankelijk
     // vrijwel) niets — de meerdaagse geschiedenis in die CSV gaat feitelijk
     // ook verloren, niet alleen de Room-tabellen zelf.
-    version = 16,
+    //
+    // v16→v17 (16/07/2026, Ecko): +codeVersion/+appRestartThisCycle/+aigfPct/
+    // +aigfActive/+aigfReason/+episodePeakCommitU in FCLCycleLogEntity — zie
+    // de kdoc daar. ANDERS DAN alle eerdere bumps hierboven: dit is zuiver
+    // ADDITIEF (alleen nieuwe kolommen, niets hernoemd/verwijderd/van type
+    // veranderd), dus deze keer een ECHTE Migration (MIGRATION_16_17
+    // hieronder, ALTER TABLE ... ADD COLUMN) i.p.v. destructieve wipe — de
+    // 90 dagen cycle-log/episode/night-window/basalprofiel-geschiedenis
+    // blijft nu dus intact. Historische rijen van vóór v17 krijgen de
+    // DEFAULT-waarden uit de ALTER TABLE-statements (lege string/0/false)
+    // voor de 6 nieuwe kolommen — geen dataverlies, wel logisch dat oude
+    // rijen op "geen AIGF-data"/"onbekende code-versie" uitkomen.
+    // RISICO (Ecko, expliciet): deze Migration kon niet op een echt toestel
+    // getest worden. fallbackToDestructiveMigration hieronder blijft daarom
+    // als vangnet staan — als de Migration onverhoopt niet toepasbaar blijkt
+    // (bijv. door een OEM-SQLite-eigenaardigheid), valt Room automatisch
+    // terug op de bekende, werkende destructieve wipe i.p.v. te crashen.
+    version = 17,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {
@@ -73,6 +111,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
                     FCLAnalyzerDatabase::class.java,
                     DB_NAME
                 )
+                    .addMigrations(MIGRATION_16_17)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }

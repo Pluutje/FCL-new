@@ -458,7 +458,7 @@ class FCLCycleLogRepository @Inject constructor(
         // versnipperen over een derde bestand. De twee nieuwe kolommen hierboven
         // blijven wel gewoon actief in de v8-header — alleen de bestandsnaam zelf
         // is niet meegegaan.
-        val file = File(dir, "FCLvNext_Log_v8.csv")
+        val file = File(dir, "FCLvNext_Log_v9.csv")
 
         val sep = ";"
         val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC)
@@ -491,11 +491,13 @@ private fun csvHeader(sep: String): String = listOf(
     "schema_version", "ts_utc",
     "is_night", "sterkte_pct", "timing_pct", "volhoudendheid_pct", "nacht_factor_pct",
     "doseDistributionStyle", "nightResponseStyle",
+    "code_version", "app_restart_this_cycle",
     "bg_mmol", "target_mmol", "delta_target",
     "iob", "iob_ratio", "bg_zone", "dose_access",
     "final_dose", "commanded_dose", "delivered_total", "bolus", "basal_u_h",
     "real_delivered_basal_u", "real_delivered_bolus_u", "profile_basal_u_h",
     "activity_active", "activity_insulin_pct", "activity_target_adjust", "aaps_multiplier",
+    "aigf_pct", "aigf_active", "aigf_reason",
     "nf_level_geleerd", "nf_level_effectief", "nacht_aggressiviteit",
     "night_stagnation_delta_min", "night_stagnation_energy_boost", "night_persistent_aggression_mul",
     "night_cooldown_min", "night_correction_hold_delta_max", "night_absorption_dose_factor",
@@ -526,6 +528,7 @@ private fun csvHeader(sep: String): String = listOf(
     "commit_zone_factor", "commit_iob_factor", "commit_postpeak_factor",
     "commit_raw_plateau_penalty", "commit_aggression_mul",
     "commit_dose_raw", "commit_dose_final", "late_decay_mul", "episode_commit_nr",
+    "episode_peak_commit_u",
     "bg_stijgt_nog_fors", "commit_nr_used",
     "iob_overshoot_factor",
     "burst_delivered_10m", "burst_cap_10m", "burst_remaining_10m",
@@ -562,11 +565,13 @@ private fun FCLCycleLogEntity.toCsvLine(
         schemaVersion, ts,
         bool(context.isNight), context.sterktePct, context.timingPct, context.volhoudendheidPct, context.nachtFactorPct,
         context.doseDistributionStyle, context.nightResponseStyle,
+        context.codeVersion, bool(context.appRestartThisCycle),
         bg1(glucoseIob.bg), bg1(glucoseIob.target), d2(deltaTarget),
         d2(glucoseIob.iob), d2(glucoseIob.iobRatio), glucoseIob.bgZone, glucoseIob.doseAccess,
         d2(delivery.finalDose), d2(delivery.commandedDose), d2(delivery.deliveredTotal), d2(delivery.bolus), d2(delivery.basalRate),
         d2(delivery.realDeliveredBasalU), d2(delivery.realDeliveredBolusU), d2(delivery.profileBasalUH),
         bool(delivery.activityActive), d2(delivery.activityInsulinPct), d2(delivery.activityTargetAdjust), d2(delivery.aapsMultiplier),
+        d2(delivery.aigfPct), bool(delivery.aigfActive), delivery.aigfReason,
         d2(delivery.nfLevelGeleerd), d2(delivery.nfLevelEffectief), delivery.nachtAggressiviteit,
         d3(delivery.nightStagnationDeltaMin), d3(delivery.nightStagnationEnergyBoost), d3(delivery.nightPersistentAggressionMul),
         delivery.nightCooldownMinutes, d2(delivery.nightCorrectionHoldDeltaMax), d3(delivery.nightAbsorptionDoseFactor),
@@ -598,6 +603,7 @@ private fun FCLCycleLogEntity.toCsvLine(
         d2(forensic.commitZoneFactor), d2(forensic.commitIobFactor), d2(forensic.commitPostPeakFactor),
         d2(forensic.commitRawPlateauPenalty), d2(forensic.commitAggressionMul),
         d2(forensic.commitDoseRaw), d2(forensic.commitDoseFinal), d2(forensic.lateDecayMul), forensic.episodeCommitNr,
+        d2(forensic.episodePeakCommitU),
         bool(forensic.bgStijgtNogFors), forensic.commitNrUsed,
         d2(forensic.iobOvershootFactor),
         d2(burst.burstDelivered10m), d2(burst.burstCap10m), d2(burst.burstRemaining10m),

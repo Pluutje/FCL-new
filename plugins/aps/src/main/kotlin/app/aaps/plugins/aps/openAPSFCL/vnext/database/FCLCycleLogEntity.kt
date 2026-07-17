@@ -48,6 +48,17 @@ import androidx.room.PrimaryKey
  * kunnen laten overslaan als het toestel al ergens op user_version=14 staat).
  * fallbackToDestructiveMigration() in FCLAnalyzerDatabase.kt dropt en
  * hermaakt alle tabellen — geen handmatige Migration nodig.
+ *
+ * v8→v9 (16/07/2026, Ecko): +codeVersion, +appRestartThisCycle (in
+ * ContextFields), +aigfPct/+aigfActive/+aigfReason (in DeliveryFields),
+ * +episodePeakCommitU (in ForensicFields) — zie FCL_CODE_VERSION in
+ * FCLvNext.kt voor de aanleiding. ANDERS DAN v7→v8/v13→16: dit is de eerste
+ * ZUIVER ADDITIEVE schema-wijziging (alleen nieuwe kolommen, niets hernoemd/
+ * verwijderd), dus FCLAnalyzerDatabase.kt gebruikt hiervoor een echte,
+ * niet-destructieve Migration(16, 17) i.p.v. fallbackToDestructiveMigration —
+ * zie de kdoc daar voor het risico (kon niet op een echt toestel getest
+ * worden) en waarom fallbackToDestructiveMigration daarnaast als vangnet
+ * blijft staan voor eventuele TOEKOMSTIGE, niet-additieve wijzigingen.
  */
 @Entity(
     tableName = "fcl_cycle_log",
@@ -94,7 +105,11 @@ data class ContextFields(
     val volhoudendheidPct: Int,
     val nachtFactorPct: Int,
     val doseDistributionStyle: String,
-    val nightResponseStyle: String
+    val nightResponseStyle: String,
+    // v8→v9 (16/07/2026, Ecko) — zie FCL_CODE_VERSION/isFirstCycleSinceInit
+    // in FCLvNext.kt. Historische rijen van vóór deze migratie krijgen "" / false.
+    val codeVersion: String = "",
+    val appRestartThisCycle: Boolean = false
 )
 
 // ── GLUCOSE / IOB ─────────────────────────────────────────────────────────
@@ -137,7 +152,13 @@ data class DeliveryFields(
     // Berekend als max(0, currentIOB - prevIOB + expectedDecay - fclOwnDose).
     // 0.0 als geen externe bolus gedetecteerd. Gebruikt door analyzer voor
     // correcte totalInsulinDelivered en hasManualCorrection markering.
-    val externalBolusU: Double = 0.0
+    val externalBolusU: Double = 0.0,
+    // v8→v9 (16/07/2026, Ecko) — AIGF stond tot nu toe in geen enkele kolom,
+    // ondanks actieve invloed op dosering. aigfPct is de daadwerkelijk
+    // TOEGEPASTE (gladgestreken) waarde, zie aigfSmoothedPct in FCLvNext.kt.
+    val aigfPct: Double = 100.0,
+    val aigfActive: Boolean = false,
+    val aigfReason: String = ""
 )
 
 // ── TRENDS ────────────────────────────────────────────────────────────────
@@ -263,7 +284,11 @@ data class ForensicFields(
     // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Zie
     // kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
     val bgStijgtNogFors: Boolean = false,
-    val commitNrUsed: Int = 0
+    val commitNrUsed: Int = 0,
+    // v8→v9 (16/07/2026, Ecko) — de taper-clamp-ankerwaarde zelf, zie
+    // PEAK_ANCHOR_THRESHOLD_FRAC in FCLvNext.kt. Tot nu toe alleen indirect
+    // af te leiden uit commitDoseFinal/lateDecayMul.
+    val episodePeakCommitU: Double = 0.0
 )
 
 // ── BURST CAP ─────────────────────────────────────────────────────────────
