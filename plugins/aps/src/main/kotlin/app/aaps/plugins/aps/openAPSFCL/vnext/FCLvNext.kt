@@ -188,7 +188,11 @@ private data class DowntrendGate(
  * - WEAK: probe mag, maar geen grote acties
  * - CONFIRMED: grote acties toegestaan
  */
-private fun classifyTrendState(ctx: FCLvNextContext, config: FCLvNextConfig): TrendDecision {
+private fun classifyTrendState(
+    ctx: FCLvNextContext,
+    config: FCLvNextConfig,
+    sustainedHighSlopeMinutes: Double = 0.0
+): TrendDecision {
 
     // basis betrouwbaarheid
     if (ctx.consistency < config.minConsistency) {
@@ -244,6 +248,55 @@ private fun classifyTrendState(ctx: FCLvNextContext, config: FCLvNextConfig): Tr
     val weak =
         slopeEff >= weakSlopeMin &&
             accelEff >= weakAccelMin
+
+    // ── Sustained-rise promotie (17/07/2026, Ecko) ──────────────────────────
+    // De CONFIRMED-eis hierboven vereist ALTIJD accelEff >= confAccelMin (0.18),
+    // ook via het strongAcceleration-pad. Een gestage ("Type B") stijging —
+    // brood, rijst, een langzaam verterende maaltijd — kan aanhoudend en
+    // substantieel zijn zonder ooit die versnelling te tonen, en blijft dan
+    // voor de HELE episode op WEAK/allowLarge=false hangen.
+    //
+    // Concreet voorbeeld 17/07 11:52-13:17 (lunch): 95 minuten, BG 6,4→9,1,
+    // accel bleef de hele episode onder 0,12 (drempel 0,18) terwijl delta
+    // opliep tot 4,2 mmol — allowLarge (stage2/3 in computeEarlyDoseDecision)
+    // werd daardoor nooit ontgrendeld, ook niet toen de interne confidence-
+    // score daar al op 0,92 stond. computeEarlyDoseDecision erkent dit type
+    // stijging al lang als legitiem via sustainScore/persistScore (zie kdoc
+    // daar) — deze uitbreiding brengt de bovenliggende trend-poort naar
+    // hetzelfde niveau, door DEZELFDE sustainedHighSlopeMinutes-teller te
+    // hergebruiken (al bestaand, al bijgehouden t.b.v. sustainScore) i.p.v.
+    // een nieuwe losse teller te bouwen.
+    //
+    // Drempel (15 min): hergebruikt VROEGE_STIJGING_SUSTAIN_MIN, dezelfde,
+    // al eerder beredeneerde grens die verderop in dit bestand gebruikt wordt
+    // voor de taper-reset-logica ("VROEGE STIJGING BEVESTIGD").
+    // delta >= 1.5: een gestage stijging zonder reële afstand tot target
+    // hoeft niet aangejaagd te worden.
+    // Impliciete IOB-begrenzing: sustainedHighSlopeMinutes wordt elders al
+    // op 0 gezet zodra iobRatio >= 0.40 — dit pad kan dus nooit aanslaan
+    // nadat er al substantiële IOB is opgebouwd.
+    // LET OP (herzien na simulatie op echte data, 17/07/2026): dit pad mag
+    // NIET van 'weak' afhangen — weak vereist zelf ook al accelEff >= 0.10,
+    // en juist DAAR zakt een gestage stijging vaak even onderdoor (in de
+    // lunch-episode hierboven schommelde accel tussen 0,02 en 0,12, dus
+    // 'weak' zelf was op veel cycli ook al false). In plaats daarvan alleen
+    // slopeEff als stijgings-eis, plus een expliciete "niet duidelijk aan het
+    // afvlakken/omkeren"-check (accelEff > -0.05) zodat dit pad niet alsnog
+    // aanslaat vlak na een piek, terwijl sustainedHighSlopeMinutes nog even
+    // naijlt (één cyclus vertraging, zie call-site).
+    val sustainedRiseConfirmed =
+        slopeEff >= weakSlopeMin &&
+            accelEff > -0.05 &&
+            sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
+            delta >= 1.5
+
+    if (sustainedRiseConfirmed) {
+        return TrendDecision(
+            TrendState.RISING_CONFIRMED,
+            "TREND confirmed (sustained): slope=${"%.2f".format(slopeEff)} " +
+                "sustained=${sustainedHighSlopeMinutes.toInt()}m delta=${"%.2f".format(delta)}"
+        )
+    }
 
     if (weak) {
         return TrendDecision(
@@ -571,6 +624,19 @@ private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 // Gebruikt door computePeakBrake() (30/06/2026, Ecko: consolidatie van
 // peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
 private var prevRecentSlopeForBrake: Double? = null
+
+// ── Peak-brake hysterese-tracking (17/07/2026, Ecko) ──────────────────────────────────────────────
+// Incident 17/07 13:12 UTC: iobRatio flipperde cyclus-op-cyclus rond de
+// suppressThreshold (0,45→0,56→0,58→0,49→0,60) — deels doordat blokkeren zelf de
+// IOB laat wegzakken en vrijgeven zelf de IOB weer laat stijgen (een
+// zelf-versterkende oscillatie). computePeakBrake() gaf bij iobRatio=0,49
+// (net onder de drempel) meteen volledig los ("NONE"), waarna een volle,
+// ongedempte commit-dosis (1,46U) werd afgeleverd vlak vóór de daadwerkelijke
+// piek. Deze vlag onthoudt of de rem de vorige cyclus actief was, zodat
+// computePeakBrake() een lagere "loslaat"-drempel kan hanteren dan de
+// "aangrijp"-drempel (hysterese/Schmitt-trigger) i.p.v. bij de eerste
+// cyclus onder de vaste drempel meteen volledig los te laten.
+private var peakBrakeWasActiveLastCycle: Boolean = false
 
 // ── Graduele omslag-detectie (13/07/2026, Ecko) ──────────────────────────
 // Vult curveConfirmtOmslag aan: die vereist curveAcceleration <= 0.0 (al
@@ -1190,7 +1256,13 @@ private data class HypoProtection(
     val projectedMin: Double,
     val projectedMinNoInsulin: Double,
     val projectedMinWithPlannedInsulin: Double,
-    val reason: String
+    val reason: String,
+    // Grootste dosis die op alle horizons (30/60/90 min) nog boven
+    // blockThreshold blijft — 0.0 als zelfs 0U al onveilig projecteert
+    // (projectedMinNoInsulin < blockThreshold, dan kan geen dosis helpen),
+    // anders plannedDoseU zelf bij een bypass (17/07/2026, Ecko: right-sizing
+    // i.p.v. alles-of-niets, zie kdoc bij de aanroep in de hoofdlus).
+    val maxSafeDoseU: Double = 0.0
 )
 
 private fun hypoProtection(
@@ -1264,6 +1336,49 @@ private fun hypoProtection(
     // Safety threshold: iets hoger dan 4.4 om "net-niet" hypos te voorkomen.
     val blockThreshold = config.hypoBlockThreshold
 
+    // ── Maximaal veilige dosis (17/07/2026, Ecko) ────────────────────────
+    // Vervangt straks bij de aanroep het alles-of-niets-gedrag: i.p.v. de
+    // volledige plannedDoseU naar 0 te klappen zodra ÉÉN horizon de drempel
+    // overschrijdt, berekenen we hier de grootste dosis die op ALLE
+    // horizons (30/60/90 min) nog boven blockThreshold blijft.
+    //
+    // Incident 17/07 16:47 (snack): early-boost-doel 4,39U werd in zijn
+    // geheel geveto'd omdat de volle dosis een horizon onder de drempel
+    // zou trekken — ook al was een substantieel KLEINER deel van diezelfde
+    // dosis wél veilig geweest. Alles-of-niets betekende dat er dat cyclus
+    // 0,00U werd gegeven i.p.v. bijvoorbeeld ~1-2U, en de dosis die er 5 min
+    // later wél kwam (1,04U) viel toen alweer vrijwel op de piek.
+    //
+    // Alleen zinvol als projectedMinNoInsulin zelf al veilig is: staat de BG
+    // ZONDER insuline al onder de drempel, dan kan geen enkele dosis dat
+    // repareren (méér insuline verlaagt de projectie juist verder) — dan
+    // blijft maxSafeDoseU op 0.0, exact het bestaande, correcte gedrag.
+    //
+    // bgWithInsulin(m) = bgNoInsulin(m) - dose*effectiveISF*insulinActionFrac(m)
+    // is lineair dalend in dose, dus per horizon is er een eenduidige
+    // maximale dose waarbij bgWithInsulin(m) precies op blockThreshold zit.
+    // De bindende (strengste) horizon bepaalt de uiteindelijke grens — vandaar
+    // minOf() over de drie horizons. Afgerond naar beneden op 0,05U-stappen
+    // zodat er nooit per ongeluk tot net over de veilige grens wordt
+    // afgerond.
+    fun computeMaxSafeDoseU(plannedU: Double): Double {
+        if (plannedU <= 0.0) return 0.0
+        if (projectedMinNoInsulin < blockThreshold) return 0.0
+        val maxByHorizon = horizons.minOf { m ->
+            val bgNoInsulinM = trendBgAt(m)
+            val frac = insulinActionFrac(m)
+            if (frac <= 0.0 || effectiveISF <= 0.0) {
+                Double.POSITIVE_INFINITY
+            } else {
+                ((bgNoInsulinM - blockThreshold) / (effectiveISF * frac))
+                    .coerceAtLeast(0.0)
+            }
+        }
+        val capped = maxByHorizon.coerceIn(0.0, plannedU)
+        val step = 0.05
+        return (kotlin.math.floor(capped / step) * step).coerceIn(0.0, plannedU)
+    }
+
     // fastLaneRising: bypas bij agressieve maaltijdstijging met lage IOB.
     // Fix2 (projectedMinWithInsulin >= 4.0) is de enige veiligheidscheck die
     // nodig is — die is gebaseerd op de werkelijke BG-projectie en werkt
@@ -1294,7 +1409,8 @@ private fun hypoProtection(
             projectedMin = projectedMin,
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
-            reason = "HYPO PROTECT BYPASSED (fast-lane meal rise, no recent hypo)"
+            reason = "HYPO PROTECT BYPASSED (fast-lane meal rise, no recent hypo)",
+            maxSafeDoseU = plannedDoseU.coerceAtLeast(0.0)
         )
     }
     // ── einde fast-lane bypass ────────────────────────────────────────────
@@ -1334,7 +1450,8 @@ private fun hypoProtection(
             projectedMin = projectedMin,
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
-            reason = "HYPO PROTECT BYPASSED (confirmed meal, rising, safe no-insulin projection)"
+            reason = "HYPO PROTECT BYPASSED (confirmed meal, rising, safe no-insulin projection)",
+            maxSafeDoseU = plannedDoseU.coerceAtLeast(0.0)
         )
     }
 
@@ -1359,7 +1476,8 @@ private fun hypoProtection(
             projectedMin = projectedMin,
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
-            reason = "HYPO PROTECT BYPASSED (strong rise with existing IOB, no-insulin safe)"
+            reason = "HYPO PROTECT BYPASSED (strong rise with existing IOB, no-insulin safe)",
+            maxSafeDoseU = plannedDoseU.coerceAtLeast(0.0)
         )
     }
 
@@ -1390,7 +1508,8 @@ private fun hypoProtection(
             projectedMin = projectedMin,
             projectedMinNoInsulin = projectedMinNoInsulin,
             projectedMinWithPlannedInsulin = projectedMinWithInsulin,
-            reason = "HYPO PROTECT BYPASSED (low IOB, high BG, no-insulin projection safe)"
+            reason = "HYPO PROTECT BYPASSED (low IOB, high BG, no-insulin projection safe)",
+            maxSafeDoseU = plannedDoseU.coerceAtLeast(0.0)
         )
     }
     // ── einde meal-context vrijstelling ───────────────────────────────────
@@ -1414,7 +1533,8 @@ private fun hypoProtection(
         projectedMin = projectedMin,
         projectedMinNoInsulin = projectedMinNoInsulin,
         projectedMinWithPlannedInsulin = projectedMinWithInsulin,
-        reason = reason
+        reason = reason,
+        maxSafeDoseU = if (active) computeMaxSafeDoseU(plannedDoseU) else plannedDoseU.coerceAtLeast(0.0)
     )
 }
 
@@ -2526,7 +2646,8 @@ private fun computePeakBrake(
     ctx: FCLvNextContext,
     peak: PeakEstimate,
     config: FCLvNextConfig,
-    prevRecentSlope: Double?
+    prevRecentSlope: Double?,
+    wasActiveLastCycle: Boolean = false
 ): PeakBrakeResult {
 
     val suppressThreshold = config.peakIobBrakeSuppressThreshold   // nu actief 0.30
@@ -2538,7 +2659,19 @@ private fun computePeakBrake(
 
     val recentSlopeDrop = (prevRecentSlope ?: ctx.recentSlope) - ctx.recentSlope
 
-    if (peak.state == PeakPredictionState.IDLE || ctx.iobRatio < suppressThreshold) {
+    // HYSTERESE (17/07/2026, Ecko): incident 13:12 UTC — iobRatio flipperde
+    // cyclus-op-cyclus net rond suppressThreshold (0,45→0,56→0,58→0,49→0,60),
+    // deels zelf-veroorzaakt (blokkeren laat IOB wegzakken, vrijgeven laat IOB
+    // weer stijgen). Als de rem de vorige cyclus al actief was, moet iobRatio
+    // een stuk verder onder de drempel zakken voordat we ECHT loslaten, i.p.v.
+    // bij de eerste cyclus die er nét onder duikt meteen een volle, ongedempte
+    // dosis vrij te geven. t/slopeCeiling/severity hieronder blijven op de
+    // ECHTE suppressThreshold gebaseerd — alleen de loslaat-poort verschuift.
+    val releaseMargin = 0.08
+    val effectiveSuppressThreshold =
+        if (wasActiveLastCycle) suppressThreshold - releaseMargin else suppressThreshold
+
+    if (peak.state == PeakPredictionState.IDLE || ctx.iobRatio < effectiveSuppressThreshold) {
         return PeakBrakeResult(1.0, false, 0.0, 0.50, recentSlopeDrop, "NONE")
     }
 
@@ -2588,7 +2721,8 @@ private fun evaluatePostPeak(
     minutesSinceEpisodeStart: Int = 999,
     sensorBlipStreak: Int = 0,          // huidig aantal opeenvolgende blip-cycli
     bgRising3Cycles: Boolean = false,    // waren de laatste 3 BG-delta's alle positief?
-    prevRecentSlope: Double? = null      // voor computePeakBrake() deceleratie-signaal
+    prevRecentSlope: Double? = null,     // voor computePeakBrake() deceleratie-signaal
+    prevBrakeActive: Boolean = false     // voor computePeakBrake() hysterese (17/07/2026)
 ): PostPeakSummary {
 
     val inAbsorption = isInAbsorptionWindow(now, config)
@@ -2695,7 +2829,7 @@ private fun evaluatePostPeak(
 
     // ✅ GECONSOLIDEERD (30/06/2026): predictieve IOB-rem via computePeakBrake().
     // Vervangt de oude losse peakIobBrake-conditie (ctx.slope <= 0.50 vaste grens).
-    val peakBrake = computePeakBrake(ctx, peak, config, prevRecentSlope)
+    val peakBrake = computePeakBrake(ctx, peak, config, prevRecentSlope, prevBrakeActive)
     val peakIobBrake = peakBrake.reason != "NONE"   // soft of hard → telt als brake-signaal
 
 
@@ -2965,6 +3099,7 @@ private fun maybeResetEarlyOnDecel(
     earlyConfirmDone = false
     sensorBlipStreakCount = 0
     recentBgHistory.clear()
+    peakBrakeWasActiveLastCycle = false
 
     status.append(
         "EARLY RESET (deceleration): " +
@@ -3541,6 +3676,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            peakBrakeWasActiveLastCycle = false
         }
 
         // ── episode exit (niet te snel!) ──
@@ -3588,6 +3724,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            peakBrakeWasActiveLastCycle = false
             activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
@@ -3613,6 +3750,7 @@ class FCLvNext(
                 earlyConfirmDone = false
                 sensorBlipStreakCount = 0
                 recentBgHistory.clear()
+                peakBrakeWasActiveLastCycle = false
             }
         }
 
@@ -4315,7 +4453,10 @@ class FCLvNext(
         val downGate = updateDowntrendGate(ctx, mealSignal, peak, config)
         status.append(downGate.reason + "\n")
 
-        val trend = classifyTrendState(ctx, config)
+        val trend = classifyTrendState(ctx, config, sustainedHighSlopeMinutes)
+        // ↑ sustainedHighSlopeMinutes hier is nog de waarde van een cyclus terug
+        // (de update verderop in deze cyclus, bij SUSTAINED RISE TRACKING, is nog
+        // niet gebeurd) — zelfde, al gangbare patroon als prevRecentSlopeForBrake.
         status.append(trend.reason + "\n")
 
         // ─────────────────────────────────────────────
@@ -4661,11 +4802,14 @@ class FCLvNext(
             episodeMinutesForPostPeak,
             sensorBlipStreak = sensorBlipStreakCount,
             bgRising3Cycles  = bgRising3Cycles || explosiveRise,
-            prevRecentSlope  = prevRecentSlopeForBrake
+            prevRecentSlope  = prevRecentSlopeForBrake,
+            prevBrakeActive  = peakBrakeWasActiveLastCycle
         )
         status.append(postPeak.reason + "\n")
-        // bijwerken voor de volgende cyclus (computePeakBrake deceleratie-signaal)
+        // bijwerken voor de volgende cyclus (computePeakBrake deceleratie-signaal +
+        // hysterese-status, 17/07/2026)
         prevRecentSlopeForBrake = ctx.recentSlope
+        peakBrakeWasActiveLastCycle = postPeak.peakBrake.reason != "NONE"
 
         // ✅ NIEUW: early reset zodra afremmen/omkeer start
         val earlyResetThisCycle = maybeResetEarlyOnDecel(ctx, peak, now, status)
@@ -5326,6 +5470,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            peakBrakeWasActiveLastCycle = false
 
             status.append("SEGMENT: re-entry → new impulse window\n")
         }
@@ -5809,14 +5954,20 @@ class FCLvNext(
         val reserveReleaseBlocked = hypoProj.active
 
         if (hypoProj.active) {
-            status.append("${hypoProj.reason} → commandedDose=0\n")
+            // RIGHT-SIZING (17/07/2026, Ecko): i.p.v. commandedDose altijd naar 0
+            // te klappen zodra één horizon de drempel raakt, alleen het stuk
+            // weerhouden dat echt onveilig is (zie maxSafeDoseU bij hypoProtection()).
+            // Incident 16:47 (snack): een 4,39U-doel werd volledig geveto'd terwijl
+            // een substantieel kleiner deel al veilig was geweest.
+            val doseBefore = commandedDose
+            val safeDose = hypoProj.maxSafeDoseU.coerceIn(0.0, doseBefore)
 
-            // Bouw hypo-debt op: we houden bij hoeveel insuline is achtergehouden
-            // door hypo-bescherming terwijl er een maaltijdepisode actief was.
+            // Bouw hypo-debt op over het WEERHOUDEN deel (was: de volle
+            // commandedDose — nu alleen wat na right-sizing nog ontbreekt).
             // Alleen tellen tijdens een actieve episode (startBg bekend) zodat
             // nacht-hypo's of correctie-blokkades niet worden meegeteld.
-            if (activeMealEpisodeId != -1L && commandedDose > 0.0) {
-                val debtIncrement = commandedDose.coerceIn(0.0, config.maxSMB)
+            if (activeMealEpisodeId != -1L && doseBefore > safeDose) {
+                val debtIncrement = (doseBefore - safeDose).coerceIn(0.0, config.maxSMB)
                 episodeHypoDebtU = (episodeHypoDebtU + debtIncrement)
                     .coerceAtMost(config.maxSMB * 2.0)  // absolute cap: nooit > 2× maxSMB
                 status.append(
@@ -5825,7 +5976,11 @@ class FCLvNext(
                 )
             }
 
-            commandedDose = 0.0
+            commandedDose = safeDose
+            status.append(
+                "${hypoProj.reason} → commandedDose " +
+                    "${"%.2f".format(doseBefore)}→${"%.2f".format(commandedDose)}U (right-sized)\n"
+            )
         }
 
 
@@ -6040,8 +6195,16 @@ class FCLvNext(
             )
             logRow.hypoActive = hypoFinal.active
             if (hypoFinal.active) {
-                status.append(hypoFinal.reason + " → commandedDose=0\n")
-                commandedDose = 0.0
+                // RIGHT-SIZING (17/07/2026, Ecko) — zelfde aanpak als bij de eerste
+                // hypo-check hierboven: alleen het onveilige deel weerhouden i.p.v.
+                // alles-of-niets. Geen aparte hypo-debt-boeking hier (dat gebeurt
+                // al bij de eerste check verderop in de cyclus).
+                val doseBefore = commandedDose
+                commandedDose = hypoFinal.maxSafeDoseU.coerceIn(0.0, doseBefore)
+                status.append(
+                    hypoFinal.reason + " → commandedDose " +
+                        "${"%.2f".format(doseBefore)}→${"%.2f".format(commandedDose)}U (right-sized)\n"
+                )
             }
         }
 
