@@ -28,6 +28,12 @@ object FclAiAdvisorRanges {
     /** Minimale confidence voor ceiling-busting (voorbij softMax/onder softMin). */
     const val CEILING_BUST_CONFIDENCE = 0.55   // ⚠️ TESTFASE: was 0.75 — terugzetten voor productie
 
+    // Minimale confidence om een voorstel uberhaupt als actionable kaart te tonen
+    // (18/07/2026, Ecko). Voorstellen eronder komen niet meer in de goed te keuren
+    // lijst terecht, maar in de "automatisch verworpen"-lijst (net als een
+    // parameter buiten bereik) — dezelfde bestaande weergave, geen nieuwe UI nodig.
+    const val MIN_SUGGESTION_CONFIDENCE = 0.60
+
     data class ParamSpec(
         val key: String,
         val labelNl: String,

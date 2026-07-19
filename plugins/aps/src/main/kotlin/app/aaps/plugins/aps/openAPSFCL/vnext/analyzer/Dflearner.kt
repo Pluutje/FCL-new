@@ -33,6 +33,40 @@ object DFLearner {
     // potentie nodig was (rawDeltaD > 0). Zie de "F eerst, D als vluchtoptie"
     // redirect-logica in evaluate(). Reset naar 0 zodra F weer ruimte heeft.
     private const val KEY_F_CEILING_STUCK_COUNT = "df_f_ceiling_stuck_count"
+
+    // ── Voorzichtige terugtrek naar het midden (19/07/2026, Ecko) ──────────
+    // AANLEIDING: D en F kennen geen enkel mechanisme dat ze uit zichzelf
+    // richting het midden van hun bereik trekt. Elke diagnose hierboven is
+    // eenrichtingsverkeer — een probleem duwt D of F een kant op, en zonder
+    // een TEGENGESTELD probleem blijft de waarde daar voor altijd staan, ook
+    // als de reden allang niet meer bestaat. Concreet voorbeeld: F liep in 5
+    // weken van 0,695 naar 0,818 (F_MAX), grotendeels gedreven door herhaalde
+    // FRONTLOAD_LAG(_VROEG)-diagnoses — precies het symptoom van de
+    // trend-bevestigingsbug die op 19/07/2026 is gefixt in classifyTrendState().
+    // Die fix zou de bron van het signaal moeten laten opdrogen, maar F zelf
+    // zakt daardoor niet vanzelf terug — hij blijft op 0,818 hangen zolang er
+    // geen tegengesteld signaal komt.
+    //
+    // OPLOSSING: na een lange reeks opeenvolgende "rustige" evaluaties (geen
+    // signaal in welke richting dan ook — diagnose in QUIET_DIAGNOSES) EN
+    // terwijl D of F duidelijk buiten de middelste comfortzone van zijn bereik
+    // zit, een kleine stap terug richting het midden. Bewust traag (10
+    // rustige evaluaties op rij nodig, ~3x per 5 weken in de praktijk o.b.v.
+    // simulatie op echte LearnerLog-data) en met een kleine stapgrootte — dit
+    // mag hard-verdiende kalibratie niet ondermijnen, alleen ONGEBRUIKTE marge
+    // teruggeven. Elk echt signaal (in beide richtingen) reset de teller
+    // meteen, dus zodra de noodzaak terugkeert wijkt dit onmiddellijk.
+    //
+    // Loopt bewust door dezelfde accumulator/maxStep/weekcap-machinerie als
+    // alle andere deltas hieronder (toegepast op adjDeltaD/adjDeltaF, niet als
+    // aparte bypass) — geen nieuw, ongetest rate-limiet nodig.
+    private const val KEY_QUIET_STREAK = "df_quiet_streak"
+    private val QUIET_DIAGNOSES = setOf("OK", "PIEK_LAAG_GEEN_BEWIJS", "AFTERLOAD_GUARD_OK")
+    private const val QUIET_STREAK_THRESHOLD = 10
+    private const val RECENTER_STEP_D = 0.02
+    private const val RECENTER_STEP_F = 0.03
+    // Middelste 60% van het bereik = "comfortabel", geen actie nodig.
+    private const val COMFORT_BAND_FRACTION = 0.30
     private const val KEY_HISTORY         = "df_history"   // laatste 20 aanpassingen
     private const val KEY_V_EXTRA = "df_v_extra"
 
@@ -99,6 +133,24 @@ object DFLearner {
     private const val AFTERLOAD_MAX_PEAK = 8.0   // mmol plafond voor D-ophogen bij guard-actief episode
     private const val TARGET_IOBR_PEAK  = 0.45   // ideale IOBratio op piek
     private const val HYPO_THRESHOLD    = 4.5    // onder dit → hypo-straf
+
+    // 20/07/2026 (Ecko): marge om refLcd als "praktisch gemaximaliseerd"
+    // te beschouwen — zie kdoc bij de RESCUE_OVERPOWERED-tak hieronder.
+    // Geen exacte gelijkheid met REF_LCD_MAX eisen (floating-point/
+    // step-afronding kan de exacte grens net missen).
+    private const val REF_LCD_MAXED_MARGIN = 0.02
+    // 20/07/2026 (Ecko): grens om HYPO/HYPO_D_PROBLEEM/HYPO_D_DEMPED de
+    // late-eerst-prioriteit te laten volgen — zie kdoc bij die branches
+    // hieronder. In tegenstelling tot RESCUE_OVERPOWERED (die per definitie
+    // nooit een échte hypo betreft, minBgInWindow>=HYPO_THRESHOLD) kan
+    // hypoStraf hier wel degelijk een diepe, gevaarlijke hypo weerspiegelen —
+    // uitstellen naar refLcd mag dan niet de volle D-respons afzwakken.
+    // Waarde: (HYPO_THRESHOLD - 3.9) * HYPO_WEIGHT = (4.5-3.9)*2.0 = 1.2 —
+    // 3.9 is dezelfde harde hypo-grens als elders in het project (zie
+    // EpisodeMetricsBuilder.NEAR_HYPO_THRESH-kdoc: "boven de harde
+    // hypo-grens (3.9)"). Nadir onder 3.9 -> altijd volledige D-respons,
+    // ongeacht staartTeGroot/refLcd.
+    private const val HYPO_STRAF_SEVERE_CUTOFF = 1.2
     private const val HYPO_WEIGHT       = 2.0    // straf multiplier
 
 
@@ -239,7 +291,7 @@ object DFLearner {
     fun setAutoEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
         setMode(context, if (enabled) app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
-                          else app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL)
+        else app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL)
     }
 
     // ── Maaltijdtype-specifieke D/F get/set ──────────────────────────────
@@ -739,7 +791,17 @@ object DFLearner {
         // het "geleende" budget terugpakken, EN nadir daalde te ver.
         val NEAR_HYPO_THRESH = 4.8   // waarschuwingsdrempel (boven echte hypo)
         val nadirTeeLaag = nadirBg < NEAR_HYPO_THRESH
-        val frontloadTeGroot = fracHoog && soloCommit && nadirTeeLaag
+        // 20/07/2026 (Ecko): projectedSevereLowAverted ook hier laten
+        // meewegen — zelfde redenering als bij evaluateLateCommitDecay's
+        // risicoSignaal. Een solo, dominante EERSTE commit die een ernstige
+        // PROJECTIE veroorzaakte (zonder dat de gemeten BG ooit onder
+        // NEAR_HYPO_THRESH kwam — bijv. dankzij tijdig ingrijpen) is
+        // evengoed bewijs dat die ene commit te groot was. Dit is precies
+        // het "tenzij het de enige is en er is te veel gedoseerd"-geval
+        // (Ecko, 20/07/2026) — soloCommit hierboven bewaakt dat het ook
+        // écht de enige was.
+        val frontloadTeGroot = fracHoog && soloCommit &&
+            (nadirTeeLaag || metrics.projectedSevereLowAverted)
 
         val peekHoog  = peakFout >  DEAD_ZONE_PEAK
         val peekLaag  = peakFout < -DEAD_ZONE_PEAK
@@ -776,9 +838,47 @@ object DFLearner {
             // EpisodeMetrics.nearHypoAverted — automatische detectie, geen
             // handmatige bevestiging meer vereist, 20/06/2026)
             (metrics.rescueConfirmed || metrics.nearHypoAverted) && metrics.minBgInWindow >= HYPO_THRESHOLD -> {
-                rawDeltaD = -tp.alphaPiek * 0.5
-                rawDeltaF = -tp.alphaPiek * 0.2
-                diagnose  = "RESCUE_OVERPOWERED"
+                // 20/07/2026 (Ecko): eerst-laat-dan-vroeg escalatie. Zie kdoc
+                // boven evaluateLateCommitDecay (dit bestand) en bij
+                // frontloadTeGroot hierboven. RESCUE_OVERPOWERED verlaagde hier
+                // altijd D (dus OOK de eerste commit, via het brede dose-scale-
+                // effect van D) en F, ongeacht of de late-commit-afbouw (refLcd)
+                // dit patroon al zelf kon afvangen.
+                //
+                // Nu: als er een late, significante commit was om de schuld aan
+                // te geven (staartTeGroot — dezelfde voorwaarde als
+                // evaluateLateCommitDecay's laatEnGroot) EN refLcd nog ruimte
+                // heeft, laat dan UITSLUITEND refLcd corrigeren (BACK vuurt daar
+                // toch al op dezelfde risicoSignaal-voorwaarde, sinds 19/07/2026
+                // ook inclusief projectedSevereLowAverted) — geen dubbele
+                // correctie voor dezelfde oorzaak. D/F (en daarmee de EERSTE
+                // commit) gaat pas omlaag als de late-commit-afbouw het patroon
+                // niet kan verklaren (geen late commit — staartTeGroot=false,
+                // bijv. omdat de schuld bij een solo vroege commit lag, zie
+                // frontloadTeGroot) of al maximaal is ingezet (refLcd tegen
+                // REF_LCD_MAX).
+                //
+                // Uitgangspunt (Ecko, 20/07/2026): "de eerste is nooit te groot,
+                // tenzij het de enige is en er is te veel gedoseerd" — D/F blijven
+                // dus het laatste redmiddel, nooit de eerste reactie op dit signaal.
+                //
+                // Praktijkcheck (echte LearnerLog, 5 weken): refLcd staat nu op
+                // 0.2037 van een max van 0.45 (45%) — dus in de praktijk is het
+                // vrijwel altijd staartTeGroot die bepaalt of dit uitstelt, niet
+                // de refLcd-plafondcheck. RESCUE_OVERPOWERED zelf is in die 5 weken
+                // nog geen enkele keer gevuurd (diagnose komt niet voor in de
+                // historie) — deze aanpassing kon dus niet tegen een historisch
+                // geval worden getoetst, alleen tegen de logica zelf.
+                val refLcdBijnaMax = getRefLcd(context) >= DFMapping.REF_LCD_MAX - REF_LCD_MAXED_MARGIN
+                if (staartTeGroot && !refLcdBijnaMax) {
+                    rawDeltaD = 0.0
+                    rawDeltaF = 0.0
+                    diagnose  = "RESCUE_DEFERRED_TO_LCD"
+                } else {
+                    rawDeltaD = -tp.alphaPiek * 0.5
+                    rawDeltaF = -tp.alphaPiek * 0.2
+                    diagnose  = "RESCUE_OVERPOWERED"
+                }
             }
 
             // ── TERUGSCHROEF: eerste commit was groot, geen follow-up, nadir laag ──
@@ -818,15 +918,43 @@ object DFLearner {
             }
 
             hypoStraf > 0.0 && fracHoog && safeFollowUp -> {
+                // 20/07/2026 (Ecko): zelfde eerst-laat-dan-vroeg-prioriteit als
+                // RESCUE_OVERPOWERED hierboven, met één verschil: hier kán
+                // hypoStraf een echte, diepe hypo weerspiegelen (dit is geen
+                // near-miss-tak) — dus alleen uitstellen naar refLcd als het ook
+                // nog mild was (hypoStraf < HYPO_STRAF_SEVERE_CUTOFF, nadir boven
+                // de harde hypo-grens van 3.9). Bij een diepe hypo blijft de volle,
+                // hypoStraf-geschaalde D-respons ongewijzigd — refLcd's stap is
+                // vast van grootte en schaalt niet mee met hoe diep de hypo was.
                 val afterloadDemper = if (metrics.afterloadWasActive) 0.5 else 1.0
-                rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier * afterloadDemper
-                rawDeltaF = 0.0
-                diagnose  = if (metrics.afterloadWasActive) "HYPO_D_DEMPED" else "HYPO_D_PROBLEEM"
+                val refLcdBijnaMax = getRefLcd(context) >= DFMapping.REF_LCD_MAX - REF_LCD_MAXED_MARGIN
+                if (staartTeGroot && !refLcdBijnaMax && hypoStraf < HYPO_STRAF_SEVERE_CUTOFF) {
+                    rawDeltaD = 0.0
+                    rawDeltaF = 0.0
+                    diagnose  = "HYPO_D_DEFERRED_TO_LCD"
+                } else {
+                    rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier * afterloadDemper
+                    rawDeltaF = 0.0
+                    diagnose  = if (metrics.afterloadWasActive) "HYPO_D_DEMPED" else "HYPO_D_PROBLEEM"
+                }
             }
             hypoStraf > 0.0 -> {
-                rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier
-                rawDeltaF = 0.0
-                diagnose  = "HYPO"
+                // 20/07/2026 (Ecko): zelfde redenering als bij HYPO_D_PROBLEEM
+                // hierboven — zie kdoc daar. Praktijkcheck (5 weken LearnerLog):
+                // van 32 echte D-verlagende hypo-episodes zouden 6 nu uitstellen
+                // (mild + staartTeGroot), 7 blijven ongewijzigd (te diep, hypoStraf
+                // >= 1.2) en 19 blijven ongewijzigd (geen late commit om de schuld
+                // aan te geven — D reageert daar terecht nog steeds direct).
+                val refLcdBijnaMax = getRefLcd(context) >= DFMapping.REF_LCD_MAX - REF_LCD_MAXED_MARGIN
+                if (staartTeGroot && !refLcdBijnaMax && hypoStraf < HYPO_STRAF_SEVERE_CUTOFF) {
+                    rawDeltaD = 0.0
+                    rawDeltaF = 0.0
+                    diagnose  = "HYPO_DEFERRED_TO_LCD"
+                } else {
+                    rawDeltaD = -tp.betaHypo * hypoStraf * tbtModifier
+                    rawDeltaF = 0.0
+                    diagnose  = "HYPO"
+                }
             }
 
             // ── TBT zonder hypo: BG lang onder target maar niet hypo ─────────────
@@ -1067,6 +1195,33 @@ object DFLearner {
                         .logFCeilingAdvies(context, currentF, teller)
                 }
             }
+        }
+
+        // ── Voorzichtige terugtrek naar het midden (19/07/2026, Ecko) ─────────
+        // Zie kdoc bij KEY_QUIET_STREAK hierboven. Telt alleen mee als diagnose
+        // hierboven een “echte” evaluatie was (dus niet SKIP/COOLDOWN, die
+        // stoppen al eerder met return null) — op dit punt is dat altijd zo.
+        if (diagnose in QUIET_DIAGNOSES) {
+            val streak = prefs(context).getInt(KEY_QUIET_STREAK, 0) + 1
+            if (streak >= QUIET_STREAK_THRESHOLD) {
+                val currentD = getD(context)
+                val currentF = getF(context)
+                val centerD = (DFMapping.D_MIN + DFMapping.D_MAX) / 2.0
+                val centerF = (DFMapping.F_MIN + DFMapping.F_MAX) / 2.0
+                val bandD = (DFMapping.D_MAX - DFMapping.D_MIN) * COMFORT_BAND_FRACTION
+                val bandF = (DFMapping.F_MAX - DFMapping.F_MIN) * COMFORT_BAND_FRACTION
+                if (abs(currentD - centerD) > bandD) {
+                    adjDeltaD += -Math.signum(currentD - centerD) * RECENTER_STEP_D
+                }
+                if (abs(currentF - centerF) > bandF) {
+                    adjDeltaF += -Math.signum(currentF - centerF) * RECENTER_STEP_F
+                }
+                prefs(context).edit().putInt(KEY_QUIET_STREAK, 0).apply()
+            } else {
+                prefs(context).edit().putInt(KEY_QUIET_STREAK, streak).apply()
+            }
+        } else {
+            prefs(context).edit().putInt(KEY_QUIET_STREAK, 0).apply()
         }
 
         // ── Schaal rawDelta met episodeVertrouwen ───────────────────────────
@@ -1670,7 +1825,14 @@ object DFLearner {
         val geenRecenteLateCommit = lastFrac <= LCD_LAAT_FRAC_MIN ||
             lastMins == null || lastMins > LCD_FORWARD_VROEG_MIN
 
-        val risicoSignaal = metrics.hypoDetected || metrics.rescueConfirmed || metrics.nearHypoAverted
+        // 19/07/2026 (Ecko): projectedSevereLowAverted toegevoegd — vangt
+        // "te vroeg te veel insuline" ook als de gemeten BG nooit écht laag
+        // kwam (bijv. door tijdig ingrijpen), maar de IOB/ISF/BG-projectie op
+        // enig moment wél ruim onder de 4 wees en de BG later, rond target en
+        // met nog substantiële IOB aanwezig, afvlakte of weer ging stijgen. Zie
+        // kdoc bij EpisodeMetrics.projectedSevereLowAverted.
+        val risicoSignaal = metrics.hypoDetected || metrics.rescueConfirmed ||
+            metrics.nearHypoAverted || metrics.projectedSevereLowAverted
 
         val signal = when {
             risicoSignaal && laatEnGroot -> "BACK"

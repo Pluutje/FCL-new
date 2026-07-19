@@ -8,6 +8,14 @@ object EpisodeMetricsBuilder {
     // de bestaande rescue-ARM/CONFIRM-constanten in FCLvNext.kt, zodat
     // beide mechanismen consistent dezelfde situatie als "verdacht" zien.
     private const val NEAR_HYPO_THRESH        = 4.8   // mmol/L — waarschuwingsdrempel, boven de harde hypo-grens (3.9)
+    // Projectie-drempel voor projectedSevereLowAverted (19/07/2026, Ecko) —
+    // "ruim onder de 4": lager dan NEAR_HYPO_THRESH, want dit is een
+    // PROJECTIE (hypoProjectedBg), geen gemeten waarde — een projectie mag
+    // een grotere marge onder de harde hypo-grens hebben voor het als
+    // betekenisvol bewijs telt.
+    private const val SEVERE_PROJECTION_THRESH = 3.5   // mmol/L
+    // "Rond target" voor de afvlak/rebound-check hieronder.
+    private const val NEAR_TARGET_BAND         = 1.2   // mmol/L
 
     // Gedeelde maat voor "is dit een betekenisvolle hoeveelheid insuline voor
     // déze patiënt" — RELATIEF aan maxSMB, niet absoluut (zie controlevraag
@@ -112,7 +120,7 @@ object EpisodeMetricsBuilder {
             val significantCommits = rows
                 .filter { row ->
                     row.deliveredTotal > significantThresholdU &&
-                    (totalInsulinDelivered <= 0.1 || row.deliveredTotal / totalInsulinDelivered > significantThresholdFrac)
+                        (totalInsulinDelivered <= 0.1 || row.deliveredTotal / totalInsulinDelivered > significantThresholdFrac)
                 }
                 .sortedBy { it.timestamp }
 
@@ -221,8 +229,30 @@ object EpisodeMetricsBuilder {
                 nadirRow.iob >= manualMaxSmb * SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB &&
                 rowsAfterPeak.any {
                     it.timestamp > nadirRow.timestamp &&
-                    it.accel >= REBOUND_ACCEL_MIN &&
-                    it.slope >= REBOUND_SLOPE_MIN
+                        it.accel >= REBOUND_ACCEL_MIN &&
+                        it.slope >= REBOUND_SLOPE_MIN
+                }
+
+            // ── projectedSevereLowAverted (19/07/2026, Ecko) ────────────────
+            // Zie kdoc bij EpisodeMetrics.projectedSevereLowAverted. Twee stappen:
+            // 1. was er, terwijl BG zelf nog geen alarmerende waarde had maar er
+            //    wel significante IOB actief was, een moment waarop de PROJECTIE
+            //    (hypoProjectedBg, dezelfde live IOB/ISF/BG-berekening als
+            //    FCLvNext.kt elke cyclus al maakt) ernstig laag stond?
+            // 2. vlakte de BG daarna, rond target, met nog steeds significante
+            //    IOB aanwezig, af of steeg die weer — zonder dat de gemeten BG
+            //    ooit zelf de NEAR_HYPO-drempel raakte (anders vangt
+            //    nearHypoAverted hierboven het al af)?
+            val severeProjectionRow = rowsAfterPeak.firstOrNull {
+                it.iob >= manualMaxSmb * SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB &&
+                    it.hypoProjectedBg <= SEVERE_PROJECTION_THRESH   // ook (sterk) negatieve projecties tellen
+            }
+            val projectedSevereLowAverted = severeProjectionRow != null && !nearHypoAverted &&
+                rowsAfterPeak.any {
+                    it.timestamp > severeProjectionRow.timestamp &&
+                        kotlin.math.abs(it.bg - it.target) <= NEAR_TARGET_BAND &&
+                        it.iob >= manualMaxSmb * SUBSTANTIAL_DOSE_FRAC_OF_MAXSMB &&
+                        it.slope >= -0.10
                 }
 
             EpisodeMetrics(
@@ -254,6 +284,7 @@ object EpisodeMetricsBuilder {
                 adviceStatus = "NEW",
                 rescueConfirmed = false,  // wordt later overschreven vanuit DB
                 nearHypoAverted = nearHypoAverted,
+                projectedSevereLowAverted = projectedSevereLowAverted,
                 firstCommitU = firstCommitU,
                 iobRatioAt15min = iobRatioAt15min,
                 firstBigCommitFrac = firstBigCommitFrac,

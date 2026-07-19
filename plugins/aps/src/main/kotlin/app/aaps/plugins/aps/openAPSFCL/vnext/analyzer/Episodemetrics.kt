@@ -128,6 +128,21 @@ data class EpisodeMetrics(
     // uitsluiten in plaats van bevestigen.
     val nearHypoAverted: Boolean = false,
 
+    // ── Geprojecteerde ernstige daling, afgewend zonder harde hypo ────────
+    // (19/07/2026, Ecko) AANLEIDING: nearHypoAverted hierboven vereist dat de
+    // WERKELIJK GEMETEN BG ooit onder NEAR_HYPO_THRESH (4,8) kwam. Dat mist
+    // precies de gevallen waar de dosering te vroeg te veel gaf, maar de BG
+    // dankzij een tijdige interventie (of gewoon de eigen fysiologie) nooit
+    // echt laag heeft gestaan — terwijl de PROJECTIE (dezelfde hypoProjectedBg
+    // die FCLvNext.kt elke cyclus al berekent op basis van IOB/ISF/BG) op dat
+    // moment wel degelijk ruim onder de 4 wees. Bewijs hiervoor: die projectie
+    // was op enig moment ernstig laag, EN later — rond target, met nog steeds
+    // significante IOB aanwezig — vlakte de BG af of steeg zelfs weer. Die
+    // combinatie kan insuline zelf niet verklaren (insuline kan een stijging
+    // nooit veroorzaken) — sterke aanwijzing dat er vóór de piek te veel is
+    // gegeven. Zie EpisodeMetricsBuilder voor de exacte criteria.
+    val projectedSevereLowAverted: Boolean = false,
+
     // ── Veiligheidscontrole: late/te grote afsluitende commit ────────────
     // (13/07/2026, Ecko) Herbruikt SafetyInvariantChecker (Analyzer-UI,
     // 12/07/2026) als extra, complementair leersignaal voor FrontloadLearner.

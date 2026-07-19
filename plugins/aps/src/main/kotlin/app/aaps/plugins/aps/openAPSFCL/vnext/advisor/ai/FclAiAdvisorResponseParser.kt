@@ -87,6 +87,15 @@ object FclAiAdvisorResponseParser {
 
         if (spec == null) return rejected("Onbekende parameter '$param' — niet in toegestane lijst")
         if (proposedValue.isNaN()) return rejected("Ontbrekende of ongeldige proposedValue")
+        // Confidence-vloer (18/07/2026, Ecko): voorstellen onder deze drempel worden
+        // nooit als actionable kaart getoond, ongeacht hoe goed de rest van de
+        // validatie eruitziet — een correct-onderbouwd voorstel met lage confidence
+        // is nog steeds een voorstel waar het model zelf niet zeker van is.
+        if (confidence < FclAiAdvisorRanges.MIN_SUGGESTION_CONFIDENCE)
+            return rejected(
+                "Confidence (${(confidence * 100).toInt()}%) onder de drempel van " +
+                    "${(FclAiAdvisorRanges.MIN_SUGGESTION_CONFIDENCE * 100).toInt()}%"
+            )
         if (!FclAiAdvisorRanges.isInRange(spec, proposedValue))
             return rejected("Waarde $proposedValue buiten absoluut bereik [${spec.min}–${spec.max}]")
         if (currentValue.isNaN())

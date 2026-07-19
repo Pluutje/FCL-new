@@ -435,6 +435,14 @@ private fun SuggestionCard(suggestion: AiParamSuggestion, context: Context) {
                      style = MaterialTheme.typography.bodySmall)
             }
 
+            // Korte waarschuwing (18/07/2026, Ecko) — bewust beknopt, geen lang
+            // betoog: bij elke kaart opnieuw zichtbaar, vlak boven de knoppen.
+            Text(
+                "\u26A0\uFE0F Controleer advies en confidence goed voor je goedkeurt \u2014 bij twijfel afwijzen.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+
             when (status) {
                 AiSuggestionStatus.PENDING -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {

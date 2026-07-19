@@ -191,7 +191,11 @@ private data class DowntrendGate(
 private fun classifyTrendState(
     ctx: FCLvNextContext,
     config: FCLvNextConfig,
-    sustainedHighSlopeMinutes: Double = 0.0
+    sustainedHighSlopeMinutes: Double = 0.0,
+    // predictedPeak: huidige piekvoorspelling (19/07/2026, Ecko) — zie kdoc bij
+    // dynamicConfDeltaMin hieronder. 0.0 = geen voorspelling beschikbaar (val
+    // terug op het vaste, oorspronkelijke gedrag).
+    predictedPeak: Double = 0.0
 ): TrendDecision {
 
     // basis betrouwbaarheid
@@ -204,11 +208,47 @@ private fun classifyTrendState(
     val weakAccelMin = 0.10
 
 
-    val (confSlopeMin, confDeltaMin) = when (config.profielNaam) {
+    val (confSlopeMin, confDeltaMinFixed) = when (config.profielNaam) {
         "AGGRESSIVE", "VERY_AGGRESSIVE" -> 0.65 to 1.2
         else -> 0.95 to 1.8
     }
     val confAccelMin = 0.18
+
+    // ── Piek-relatieve delta-drempel (19/07/2026, Ecko) ───────────────────
+    // AANLEIDING: confDeltaMinFixed hierboven eist altijd dezelfde absolute
+    // afstand tot target (1.8 mmol, resp. 1.2 in AGGRESSIVE), ongeacht hoe
+    // hoog de maaltijd uiteindelijk gaat pieken. Bij een gematigde maaltijd
+    // (voorspelde piek bijv. 7,0-7,9) wordt die 1,8 mmol vaak pas gehaald
+    // NADAT de stijging alweer aan het afvlakken is — RISING_CONFIRMED (en
+    // daarmee EarlyBoost stage 3, de grootste boosted commit) komt dan te
+    // laat of helemaal niet, terwijl de stijging op dat moment allang
+    // overtuigend was. Voorbeeld 18/07 08:12-08:32: delta bereikte 1,8 pas
+    // om 08:32, terwijl de slope al vanaf 08:27 weer aan het dalen was.
+    //
+    // OPLOSSING: schaal de delta-eis mee met de eigen piekvoorspelling van
+    // DEZE maaltijd — een fractie van de nog te overbruggen afstand tot de
+    // voorspelde piek, met een vloer (nooit onder DELTA_FLOOR, voorkomt
+    // bevestigen op een fractie van een mmol) en een plafond (nooit boven
+    // de oorspronkelijke vaste drempel — dit pad kan de eis dus alleen
+    // VERLAGEN, nooit verhogen).
+    //
+    // BEWUST ALLEEN toegepast op het hoofdpad (main/strongAcceleration)
+    // hieronder — NIET op sustainedRiseConfirmed verderop. Simulatie op 62
+    // echte episodes (week 12-19/07) liet zien dat het ook meeschalen van
+    // het sustained-pad een mild, aanhoudend buikje (piek 6,3, nauwelijks
+    // boven target) al na 20 minuten liet bevestigen — dat pad heeft zijn
+    // eigen, bewust behouden vloer van 1.5 mmol als tegenwicht voor de
+    // ruimere 15-minuten-sustain-eis.
+    //
+    // Getest: van de 62 episodes die week bevestigen 39 op hetzelfde moment
+    // of eerder (tot 25 min eerder), geen enkele episode die voorheen nooit
+    // bevestigde gaat nu ten onrechte vroeg bevestigen, op één randgeval na
+    // (15/07 16:02: snelle maar kortstondige uitschieter, piek bleef op 5,8
+    // hangen) — geaccepteerd risico, de overige veiligheidslagen (IOB-rem,
+    // hypo-rightsizing, piek-anker-cap) blijven onverkort gelden op de
+    // uiteindelijke dosis.
+    val peakRoomForConfirm = (predictedPeak - ctx.input.targetBG).coerceAtLeast(0.8)
+    val confDeltaMin = ((peakRoomForConfirm * 0.40).coerceAtLeast(0.60)).coerceAtMost(confDeltaMinFixed)
 
 
     val slopeEff = maxOf(ctx.slope, ctx.recentSlope * 0.6)
@@ -514,6 +554,43 @@ private const val CURVE_FIT_EARLY_TRIGGER_MMOL = 1.5 // max. vervroeging van de 
 private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit doel.txt
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
 private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op effectiveDecay
+
+// ── Post-omslag vloer-verlaging (20/07/2026, Ecko) ──────────────────────
+// AANLEIDING: toppingOutBoost hierboven verhoogt effectiveDecay (de
+// STEILHEID van de afbouw per commit), maar de daadwerkelijke ondergrens
+// (decayFloor, zie hieronder bij lateDecayMul) reageert daar NIET op — die
+// hangt alleen af van iobRatio/bgStijgtNogFors en zakt nooit onder 0.10.
+// Concreet incident 19/07/2026 12:22-12:27: curveConfirmtOmslag was al TRUE
+// (R²=0.999/0.998, curveAcceleration=-0.91/-2.62) — de bocht was dus met
+// hoge zekerheid bevestigd — maar late_decay_mul stond al vast op zijn
+// vloer (0.10) en toppingOutBoost was zelf verwaarloosbaar (+0.01, want
+// predictedPeak=8.3 lag vlak tegen de 8.5mmol-marge aan waar die boost op
+// schaalt). Resultaat: 1,93U en 1,55U werden alsnog gegeven NA een met
+// hoge zekerheid bevestigde omslag, IOB liep door naar 6,62U, en de BG
+// zakte daarna hard door richting een dreigende hypo.
+//
+// OPLOSSING: zodra curveConfirmtOmslag TRUE is, mag de vloer zelf verder
+// zakken — geschaald met hoe diep de omslag al is (|curveAcceleration|),
+// niet met een harde knip op het moment van bevestigen. Dit raakt
+// uitsluitend de vloer, niet de opbouwfase: bgStijgtNogFors (de vluchtklep
+// voor een oprecht nieuwe/doorzettende stijging) vereist zelf expliciet
+// !curveConfirmtOmslag, dus deze twee kunnen nooit tegelijk actief zijn —
+// geen risico dat dit een echte tweede gang afknijpt.
+private const val OMSLAG_DIEPTE_REF_MMOL = 3.0        // |curveAcceleration| voor volle verlaging
+private const val POST_OMSLAG_MAX_FLOOR_CUT = 0.28    // max. verlaging van decayFloor
+private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 0
+// 20/07/2026 (Ecko): gedeeltelijke, vroegere versie van de post-omslag
+// verlaging — al actief zodra omslagBijnaBevestigd waar is (curve-
+// versnelling minstens 45% afgenomen, nog wel positief), niet pas bij
+// de volledige bevestiging. Bewust een vaste, bescheiden fractie i.p.v.
+// een dieptemeting zoals bij curveConfirmtOmslag — omslagBijnaBevestigd
+// heeft geen natuurlijke "diepte"-maat, en dit moet een zachte,
+// voorzichtige nudge blijven, geen tweede volledige rem. Anders dan een
+// vroege IOB/ISF/BG-projectie is dit gebaseerd op de curve-fit zelf (de
+// stijging vertraagt aantoonbaar), dus minder gevoelig voor het
+// koolhydraten-blinde-vlek-probleem (zie kdoc bij bgStijgtNogFors) dan
+// een projectie zou zijn.
+private const val OMSLAG_BIJNA_PARTIAL_FRACTIE = 0.28  // 28% van het volle effect
 
 // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
 // Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
@@ -3343,7 +3420,7 @@ class FCLvNext(
     // Room-laag: schemaVersion volgt de KOLOM-lay-out van CSV/Room, deze
     // constante volgt de DOSIS-LOGICA. Formaat vrij, aanbevolen:
     // "vNN-jjjj-mm-dd-korte-omschrijving".
-    private val FCL_CODE_VERSION = "v11-2026-07-16-diagnose-uitbreiding"
+    private val FCL_CODE_VERSION = "v12-2026-07-19-omslag-afbouw"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4453,7 +4530,7 @@ class FCLvNext(
         val downGate = updateDowntrendGate(ctx, mealSignal, peak, config)
         status.append(downGate.reason + "\n")
 
-        val trend = classifyTrendState(ctx, config, sustainedHighSlopeMinutes)
+        val trend = classifyTrendState(ctx, config, sustainedHighSlopeMinutes, peak.predictedPeak)
         // ↑ sustainedHighSlopeMinutes hier is nog de waarde van een cyclus terug
         // (de update verderop in deze cyclus, bij SUSTAINED RISE TRACKING, is nog
         // niet gebeurd) — zelfde, al gangbare patroon als prevRecentSlopeForBrake.
@@ -5759,8 +5836,28 @@ class FCLvNext(
                 // Kleine, aflopende correctie per extra commit (max 5×0.02=0.10) zorgt
                 // dat er ook ná het bereiken van de vloer nog een geleidelijke afbouw
                 // blijft plaatsvinden, zonder de vloer als veiligheidsgrens los te laten.
-                val decayFloor = (decayFloorBase - (commitNr - 1).coerceAtMost(5) * 0.02)
-                    .coerceAtLeast(0.10)
+                val decayFloorNaCommits = decayFloorBase - (commitNr - 1).coerceAtMost(5) * 0.02
+                // ── Post-omslag verlaging (20/07/2026, Ecko) ──────────────────
+                // Zie kdoc bij OMSLAG_DIEPTE_REF_MMOL hierboven. Alleen actief als
+                // curveConfirmtOmslag TRUE is (dus nooit tegelijk met
+                // bgStijgtNogFors); schaalt met hoe diep de omslag al is, niet een
+                // harde knip. coerceAtLeast(0.10) hierboven is bewust losgelaten
+                // vóór deze stap — de nieuwe, lagere POST_OMSLAG_ABSOLUTE_MIN_FLOOR
+                // geldt hierna in plaats daarvan.
+                val omslagDiepte = when {
+                    curveConfirmtOmslag ->
+                        smooth01(kotlin.math.abs(ctx.curveAcceleration) / OMSLAG_DIEPTE_REF_MMOL)
+                    // 20/07/2026 (Ecko): gedeeltelijke, vroegere versie — zie kdoc
+                    // bij OMSLAG_BIJNA_PARTIAL_FRACTIE hierboven. omslagBijnaBevestigd
+                    // en curveConfirmtOmslag sluiten elkaar per definitie uit (zie
+                    // omslagBijnaBevestigd's eigen "&& !curveConfirmtOmslag"), dus
+                    // geen overlap met de tak hierboven.
+                    omslagBijnaBevestigd -> OMSLAG_BIJNA_PARTIAL_FRACTIE
+                    else -> 0.0
+                }
+                val postOmslagFloorCut = omslagDiepte * POST_OMSLAG_MAX_FLOOR_CUT
+                val decayFloor = (decayFloorNaCommits - postOmslagFloorCut)
+                    .coerceAtLeast(POST_OMSLAG_ABSOLUTE_MIN_FLOOR)
 
                 lateDecayMul = if (vroegeStijgingNuVoorHetEerst) {
                     // Eenmalige afbouw-reset: laat de commit-branch-formule (fraction,
@@ -5774,6 +5871,12 @@ class FCLvNext(
                 } else 1.0
 
                 logRow.toppingOutBoost = toppingOutBoost
+                if (postOmslagFloorCut > 0.001) {
+                    status.append(
+                        "POST-OMSLAG VLOER: ${"%.2f".format(decayFloorNaCommits)}->${"%.2f".format(decayFloor)} " +
+                            "(diepte=${"%.2f".format(omslagDiepte)} accel=${"%.2f".format(ctx.curveAcceleration)})\n"
+                    )
+                }
                 if (lateDecayActive) {
                     val toppingOutSuffix = if (toppingOutBoost > 0.001)
                         " toppingOut=+${"%.2f".format(toppingOutBoost)}(R²=${"%.2f".format(ctx.curveFitR2)})"
@@ -5832,8 +5935,44 @@ class FCLvNext(
                 // (dat zou alles tot 0 knijpen), gewoon hetzelfde gedrag als de
                 // allereerste commit van de episode.
                 val episodePeakAnchored = episodePeakCommitU > 1e-9
-                val cappedFinalDose = if (commitNr <= 1 || !episodePeakAnchored) {
+
+                // ── Piek-nabijheid voor het EERSTE, nog niet verankerde anker
+                // (18/07/2026, Ecko) ─────────────────────────────────────────
+                // Incident 18/07 08:27: episodePeakCommitU stond nog op 0 (geen enkele
+                // commit had ooit >=75% van maxSMB gehaald), dus gold de bypass
+                // hieronder (commitNr<=1 || !episodePeakAnchored) onbeperkt — finalDose
+                // (het losse energiemodel, "weet niets van commit-nummer of afbouw")
+                // won ongeplafonneerd met 2,90U over de normale commit-formule (0,50U),
+                // geleverd terwijl BG (6,6) al zo goed als op de voorspelde piek (7,8,
+                // werkelijk bereikt: 6,7) zat. De bestaande bescherming vangt alleen een
+                // TWEEDE ongeplafonneerde uitschieter op — niet de allereerste, en die
+                // eerste viel hier toevallig laat in de stijging.
+                //
+                // commitNr<=1 blijft bewust volledig vrij (eerste commit van de episode
+                // — dat is precies het front-load-moment). Voor commitNr>1 zónder anker
+                // schalen we finalDose nu naar hoeveel stijging er volgens de
+                // piekvoorspelling nog te gaan is: vroeg in de stijging (nog ver van
+                // predictedPeak) nauwelijks beperkt, dicht bij/op de voorspelde piek
+                // sterk beperkt (nooit volledig naar 0 — de piekvoorspelling zelf kan
+                // nog bijstellen).
+                val firstUnanchoredPeakRoom =
+                    (peak.predictedPeak - ctx.input.targetBG).coerceAtLeast(0.5)
+                val firstUnanchoredProgress =
+                    (ctx.deltaToTarget / firstUnanchoredPeakRoom).coerceIn(0.0, 1.0)
+                val firstUnanchoredCapFactor = 1.0 - 0.65 * smooth01(firstUnanchoredProgress)
+
+                val cappedFinalDose = if (commitNr <= 1) {
                     finalDose
+                } else if (!episodePeakAnchored) {
+                    val cap = config.maxSMB * firstUnanchoredCapFactor
+                    if (finalDose > cap) {
+                        status.append(
+                            "FIRST-ANCHOR CAP: predictedPeak=${"%.1f".format(peak.predictedPeak)} " +
+                                "progress=${"%.2f".format(firstUnanchoredProgress)} " +
+                                "finalDose ${"%.2f".format(finalDose)}→${"%.2f".format(cap)}U\n"
+                        )
+                    }
+                    finalDose.coerceAtMost(cap)
                 } else if (bgStijgtNogFors && bgStijgtNogForsBypassStrength >= 1.0) {
                     finalDose
                 } else if (bgStijgtNogFors) {
