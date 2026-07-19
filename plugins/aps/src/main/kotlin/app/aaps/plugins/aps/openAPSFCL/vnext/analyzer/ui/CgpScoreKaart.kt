@@ -124,7 +124,7 @@ fun CgpScoreKaart(context: Context) {
 
             if (display == null) {
                 Text("Score beschikbaar na de eerste middernacht-berekening " +
-                     "(minimaal 1 dag data nodig).",
+                         "(minimaal 1 dag data nodig).",
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
                 return@Column
@@ -236,7 +236,18 @@ fun CgpScoreKaart(context: Context) {
                      style = MaterialTheme.typography.labelSmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                val refKleur   = MaterialTheme.colorScheme.primary.copy(green = 0.7f)
+                // 20/07/2026 (Ecko): BUGFIX — MaterialTheme.colorScheme.primary.copy(
+                // green = 0.7f) forceerde alleen het groen-kanaal en liet rood/blauw
+                // van de actieve primary-kleur ongemoeid. De primary van deze app is
+                // paars/lavendel (hoog rood EN hoog blauw) — in het donkere thema
+                // overheerst dat, dus "Referentie (gezond)" bleef paars/grijzig i.p.v.
+                // groen. In het lichte thema had primary toevallig een andere
+                // rood/blauw-balans waardoor het geforceerde groen-kanaal wél
+                // domineerde. Vaste, thema-onafhankelijke groentint (dezelfde
+                // "donkergroen" als elders in dit bestand, bijv. contributionColor
+                // GREEN en de PGR-zones hieronder) lost dit op — geen kans meer dat
+                // een thema-kleur de bedoelde groene betekenis overstemt.
+                val refKleur   = androidx.compose.ui.graphics.Color(0xFF2E7D32)
                 val patKleur   = MaterialTheme.colorScheme.primary
                 val gridKleur  = MaterialTheme.colorScheme.outlineVariant
                 val asKleur    = MaterialTheme.colorScheme.outline
@@ -335,9 +346,9 @@ private fun DrawScope.tekenPentagon(
     for (i in 0..4) {
         val a = axisAngle(i)
         drawLine(asKleur,
-            start = Offset(cx, cy),
-            end = Offset(cx + maxR * cos(a).toFloat(), cy + maxR * sin(a).toFloat()),
-            strokeWidth = 1f)
+                 start = Offset(cx, cy),
+                 end = Offset(cx + maxR * cos(a).toFloat(), cy + maxR * sin(a).toFloat()),
+                 strokeWidth = 1f)
     }
 
     // Referentie-pentagon
@@ -376,11 +387,11 @@ private fun DrawScope.tekenPentagon(
 
         val topY = ly - totH / 2f
         drawText(textMeasurer, labelTekst,
-            topLeft = Offset(lx - mLabel.size.width / 2f, topY),
-            style = labelStijl)
+                 topLeft = Offset(lx - mLabel.size.width / 2f, topY),
+                 style = labelStijl)
         drawText(textMeasurer, waardeTekst,
-            topLeft = Offset(lx - mWaarde.size.width / 2f, topY + mLabel.size.height + 1),
-            style = waardeStijl)
+                 topLeft = Offset(lx - mWaarde.size.width / 2f, topY + mLabel.size.height + 1),
+                 style = waardeStijl)
     }
 }
 
@@ -508,8 +519,8 @@ private fun PgrTrendlijn(
             )
             val measured = textMeasurer.measure(level.toInt().toString(), labelStyle)
             drawText(textMeasurer, level.toInt().toString(),
-                topLeft = Offset(0f, y - measured.size.height / 2f),
-                style = labelStyle)
+                     topLeft = Offset(0f, y - measured.size.height / 2f),
+                     style = labelStyle)
         }
 
         // 14-daags schuifvenster als lijn — elk punt is al een 14d-PGR
@@ -591,9 +602,9 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
                 )
                 Text(
                     "PGR (Prognostic Glycemic Risk) is a composite score derived from " +
-                    "the Comprehensive Glucose Pentagon (CGP), introduced by Vigersky & McMahon (2018). " +
-                    "It combines five CGM-derived metrics into a single number that reflects " +
-                    "both short-term hypoglycemia risk and long-term complication risk.",
+                        "the Comprehensive Glucose Pentagon (CGP), introduced by Vigersky & McMahon (2018). " +
+                        "It combines five CGM-derived metrics into a single number that reflects " +
+                        "both short-term hypoglycemia risk and long-term complication risk.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
@@ -604,10 +615,10 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
                 )
                 Text(
                     "• TOR — Time Out of Range (< 3.9 or > 10.0 mmol/L)\n" +
-                    "• %CV — Coefficient of Variation (SD ÷ mean glucose)\n" +
-                    "• Hypo% — Time below 3.9 mmol/L\n" +
-                    "• Hyper% — Time above 10.0 mmol/L\n" +
-                    "• Mean — Average glucose level",
+                        "• %CV — Coefficient of Variation (SD ÷ mean glucose)\n" +
+                        "• Hypo% — Time below 3.9 mmol/L\n" +
+                        "• Hyper% — Time above 10.0 mmol/L\n" +
+                        "• Mean — Average glucose level",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
@@ -618,9 +629,9 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
                 )
                 Text(
                     "Each metric is normalized to a 0.18–1.0 scale. The PGR equals " +
-                    "the area of the patient's pentagon divided by the area of a reference " +
-                    "pentagon representing a person without diabetes. " +
-                    "A smaller pentagon means better control — so a lower PGR is better.",
+                        "the area of the patient's pentagon divided by the area of a reference " +
+                        "pentagon representing a person without diabetes. " +
+                        "A smaller pentagon means better control — so a lower PGR is better.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
@@ -631,17 +642,17 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
                 )
                 Text(
                     "≤ 2.0  Very low risk\n" +
-                    "≤ 3.0  Low risk\n" +
-                    "≤ 4.0  Moderate risk\n" +
-                    "≤ 4.5  High risk\n" +
-                    "> 4.5  Extremely high risk",
+                        "≤ 3.0  Low risk\n" +
+                        "≤ 4.0  Moderate risk\n" +
+                        "≤ 4.5  High risk\n" +
+                        "> 4.5  Extremely high risk",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
                 Text(
                     "The score shown here is calculated from the FCLvNext cycle log " +
-                    "over the past 14 days and is updated daily at midnight. " +
-                    "It uses the same method as AAPS Statistics.",
+                        "over the past 14 days and is updated daily at midnight. " +
+                        "It uses the same method as AAPS Statistics.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -654,7 +665,7 @@ private fun PgrInfoDialog(pgr: Double, onDismiss: () -> Unit) {
         }
     )
 }
- /**
+/**
  * Normaliseert één CgpScore (bedoeld: het laatste 14-daags
  * schuifvenster-punt) naar [0.18-1.0] voor de pentagon-grafiek.
  *

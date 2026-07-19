@@ -591,6 +591,20 @@ private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 
 // koolhydraten-blinde-vlek-probleem (zie kdoc bij bgStijgtNogFors) dan
 // een projectie zou zijn.
 private const val OMSLAG_BIJNA_PARTIAL_FRACTIE = 0.28  // 28% van het volle effect
+// 20/07/2026 (Ecko): AANLEIDING — echte episode 19/07 15:17-16:32:
+// curveAcceleration werd tijdelijk sterk negatief (tot -17,41) tijdens een
+// gewone vertraging BINNEN een doorlopende stijging (een tussenstap in de
+// absorptie, geen echte piek — de BG bleef de hele tijd stijgen, van 8,0
+// naar uiteindelijk 9,7+, met slope die nooit onder de 3 kwam). De post-
+// omslag-vloerverlaging hierboven greep hier onterecht in en hield
+// commits ruim 20 minuten op hun minimum, precies toen een echte tweede
+// golf op gang kwam. Onderscheid met een échte piek (zoals het 12:22-
+// 12:27-incident dat deze vloerverlaging oorspronkelijk motiveerde): bij
+// een échte piek blijft curveAcceleration verder verdiepen (elke cyclus
+// negatiever); bij een tijdelijke vertraging herstelt hij (wordt minder
+// negatief) al binnen 1-2 cycli. Een vaste marge (i.p.v. simpelweg "nam
+// toe") filtert normale ruis tussen twee opeenvolgende cycli uit.
+private const val CURVE_ACCEL_HERSTEL_MARGIN = 2.0
 
 // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
 // Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
@@ -3418,9 +3432,12 @@ class FCLvNext(
     // Room-rij daadwerkelijk heeft geproduceerd (zip-tijdstempels/md5's als
     // enige aanwijzing). Dit is iets ANDERS dan schemaVersion verderop in de
     // Room-laag: schemaVersion volgt de KOLOM-lay-out van CSV/Room, deze
-    // constante volgt de DOSIS-LOGICA. Formaat vrij, aanbevolen:
-    // "vNN-jjjj-mm-dd-korte-omschrijving".
-    private val FCL_CODE_VERSION = "v12-2026-07-19-omslag-afbouw"
+    // constante volgt de DOSIS-LOGICA.
+    // 19/07/2026 (Ecko): formaat aangepast op verzoek — voortaan
+    // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
+    // eerdere versies raakten toch achter). Alleen als het écht relevant
+    // is een korte omschrijving toevoegen.
+    private val FCL_CODE_VERSION = "v13-2026-07-19-2027"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -5776,6 +5793,15 @@ class FCLvNext(
                         prev > 0.0 &&
                         ctx.curveAcceleration <= prev * 0.55
                 } ?: false
+                // Zie kdoc bij CURVE_ACCEL_HERSTEL_MARGIN hierboven. Bewust vóór de
+                // overschrijving hieronder berekend, zodat "vorige cyclus" nog
+                // beschikbaar is — geen sign-restrictie (in tegenstelling tot
+                // curveAccelDecelerating hierboven): herstel telt zowel binnen het
+                // negatieve gebied (-17.41 -> -13.10) als bij de overgang terug naar
+                // positief.
+                val curveAccelHerstellend = prevCurveAccelerationForOmslag?.let { prev ->
+                    ctx.curveAcceleration - prev >= CURVE_ACCEL_HERSTEL_MARGIN
+                } ?: false
                 prevCurveAccelerationForOmslag = ctx.curveAcceleration
                 val omslagBijnaBevestigd = curveAccelDecelerating && !curveConfirmtOmslag
                 val bgStijgtNogFors = ctx.slope >= 1.5 &&
@@ -5845,10 +5871,15 @@ class FCLvNext(
                 // vóór deze stap — de nieuwe, lagere POST_OMSLAG_ABSOLUTE_MIN_FLOOR
                 // geldt hierna in plaats daarvan.
                 val omslagDiepte = when {
+                    // 20/07/2026 (Ecko): herstel wint altijd — zie kdoc bij
+                    // CURVE_ACCEL_HERSTEL_MARGIN hierboven. Voorkomt dat een
+                    // tijdelijke vertraging binnen een doorlopende stijging als een
+                    // echte piek wordt behandeld.
+                    curveAccelHerstellend -> 0.0
                     curveConfirmtOmslag ->
                         smooth01(kotlin.math.abs(ctx.curveAcceleration) / OMSLAG_DIEPTE_REF_MMOL)
-                    // 20/07/2026 (Ecko): gedeeltelijke, vroegere versie — zie kdoc
-                    // bij OMSLAG_BIJNA_PARTIAL_FRACTIE hierboven. omslagBijnaBevestigd
+                    // Gedeeltelijke, vroegere versie — zie kdoc bij
+                    // OMSLAG_BIJNA_PARTIAL_FRACTIE hierboven. omslagBijnaBevestigd
                     // en curveConfirmtOmslag sluiten elkaar per definitie uit (zie
                     // omslagBijnaBevestigd's eigen "&& !curveConfirmtOmslag"), dus
                     // geen overlap met de tak hierboven.
