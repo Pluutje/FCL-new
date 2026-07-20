@@ -288,6 +288,26 @@ fun CgpScoreKaart(context: Context) {
             // ── PGR trendlijn: dagpunten + 14-daags voortschrijdend gemiddelde ──
             if (scores14d.size >= 2) {
                 Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                // ── HbA1c-trendlijn (20/07/2026, Ecko) ──────────────────────────
+                // Zelfde dagpunten+voortschrijdend-gemiddelde-patroon als de PGR-
+                // trendlijn hieronder, maar dan op het geschatte HbA1c. Bewust
+                // HIERBOVEN geplaatst (i.p.v. bovenin bij de losse "Geschat HbA1c"-
+                // regel in de Glucose-bereiken-kaart): dat bovenste blok is het
+                // at-a-glance-getal en blijft simpel; deze kaart is al de plek voor
+                // trends/geschiedenis (pentagon, tabel, PGR-lijn), dus een tweede
+                // trendgrafiek hoort hier het meest voor de hand liggend thuis. Geen
+                // nieuwe databron nodig: scores24h bevat al meanMmol per dag, exact
+                // dezelfde geschiedenis die de PGR-trendlijn hieronder ook gebruikt.
+                Text("HbA1c per dag  |  lijn = 14-daags gemiddelde",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Hba1cTrendlijn(
+                    scores14d = scores14d,
+                    scores24h = scores24h,
+                    modifier  = Modifier.fillMaxWidth().height(80.dp)
+                )
+
+                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 Text("PGR per dag  |  lijn = 14-daags gemiddelde",
                      style = MaterialTheme.typography.labelSmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -542,6 +562,166 @@ private fun PgrTrendlijn(
                 v <= 3.0 -> androidx.compose.ui.graphics.Color(0xFFF9A825)
                 v <= 4.0 -> androidx.compose.ui.graphics.Color(0xFFE65100)
                 else     -> androidx.compose.ui.graphics.Color(0xFFB71C1C)
+            }
+            drawCircle(puntZoneKleur, radius = 5f, center = Offset(x, y))
+            drawCircle(androidx.compose.ui.graphics.Color.White, radius = 2.5f, center = Offset(x, y))
+        }
+    }
+}
+
+
+// ── HbA1c-trendlijn: dagpunten + 14-daags voortschrijdend gemiddelde ───────
+// (20/07/2026, Ecko) — zelfde patroon als PgrTrendlijn hierboven, maar dan
+// op basis van het geschatte HbA1c (mmol/mol) per dag i.p.v. de PGR-score.
+// Geen nieuwe databron nodig: scores24h bevat al meanMgdl/meanMmol per dag
+// (zie CgpScore), dus de dagpunten en de voortschrijdend-gemiddelde-lijn
+// worden hier puur afgeleid van dezelfde geschiedenis die de PGR-trendlijn
+// al gebruikt — geen aanpassing aan CgpHistory nodig. Hergebruikt bewust
+// estimateHba1cPct/pctToMmolMol uit Timeinrangecard.kt (bovenin het scherm,
+// "Geschat HbA1c: ..."), zodat beide plekken in de app altijd dezelfde
+// formule en dezelfde uitkomst tonen.
+@Composable
+private fun Hba1cTrendlijn(
+    scores14d: List<CgpScore>,
+    scores24h: List<CgpScore>,
+    modifier: Modifier = Modifier
+) {
+    val lijnKleur  = MaterialTheme.colorScheme.secondary
+    val gridKleur  = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+    val labelKleur = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+
+    // Per-dag HbA1c (mmol/mol), uitgelijnd op datum — zelfde matchpatroon als
+    // stippen/lijnOpXas in PgrTrendlijn hierboven.
+    val hba1cByDate = scores24h.associate { s ->
+        val datum = try {
+            java.time.Instant.parse(s.tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+        } catch (_: Exception) { "" }
+        datum to pctToMmolMol(estimateHba1cPct(s.meanMmol))
+    }
+    val stippen = scores14d.map { s ->
+        val datum = try {
+            java.time.Instant.parse(s.tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+        } catch (_: Exception) { "" }
+        hba1cByDate[datum]
+    }
+
+    // Voortschrijdend gemiddelde over de scores24h-volgorde zelf, zelfde
+    // 14-punts-vensterstijl als CgpHistory.getRollingAverageOfDots (maar dan
+    // over HbA1c-waarden i.p.v. PGR — geen aparte CgpHistory-functie nodig,
+    // scores24h ligt hier al in het geheugen).
+    val hba1cSequentieel = scores24h.map { s -> pctToMmolMol(estimateHba1cPct(s.meanMmol)) }
+    val lijnReeksHba1c: List<Double?> = hba1cSequentieel.indices.map { i ->
+        val van = maxOf(0, i - 13)
+        val window = hba1cSequentieel.subList(van, i + 1)
+        if (window.isNotEmpty()) window.average() else null
+    }
+    val lijnByDate = scores24h.indices.associate { i ->
+        val datum = try {
+            java.time.Instant.parse(scores24h[i].tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+        } catch (_: Exception) { "" }
+        datum to lijnReeksHba1c.getOrNull(i)
+    }
+    val lijnOpXas = scores14d.map { s ->
+        val datum = try {
+            java.time.Instant.parse(s.tsUtc)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate().toString()
+        } catch (_: Exception) { "" }
+        lijnByDate[datum]
+    }
+    val textMeasurer = rememberTextMeasurer()
+
+    Canvas(modifier = modifier) {
+        val labelW = 32f
+        val w = size.width - labelW
+        val h = size.height
+        val n = stippen.size
+        val alleWaarden = stippen.filterNotNull() + lijnOpXas.filterNotNull()
+        val rawMin = alleWaarden.minOrNull() ?: 30.0
+        val rawMax = alleWaarden.maxOrNull() ?: 45.0
+        // Afronden op 5-tallen voor nette rasterlijnen; minimaal 10 mmol/mol
+        // spanbreedte zodat de lijn niet vlak oogt bij een stabiele periode.
+        val yMin = kotlin.math.floor(rawMin / 5.0) * 5.0
+        val yMaxRaw = kotlin.math.ceil(rawMax / 5.0) * 5.0
+        val yMax = if (yMaxRaw - yMin < 10.0) yMin + 10.0 else yMaxRaw
+
+        fun xOf(i: Int) = labelW + if (n == 1) w / 2 else (i.toFloat() / (n - 1)) * w
+        fun yOf(v: Double) = h - ((v.coerceIn(yMin, yMax) - yMin) / (yMax - yMin) * h).toFloat()
+
+        // ── Kleurgradiënt achtergrond: groen (laag) → rood (hoog) ──────────
+        // Klinische HbA1c-banden (mmol/mol, IFCC): <42 uitstekend, 42-53 goed,
+        // 53-64 verhoogd, 64-75 hoog, >75 zeer hoog. Zelfde vijf kleuren als de
+        // PGR-trendlijn hierboven, voor visuele consistentie.
+        data class Zone(val grens: Double, val color: androidx.compose.ui.graphics.Color)
+        val zones = listOf(
+            Zone(42.0, androidx.compose.ui.graphics.Color(0xFF2E7D32)),  // donkergroen
+            Zone(53.0, androidx.compose.ui.graphics.Color(0xFF7CB342)),  // lichtgroen
+            Zone(64.0, androidx.compose.ui.graphics.Color(0xFFF9A825)),  // amber
+            Zone(75.0, androidx.compose.ui.graphics.Color(0xFFE65100)),  // oranje
+            Zone(yMax, androidx.compose.ui.graphics.Color(0xFFB71C1C))   // rood
+        )
+        zones.forEachIndexed { i, zone ->
+            val vorigeGrens = if (i == 0) yMin else zones[i - 1].grens
+            val bandTop = yOf(zone.grens.coerceAtMost(yMax))
+            val bandBot = yOf(vorigeGrens.coerceAtLeast(yMin))
+            if (bandBot > bandTop) {
+                drawRect(
+                    color = zone.color.copy(alpha = 0.12f),
+                    topLeft = Offset(labelW, bandTop),
+                    size = androidx.compose.ui.geometry.Size(w, bandBot - bandTop)
+                )
+            }
+        }
+
+        val labelStyle = androidx.compose.ui.text.TextStyle(
+            fontSize = 9.sp, color = labelKleur
+        )
+
+        // Rasterlijnen elke 10 mmol/mol (i.p.v. elke 1 zoals bij PGR — de
+        // schaal hier is veel breder).
+        val gridStep = 10.0
+        var level = kotlin.math.ceil(yMin / gridStep) * gridStep
+        while (level <= yMax + 1e-9) {
+            val y = yOf(level)
+            drawLine(
+                gridKleur,
+                Offset(labelW, y), Offset(labelW + w, y),
+                0.8f
+            )
+            val tekst = level.toInt().toString()
+            val measured = textMeasurer.measure(tekst, labelStyle)
+            drawText(textMeasurer, tekst,
+                     topLeft = Offset(0f, y - measured.size.height / 2f),
+                     style = labelStyle)
+            level += gridStep
+        }
+
+        // 14-daags voortschrijdend gemiddelde als lijn
+        val maPath = Path(); var firstMa = true
+        lijnOpXas.forEachIndexed { i, ma ->
+            if (ma != null) {
+                val x = xOf(i); val y = yOf(ma)
+                if (firstMa) { maPath.moveTo(x, y); firstMa = false }
+                else maPath.lineTo(x, y)
+            }
+        }
+        drawPath(maPath, lijnKleur, style = Stroke(width = 2.5f))
+
+        stippen.forEachIndexed { i, v ->
+            if (v == null) return@forEachIndexed
+            val x = xOf(i); val y = yOf(v)
+            val puntZoneKleur = when {
+                v <= 42.0 -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                v <= 53.0 -> androidx.compose.ui.graphics.Color(0xFF7CB342)
+                v <= 64.0 -> androidx.compose.ui.graphics.Color(0xFFF9A825)
+                v <= 75.0 -> androidx.compose.ui.graphics.Color(0xFFE65100)
+                else      -> androidx.compose.ui.graphics.Color(0xFFB71C1C)
             }
             drawCircle(puntZoneKleur, radius = 5f, center = Offset(x, y))
             drawCircle(androidx.compose.ui.graphics.Color.White, radius = 2.5f, center = Offset(x, y))

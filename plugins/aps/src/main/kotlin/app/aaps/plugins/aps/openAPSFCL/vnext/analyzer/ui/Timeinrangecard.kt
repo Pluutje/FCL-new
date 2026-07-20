@@ -639,12 +639,16 @@ private fun computeAverageBg(rows: List<LogRow>, dayWindow: Int): Double? {
     return inWindow.sumOf { it.bg } / inWindow.size
 }
 
-private fun estimateHba1cPct(avgBgMmol: Double): Double {
+// 20/07/2026 (Ecko): internal i.p.v. private — de nieuwe HbA1c-trendlijn
+// in CgpScoreKaart.kt hergebruikt deze exacte formule (zelfde package,
+// zelfde module), zodat beide plekken in de app altijd dezelfde uitkomst
+// tonen. Geen gedragswijziging.
+internal fun estimateHba1cPct(avgBgMmol: Double): Double {
     val avgMgdl = avgBgMmol * MMOL_TO_MGDL
     return (avgMgdl + 46.7) / 28.7
 }
 
-private fun pctToMmolMol(pct: Double): Double = (pct - 2.15) * 10.929
+internal fun pctToMmolMol(pct: Double): Double = (pct - 2.15) * 10.929
 
 /**
  * Informatieve popup over de eA1c-schatting. Bewust in het Engels en op
