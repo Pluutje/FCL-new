@@ -555,6 +555,45 @@ private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
 private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op effectiveDecay
 
+// ── Leeftijd-gedempte horizon voor de piekvoorspelling (20/07/2026, Ecko) ──
+// AANLEIDING: incident 20/07 08:52-09:12, 1 beker chocomel. riseFrac
+// (hieronder bij hEff) bereikt zijn maximum zodra riseSinceStart 2,0 mmol
+// haalt — bij een snelle-suiker-stijging (chocomel) gebeurt dat al binnen
+// ~20 minuten. Op dat moment kreeg hEff bijna zijn volledige, nominale
+// waarde, terwijl v (de snelheid) ook al zeer hoog was (5+ mmol/u-
+// equivalent) — de ballistische projectie (bgNow + v·hEff) trok die hoge
+// snelheid dus over bijna het volle uur door. Concreet: om 09:02 gaf dit
+// predictedPeakBallistic=12,5 (!) voor een maaltijd die uiteindelijk op
+// 8,0 piekte — EarlyBoost joeg op die 9,0-voorspelling (na correctie) en
+// leverde 2,90U in die ene cyclus.
+//
+// Het bestaande iobScale-mechanisme verkort hEff al bij hoge IOB, maar
+// IOB was op dat moment nog laag (0,18 ratio) — de opbouw van IOB als
+// enige rem komt te laat voor een snelle stijging. Een op curve-
+// versnelling gebaseerde rem (zoals de post-omslag-vloerverlaging van
+// gisteren) bleek NIET te werken: curveAcceleration was op dit moment nog
+// altijd stijgend (18,53, nog geen teken van afvlakken) — de versnelling
+// bevestigde de snelle stijging pas ná de grote commits.
+//
+// OPLOSSING: hEff mag pas zijn volledige (leeftijd-onafhankelijke) waarde
+// krijgen zodra de episode al een tijd loopt — een stijging die in 10-20
+// minuten al 2 mmol heeft gehaald is minder bewezen "nog lang bezig" dan
+// dezelfde stijging bereikt over 40+ minuten. AGE_FRAC_FLOOR (0,40)
+// voorkomt dat een jonge, maar mogelijk wél groot wordende episode
+// volledig kaalgeschoren wordt — puur vertragend, nooit blokkerend.
+//
+// Getest (doorgerekend op echte logdata, 3 episodes 20/07): bij het
+// chocomel-incident daalt predictedPeak om 09:02 van 9,0 naar 8,08 (echte
+// piek: 8,0) — nagenoeg exact. Bij de twee andere verhoogde-IOB-episodes
+// van dezelfde dag (piek 9,0 resp. 8,8, ook allebei met een voorspelling
+// die tot 0,9-1,0 mmol boven de uiteindelijke piek uitschoot) verbetert de
+// voorspelling eveneens, zonder een tegenvoorbeeld van een langzame,
+// legitiem grote maaltijd die hierdoor juist te laat zou worden herkend
+// — al blijft dat een aandachtspunt om na oplevering in de gaten te
+// houden.
+private const val AGE_FULL_TRUST_MIN = 40.0   // minuten tot hEff volledig vertrouwd wordt
+private const val AGE_FRAC_FLOOR = 0.40       // nooit verder inkrimpen dan dit
+
 // ── Post-omslag vloer-verlaging (20/07/2026, Ecko) ──────────────────────
 // AANLEIDING: toppingOutBoost hierboven verhoogt effectiveDecay (de
 // STEILHEID van de afbouw per commit), maar de daadwerkelijke ondergrens
@@ -605,6 +644,48 @@ private const val OMSLAG_BIJNA_PARTIAL_FRACTIE = 0.28  // 28% van het volle effe
 // negatief) al binnen 1-2 cycli. Een vaste marge (i.p.v. simpelweg "nam
 // toe") filtert normale ruis tussen twee opeenvolgende cycli uit.
 private const val CURVE_ACCEL_HERSTEL_MARGIN = 2.0
+
+// ── Directe omslag-rem, vloer-onafhankelijk (20/07/2026, Ecko) ──────────────
+// AANLEIDING: audit-vraag "reageert het algoritme hard genoeg zodra er
+// harde aanwijzingen zijn (herstel vs. echte daling)". Twee gaten
+// gevonden in echte logdata (20/07, 20-7 14.40-csv, week 13-20/07):
+//
+// GAT 1 — vroegeStijgingBevestigd (zie verderop) reset lateDecayMul naar
+// 1.0 op basis van ctx.acceleration > 0.0, een ANDER (eenvoudiger)
+// signaal dan ctx.curveAcceleration/curveConfirmtOmslag hierboven, en
+// checkte curveConfirmtOmslag nergens. Voorbeeld 17/07/2026 11:03:40Z:
+// curveAcceleration=-2,36 (R²=0,999 — bocht met hoge zekerheid
+// bevestigd) maar ctx.acceleration=+0,07 (nog net positief) — de reset
+// vuurde, late_decay_mul werd 1,00, en er ging 4,90U uit vlak ná een
+// bevestigde omslag. Opgelost: vroegeStijgingBevestigd vereist nu ook
+// !curveConfirmtOmslag (zie kdoc daar). Omdat curveConfirmtOmslag
+// curveAcceleration<=0 vereist en vroegeStijgingBevestigd altijd
+// ctx.acceleration>0 vereiste, raakt dit uitsluitend de gevallen waarin
+// de twee signalen UITEENLOPEN (precies de bug) — een oprechte
+// hernieuwde stijging (beide signalen positief) wordt nooit geraakt.
+//
+// GAT 2 — de post-omslag-vloerverlaging hierboven (OMSLAG_DIEPTE_REF_MMOL
+// e.v.) verlaagt alleen de VLOER (decayFloor); als de ruwe, nog niet-
+// afgevlakte waarde (1 - effectiveDecay×(commitNr-1)) daar al ver boven
+// zit — typisch bij lage commitNr — verandert de vloerverlaging dus
+// niets. Voorbeeld 15/07/2026 17:42:02Z: curveAcceleration=-6,97 (sterk
+// bevestigde omslag), BG al 10,0, IOB al 6,22U — toch ging er nog 1,79U
+// uit met late_decay_mul=0,30, want de vloer (na verlaging ver onder
+// 0,30) was hier simpelweg niet de bottleneck. In dezelfde dataset bleek
+// late_decay_mul bij lage commitNr herhaaldelijk vast te lopen op exact
+// 0,30, ONGEACHT hoe diep curveAcceleration al was (-1,54 tot -6,97) —
+// de vloerverlaging schaalt wél mee met de diepte, maar had daar in de
+// praktijk geen enkel effect.
+//
+// OPLOSSING: een DIRECTE, vermenigvuldigende rem op lateDecayMul zelf
+// (niet op de vloer), die ongeacht commitNr, effectiveDecay of de
+// vloer al bindend is, altijd evenredig met de al berekende omslagDiepte
+// aangrijpt. Hergebruikt bewust dezelfde omslagDiepte (dus ook dezelfde
+// curveAccelHerstellend-vrijstelling hierboven — geen nieuw risico op
+// het al opgeloste 15:42-16:12-fout-positief) en dezelfde
+// POST_OMSLAG_ABSOLUTE_MIN_FLOOR als ondergrens, zodat dit nooit verder
+// afknijpt dan de al geaccepteerde veiligheidsgrens.
+private const val POST_OMSLAG_DIRECT_CUT_FRACTIE = 0.60  // max. extra vermenigvuldigende rem bij volle omslagDiepte
 
 // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
 // Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
@@ -3437,7 +3518,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v13-2026-07-19-2027"
+    private val FCL_CODE_VERSION = "v15-2026-07-20-1626"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3886,7 +3967,11 @@ class FCLvNext(
         val iobScale = (1.0 - 0.35 * ctx.iobRatio).coerceIn(0.35, 1.0)
 
 // effectieve horizon (uren)
-        val hEff = config.peakPredictionHorizonH * riseFrac * iobScale
+        // Zie kdoc bij AGE_FULL_TRUST_MIN hierboven. episodeAgeMinutes is
+        // hierboven al berekend (voor de exit-checks) — hergebruikt, geen dubbele
+        // state nodig.
+        val ageFrac = (episodeAgeMinutes / AGE_FULL_TRUST_MIN).coerceIn(AGE_FRAC_FLOOR, 1.0)
+        val hEff = config.peakPredictionHorizonH * riseFrac * iobScale * ageFrac
 
 // v5: korte-termijn snelheid uit delta5m (mmol/5m -> mmol/uur)
         val v5Raw = ctx.recentDelta5m * 12.0
@@ -5822,9 +5907,16 @@ class FCLvNext(
                 // koolhydraten zou dat niet volhouden), i.p.v. een absoluut
                 // BG-niveau. Vuurt maximaal éénmaal per episode (zie
                 // vroegeStijgingBevestigdUsedThisEpisode).
+                // 20/07/2026 (Ecko): !curveConfirmtOmslag toegevoegd — zie kdoc bij
+                // POST_OMSLAG_DIRECT_CUT_FRACTIE (GAT 1). ctx.acceleration en
+                // ctx.curveAcceleration zijn twee verschillende signalen die kunnen
+                // uiteenlopen; zonder deze check kon de volledige reset
+                // (lateDecayMul=1.0) vuren terwijl de meer vertrouwde curve-fit-
+                // basis al een omslag had bevestigd.
                 val vroegeStijgingBevestigd = sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
                     ctx.consistency >= config.episodeMinConsistency &&
-                    ctx.acceleration > 0.0
+                    ctx.acceleration > 0.0 &&
+                    !curveConfirmtOmslag
                 val vroegeStijgingNuVoorHetEerst = vroegeStijgingBevestigd && !vroegeStijgingBevestigdUsedThisEpisode
                 if (vroegeStijgingNuVoorHetEerst) {
                     vroegeStijgingBevestigdUsedThisEpisode = true
@@ -5900,6 +5992,23 @@ class FCLvNext(
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
                         .coerceIn(decayFloor, 1.0)
                 } else 1.0
+
+                // Zie kdoc bij POST_OMSLAG_DIRECT_CUT_FRACTIE hierboven (GAT 2). Grijpt
+                // ALTIJD aan, ongeacht of de vloer hierboven al bindend was — dus ook
+                // bij lage commitNr of ná de vroege-stijging-reset (die inmiddels
+                // zelf al !curveConfirmtOmslag vereist, maar deze rem is bewust
+                // onvoorwaardelijk als extra vangnet, niet afhankelijk van welke tak
+                // hierboven lateDecayMul heeft bepaald).
+                val omslagDirectCut = omslagDiepte * POST_OMSLAG_DIRECT_CUT_FRACTIE
+                if (omslagDirectCut > 0.001) {
+                    val voorDirectCut = lateDecayMul
+                    lateDecayMul = (lateDecayMul * (1.0 - omslagDirectCut))
+                        .coerceAtLeast(POST_OMSLAG_ABSOLUTE_MIN_FLOOR)
+                    status.append(
+                        "OMSLAG DIRECTE REM: ${"%.2f".format(voorDirectCut)}->${"%.2f".format(lateDecayMul)} " +
+                            "(diepte=${"%.2f".format(omslagDiepte)})\n"
+                    )
+                }
 
                 logRow.toppingOutBoost = toppingOutBoost
                 if (postOmslagFloorCut > 0.001) {
@@ -7054,4 +7163,4 @@ class FCLvNext(
             aigfDaysOfHistory = aigfRawResult.daysOfHistory
         )
     }
-}
+}cd
