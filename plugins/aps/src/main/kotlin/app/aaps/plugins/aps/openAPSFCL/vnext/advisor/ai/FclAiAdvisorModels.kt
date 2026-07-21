@@ -26,7 +26,21 @@ data class AiAdvisorRunResult(
     val generatedAtUtc: String,
     val rawModelResponse: String,
     val suggestions: List<AiParamSuggestion>,
-    val parseError: String? = null   // null = parsing/validatie geslaagd (suggesties kunnen alsnog individueel rejected zijn)
+    val parseError: String? = null,  // null = parsing/validatie geslaagd (suggesties kunnen alsnog individueel rejected zijn)
+    /**
+     * 21/07/2026 (Ecko) — puur informatieve constatering van het model, GEEN
+     * voorstel (niet goed/af te keuren). Bedoeld voor precies één situatie (zie
+     * FclAiAdvisorPromptBuilder): timing-parameters zitten al op hun hardMax,
+     * het probleem (bijv. aanhoudende overshoot) blijft bestaan, en geen enkele
+     * parameter in FclAiAdvisorRanges kan dat verantwoord oplossen. Voorheen
+     * greep het model in die situatie terug op lateCommitDecayFactor verlagen
+     * (afbouw van late commits soepeler maken) — precies de late-commits-
+     * groter-maken-richting die deze week juist stap voor stap is dichtgezet
+     * (RESCUE_OVERPOWERED/HYPO late-first, post-omslag-afbouw). Dit veld geeft
+     * het model een uitweg om dat hardop te zeggen i.p.v. de verkeerde knop te
+     * pakken.
+     */
+    val advisoryNoteNl: String? = null
 )
 
 /** Compact dagrapport dat als input-payload naar het model gaat — geen ruwe CSV. */

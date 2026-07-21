@@ -169,6 +169,31 @@ fun FclAiAdvisorScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
 
+                // ── Informatieve constatering (21/07/2026, Ecko) ──────────────
+                // Zie kdoc bij AiAdvisorRunResult.advisoryNoteNl: GEEN voorstel — niet
+                // goed/af te keuren, dus bewust niet als SuggestionCard maar als losse,
+                // visueel duidelijk andere info-kaart. Bedoeld voor de "timing al op
+                // hardMax, probleem blijft bestaan, geen parameter kan het oplossen"-
+                // situatie (zie FclAiAdvisorPromptBuilder) — voorheen greep het model
+                // hier terug op lateCommitDecayFactor verlagen, wat nu expliciet
+                // verboden is (zie "Wat je NIET mag" in de prompt).
+                runResult.advisoryNoteNl?.let { note ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                "ℹ️ Constatering (geen voorstel)",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(note, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
                 if (accepted.isEmpty()) {
                     Text(
                         "Geen voorstellen vandaag — alles blijft binnen verwachting, of er is te weinig bewijs.",

@@ -73,11 +73,26 @@ object FclAiAdvisorRanges {
 
         // ── Early Boost (hoeveel en hoe vroeg) ───────────────────────────────
 
+        // 21/07/2026 (Ecko): hardMax 2.50 -> 2.80 (softMax blijft 2.20 —
+        // ongewijzigd, de learner drift dus NIET vanzelf hoger; alleen de AI
+        // mag, met bewijs, tot hier ceiling-busten). Aanleiding: in de week
+        // 14-21/07 zat de effectieve boost-factor 40× tegen de oude hardMax
+        // aan; van die 40 zat 55% (22×) nog ONDER de aparte maxSMB×1.5-
+        // absolute-dosisgrens — daar had een hogere hardMax dus een écht
+        // grotere vroege dosis gegeven, geen loze ruimte. Doorgerekend: bij
+        // 2.80 was over die 22 cycli in totaal +6,78U extra gegeven (84,38
+        // -> 91,16U), met 14 van de 22 alsnog tegen de (ongewijzigde)
+        // maxSMB×1.5-grens — die blijft dus de ultieme achtervang, deze
+        // stap vergroot alleen de ruimte ERVOOR. Bewust een bescheiden stap
+        // (+0,30 absoluut / +12%), niet in één keer naar een veel hogere
+        // waarde — zie ook TOTAL_NEED_MAX_EXTRA_DECAY in FCLvNext.kt, de
+        // tegenhanger die latere commits juist extra afremt als de vroege
+        // episode-indicatie op een kleine maaltijd wijst.
         ParamSpec("earlyBoostFactor",
                   "Vermenigvuldiger op earlyTargetU bij Early Confidence Boost",
                   "Hoger = grotere vroege bolus zodra de automaat zeker genoeg is van de stijging; lager = behoudender vroege dosering.",
-                  ValueType.DOUBLE, min = 1.0, max = 2.50,  // max = hardMax (2.50)
-                  softMax = 2.20  // = EB_BOOST_MAX in DFLearner — AI mag 2.20–2.50 bij hoge confidence EN learner op 2.20
+                  ValueType.DOUBLE, min = 1.0, max = 2.80,  // max = hardMax (2.80, was 2.50)
+                  softMax = 2.20  // = EB_BOOST_MAX in DFLearner — AI mag 2.20–2.80 bij hoge confidence EN learner op 2.20
         ),
 
         ParamSpec("earlyBoostMinConfidence",

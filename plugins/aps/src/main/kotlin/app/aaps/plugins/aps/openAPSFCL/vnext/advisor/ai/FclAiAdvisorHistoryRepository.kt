@@ -99,6 +99,17 @@ object FclAiAdvisorHistoryRepository {
      * hier alleen ook bruikbaar buiten dat scherm (voor de badge/notificatie).
      */
     fun isStillPending(suggestion: AiParamSuggestion): Boolean {
+        // 21/07/2026 (Ecko): BUGFIX — een suggestie die de validator zelf al
+        // rejected heeft (buiten bereik, te lage confidence, ontbrekende
+        // evidenceFields, ...) is nooit "nog te beoordelen" geweest; die kwam
+        // niet eens als goed te keuren kaart in beeld. Zonder deze check telde
+        // de badge op het Analyzer-dashboard zo'n auto-verworpen suggestie toch
+        // mee (want lastEntryFor vindt niets — die is immers nooit aan de
+        // gebruiker voorgelegd — en gaf dan altijd true terug), terwijl het AI
+        // Advisor-scherm zelf 'rejected' er via 'accepted = filter { !it.rejected }'
+        // wél al uitsloot. Concreet incident: badge toonde "1 wacht", scherm
+        // toonde "0 voorstel(len), 1 automatisch verworpen" — zelfde suggestie.
+        if (suggestion.rejected) return false
         val last = lastEntryFor(suggestion.param) ?: return true
         return kotlin.math.abs(last.proposedValue - suggestion.proposedValue) >= 0.001
     }

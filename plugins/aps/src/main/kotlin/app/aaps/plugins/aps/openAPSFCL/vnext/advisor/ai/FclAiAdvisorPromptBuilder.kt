@@ -61,6 +61,17 @@ is een aanpassing die de hoeveelheid raakt gerechtvaardigd. Vermeld in de reason
 of timing-parameters al dicht bij hun grens zaten — dat helpt de gebruiker beoordelen of
 dit voorstel de vluchtoptie is of de eerste stap.
 
+BELANGRIJKE VERDUIDELIJKING (21/07/2026): "een aanpassing die de hoeveelheid raakt"
+betekent NOOIT lateCommitDecayFactor of lateCommitDecayThreshold verlagen — zie de
+expliciete regel daarover bij "Wat je NIET mag" hieronder. Als de timing-parameters
+AL op hun hardMax zitten (dus een verdere verhoging toch al zou worden verworpen) en
+het probleem blijft bestaan, is er in de huidige parameterlijst GEEN parameter die dit
+verantwoord kan oplossen. Doe in die situatie geen voorstel voor een parameter die je
+weet dat verkeerd of kansloos is; gebruik in plaats daarvan het `advisoryNoteNl`-veld
+in de output (zie OUTPUT-sectie) om dit expliciet en feitelijk te melden, inclusief het
+concrete cijfer dat aanleiding gaf. Dit veld is geen voorstel — de gebruiker kan het niet
+goed- of afkeuren, het is puur een constatering.
+
 Omgekeerd (te veel/hypo) geldt deze volgorde NIET: een hypo vraagt direct om minder
 potentie, zonder eerst timing "uit te proberen" — dat zou de hypo onnodig verlengen.
 Verlaag earlyBoostFactor/watchingFrontloadFrac alleen specifiek als de hypo duidelijk
@@ -106,6 +117,16 @@ alleen zou doen. De learner past zijn volgende stap dan op de nieuwe waarde aan.
 - Geen IOB, piek of glucosewaarden zelf herberekenen.
 - Geen toekomstige metingen verzinnen.
 - Geen veiligheidsremmen (IOB-drempels) verhogen als reactie op overshoot.
+- lateCommitDecayFactor of lateCommitDecayThreshold NOOIT VERLAGEN (afbouw van late
+  commits dus nooit soepeler maken) als reactie op overshoot of op "te weinig potentie"
+  elders, ook niet als vluchtoptie wanneer timing-parameters al op hun hardMax zitten.
+  Dit zijn parameters over de LAATSTE commits, vlak vóór/na de piek: ze kunnen een piek
+  die al gepasseerd is niet meer voorkomen, en een groter late commit geeft een reëel
+  risico op een latere hypo (IOB komt laat en geconcentreerd binnen, ná het moment dat
+  de dosis nog nuttig had kunnen zijn). Verlaag deze twee parameters uitsluitend als er
+  concreet bewijs is dat de afbouw zelf te STRENG is (bijv. een hypo die duidelijk
+  optrad tijdens een nog doorlopende stijging, ná een reeks al sterk afgebouwde
+  commits) — nooit als vervanging voor een gemiste of ontoereikende vroege dosis.
 """.trimIndent()
 
     private fun safetyAndAntiHallucinationSection(): String = """
@@ -177,11 +198,20 @@ ${json.toString(2)}
       "reason": "Concrete onderbouwing met minstens één cijfer uit INPUT DATA.",
       "evidenceFields": ["notableEpisodes[0]", "learnerEventsSummary"]
     }
-  ]
+  ],
+  "advisoryNoteNl": null
 }
 ```
 
-Als er geen verantwoorde voorstellen zijn: `{ "suggestions": [] }`.
+Als er geen verantwoorde voorstellen zijn: `"suggestions": []`.
+`advisoryNoteNl`: uitsluitend invullen in de "timing al op hardMax, probleem blijft
+bestaan, geen parameter in de lijst kan het oplossen"-situatie hierboven (zie "Rode
+draad: timing eerst"). Een korte, feitelijke Nederlandse zin met minstens één cijfer
+uit INPUT DATA — bijv. "earlyBoostFactor (2.20) en watchingFrontloadFrac (0.90) staan
+al op hun praktische maximum en avgOvershootAfterPeakMmol blijft 1.12 — dit wijst
+mogelijk op een tekort aan totale beschikbare insuline; overweeg als gebruiker zelf de
+maximale bolusgrootte (max SMB) te verhogen." In alle andere gevallen: `null`. Dit veld
+is geen voorstel — het wordt niet goed- of afgekeurd, puur informatief getoond.
 Geen markdown, geen uitleg buiten de JSON.
 """.trimIndent()
 }

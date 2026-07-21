@@ -687,6 +687,34 @@ private const val CURVE_ACCEL_HERSTEL_MARGIN = 2.0
 // afknijpt dan de al geaccepteerde veiligheidsgrens.
 private const val POST_OMSLAG_DIRECT_CUT_FRACTIE = 0.60  // max. extra vermenigvuldigende rem bij volle omslagDiepte
 
+// ── Zacht bijstel-mechanisme: vroege schatting van totale episode-
+// behoefte (21/07/2026, Ecko) ────────────────────────────────────────
+// AANLEIDING: onderzoeksvraag of curve-vorm vroeg in een episode iets kan
+// zeggen over hoeveel insuline de HELE maaltijd uiteindelijk nodig heeft —
+// niet om harder/vroeger te doseren (dat doet earlyBoostFactor al), maar
+// om de LATE-commit-afbouw slimmer te maken dan de vaste factor die er nu
+// staat. Doorgerekend op de week 14-21/07 (70 episodes, 37 met een
+// zinvol totaal ≥0,3U en duur ≥25 min, minutes_since_meal_start als
+// episodegrens): bij t=10-15 min is de samenhang tussen vroege signalen
+// en de uiteindelijke episode-totaaldosis zwak (R²≈0,21-0,33) — dat
+// dekt de eerdere bevinding dat de eerste minuten weinig onderscheidend
+// zijn. Bij t=20-25 min ontstaat een reële, KRUISGEVALIDEERDE (leave-
+// one-out) samenhang: ctx.slope op t=25min alleen geeft LOOCV-R²≈0,44 —
+// het beste enkelvoudige signaal, en meerdere signalen combineren maakt
+// het bij deze steekproefgrootte (n=37) juist SLECHTER (overfitting).
+// Mediane absolute voorspelfout ~1,1U (spreiding 0,5-1,8U) — bruikbaar
+// als RICHTING, niet als precisiegetal. Vandaar bewust geen hard gedeeld
+// budget, maar een bescheiden, additieve bijstelling op effectiveDecay
+// (dezelfde plek als budgetDecay/toppingOutBoost hierboven), pas actief
+// ná TOTAL_NEED_MIN_AGE_MINUTES (voordien is er domweg te weinig
+// signaal) en begrensd tot een fractie van de totale decay-ruimte.
+// SLOPE_LOW_REF/HIGH_REF zijn de p10/p90 van ctx.slope op t=25min uit
+// dezelfde 37 episodes — dus data-gegrond, geen ronde aannames.
+private const val TOTAL_NEED_MIN_AGE_MINUTES = 20.0    // vóór deze leeftijd geen signaal, dus geen bijstelling
+private const val TOTAL_NEED_SLOPE_LOW_REF = 0.5       // p10 van slope@25min in kleine episodes
+private const val TOTAL_NEED_SLOPE_HIGH_REF = 4.9      // p90 van slope@25min in grote episodes
+private const val TOTAL_NEED_MAX_EXTRA_DECAY = 0.12    // max. extra effectiveDecay bij een kleine-episode-schatting
+
 // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
 // Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
 // NA een afvlakking, bijv. een 2e gang — zie kdoc bij vroegeStijgingBevestigd
@@ -3518,7 +3546,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v15-2026-07-20-1626"
+    private val FCL_CODE_VERSION = "v16-2026-07-21-1530"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -5830,8 +5858,33 @@ class FCLvNext(
                     fitScore * marginScore * TOPPING_OUT_MAX_DECAY_BOOST
                 } else 0.0
 
-                val effectiveDecay = (config.lateCommitDecayFactor + budgetDecay + toppingOutBoost)
+                // Zie kdoc bij TOTAL_NEED_MIN_AGE_MINUTES hierboven. Eigen,
+                // lokale leeftijdsberekening (peakEstimator is top-level en dus
+                // ook hier beschikbaar) — geen nieuwe state, hergebruikt dezelfde
+                // bron als episodeAgeMinutes in updatePeakEstimate().
+                val episodeAgeMinutesForDecay = peakEstimator.startedAt?.let {
+                    org.joda.time.Minutes.minutesBetween(it, now).minutes
+                } ?: 0
+                val totalNeedAdjustment = if (episodeAgeMinutesForDecay >= TOTAL_NEED_MIN_AGE_MINUTES) {
+                    // grootteSchatting 0 = vroege signalen wijzen op een kleine
+                    // episode, 1 = op een grote. Alleen het KLEINE uiteinde geeft
+                    // extra afbouw; bij een grote-episode-schatting blijft dit 0
+                    // (geen extra REM t.o.v. het bestaande gedrag — uitsluitend
+                    // een extra duw richting sneller afbouwen, nooit richting
+                    // langzamer, dat blijft aan curveAccelHerstellend/omslagDiepte).
+                    val grootteSchatting = smooth01(
+                        (ctx.slope - TOTAL_NEED_SLOPE_LOW_REF) / (TOTAL_NEED_SLOPE_HIGH_REF - TOTAL_NEED_SLOPE_LOW_REF)
+                    )
+                    (1.0 - grootteSchatting) * TOTAL_NEED_MAX_EXTRA_DECAY
+                } else 0.0
+                val effectiveDecay = (config.lateCommitDecayFactor + budgetDecay + toppingOutBoost + totalNeedAdjustment)
                     .coerceIn(0.0, 0.70)
+                if (totalNeedAdjustment > 0.005) {
+                    status.append(
+                        "TOTAAL-BEHOEFTE BIJSTEL: +${"%.2f".format(totalNeedAdjustment)} decay " +
+                            "(slope=${"%.2f".format(ctx.slope)} leeftijd=${episodeAgeMinutesForDecay}m)\n"
+                    )
+                }
                 val lateDecayActive = effectiveDecay > 0.01 && commitNr > 1
 
                 // ── IOB-afhankelijke vloer voor lateDecayMul ──────────────────

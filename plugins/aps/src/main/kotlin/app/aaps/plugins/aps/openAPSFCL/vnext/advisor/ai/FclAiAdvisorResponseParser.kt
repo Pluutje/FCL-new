@@ -57,11 +57,17 @@ object FclAiAdvisorResponseParser {
             results += validateOne(obj, payload)
         }
 
+        // 21/07/2026 (Ecko) — zie kdoc bij AiAdvisorRunResult.advisoryNoteNl:
+        // puur informatief, geen voorstel, dus geen validatie tegen
+        // FclAiAdvisorRanges nodig — alleen leeg/blank normaliseren naar null.
+        val advisoryNote = json.optString("advisoryNoteNl", "").trim().ifBlank { null }
+
         return AiAdvisorRunResult(
             generatedAtUtc = payload.dateUtc,
             rawModelResponse = rawResponse,
             suggestions = results,
-            parseError = null
+            parseError = null,
+            advisoryNoteNl = advisoryNote
         )
     }
 
