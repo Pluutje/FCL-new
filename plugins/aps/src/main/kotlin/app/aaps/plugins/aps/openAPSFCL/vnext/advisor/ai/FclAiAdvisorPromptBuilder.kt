@@ -55,22 +55,35 @@ Basisprincipe voor ELK voorstel dat "meer potentie" beoogt (niet alleen bij over
 probeer eerst insuline vroeger te laten geven (earlyBoostFactor omhoog,
 watchingFrontloadFrac omhoog, watchingMinDeltaToTarget/commitCooldownMinutes omlaag)
 vóórdat je een parameter voorstelt die puur de hoeveelheid raakt. Alleen als de
-timing-parameters al dicht bij hun bovengrens zitten (watchingFrontloadFrac >= 0.90,
-earlyBoostFactor al meermaals verhoogd zonder resultaat) én het probleem blijft bestaan,
+timing-parameters al dicht bij hun bovengrens zitten én het probleem blijft bestaan,
 is een aanpassing die de hoeveelheid raakt gerechtvaardigd. Vermeld in de reason expliciet
 of timing-parameters al dicht bij hun grens zaten — dat helpt de gebruiker beoordelen of
 dit voorstel de vluchtoptie is of de eerste stap.
 
+VERPLICHTE CHECK VOOR JE "AL OP HUN GRENS" CONCLUDEERT (21/07/2026): dit is een
+concrete, per-parameter vergelijking, geen algemene indruk. Citeer voor ELK van de
+volgende vier de ACTUELE waarde uit activeParams tegen de bijbehorende grens uit
+PARAMETER-RANGES, vóórdat je concludeert dat er geen ruimte meer is:
+  - earlyBoostFactor  — actueel vs. zijn max in PARAMETER-RANGES
+  - watchingFrontloadFrac — actueel vs. zijn max
+  - watchingMinDeltaToTarget — actueel vs. zijn min (lager = agressiever hier)
+  - commitCooldownMinutes — actueel vs. zijn min (lager = agressiever hier)
+Zit ook maar ÉÉN van deze vier duidelijk onder (resp. boven) zijn eigen grens, dan
+is DIE de aangewezen volgende stap — nooit meteen naar advisoryNoteNl springen omdat
+een ANDERE parameter uit dit rijtje toevallig al wel op zijn grens zit.
+
 BELANGRIJKE VERDUIDELIJKING (21/07/2026): "een aanpassing die de hoeveelheid raakt"
 betekent NOOIT lateCommitDecayFactor of lateCommitDecayThreshold verlagen — zie de
-expliciete regel daarover bij "Wat je NIET mag" hieronder. Als de timing-parameters
-AL op hun hardMax zitten (dus een verdere verhoging toch al zou worden verworpen) en
-het probleem blijft bestaan, is er in de huidige parameterlijst GEEN parameter die dit
-verantwoord kan oplossen. Doe in die situatie geen voorstel voor een parameter die je
-weet dat verkeerd of kansloos is; gebruik in plaats daarvan het `advisoryNoteNl`-veld
-in de output (zie OUTPUT-sectie) om dit expliciet en feitelijk te melden, inclusief het
-concrete cijfer dat aanleiding gaf. Dit veld is geen voorstel — de gebruiker kan het niet
-goed- of afkeuren, het is puur een constatering.
+expliciete regel daarover bij "Wat je NIET mag" hieronder. Alleen als ALLE VIER de
+parameters hierboven (niet een deel ervan) bij de verplichte check al op hun eigen
+grens blijken te zitten, en het probleem blijft bestaan, is er in de huidige
+parameterlijst GEEN parameter die dit verantwoord kan oplossen. Doe in die situatie
+geen voorstel voor een parameter die je weet dat verkeerd of kansloos is; gebruik in
+plaats daarvan het `advisoryNoteNl`-veld (zie OUTPUT-sectie) om dit te melden — én
+citeer daarin alle vier de vergeleken waarden, niet slechts een deel. Dit veld is
+geen voorstel — de gebruiker kan het niet goed- of afkeuren, het is puur een
+constatering, en noemt UITSLUITEND max SMB als mogelijke externe vervolgstap (zie
+"Wat je NIET mag" hieronder voor waarom basaal daarbij nooit genoemd mag worden).
 
 Omgekeerd (te veel/hypo) geldt deze volgorde NIET: een hypo vraagt direct om minder
 potentie, zonder eerst timing "uit te proberen" — dat zou de hypo onnodig verlengen.
@@ -117,6 +130,15 @@ alleen zou doen. De learner past zijn volgende stap dan op de nieuwe waarde aan.
 - Geen IOB, piek of glucosewaarden zelf herberekenen.
 - Geen toekomstige metingen verzinnen.
 - Geen veiligheidsremmen (IOB-drempels) verhogen als reactie op overshoot.
+- Basale instellingen NOOIT noemen als mogelijke oplossing, ook niet in
+  advisoryNoteNl. FCLvNext grijpt uitsluitend in via SMB-achtige bolussen;
+  basaal is puur de vaste, continue achtergrondinsuline van de AAPS/pomp-
+  instelling zelf, en loopt door ONGEACHT of FCLvNext ingrijpt of niet. Een
+  basaalverhoging is dus geen alternatief voor "te weinig SMB-potentie" —
+  het is een compleet ander, ongecoördineerd mechanisme dat ook buiten
+  maaltijden continu doorwerkt en zo een reëel hypo-risico toevoegt dat niks
+  met de maaltijdanalyse hier te maken heeft. Uitsluitend max SMB is een
+  geldige externe suggestie in advisoryNoteNl.
 - lateCommitDecayFactor of lateCommitDecayThreshold NOOIT VERLAGEN (afbouw van late
   commits dus nooit soepeler maken) als reactie op overshoot of op "te weinig potentie"
   elders, ook niet als vluchtoptie wanneer timing-parameters al op hun hardMax zitten.
@@ -204,14 +226,19 @@ ${json.toString(2)}
 ```
 
 Als er geen verantwoorde voorstellen zijn: `"suggestions": []`.
-`advisoryNoteNl`: uitsluitend invullen in de "timing al op hardMax, probleem blijft
-bestaan, geen parameter in de lijst kan het oplossen"-situatie hierboven (zie "Rode
-draad: timing eerst"). Een korte, feitelijke Nederlandse zin met minstens één cijfer
-uit INPUT DATA — bijv. "earlyBoostFactor (2.20) en watchingFrontloadFrac (0.90) staan
-al op hun praktische maximum en avgOvershootAfterPeakMmol blijft 1.12 — dit wijst
-mogelijk op een tekort aan totale beschikbare insuline; overweeg als gebruiker zelf de
-maximale bolusgrootte (max SMB) te verhogen." In alle andere gevallen: `null`. Dit veld
-is geen voorstel — het wordt niet goed- of afgekeurd, puur informatief getoond.
+`advisoryNoteNl`: uitsluitend invullen als de VERPLICHTE CHECK hierboven bevestigt dat
+ALLE VIER de timing-parameters (earlyBoostFactor, watchingFrontloadFrac,
+watchingMinDeltaToTarget, commitCooldownMinutes) al op hun eigen grens zitten én het
+probleem blijft bestaan (zie "Rode draad: timing eerst"). Een korte, feitelijke
+Nederlandse zin met minstens één cijfer uit INPUT DATA per genoemde parameter —
+bijv. "earlyBoostFactor (2.20/2.80), watchingFrontloadFrac (0.95/0.95),
+watchingMinDeltaToTarget (0.50/0.50) en commitCooldownMinutes (4/4) staan alle vier al
+op hun grens en avgOvershootAfterPeakMmol blijft 1.12 — dit wijst mogelijk op een
+tekort aan totale beschikbare insuline; overweeg als gebruiker zelf de maximale
+bolusgrootte (max SMB) te verhogen." NOOIT basaal noemen (zie "Wat je NIET mag").
+In alle andere gevallen — dus zodra ook maar ÉÉN van de vier nog ruimte heeft —:
+`null`, en stel in plaats daarvan die ene parameter voor. Dit veld is geen voorstel —
+het wordt niet goed- of afgekeurd, puur informatief getoond.
 Geen markdown, geen uitleg buiten de JSON.
 """.trimIndent()
 }

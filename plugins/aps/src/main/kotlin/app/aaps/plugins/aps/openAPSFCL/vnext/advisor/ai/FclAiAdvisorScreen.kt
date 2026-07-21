@@ -118,12 +118,19 @@ fun FclAiAdvisorScreen(
         // onafhankelijk van hoe lang de aanvraag duurt of hoe hij afloopt. Het
         // succesvolle-resultaat-scherm zelf blijft ongewijzigd.
         var lastRequestedAt by remember { mutableStateOf<String?>(null) }
+        // 21/07/2026 (Ecko): naast de weergavetekst hierboven ook het echte
+        // Instant bijhouden — nodig om zo dadelijk te kunnen bepalen of
+        // runResult (van de VORIGE aanvraag) inmiddels verouderd is t.o.v.
+        // deze nieuwe klik. Zie kdoc bij isRefreshing hieronder.
+        var lastRequestedAtInstant by remember { mutableStateOf<Instant?>(null) }
 
         val ready = FclAiAdvisorSettingsStore.isConfigured(context)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    lastRequestedAt = LOCAL_FMT.format(Instant.now())
+                    val nu = Instant.now()
+                    lastRequestedAtInstant = nu
+                    lastRequestedAt = LOCAL_FMT.format(nu)
                     onRefreshNow()
                 },
                 enabled = ready
@@ -146,75 +153,99 @@ fun FclAiAdvisorScreen(
             )
         }
 
-        when {
-            runResult == null -> Text(
-                "Nog geen rapport beschikbaar. Druk op \"Nu vernieuwen\" om de eerste analyse te draaien.",
-                style = MaterialTheme.typography.bodyMedium
+        // 21/07/2026 (Ecko) — BUGFIX: het rapport hieronder toonde na een klik op
+        // "Nu vernieuwen" gewoon het VORIGE resultaat door totdat het nieuwe
+        // binnen was — geen enkel verschil te zien tussen "nog bezig" en "dit IS
+        // het nieuwe advies". runResult komt van buiten (de host bewaart alleen
+        // het laatst VOLTOOIDE rapport) en heeft dus geen eigen "in behandeling"-
+        // status; die wordt hier afgeleid door lastRequestedAtInstant (het moment
+        // van de klik) te vergelijken met runResult.generatedAtUtc (het moment
+        // waarop het GETOONDE rapport is gemaakt). Is dat laatste ouder dan de
+        // klik (of nog helemaal niet aanwezig), dan is het zichtbare rapport
+        // stale — verbergen en een duidelijke wacht-status tonen in plaats van
+        // net te doen of het al het nieuwe antwoord is.
+        val getoondRapportInstant = runResult?.let {
+            runCatching { Instant.parse(it.generatedAtUtc) }.getOrNull()
+        }
+        val isRefreshing = lastRequestedAtInstant != null &&
+            (getoondRapportInstant == null || getoondRapportInstant.isBefore(lastRequestedAtInstant))
+        if (isRefreshing) {
+            Text(
+                "⏳ Nieuw advies wordt opgehaald — het rapport hieronder verschijnt zodra dit klaar is.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            runResult.parseError != null -> Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Adviseur kon dit rapport niet voltooien", fontWeight = FontWeight.Bold)
-                    Text(runResult.parseError, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            else -> {
-                val accepted = runResult.suggestions.filter { !it.rejected }
-                val rejected = runResult.suggestions.filter { it.rejected }
-
-                Text(
-                    "Rapport van ${utcToLocal(runResult.generatedAtUtc)} — ${accepted.size} voorstel(len)" +
-                        if (rejected.isNotEmpty()) ", ${rejected.size} automatisch verworpen" else "",
+        } else {
+            when {
+                runResult == null -> Text(
+                    "Nog geen rapport beschikbaar. Druk op \"Nu vernieuwen\" om de eerste analyse te draaien.",
                     style = MaterialTheme.typography.bodyMedium
                 )
-
-                // ── Informatieve constatering (21/07/2026, Ecko) ──────────────
-                // Zie kdoc bij AiAdvisorRunResult.advisoryNoteNl: GEEN voorstel — niet
-                // goed/af te keuren, dus bewust niet als SuggestionCard maar als losse,
-                // visueel duidelijk andere info-kaart. Bedoeld voor de "timing al op
-                // hardMax, probleem blijft bestaan, geen parameter kan het oplossen"-
-                // situatie (zie FclAiAdvisorPromptBuilder) — voorheen greep het model
-                // hier terug op lateCommitDecayFactor verlagen, wat nu expliciet
-                // verboden is (zie "Wat je NIET mag" in de prompt).
-                runResult.advisoryNoteNl?.let { note ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(
-                                "ℹ️ Constatering (geen voorstel)",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(note, style = MaterialTheme.typography.bodySmall)
-                        }
+                runResult.parseError != null -> Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Adviseur kon dit rapport niet voltooien", fontWeight = FontWeight.Bold)
+                        Text(runResult.parseError, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                else -> {
+                    val accepted = runResult.suggestions.filter { !it.rejected }
+                    val rejected = runResult.suggestions.filter { it.rejected }
 
-                if (accepted.isEmpty()) {
                     Text(
-                        "Geen voorstellen vandaag — alles blijft binnen verwachting, of er is te weinig bewijs.",
+                        "Rapport van ${utcToLocal(runResult.generatedAtUtc)} — ${accepted.size} voorstel(len)" +
+                            if (rejected.isNotEmpty()) ", ${rejected.size} automatisch verworpen" else "",
                         style = MaterialTheme.typography.bodyMedium
                     )
-                }
-                accepted.forEach { SuggestionCard(it, context) }
 
-                if (rejected.isNotEmpty()) {
-                    Text("Automatisch verworpen (buiten bereik of onvoldoende onderbouwing):",
-                         fontWeight = FontWeight.Bold)
-                    rejected.forEach { s ->
-                        Text("• ${s.param}: ${s.rejectionReasonNl}",
-                             style = MaterialTheme.typography.bodySmall)
+                    // ── Informatieve constatering (21/07/2026, Ecko) ──────────────
+                    // Zie kdoc bij AiAdvisorRunResult.advisoryNoteNl: GEEN voorstel — niet
+                    // goed/af te keuren, dus bewust niet als SuggestionCard maar als losse,
+                    // visueel duidelijk andere info-kaart. Bedoeld voor de "timing al op
+                    // hardMax, probleem blijft bestaan, geen parameter kan het oplossen"-
+                    // situatie (zie FclAiAdvisorPromptBuilder) — voorheen greep het model
+                    // hier terug op lateCommitDecayFactor verlagen, wat nu expliciet
+                    // verboden is (zie "Wat je NIET mag" in de prompt).
+                    runResult.advisoryNoteNl?.let { note ->
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(
+                                    "ℹ️ Constatering (geen voorstel)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(note, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                     }
-                }
 
-                // ── Geschiedenis van AI-aanpassingen ──────────────────────────
-                AiHistorySection()
+                    if (accepted.isEmpty()) {
+                        Text(
+                            "Geen voorstellen vandaag — alles blijft binnen verwachting, of er is te weinig bewijs.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    accepted.forEach { SuggestionCard(it, context) }
+
+                    if (rejected.isNotEmpty()) {
+                        Text("Automatisch verworpen (buiten bereik of onvoldoende onderbouwing):",
+                             fontWeight = FontWeight.Bold)
+                        rejected.forEach { s ->
+                            Text("• ${s.param}: ${s.rejectionReasonNl}",
+                                 style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    // ── Geschiedenis van AI-aanpassingen ──────────────────────────
+                    AiHistorySection()
+                }
             }
-        }
+        } // einde isRefreshing-else (zie kdoc hierboven bij getoondRapportInstant)
 
         // einde inhoud
     }

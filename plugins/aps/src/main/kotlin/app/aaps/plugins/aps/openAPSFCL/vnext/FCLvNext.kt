@@ -3546,7 +3546,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v16-2026-07-21-1530"
+    private val FCL_CODE_VERSION = "v17-2026-07-21-2103"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -6152,7 +6152,59 @@ class FCLvNext(
                     (peak.predictedPeak - ctx.input.targetBG).coerceAtLeast(0.5)
                 val firstUnanchoredProgress =
                     (ctx.deltaToTarget / firstUnanchoredPeakRoom).coerceIn(0.0, 1.0)
-                val firstUnanchoredCapFactor = 1.0 - 0.65 * smooth01(firstUnanchoredProgress)
+
+                // ── Vroeg-in-episode uitzondering (21/07/2026, Ecko) ─────────────
+                // AANLEIDING (maaltijd 21/07 18:32-19:32): predictedPeak wordt drie
+                // regels hierboven altijd minimaal op bgNow gevloerd. Vroeg in een
+                // episode heeft het ballistische model (momentum/posSlopeArea) nog
+                // geen basis om verder dan bgNow te voorspellen — predictedPeak staat
+                // dan simpelweg op die vloer, NIET omdat de piek al bereikt is. Met
+                // predictedPeak==bgNow wordt firstUnanchoredProgress hierboven altijd
+                // 1.0 (peakRoom en deltaToTarget zijn dan gelijk), dus kneep dit de
+                // eerste, nog niet verankerde commits altijd terug tot de bodem van
+                // firstUnanchoredCapFactor — ook als BG overduidelijk nog steeg.
+                // Concreet: 18:32:07 (commit 2, slope=1,85) en 18:42:16 (commit 3,
+                // slope=1,29) werden zo teruggeknepen tot resp. 1,02U en 0,83U
+                // terwijl early_target_u daar 5,14U toestond — gevolgd door een
+                // stilte van 25 minuten terwijl BG doorkroop van 9,6 naar 10,0.
+                //
+                // ONDERSCHEID MET het oorspronkelijke incident waarvoor deze cap
+                // gebouwd is (18/07 08:27, zie kdoc hieronder): daar had predictedPeak
+                // al wél een ballistische voorsprong op bgNow (7,8 vs. 6,6 — 1,2
+                // mmol), dus predictedPeakOpVloer hieronder is daar FALSE en blijft
+                // de bestaande, al gevalideerde cap onveranderd van kracht.
+                //
+                // Getoetst op de volledige week 14-21/07: met alle drie de
+                // voorwaarden hieronder (aantoonbare stijging ÉN predictedPeak nog op
+                // de vloer ÉN duidelijk boven target) raakt de uitzondering vrijwel
+                // uitsluitend de 21/07-episode zelf (8 van de 10 momenten in de hele
+                // week) — een losse OR-toets op alleen slope bleek 98 momenten te
+                // raken, inclusief gevallen met een dalende recentSlope (topping-out,
+                // hoort níet vrijgesteld) en momenten dicht bij target (hoort ook niet
+                // vrijgesteld) — vandaar de drie afzonderlijke, elk noodzakelijke,
+                // voorwaarden.
+                //
+                // Bewust GEDEMPT (max -30% i.p.v. de normale -65%) in plaats van
+                // volledig vrijgesteld: dit verdubbelt ruwweg de ruimte voor deze
+                // twee soort commits in plaats van te vervier-/verdrievoudigen, in
+                // lijn met "de eerste nog wát sterker" i.p.v. een volledig loslaten —
+                // de bestaande afbouw-/budgetmechanismen verderop in de episode
+                // moeten dit bovendien nog corrigeren op het totaal, dat is nog niet
+                // end-to-end doorgerekend voor déze specifieke episode.
+                val strongRiseNow = ctx.slope >= 0.6 && ctx.recentSlope >= 0.3
+                val predictedPeakOpVloer = (peak.predictedPeak - ctx.input.bgNow) < 0.05
+                val duidelijkBovenTarget = ctx.deltaToTarget > 2.0
+                val firstUnanchoredCapFactor = if (strongRiseNow && predictedPeakOpVloer && duidelijkBovenTarget) {
+                    (1.0 - 0.30 * smooth01(firstUnanchoredProgress)).also {
+                        status.append(
+                            "VROEG-EPISODE CAP VERZACHT: predictedPeak nog op bgNow-vloer, " +
+                                "slope=${"%.2f".format(ctx.slope)} rSlope=${"%.2f".format(ctx.recentSlope)} " +
+                                "deltaTarget=${"%.2f".format(ctx.deltaToTarget)}\n"
+                        )
+                    }
+                } else {
+                    1.0 - 0.65 * smooth01(firstUnanchoredProgress)
+                }
 
                 val cappedFinalDose = if (commitNr <= 1) {
                     finalDose
