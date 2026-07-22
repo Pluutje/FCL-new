@@ -315,7 +315,8 @@ data class TopGuardFields(
 // ── AGGRESSION ────────────────────────────────────────────────────────────
 data class AggressionFields(
     val mealAggressionA: Double,
-    val mealAggressionMul: Double
+    val mealAggressionMul: Double,
+    val mealAggressionReason: String = ""
 )
 
 // ── PEAK BENADERING ───────────────────────────────────────────────────────

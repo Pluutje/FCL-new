@@ -207,6 +207,7 @@ data class FCLvNextCsvLogRow(
     // ── Aggression ──
     var mealAggressionA: Double = 0.0,
     var mealAggressionMul: Double = 0.0,
+    var mealAggressionReason: String = "",
 
     // ── Peak benadering ──
     var peakIobBrakeActive: Boolean = false,

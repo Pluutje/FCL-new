@@ -776,6 +776,31 @@ private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
 // verderop (over WATCHING_DELTA_RAMP_WIDTH mmol) naar 100% doorgroeit.
 // ─────────────────────────────────────────────
 private const val WATCHING_DELTA_RAMP_WIDTH = 0.60 // mmol vanaf de drempel tot volle 100%
+
+// ── Geleidelijke naderings-ramp vóór bgStijgtNogFors (22/07/2026, Ecko) ──
+// AANLEIDING (maaltijd 22/07 11:07, zelfde patroon als 22/07 05:07 een dag
+// eerder): bgStijgtNogFors is een harde knip op bgNow > target+3.0. Zodra
+// die drempel valt, springt cappedFinalDose in ÉÉN cyclus van het normale
+// plafond (episodePeakCommitU × lateDecayMul, vaak 0,3-0,6U) naar volledig
+// ongeplafonneerd (vaak 3+U) — terwijl slope vaak al 15-20+ minuten
+// onafgebroken boven 1,5 zat en duidelijk versnelde. Concreet 22/07 11:07:
+// 0,43U om 11:02 (delta=2,58, slope=3,63) → 3,10U om 11:07 (delta=3,01).
+// Ecko's verzoek: niet kleiner, maar eerder — een geleidelijke opbouw
+// i.p.v. een klif, analoog aan hoe WATCHING_DELTA_RAMP_WIDTH hierboven een
+// harde aan/uit-drempel al vervangt door een ease-in.
+//
+// Alleen de "hoever nog tot de bgNow-drempel"-component wordt continu; de
+// signaalkwaliteits-eisen van bgStijgtNogFors zelf (slope>=1.5, geen
+// (bijna-)omslag) blijven ONGEWIJZIGD een harde eis — zie
+// bgStijgtNogForsNaderend verderop, die dezelfde curveConfirmtOmslag/
+// omslagBijnaBevestigd-gates hergebruikt. Getoetst tegen de twee eerder
+// gevalideerde "terecht onderdrukt"-incidenten (15/07 17:42, 17/07 11:03):
+// bij beide is curveConfirmtOmslag al TRUE, dus bgStijgtNogForsNaderend
+// blijft daar 0 — deze ramp raakt ze niet. Doorgerekend over de hele week
+// (14-22/07): 32 momenten waar de ramp zou aangrijpen vóórdat bgStijgtNogFors
+// zelf al TRUE is, stuk voor stuk met duidelijk verhoogde BG en aantoonbaar
+// nog-niet-omgeslagen stijging.
+private const val BGSTIJGT_NOG_FORS_RAMP_WIDTH = 1.0  // mmol vóór de target+3.0-drempel
 private const val WATCHING_DELTA_RAMP_FLOOR = 0.10 // fractie direct op de drempel (voorkomt harde sprong)
 
 // ─────────────────────────────────────────────
@@ -814,7 +839,41 @@ private var lastEpisodeExitAt: org.joda.time.DateTime? = null  // voor grace-per
 // Telt hoeveel opeenvolgende cycli de blip-conditie (slowFalling+fastRising)
 // aanhoudt. Een echte sensorblip is 1-2 cycli; EWMA-naloop na echte stijging
 // houdt tientallen cycli aan. Na 2 cycli beschouwen we het als echte stijging.
+// BLIJFT bewust top-level (22/07/2026, Ecko: eerste poging verplaatste dit
+// naar een klasse-veld voor persistentie, maar `maybeResetEarlyOnDecel`
+// hierboven is een top-level functie die deze teller rechtstreeks reset —
+// die kan een klasse-veld niet bereiken. Persistentie is daarom apart
+// opgelost via context-parameter-functies (zie loadSensorBlipStreakCount/
+// saveSensorBlipStreakCount hieronder), aangeroepen vanuit de klasse op de
+// plekken waar context wél beschikbaar is — zie FCLvNext-init en de
+// increment-site verderop).
 private var sensorBlipStreakCount: Int = 0
+
+// Geldigheidsduur kort houden (15 min): een streak is per ontwerp maar 1-2
+// cycli relevant, dus een oudere opgeslagen waarde is toch al achterhaald
+// en wordt genegeerd (val terug op 0) — zelfde redenering als bij een
+// gewone binnen-episode reset.
+private const val SENSOR_BLIP_STREAK_PREFS = "fcl_taper_state"
+private const val SENSOR_BLIP_STREAK_KEY = "sensor_blip_streak_count"
+private const val SENSOR_BLIP_STREAK_TS_KEY = "sensor_blip_streak_count_saved_at_ms"
+private const val SENSOR_BLIP_STREAK_MAX_AGE_MS = 15L * 60L * 1000L
+
+private fun loadSensorBlipStreakCount(context: android.content.Context): Int {
+    val prefs = context.getSharedPreferences(SENSOR_BLIP_STREAK_PREFS, android.content.Context.MODE_PRIVATE)
+    val savedAt = prefs.getLong(SENSOR_BLIP_STREAK_TS_KEY, -1L)
+    if (savedAt < 0L) return 0
+    val ageMs = System.currentTimeMillis() - savedAt
+    return if (ageMs in 0..SENSOR_BLIP_STREAK_MAX_AGE_MS) prefs.getInt(SENSOR_BLIP_STREAK_KEY, 0) else 0
+}
+
+private fun saveSensorBlipStreakCount(context: android.content.Context, value: Int) {
+    context.getSharedPreferences(SENSOR_BLIP_STREAK_PREFS, android.content.Context.MODE_PRIVATE)
+        .edit()
+        .putInt(SENSOR_BLIP_STREAK_KEY, value)
+        .putLong(SENSOR_BLIP_STREAK_TS_KEY, System.currentTimeMillis())
+        .apply()
+}
+
 // Ringebuffer: de laatste 3 ruwe BG-waarden voor de consistenticheck
 private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 
@@ -3546,7 +3605,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v19-2026-07-22-1145"
+    private val FCL_CODE_VERSION = "v21-2026-07-22-1630"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3704,6 +3763,14 @@ class FCLvNext(
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
     private var episodePeakCommitU: Double = loadEpisodePeakCommitU()
+
+    // ── SensorBlip-teller: seed bij opstart (22/07/2026, Ecko) ──────────────
+    // De teller zelf blijft top-level (zie kdoc daar voor waarom), maar het
+    // laden van de gepersisteerde waarde kan alleen hier, waar `context`
+    // beschikbaar is — vandaar deze init-regel meteen bij object-constructie.
+    init {
+        sensorBlipStreakCount = loadSensorBlipStreakCount(context)
+    }
     // ── Persistente lateDecayMul over cycli heen (22/07/2026, Ecko) ──────
     // AANLEIDING (maaltijd 22/07 05:07): de taper-clamp verderop
     // ("episodePeakCommitU * lateDecayMul", bedoeld als vangnet precies
@@ -5026,6 +5093,7 @@ class FCLvNext(
             ((ctx.recentSlope >= 1.50) || (ctx.recentDelta5m >= 0.20))
         if (blipBaseNow && !bgRising3Cycles && !explosiveRise) sensorBlipStreakCount++
         else sensorBlipStreakCount = 0
+        saveSensorBlipStreakCount(context, sensorBlipStreakCount)
 
         val postPeak = evaluatePostPeak(
             ctx, mealSignal, peak, now, config,
@@ -5683,6 +5751,11 @@ class FCLvNext(
         val aggrMul = lerp(0.85, 1.25, aggr.a)
         logRow.mealAggressionA = aggr.a
         logRow.mealAggressionMul = aggrMul
+        // 22/07/2026 (Ecko): reason ook gestructureerd loggen i.p.v. alleen in
+        // de vrije status-tekst — makkelijker filteren/analyseren achteraf.
+        // ";" vervangen als vangnet tegen CSV-delimiter-breuk (dit format
+        // bevat er in de praktijk geen, maar geen aanname hierop laten steunen).
+        logRow.mealAggressionReason = aggr.reason.replace(";", ",")
 
         val commitFraction = (baseCommitFraction * aggrMul).coerceIn(0.0, 1.0)
 
@@ -6013,6 +6086,17 @@ class FCLvNext(
                     ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
                     !curveConfirmtOmslag &&
                     !omslagBijnaBevestigd
+                // Zie kdoc bij BGSTIJGT_NOG_FORS_RAMP_WIDTH hierboven. Zelfde
+                // signaalkwaliteits-gates als bgStijgtNogFors (slope, geen
+                // (bijna-)omslag) — alleen de afstand-tot-de-drempel wordt continu
+                // i.p.v. een harde knip. 0.0 zodra bgNow nog target+2.0 of lager
+                // is, 1.0 zodra bgNow de bgStijgtNogFors-drempel zelf bereikt.
+                val bgStijgtNogForsNaderend = if (ctx.slope >= 1.5 && !curveConfirmtOmslag && !omslagBijnaBevestigd) {
+                    smooth01(
+                        (ctx.input.bgNow - (ctx.input.targetBG + 3.0 - BGSTIJGT_NOG_FORS_RAMP_WIDTH)) /
+                            BGSTIJGT_NOG_FORS_RAMP_WIDTH
+                    )
+                } else 0.0
                 // 11/07/2026 (Ecko) — diagnostisch vastleggen, zie kdoc bij
                 // lastBgStijgtNogFors hierboven.
                 lastBgStijgtNogFors = bgStijgtNogFors
@@ -6295,7 +6379,16 @@ class FCLvNext(
                 } else if (bgStijgtNogFors) {
                     finalDose.coerceAtMost(episodePeakCommitU * bgStijgtNogForsBypassStrength)
                 } else {
-                    finalDose.coerceAtMost(episodePeakCommitU * lateDecayMul)
+                    val normaalGeplafonneerd = finalDose.coerceAtMost(episodePeakCommitU * lateDecayMul)
+                    if (bgStijgtNogForsNaderend > 0.001) {
+                        val geblend = normaalGeplafonneerd +
+                            bgStijgtNogForsNaderend * (finalDose - normaalGeplafonneerd)
+                        status.append(
+                            "BGSTIJGT-NOG-FORS NADEREND ×${"%.2f".format(bgStijgtNogForsNaderend)}: " +
+                                "${"%.2f".format(normaalGeplafonneerd)}->${"%.2f".format(geblend)}U\n"
+                        )
+                        geblend
+                    } else normaalGeplafonneerd
                 }
 
                 // ── AIGF-verhoging op de grote commit(s) (14/07/2026, Ecko) ──────
@@ -7071,6 +7164,24 @@ class FCLvNext(
         // ─────────────────────────────────────────────
 
 
+
+        // ── Absolute veiligheidsvangrail (22/07/2026, Ecko) ──────────────────
+        // Pure laatste-linie-check, vlak vóór executeDelivery — geen van de
+        // vele mechanismen hierboven zou dit ooit mogen laten gebeuren (er zit
+        // al een aparte, eerdere absoluteUcap=maxSMB*1.5 op een specifiek
+        // deelpad), maar mocht een combinatie van mechanismen toch een te hoge
+        // waarde laten doorglippen, is dit de allerlaatste stop vóórdat er
+        // daadwerkelijk insuline wordt afgegeven. Loggen bij ingrijpen — als dit
+        // ooit afgaat, is dat zelf het signaal dat er elders een bug zit.
+        val absoluteVeiligheidsCap = config.maxSMB * 1.5
+        if (commandedDose > absoluteVeiligheidsCap) {
+            status.append(
+                "⚠️ VEILIGHEIDSVANGRAIL: commandedDose ${"%.2f".format(commandedDose)}U " +
+                    "overschreed maxSMB×1,5 (${"%.2f".format(absoluteVeiligheidsCap)}U) — " +
+                    "afgekapt. Dit zou nooit mogen gebeuren; graag dit incident melden.\n"
+            )
+            commandedDose = absoluteVeiligheidsCap
+        }
 
         // ─────────────────────────────────────────────
         // 🔟 Execution: SMB / hybride bolus + basaal

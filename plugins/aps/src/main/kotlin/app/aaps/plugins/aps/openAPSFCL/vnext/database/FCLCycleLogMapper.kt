@@ -198,7 +198,8 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
 
     aggression = AggressionFields(
         mealAggressionA        = mealAggressionA,
-        mealAggressionMul      = mealAggressionMul
+        mealAggressionMul      = mealAggressionMul,
+        mealAggressionReason   = mealAggressionReason
     ),
 
     peakBenadering = PeakBenaderingFields(

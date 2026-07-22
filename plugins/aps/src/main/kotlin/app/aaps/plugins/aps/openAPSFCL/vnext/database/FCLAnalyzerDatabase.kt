@@ -29,6 +29,15 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
     }
 }
 
+// ── MIGRATION_17_18 (22/07/2026, Ecko) ─────────────────────────────────────
+// Zuiver additief: 1 nieuwe kolom (mealAggressionReason, TEXT) op de
+// bestaande fcl_cycle_log-tabel — zelfde patroon als MIGRATION_16_17.
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE fcl_cycle_log ADD COLUMN mealAggressionReason TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 @Database(
     entities = [
         FCLCycleLogEntity::class,
@@ -88,7 +97,7 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
     // als vangnet staan — als de Migration onverhoopt niet toepasbaar blijkt
     // (bijv. door een OEM-SQLite-eigenaardigheid), valt Room automatisch
     // terug op de bekende, werkende destructieve wipe i.p.v. te crashen.
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {
@@ -111,7 +120,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
                     FCLAnalyzerDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_16_17)
+                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }
