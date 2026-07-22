@@ -21,6 +21,17 @@ data class FclUiSnapshot(
     // hoofdscherm. Zie de kdoc bovenaan FCLvNextBgHistoryProvider.kt voor
     // de achtergrond (calibratie-discussie met de hoofdontwikkelaar).
     val last3DbPoints: List<FCLvNextBgHistoryProvider.BgPoint> = emptyList(),
+    // 22/07/2026 (Ecko) — geselecteerde pomp + werkelijke max-basaal, voor
+    // de nieuwe Pomp-sectie onderaan (zie buildPompSectie). pumpMaxBasalUh
+    // is dezelfde, pomptype-bewuste waarde (absoluut of %-van-profiel-basaal)
+    // als OapsProfileFCL.max_basal — zie computeRealMaxBasalUh in
+    // OpenAPSFCLPlugin.kt voor de berekening zelf.
+    val pumpNaam: String = "",
+    val pumpMaxBasalUh: Double = 0.0,
+    // 22/07/2026 (Ecko) — huidige basaalstand, naast de max; nuttig genoeg om
+    // structureel te tonen (i.t.t. het tijdelijke ruwe-waarden-debugblok dat
+    // hier eerst stond, nu weer verwijderd).
+    val pumpCurrentBasalUh: Double = 0.0,
     // 06/07/2026 (Ecko) — korte activiteitsindicatie ("laatste uur") voor de
     // Activiteit-sectie. -1.0/-1 als er geen data beschikbaar is (zelfde
     // conventie als de kolommen in FCLvNext_ActivityLog_v2.csv). Bewust een
@@ -107,19 +118,11 @@ class FCLvNextStatusFormatter(
             appendLine("─────────────────────")
             appendLine("• ${str.glucose}:  ${BgUnits.formatBg(ui.bgNow, mgdl)}$deltaStr")
             appendLine("• ${str.iob}:     ${"%.2f".format(ui.iob)} U")
-            // 06/07/2026 (Ecko) — verificatieblok calibratie: toont de laatste 3
-            // waarden EXACT zoals FCLvNextBgHistoryProvider ze levert (dus na
-            // LinearCalibration + UKF-smoothing, .recalculated), zodat direct
-            // zichtbaar is of FCLvNext met dezelfde waarden rekent als het
-            // hoofdscherm. Bewust altijd getoond (geen aparte instelling) — bij
-            // twijfel over de calibratie-pijplijn moet dit blijvend te
-            // controleren zijn, niet alleen tijdens een debug-sessie.
-            if (ui.last3DbPoints.isNotEmpty()) {
-                appendLine("• Laatste 3 (DB, gecalibreerd):")
-                for (p in ui.last3DbPoints.asReversed()) {
-                    appendLine("   ${p.time.toString("HH:mm:ss")}  ${BgUnits.formatBg(p.bgMmol, mgdl)}")
-                }
-            }
+            // 06/07/2026 (Ecko) — verificatieblok calibratie: liet de laatste 3
+            // DB-waarden zien om de calibratiepijplijn te checken. Uitgezet
+            // (22/07/2026, Ecko) — check is voorlopig klaar; het onderliggende
+            // ui.last3DbPoints-veld en de aanlevering ervan blijven intact,
+            // dus dit is met één regel weer aan te zetten als dat nog eens nodig is.
             if (peakLine.isNotEmpty()) appendLine("• ${str.fclPiek}: $peakLine")
         }
     }
@@ -168,6 +171,20 @@ class FCLvNextStatusFormatter(
         }
     }
 
+    // ── Sectie 4: Pomp ────────────────────────────────────────────────────
+    // 22/07/2026 (Ecko) — geselecteerde pomp + werkelijke max-basaal. Bewust
+    // als eigen, statische sectie (net als Analyzer-waarden hieronder) i.p.v.
+    // in Situatie: dit verandert alleen bij een profiel-/pompwissel, niet
+    // elke cyclus, dus het hoort niet tussen de live per-cyclus-waarden.
+    private fun buildPompSectie(ui: FclUiSnapshot): String = buildString {
+        appendLine("🔌 Pomp")
+        appendLine("─────────────────────")
+        val naamTxt = ui.pumpNaam.ifEmpty { "onbekend" }
+        appendLine("• Pomp        : $naamTxt")
+        appendLine("• Max basaal  : ${"%.2f".format(ui.pumpMaxBasalUh)} U/h")
+        append(    "• Basaal nu   : ${"%.2f".format(ui.pumpCurrentBasalUh)} U/h")
+    }
+
     // ── Sectie 5: Analyzer-gestuurde waarden ─────────────────────────────────
 
     private fun buildAnalyzerConfigSectie(activeConfig: FCLvNextConfig?): String {
@@ -209,7 +226,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v2.2.0")
+        appendLine(" 🧠 FCL V7 v2.2.2")
         appendLine("════════════════════════")
         appendLine()
 
@@ -273,6 +290,9 @@ class FCLvNextStatusFormatter(
 
         // AutoSens-sectie verwijderd (18/06/2026)     POST_NOTIFICATIONS
         // Glucose statistieken verwijderd (29/06/2026): zie Statistics-tabblad    onNotificationActionClick
+
+        appendLine(buildPompSectie(ui))
+        appendLine()
 
         append(buildAnalyzerConfigSectie(activeConfig))
     }

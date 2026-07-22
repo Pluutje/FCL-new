@@ -64,7 +64,14 @@ data class FCLvNextInput(
     // Losstaand van activityActive/activityInsulinPct/activityTargetAdjust
     // hierboven — dat is de kortetermijn-stappen-mechaniek (FCLActivityModule),
     // dit is de nieuwe langetermijn-baseline-mechaniek (FclActivitySensitivity).
-    val activityCal8h: Double = -1.0
+    val activityCal8h: Double = -1.0,
+    // ── Werkelijke pomp-max-basaal, E/u (22/07/2026, Ecko) ─────────────────
+    // Door DetermineBasalFCL.kt doorgegeven vanuit profile.max_basal, die op
+    // zijn beurt door OpenAPSFCLPlugin.kt pomptype-bewust wordt berekend
+    // (absoluut voor bijv. Metrum, %-van-profiel-basaal voor bijv. Dana).
+    // 0.0 = onbekend/niet meegegeven — loadFCLvNextConfig() valt dan terug
+    // op een vaste veilige default (zie daar).
+    val realMaxBasalUh: Double = 0.0
 )
 
 data class FCLvNextContext(
@@ -3605,7 +3612,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v21-2026-07-22-1630"
+    private val FCL_CODE_VERSION = "v26-2026-07-22-2245"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4403,7 +4410,7 @@ class FCLvNext(
 
         // ─────────────────────────────────────────────
         // 1️⃣ Config & context (trends, IOB, delta)
-        var config = loadFCLvNextConfig(preferences, input.isNight, input.nightTransitionFraction, input.effectiveISF)
+        var config = loadFCLvNextConfig(preferences, input.isNight, input.nightTransitionFraction, input.effectiveISF, input.realMaxBasalUh)
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────

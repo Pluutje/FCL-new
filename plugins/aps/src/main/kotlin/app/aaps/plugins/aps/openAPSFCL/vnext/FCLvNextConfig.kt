@@ -285,7 +285,12 @@ fun loadFCLvNextConfig(
     // 12/07/2026 (Ecko) — nodig voor de Learner's "laagMetNogAanwezigeIob"-check
     // (zie Dflearner.kt): een theoretische-verdere-daling-drempel, geschaald
     // met de actuele ISF i.p.v. een vaste eenheid die voor iedereen gelijk is.
-    effectiveIsfMmol: Double = 4.0
+    effectiveIsfMmol: Double = 4.0,
+    // 22/07/2026 (Ecko) — werkelijke, pomptype-afhankelijke max-basaal (E/u),
+    // doorgegeven vanuit DetermineBasalFCL.kt/profile.max_basal. 0.0 (default,
+    // voor eventuele andere/oudere call sites) => val terug op de vaste
+    // 15.0-default hieronder bij maxTempBasalRate.
+    realMaxBasalUh: Double = 0.0
 ): FCLvNextConfig {
 
     // ── Override (geschreven door FCL Analyzer na goedkeuring) ────────────
@@ -430,7 +435,15 @@ fun loadFCLvNextConfig(
         episodeMinConsistency = 0.45,
 
         deliveryCycleMinutes = 5,
-        maxTempBasalRate     = 15.0,
+        // 22/07/2026 (Ecko): was een vaste 15.0 — kwam nog uit de tijd dat bij
+        // een sensorstoring/dropout de basaalafgifte ongewenst door kon lopen;
+        // die situatie is inmiddels via andere weg opgelost, dus de vaste 15.0
+        // als zodanig verviel. Nu de werkelijke, pomptype-afhankelijke grens
+        // (zie computeRealMaxBasalUh in OpenAPSFCLPlugin.kt): absoluut voor een
+        // pomp als Metrum, %-van-profiel-basaal voor een pomp als Dana. 15.0
+        // blijft staan als veilige fallback-default voor het (in de praktijk
+        // niet voorkomende) geval dat realMaxBasalUh niet is meegegeven.
+        maxTempBasalRate     = if (realMaxBasalUh > 0.0) realMaxBasalUh else 15.0,
 
         mealSlopeMin            = 0.35,
         mealSlopeSpan           = 0.8,
@@ -669,6 +682,20 @@ private fun applyDoseDistributionStyle(
 ): FCLvNextConfig {
 
     return when (cfg.doseDistributionStyle) {
+
+        // 22/07/2026 (Ecko) — nieuwe, extra trap boven VERY_SMOOTH. Aanleiding:
+        // de pomp-max bleek terecht 50 E/u (U200-insuline), dus er is nu ruimte
+        // om nóg meer via basaal te laten lopen dan VERY_SMOOTH's 85%. Cijfers
+        // zijn een eerste, voorzichtige extrapolatie van hetzelfde
+        // schaal-patroon als VERY_SMOOTH — nog niet in de praktijk getest,
+        // dus gerust bijstellen na een paar dagen ervaring.
+        "SUPER_SMOOTH" -> cfg.copy(
+            hybridPercentage = 95,
+            smallDoseThresholdU = (cfg.smallDoseThresholdU * 1.65).coerceIn(0.40, 0.90),
+            microCapFracOfMaxSmb = (cfg.microCapFracOfMaxSmb * 0.55).coerceIn(0.04, 0.12),
+            smallCapFracOfMaxSmb = (cfg.smallCapFracOfMaxSmb * 0.55).coerceIn(0.08, 0.35),
+            absorptionDoseFactor = (cfg.absorptionDoseFactor * 0.55).coerceIn(0.06, 0.18)
+        )
 
         "VERY_SMOOTH" -> cfg.copy(
             hybridPercentage = 85,

@@ -15,6 +15,7 @@ import app.aaps.core.interfaces.aps.AutosensResult
 import app.aaps.core.interfaces.aps.CurrentTemp
 import app.aaps.core.interfaces.aps.GlucoseStatus
 import app.aaps.core.interfaces.aps.OapsProfileFCL
+import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.configuration.Config
@@ -291,7 +292,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             min_5m_carbimpact = 0.0,
             max_iob = preferences.get(DoubleKey.fcl_vnext_MaxIOB),
             max_daily_basal = profile.getMaxDailyBasal(),
-            max_basal = 25.0,
+            max_basal = computeRealMaxBasalUh(),
             min_bg = minBg,
             max_bg = maxBg,
             target_bg = targetBg,
@@ -404,12 +405,52 @@ open class OpenAPSFCLPlugin @Inject constructor(
         return maxIob
     }
 
+    // ── Werkelijke pomp-max-basaal, pomptype-onafhankelijk (22/07/2026, Ecko) ──
+    // Sommige pompen (bijv. Metrum) hanteren een vaste ABSOLUTE E/u-grens
+    // (pumpDescription.maxTempAbsolute). Andere (bijv. Dana) hanteren een
+    // PERCENTAGE van de huidige profiel-basaalstand (bijv. 500% — dus bij
+    // 1,5 E/u profiel-basaal is de echte grens 7,5 E/u, niet een vast getal).
+    // Beide stijlen hier herleiden tot ÉÉN effectieve E/u-waarde, zodat noch
+    // FCLvNext.kt noch deze constraint-check zelf per pomptype hoeft te weten
+    // hoe de grens is opgebouwd — en zodat dit generiek blijft werken voor
+    // toekomstige gebruikers met een ander pomptype (geen hardcoded
+    // per-gebruiker waarde, conform eerdere afspraak).
+    // Was hiervoor een vaste 25.0 op alle plekken — die klopte toevallig
+    // ongeveer voor een pomp als Metrum, maar was voor een percentage-pomp
+    // als Dana veel te ruim (Dana's werkelijke grens ligt normaliter ruim
+    // onder 25 E/u).
+    private fun computeRealMaxBasalUh(): Double {
+        return try {
+            val pumpDesc = activePlugin.activePump.pumpDescription
+            val currentBasalUh = activePlugin.activePump.baseBasalRate.cU
+            val real =
+                if (pumpDesc.tempBasalStyle == PumpDescription.ABSOLUTE) {
+                    pumpDesc.maxTempAbsolute
+                } else {
+                    currentBasalUh * (pumpDesc.maxTempPercent / 100.0)
+                }
+            // Sanity-vloer: een kapotte/lege pump-description mag nooit een
+            // 0- of negatieve grens opleveren (dat zou FCLvNext's basaal-pad
+            // volledig dichtzetten). Val in dat geval terug op de oude 25.0.
+            if (real > 0.5) real else 25.0
+        } catch (e: Exception) {
+            25.0
+        }
+    }
+
     override fun applyBasalConstraints(absoluteRate: Constraint<Double>, profile: Profile): Constraint<Double> {
         if (isEnabled()) {
-            val maxBasal = 25.0
+            // 22/07/2026 (Ecko) OPGELOST: de 50 E/u bleek GEEN bug — sinds AAPS'
+            // U200-ondersteuning toont de pomp-max in echte eenheden. Deze Medtrum
+            // kan mechanisch 0,25 mL/u; bij U200-insuline is dat 50E/u (bij U100
+            // zou het 25E/u zijn geweest). computeRealMaxBasalUh() gaf dus gewoon
+            // het juiste antwoord. Terug naar de pomp-bewuste berekening, ook hier
+            // (dezelfde als FCLvNext's eigen basaal/SMB-verdeling) — geen reden meer
+            // om deze buitenste check los te houden.
+            val maxBasal = computeRealMaxBasalUh()
             absoluteRate.setIfSmaller(maxBasal, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxBasal, rh.gs(R.string.maxvalueinpreferences)), this)
-            absoluteRate.setIfSmaller(25.0, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, 25.0, rh.gs(R.string.max_basal_multiplier)), this)
-            absoluteRate.setIfSmaller(25.0, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, 25.0, rh.gs(R.string.max_daily_basal_multiplier)), this)
+            absoluteRate.setIfSmaller(maxBasal, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxBasal, rh.gs(R.string.max_basal_multiplier)), this)
+            absoluteRate.setIfSmaller(maxBasal, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxBasal, rh.gs(R.string.max_daily_basal_multiplier)), this)
         }
         return absoluteRate
     }
@@ -424,28 +465,28 @@ open class OpenAPSFCLPlugin @Inject constructor(
         return value
     }
 
- //   override fun configuration(): JsonObject = JsonObject(emptyMap())
+    //   override fun configuration(): JsonObject = JsonObject(emptyMap())
 
- //   override fun applyConfiguration(configuration: JsonObject) {}
+    //   override fun applyConfiguration(configuration: JsonObject) {}
 
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
-           key = "fcl_vnext_settings",
-           titleResId = R.string.openaps_fcl,
-           items = listOf(
-               PreferenceSubScreenDef(
-                   key = "fcl_vnext_general",
-                   titleResId = R.string.fcl_vnext_general_title,
-                   items = listOf(
-                       DoubleKey.fcl_aaps_mulitplier_day,
-                       DoubleKey.fcl_aaps_mulitplier_night,
+        key = "fcl_vnext_settings",
+        titleResId = R.string.openaps_fcl,
+        items = listOf(
+            PreferenceSubScreenDef(
+                key = "fcl_vnext_general",
+                titleResId = R.string.fcl_vnext_general_title,
+                items = listOf(
+                    DoubleKey.fcl_aaps_mulitplier_day,
+                    DoubleKey.fcl_aaps_mulitplier_night,
                     /*   DoubleKey.max_bolus_night,
                        DoubleKey.fcl_vnext_MaxIOB,
                        StringKey.fcl_vnext_dose_distribution_style,
                        // StringKey.fcl_vnext_night_response_style verwijderd (18/06/2026)
                        // DoubleKey.fcl_vnext_nf_level   */
-                   )
-               ),
+                )
+            ),
             /*   PreferenceSubScreenDef(
                    key = "fcl_vnext_context",
                    titleResId = R.string.fcl_vnext_context_title,
@@ -458,13 +499,13 @@ open class OpenAPSFCLPlugin @Inject constructor(
                        StringKey.fcl_vnext_activity_behavior
                    )
                )   */
-           ),
-           icon = pluginDescription.icon
-       )
-  /*  override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
-        key = "fcl_vnext_settings",
-        titleResId = R.string.openaps_fcl,
-        items = emptyList(),
+        ),
         icon = pluginDescription.icon
-    )   */
+    )
+    /*  override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
+          key = "fcl_vnext_settings",
+          titleResId = R.string.openaps_fcl,
+          items = emptyList(),
+          icon = pluginDescription.icon
+      )   */
 }

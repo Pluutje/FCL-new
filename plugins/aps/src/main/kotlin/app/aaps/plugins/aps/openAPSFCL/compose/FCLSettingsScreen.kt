@@ -126,6 +126,8 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     }
 
     val doseOptions = listOf(
+        // 22/07/2026 (Ecko) — nieuwe trap boven VERY_SMOOTH, zie FCLvNextConfig.kt
+        "SUPER_SMOOTH" to s.doseStyleLabel("SUPER_SMOOTH"),
         "VERY_SMOOTH" to s.doseStyleLabel("VERY_SMOOTH"),
         "SMOOTH"      to s.doseStyleLabel("SMOOTH"),
         "BALANCED"    to s.doseStyleLabel("BALANCED"),

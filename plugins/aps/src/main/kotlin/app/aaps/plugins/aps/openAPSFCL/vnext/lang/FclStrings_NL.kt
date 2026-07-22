@@ -63,6 +63,7 @@ object FclStrings_NL : FclStrings {
     }
 
     override fun doseStyleLabel(key: String) = when (key) {
+        "SUPER_SMOOTH" -> "\uD83C\uDF0A\uD83C\uDF0A Super smooth"
         "VERY_SMOOTH" -> "\uD83C\uDF0A Ultra smooth"
         "SMOOTH"      -> "\uD83E\uDEB7 Smooth"
         "BALANCED"    -> "\u2696\uFE0F Balanced"

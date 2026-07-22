@@ -582,6 +582,10 @@ class DetermineBasalFCL @Inject constructor(
                 realDeliveredBolusU = realDelivery.bolusU,
                 pendingBolusU10min = pendingBolusU10min,
                 profileBasalUH = profile_current_basal,
+                // 22/07/2026 (Ecko): werkelijke, pomptype-afhankelijke max-basaal
+                // (zie computeRealMaxBasalUh in OpenAPSFCLPlugin.kt) — vervangt de
+                // vaste 15.0 die voorheen in FCLvNextConfig stond.
+                realMaxBasalUh = profile.max_basal,
                 activityActive = activity.isActive,
                 activityInsulinPct = activity.insulinPercentage,
                 activityTargetAdjust = activity.targetAdjust,
@@ -666,6 +670,20 @@ class DetermineBasalFCL @Inject constructor(
                 // voor trends/slope (zie FCLvNextBgHistoryProvider.kt), dus dit
                 // toont daadwerkelijk wat FCLvNext ziet, niet een aparte/losse lookup.
                 last3DbPoints = bgHistoryProvider.getLastHours(1).takeLast(3),
+                // 22/07/2026 (Ecko) — leesbare pompnaam + werkelijke max-basaal
+                // (dezelfde, al bestaande pomptype-bewuste waarde als
+                // profile.max_basal, zie computeRealMaxBasalUh in
+                // OpenAPSFCLPlugin.kt) voor de nieuwe Pomp-sectie.
+                pumpNaam = try {
+                    activePlugin.activePump.model().description
+                } catch (e: Exception) { "" },
+                pumpMaxBasalUh = profile.max_basal,
+                // 22/07/2026 (Ecko) — 50 E/u bleek correct (U200-insuline in een
+                // pomp die mechanisch 0,25 mL/u max haalt); geen debug meer nodig.
+                // Huidige basaalstand blijft wel zichtbaar (heeft meerwaarde).
+                pumpCurrentBasalUh = try {
+                    activePlugin.activePump.baseBasalRate.cU
+                } catch (e: Exception) { 0.0 },
                 recentSteps1h = recentSteps1h,
                 recentCalories1h = recentCalories1h,
                 recentHr1h = recentHr1h,
