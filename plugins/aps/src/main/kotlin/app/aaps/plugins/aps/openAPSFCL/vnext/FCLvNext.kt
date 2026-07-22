@@ -3546,7 +3546,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v17-2026-07-21-2103"
+    private val FCL_CODE_VERSION = "v19-2026-07-22-1145"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3704,6 +3704,26 @@ class FCLvNext(
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
     private var episodePeakCommitU: Double = loadEpisodePeakCommitU()
+    // ── Persistente lateDecayMul over cycli heen (22/07/2026, Ecko) ──────
+    // AANLEIDING (maaltijd 22/07 05:07): de taper-clamp verderop
+    // ("episodePeakCommitU * lateDecayMul", bedoeld als vangnet precies
+    // wanneer commandedDose van het kale energiemodel komt i.p.v. van een
+    // commit) bleek tandeloos op het moment dat het commit-pad tijdelijk
+    // geblokkeerd was (bijv. door commitCooldownMinutes) — want lateDecayMul
+    // wordt UITSLUITEND herberekend binnen het "if (effectiveCommitAllowed)"-
+    // blok verderop. Zolang dat blok niet draait, viel lateDecayMul terug op
+    // de neutrale cyclus-default 1.0, waardoor de taper-vloer feitelijk gelijk
+    // werd aan episodePeakCommitU zelf — geen afbouw meer, exact op het
+    // moment dat die het hardst nodig was. Concreet: 04:57-05:02 remde het
+    // commit-pad een verlangde 3,25U keurig af tot 0,46-0,55U; om 05:07
+    // (commit_allowed=false die ene cyclus) kwam er zonder die afbouw 3,20U
+    // ongeremd door, terwijl BG toen al op 7,9 stond (de piek werd 8,8).
+    //
+    // OPLOSSING: lateDecayMul overleeft nu de cyclus, net als episodePeakCommitU
+    // hierboven — zelfde levenscyclus, zelfde reset-momenten. Een cyclus die
+    // het commit-pad niet mag draaien, erft zo de LAATST bekende, echte
+    // afbouwstand i.p.v. terug te vallen op "geen afbouw".
+    private var lastKnownLateDecayMul: Double = 1.0
         set(value) {
             if (field != value) saveEpisodePeakCommitU(value)
             field = value
@@ -3934,6 +3954,7 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodePeakCommitU = 0.0
+            lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -4584,6 +4605,7 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodePeakCommitU = 0.0
+            lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -4618,6 +4640,7 @@ class FCLvNext(
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
             episodePeakCommitU = 0.0
+            lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
@@ -5591,13 +5614,53 @@ class FCLvNext(
         val firstCommitBypass =
             lastCommitAt == null && mealSignal.state == MealState.CONFIRMED
 
+        // ── Cooldown-bypass bij bevestigde aanhoudende stijging (22/07/2026, Ecko) ──
+        // AANLEIDING (maaltijd 22/07 05:07): sustainedHighSlopeMinutes haalde de
+        // VROEGE_STIJGING_SUSTAIN_MIN-drempel (15m) al om 04:47 (msms=9), maar
+        // ctx.consistency bleef tot 05:07 (msms=29) onder episodeMinConsistency
+        // (0.45) — pas op dát exacte moment waren alle voorwaarden van
+        // vroegeStijgingBevestigd (zie verderop) eindelijk vervuld. Maar precies
+        // die cyclus was commitAllowed al FALSE door de gewone cooldown (het
+        // vorige commit was 4 minuten eerder) — dus het hele commit-blok
+        // (inclusief de vroege-stijging-reset zelf) draaide niet, en de vervroegde,
+        // weloverwogen commit die hier hoorde te vallen kwam er domweg niet.
+        // In plaats daarvan viel de beslissing terug op het ongetemperde
+        // energiemodel-pad (zie de v18-fix bij lastKnownLateDecayMul hierboven,
+        // die dat pad inmiddels wel afremt — maar dat is een vangnet, geen
+        // vervanging voor de eigenlijke, bewust vervroegde commit).
+        //
+        // OPLOSSING: dezelfde vier voorwaarden als vroegeStijgingBevestigd
+        // hieronder (bewust gedupliceerd — dit is de enige manier om ze vóór de
+        // cooldown-poort te laten meewegen) mogen de cooldown net als
+        // firstCommitBypass opzij zetten. Vuurt hierdoor precies op het moment
+        // dat de aanhoudende stijging statistisch bevestigd is, i.p.v. te
+        // wachten tot de cooldown toevallig ook net verstreken is — en gaat via
+        // het gewone, beredeneerde commit-pad (dus mét de bestaande
+        // lateDecayMul=1.0-reset van vroegeStijgingNuVoorHetEerst), niet via het
+        // ongetemperde noodpad.
+        val curveConfirmtOmslagVoorBypass =
+            ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration <= 0.0
+        val vroegeStijgingBypass =
+            sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
+                ctx.consistency >= config.episodeMinConsistency &&
+                ctx.acceleration > 0.0 &&
+                !curveConfirmtOmslagVoorBypass &&
+                !vroegeStijgingBevestigdUsedThisEpisode
+
         val episodeMinutesForCommit =
             mealEpisodeStartTime?.let {
                 org.joda.time.Minutes.minutesBetween(it, now).minutes
             } ?: 999
 
-        val commitAllowed = firstCommitBypass || canCommitNow(now, ctx, config, episodeMinutesForCommit)
+        val commitAllowed = firstCommitBypass || vroegeStijgingBypass ||
+            canCommitNow(now, ctx, config, episodeMinutesForCommit)
         logRow.commitAllowed = commitAllowed
+        if (vroegeStijgingBypass) {
+            status.append(
+                "VROEGE-STIJGING COOLDOWN-BYPASS: sustained=${sustainedHighSlopeMinutes.toInt()}m " +
+                    "consistency=${"%.2f".format(ctx.consistency)}\n"
+            )
+        }
 // ─────────────────────────────────────────────
 // 🧠 LEARNING: commit fraction (single source)
 // ─────────────────────────────────────────────
@@ -5636,7 +5699,11 @@ class FCLvNext(
         // laatste raakt en legitieme vroege ramp-up-commits niet onderdrukt.
         var commandedDoseIsFromCommit = false
 
-        var lateDecayMul = 1.0  // bijgehouden voor logging; wordt in commit-blok ingesteld
+        // 22/07/2026 (Ecko): erft lastKnownLateDecayMul i.p.v. een neutrale
+        // 1.0 — zie kdoc bij de declaratie hierboven. Wordt hieronder in het
+        // commit-blok overschreven zodra dat blok wél draait; anders blijft
+        // de laatst bekende, echte afbouwstand van kracht voor de taper-clamp.
+        var lateDecayMul = lastKnownLateDecayMul
 
         // ── Anti-drip: kleine correcties niet elke cyclus ──
         if (commandedDose > 0.0 &&
@@ -6062,6 +6129,11 @@ class FCLvNext(
                             "(diepte=${"%.2f".format(omslagDiepte)})\n"
                     )
                 }
+
+                // Onthoud de volledig-aangepaste stand van dit cyclus voor als een
+                // latere cyclus het commit-blok overslaat (zie kdoc bij
+                // lastKnownLateDecayMul hierboven).
+                lastKnownLateDecayMul = lateDecayMul
 
                 logRow.toppingOutBoost = toppingOutBoost
                 if (postOmslagFloorCut > 0.001) {
