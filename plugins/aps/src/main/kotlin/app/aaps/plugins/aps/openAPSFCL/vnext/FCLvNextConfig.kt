@@ -538,8 +538,19 @@ fun loadFCLvNextConfig(
         topGuardCapMin                  = 0.20,
         topGuardCapMax                  = 0.65,
         peakPressureBonusMaxIob         = 0.35,
-        iobPowerDay                     = 2.1,
-        iobPowerNight                   = 2.3,
+        // 23/07/2026 (Ecko) — omlaag van 2.1/2.3 naar 1.6/1.8: bij de maaltijd
+        // van vanochtend (05:07-05:22 UTC) bleef finalDose's IOB-afbouw
+        // (iobDampingFactor, dit vermogen bepaalt de vorm van de curve tussen
+        // iobStart en iobMax) vlak bij 1,0 tot IOB al ruim boven de helft van
+        // iobMax zat — bij macht 2,1 blijft de curve lang hoog en knijpt pas
+        // scherp af vlak vóór iobMax. Een lagere macht (rechter/vroeger
+        // afbuigende curve) laat de afbouw eerder beginnen, precies het
+        // "iets sneller" dat gevraagd werd. Dit raakt NIET het aparte, al
+        // milde commitIobPower-pad (dat blijft ongewijzigd) — alleen finalDose.
+        // Eerste, voorzichtige aanpassing — nog niet doorgerekend op andere
+        // episodes deze week, dus gerust bijstellen na een paar maaltijden.
+        iobPowerDay                     = 1.6,
+        iobPowerNight                   = 1.8,
         peakApproachIobThreshold        = 0.62,
         peakApproachMaxReduction        = 0.20,
         microRampIobMax                 = 0.45,

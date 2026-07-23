@@ -461,13 +461,18 @@ class FCLCycleLogRepository @Inject constructor(
         val file = File(dir, "FCLvNext_Log_v9.csv")
 
         val sep = ";"
+        // 23/07/2026 (Ecko) — ts_utc blijft de bron van waarheid (ondubbelzinnig,
+        // geen zomer/wintertijd-verwarring in de data zelf); ts_local is puur een
+        // extra, leesbare kolom ernaast. Europe/Amsterdam schakelt automatisch
+        // CET/CEST — geen handmatige +1/+2-aanpassing nodig.
         val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC)
+        val fmtLocal = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneId.of("Europe/Amsterdam"))
 
         file.bufferedWriter().use { writer ->
             writer.write(csvHeader(sep))
             writer.newLine()
             rows.forEach { row ->
-                writer.write(row.toCsvLine(sep, fmt))
+                writer.write(row.toCsvLine(sep, fmt, fmtLocal))
                 writer.newLine()
             }
         }
@@ -488,7 +493,7 @@ class FCLCycleLogRepository @Inject constructor(
 // group-objecten, bijv. `row.slope` is nu `row.trends.slope`.
 
 private fun csvHeader(sep: String): String = listOf(
-    "schema_version", "ts_utc",
+    "schema_version", "ts_utc", "ts_local",
     "is_night", "sterkte_pct", "timing_pct", "volhoudendheid_pct", "nacht_factor_pct",
     "doseDistributionStyle", "nightResponseStyle",
     "code_version", "app_restart_this_cycle",
@@ -551,9 +556,11 @@ private fun csvHeader(sep: String): String = listOf(
 
 private fun FCLCycleLogEntity.toCsvLine(
     sep: String,
-    fmt: DateTimeFormatter
+    fmt: DateTimeFormatter,
+    fmtLocal: DateTimeFormatter
 ): String {
     val ts = fmt.format(Instant.ofEpochMilli(timestampMs))
+    val tsLocal = fmtLocal.format(Instant.ofEpochMilli(timestampMs))
     val deltaTarget = glucoseIob.bg - glucoseIob.target
 
     fun d2(v: Double) = "%.2f".format(v)
@@ -562,7 +569,7 @@ private fun FCLCycleLogEntity.toCsvLine(
     fun bool(v: Boolean) = v.toString()
 
     return listOf(
-        schemaVersion, ts,
+        schemaVersion, ts, tsLocal,
         bool(context.isNight), context.sterktePct, context.timingPct, context.volhoudendheidPct, context.nachtFactorPct,
         context.doseDistributionStyle, context.nightResponseStyle,
         context.codeVersion, bool(context.appRestartThisCycle),
