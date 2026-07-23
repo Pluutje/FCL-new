@@ -1569,10 +1569,25 @@ private fun hypoProtection(
     // Bij actieve maaltijdstijging (CONFIRMED + recentSlope>=2.0 + bgNow>=7.0)
     // compenseert glucoseabsorptie ~45% van de insulinewerking in 90 min.
     // Zonder compensatie blokkeert de hypo-guard stage2 bij BG=9.2 stijgend.
+    //
+    // UITBREIDING (23/07/2026, Ecko) — bgNow>=7.0 miste stelselmatig de EERSTE,
+    // grootste commit van een maaltijd: die valt vrijwel altijd bij bgNow 6-6.5
+    // (het moment waarop CONFIRMED net vaststaat), dus zonder compensatie werd
+    // precies de belangrijkste dosis het zwaarst geclipt. Nagerekend tegen de
+    // hele week (24 vergelijkbare CONFIRMED-momenten met bgNow<7.0): in de
+    // gevallen met iobRatio<0.10 (vers, nog nauwelijks bestaande IOB) bleef de
+    // BG daarna altijd doorstijgen of vlak (nooit een echte hypo) — de vier
+    // keer dat er die week WEL een echte, betekenisvolle daling volgde
+    // (tot 3.4-4.6 mmol/L) had iobRatio steeds >=0.15 (al opgebouwde IOB uit
+    // een eerdere commit/episode maakt een aanvullende volle dosis wél
+    // risicovol). Vandaar: iobRatio<0.10 als tweede, onafhankelijke poort naast
+    // bgNow>=7.0 — laat de bestaande bgBlockThreshold-marge (4.70) verder
+    // volledig intact, verandert alleen HOEVEEL absorptie-compensatie wordt
+    // toegekend, niet de ondergrens zelf.
     val mealCompensationFactor = if (
         mealSignal?.state == MealState.CONFIRMED &&
         ctx.recentSlope >= 2.0 &&
-        ctx.input.bgNow >= 7.0
+        (ctx.input.bgNow >= 7.0 || ctx.iobRatio < 0.10)
     ) 0.55 else 1.0
 
     fun insulinActionFrac(min: Int): Double = when {
@@ -3612,7 +3627,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v27-2026-07-23-1030"
+    private val FCL_CODE_VERSION = "v31-2026-07-23-1745"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-

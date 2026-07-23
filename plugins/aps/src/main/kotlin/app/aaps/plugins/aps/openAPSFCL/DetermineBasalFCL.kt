@@ -431,6 +431,14 @@ class DetermineBasalFCL @Inject constructor(
         val dayNightHelper = FCLvNextDayNightHelper(preferences)
         val isNight: Boolean = dayNightHelper.isNightNow()
 
+        // Nacht-AI-adviseur — randdetectie (23/07/2026, Ecko). Puur een
+        // 1-regel trigger: alle logica (dedup per dag, achtergrond-thread,
+        // opslag) zit volledig in FclNightAiAdvisorScheduler/-Store, los van
+        // de bestaande (dag-)AI-adviseur. onCycle() keert altijd direct terug
+        // en start de eventuele HTTP-aanroep nooit synchroon op dit pad.
+        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
+            .onCycle(context, isNight)
+
         // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
         // FCLvNextDayNightHelper.minutesSinceNightStart() en
         // FclNachtOvergangSettings.kt voor de volledige aanleiding/afweging.
@@ -722,6 +730,29 @@ class DetermineBasalFCL @Inject constructor(
 
         } else {
             consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/5 (min 25 min history)")
+
+            // Sensorwissel/gat-duiding (23/07/2026, Ecko) — dit skip-pad kan niet
+            // veilig "overruled" worden: met te weinig recente, betrouwbare
+            // BG-punten kan FCLvNext een sensorwissel/-warmup niet onderscheiden
+            // van een echte sensorstoring/-dropout, en precies dát verschil kan
+            // niet uit de databeschikbaarheid zelf worden afgeleid — vandaar dat
+            // dit pad bewust conservatief blijft (zie ook de kdoc hieronder over
+            // de bestaande neutraliseer-actie). In plaats daarvan hier alleen de
+            // melding verduidelijkt: leg uit WAT er aan de hand is en geef een
+            // concrete, nuttige suggestie (vingerprik + eventueel kalibreren),
+            // zodat dit niet als een onverklaarde "skip" overkomt.
+            val newestPointAgeMin = bgHistoryPoints.lastOrNull()?.let {
+                (dateUtil.now() - it.timestamp.millis) / 60_000L
+            }
+            if (newestPointAgeMin == null || newestPointAgeMin >= 15L) {
+                consoleError.add(
+                    "Vermoedelijk een gat in de sensordata (bv. door een sensorwissel " +
+                        "of -warmup) — FCLvNext draait hierdoor meestal zo'n 5 cycli " +
+                        "(~25 minuten) niet actief mee, totdat er weer genoeg recente " +
+                        "metingen binnenkomen. Dit is een goed moment om de sensor met " +
+                        "een vingerprik te vergelijken en zo nodig te kalibreren."
+                )
+            }
             // BUGFIX (11/07/2026, Ecko): deze tak deed voorheen verder niets — een
             // op dat moment lopende, verhoogde tijdelijke basaal bleef gewoon
             // doorlopen, want er werd geen rT ingesteld. Zelfde risicoklasse als

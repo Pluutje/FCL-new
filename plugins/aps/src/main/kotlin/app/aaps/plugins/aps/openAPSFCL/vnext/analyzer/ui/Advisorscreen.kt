@@ -849,6 +849,15 @@ fun NachtControlTab(
         // Dag, die ook de geleerde D/F tonen, niet de Agressiviteit-schuif).
         NfKaart(s = FclStrings.get(context), currentNf = currentNfLevel)
 
+        // ── Nacht-AI-adviseur (23/07/2026, Ecko) — volledig onafhankelijk
+        // van de dag-AI-adviseur (FclAiAdvisorScreen): eigen trigger (1x per
+        // ochtend via FclNightAiAdvisorScheduler.onCycle in DetermineBasalFCL),
+        // eigen opslag, puur advies over basaal-uren, nooit automatisch
+        // toegepast. Vóór de regel-gebaseerde vensters, want dit is het
+        // nieuwe, primaire adviespad; de vensters eronder blijven als
+        // onderliggend detail/context beschikbaar.
+        NightAiAdvisorCard(context = context)
+
         // ── Nachtvensters (legacy — blijft zichtbaar voor context) ───────
         NachtVenstersCompact(nightWindows = nightWindows)
     }
@@ -866,10 +875,16 @@ fun NachtControlTab(
  * geadviseerde wijziging vloeiend: de piek van de aanpassing valt op het
  * effectHour, de uren ervoor en erna lopen geleidelijk af/op.
  */
+// UITBREIDING (23/07/2026, Ecko): offset ±3 toegevoegd (klein gewicht 0.08) om
+// een harde "muur" aan de rand van het venster te voorkomen — zonder deze stap
+// sprong het advies van bv. -10% op uur 22 naar exact 0% op uur 21, wat bij een
+// uur-overgang een onnatuurlijke knik in het basaalprofiel zou geven. Met ±3
+// loopt de aanpassing geleidelijker naar nul uit.
 private fun gaussWeightForOffset(offset: Int): Double = when (kotlin.math.abs(offset)) {
     0 -> 1.0
     1 -> 0.55
     2 -> 0.20
+    3 -> 0.08
     else -> 0.0
 }
 
@@ -906,6 +921,26 @@ private fun computeSpreadAdvice(
     // Spread: per klok-uur de bijdrage van het kern-uur en zijn buren optellen
     val result = mutableMapOf<Int, Triple<Double, Double, Double>>()
     for (targetHour in 0..23) {
+        // BUGFIX (23/07/2026, Ecko): een kern-uur (targetHour zelf heeft een eigen,
+        // rechtstreeks gemeten signaal) werd hierboven MEE geblend met zijn eigen
+        // buren — inclusief andere, eveneens kern-uren binnen bereik ±3. Bij een
+        // aaneengesloten reeks kern-uren (bv. 22,23,00,01,02,03,04 — een hele nacht)
+        // kreeg zo goed als elk uur bijdragen van 4-5 verschillende buur-kernuren
+        // tegelijk, waardoor alle percentages naar één gemiddelde toe convergeerden
+        // (het "overal -4%"-effect). Fix: een kern-uur behoudt zijn EIGEN, rechtstreeks
+        // gemeten waarde; de spread hieronder vult alleen de uren aan die zelf geen
+        // kern-uur zijn.
+        val ownCore = coreShifts[targetHour]
+        if (ownCore != null) {
+            val (ownShift, ownCurrent) = ownCore
+            val advisedUph = (ownCurrent * (1.0 + ownShift / 100.0)).coerceAtLeast(0.0)
+            val confidence = nightWindows
+                .filter { it.effectHour == targetHour && it.advisedConfidence > 0 }
+                .map { it.advisedConfidence }.average().takeIf { !it.isNaN() } ?: 0.5
+            result[targetHour] = Triple(ownShift, advisedUph, confidence)
+            continue
+        }
+
         var weightedShiftSum = 0.0
         var weightSum = 0.0
         for ((coreHour, shiftAndCurrent) in coreShifts) {
@@ -940,6 +975,117 @@ private fun computeSpreadAdvice(
 // Toont nachtvensters met concreet basaal-advies per uur-slot.
 // BASAL_DOWN_PRECURSOR (23/06/2026, Ecko): voorloper-signaal voor te hoog
 // basaal — BG stabiel/dalend bij negatieve IOB, nog nabij target.
+
+@Composable
+private fun NightAiAdvisorCard(context: android.content.Context) {
+    var result by remember {
+        mutableStateOf(
+            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
+                .latestResult(context)
+        )
+    }
+    var isRequesting by remember { mutableStateOf(false) }
+
+    fun localFmt(utc: String): String = try {
+        val instant = java.time.Instant.parse(utc)
+        java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+            .withZone(java.time.ZoneId.of("Europe/Amsterdam"))
+            .format(instant)
+    } catch (_: Exception) { utc }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "\uD83C\uDF19 Nacht-AI-adviseur (basaal)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedButton(
+                    onClick = {
+                        isRequesting = true
+                        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
+                            .forceRunNow(context) { r ->
+                                result = r
+                                isRequesting = false
+                            }
+                    },
+                    enabled = !isRequesting &&
+                        !app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler.isRunning()
+                ) {
+                    Text(if (isRequesting) "\u23F3 Bezig\u2026" else "Nu vernieuwen")
+                }
+            }
+            Text(
+                "Puur advies over basaal-uren — wordt nooit automatisch toegepast. " +
+                    "Draait zelfstandig 1x per ochtend zodra de nacht eindigt, los van de dag-adviseur.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            val r = result
+            when {
+                r == null -> Text(
+                    "Nog geen rapport \u2014 wacht op het einde van de eerstvolgende nacht, " +
+                        "of druk op \"Nu vernieuwen\".",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                r.parseError != null -> Text(
+                    "\u26A0\uFE0F ${r.parseError}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                else -> {
+                    Text(
+                        "Rapport van ${localFmt(r.generatedAtUtc)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    r.summaryNl?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (r.suggestions.isEmpty()) {
+                        Text(
+                            "Geen structurele basaal-aanpassing voorgesteld.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else {
+                        r.suggestions.forEach { s ->
+                            Column(modifier = Modifier.padding(top = 4.dp)) {
+                                val pijl = if (s.direction == "LOWER") "\uD83D\uDD3D" else "\uD83D\uDD3C"
+                                val teken = if (s.suggestedShiftPct > 0) "+" else ""
+                                // Concrete doelwaarde tonen naast het % (23/07/2026, Ecko) —
+                                // "+10% huidig 1 -> 1,1 U/h" i.p.v. alleen het percentage,
+                                // zodat je niet zelf hoeft om te rekenen wat het advies
+                                // concreet betekent voor de basaalstand.
+                                val doelUph = (s.currentBasalUph * (1.0 + s.suggestedShiftPct / 100.0))
+                                    .coerceAtLeast(0.0)
+                                Text(
+                                    "$pijl ${s.hourLabel}  ($teken${"%.0f".format(s.suggestedShiftPct)}%, " +
+                                        "nu ${"%.2f".format(s.currentBasalUph)} \u2192 ${"%.2f".format(doelUph)} U/h) \u2014 " +
+                                        "vertrouwen ${(s.confidence * 100).toInt()}%",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(s.reasonNl, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun NachtVenstersCompact(nightWindows: List<NightWindowEntity>) {
@@ -1011,12 +1157,18 @@ private fun NachtVenstersCompact(nightWindows: List<NightWindowEntity>) {
                 nightWindows.filter { it.activeProfileSignature == mostRecentSignature }
             else nightWindows
 
+            // Nacht-volgorde i.p.v. kale numerieke sort (23/07/2026, Ecko): een
+            // nachtvenster loopt over middernacht heen (bv. 22:00...04:00) — met
+            // .sorted() kwam 00:00 vóór 22:00/23:00 te staan, niet chronologisch
+            // voor deze context. Uren vóór het middaguur worden als "vroege ochtend,
+            // dus later in de nacht" behandeld (+24) zodat bv. 22,23,00,01 correct
+            // na elkaar sorteren i.p.v. 00,01,22,23.
             val actionableHours = spreadAdvice.keys
                 .filter { hour ->
                     val (shiftPct, _, _) = spreadAdvice[hour]!!
                     kotlin.math.abs(shiftPct) >= 3.0  // toon alleen uren met ≥3% aanpassing
                 }
-                .sorted()
+                .sortedBy { hour -> if (hour < 12) hour + 24 else hour }
 
             if (actionableHours.isEmpty()) {
                 Text(

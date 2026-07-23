@@ -490,6 +490,24 @@ object NightWindowAnalyzer {
                 iobDelta <= -0.10 ->
                 NightDriftSignal.BASAL_DOWN_PRECURSOR
 
+            // ── NIEUW (23/07/2026, Ecko): aanhoudend-laag-IOB-patroon ────────
+            // BASAL_DOWN_PRECURSOR hierboven vangt alleen de MOMENTOPNAME waarop
+            // IOB nog actief aan het dalen is (iobDelta <= -0.10). Maar zodra IOB
+            // al eerder is 'gebodemd' en daarna een tijd vlak laag/negatief blijft
+            // hangen (iobDelta ~0 binnen dít venster — geen nieuwe daling meer),
+            // viel dat voorheen altijd in NEUTRAL. Terwijl een aanhoudend lage of
+            // negatieve IOB bij een verder stabiele BG precies hetzelfde
+            // onderliggende 'basaal staat te hoog'-signaal is — alleen is de acute
+            // daling zelf al voorbij tegen de tijd dat dit venster wordt bekeken.
+            // Aanleiding: bij Ecko bleef dit patroon meerdere weken lang bijna elke
+            // nacht optreden zonder ooit een advies op te leveren.
+            // avgIob <= -0.15 (i.p.v. simpelweg <0) vereist een duidelijk negatieve
+            // stand, geen ruis rond nul, zodat dit niet te lichtzinnig afgaat.
+            abs(avgBg - avgTarget) <= 0.8 &&
+                abs(bgSlopePerHour) <= 0.20 &&
+                avgIob <= -0.15 ->
+                NightDriftSignal.BASAL_DOWN_PRECURSOR
+
             abs(avgBg - avgTarget) <= 0.5 &&
                 abs(bgSlopePerHour) <= 0.15 ->
                 NightDriftSignal.NEUTRAL

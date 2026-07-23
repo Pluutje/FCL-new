@@ -11,6 +11,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.BasalProfileHistoryEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase
+import kotlinx.coroutines.runBlocking
 
 class FclBasalProfileNightLogger(
     private val context: Context,
@@ -24,6 +27,7 @@ class FclBasalProfileNightLogger(
         private const val PREFS_NAME = "fcl_basal_profile_logger"
         private const val KEY_HAS_STATE = "has_state"
         private const val KEY_LAST_SIGNATURE = "last_signature"
+        private const val KEY_DB_BACKFILLED = "db_backfilled_v1"
 
         private const val EVENT_INIT = "INIT"
         private const val EVENT_PROFILE_CHANGED = "PROFILE_CHANGED"
@@ -40,6 +44,14 @@ class FclBasalProfileNightLogger(
         currentTimeMillis: Long,
         isNight: Boolean
     ) {
+        // BUGFIX (23/07/2026, Ecko): deze logger schreef altijd al naar de CSV,
+        // maar de Room-tabel basal_profile_history (waar Nightwindowanalyzer.kt
+        // zijn activeProfileBasalUph vandaan haalt) werd NERGENS in de codebase
+        // ooit gevuld — vandaar de aanhoudende "nu 0.00 U/h". Eenmalige backfill
+        // vanuit de bestaande CSV, plus (verderop) een doorlopende DB-insert naast
+        // elke CSV-regel, zodat de tabel vanaf nu bijblijft.
+        maybeBackfillDb()
+
         val file = getFile()
         val fileWasCreatedNow = ensureFileExistsWithHeader(file)
 
@@ -69,6 +81,15 @@ class FclBasalProfileNightLogger(
                         hourlyBasalUnitsPerHour = hourlyBasal
                     )
                 )
+                persistToDb(
+                    now = now,
+                    localTs = localNow.format(localFormatter),
+                    zoneId = zone.id,
+                    eventType = EVENT_INIT,
+                    isNight = isNight,
+                    signature = signature,
+                    hourlyBasalUnitsPerHour = hourlyBasal
+                )
 
                 persistState(signature)
             }
@@ -91,6 +112,15 @@ class FclBasalProfileNightLogger(
                         hourlyBasalUnitsPerHour = hourlyBasal
                     )
                 )
+                persistToDb(
+                    now = now,
+                    localTs = localNow.format(localFormatter),
+                    zoneId = zone.id,
+                    eventType = EVENT_PROFILE_CHANGED,
+                    isNight = isNight,
+                    signature = signature,
+                    hourlyBasalUnitsPerHour = hourlyBasal
+                )
 
                 persistState(signature)
             }
@@ -102,10 +132,145 @@ class FclBasalProfileNightLogger(
     }
 
     private fun persistState(signature: String) {
+
         prefs.edit()
+
             .putBoolean(KEY_HAS_STATE, true)
+
             .putString(KEY_LAST_SIGNATURE, signature)
+
             .apply()
+
+    }
+
+
+    // ── DB-synchronisatie (23/07/2026, Ecko) ────────────────────────────────
+    // Zie kdoc bij onFiveMinuteTick: schrijft dezelfde snapshot die ook naar
+    // de CSV gaat, aanvullend naar de Room-tabel basal_profile_history — dat
+    // is de tabel waar Nightwindowanalyzer.kt zijn activeProfileBasalUph uit
+    // haalt. Best-effort: een DB-fout mag nooit de CSV-logging (en al
+    // helemaal niet de dosering zelf) verstoren, vandaar de brede try/catch.
+    private fun persistToDb(
+        now: Instant,
+        localTs: String,
+        zoneId: String,
+        eventType: String,
+        isNight: Boolean,
+        signature: String,
+        hourlyBasalUnitsPerHour: List<Double>
+    ) {
+        try {
+            val entity = BasalProfileHistoryEntity(
+                tsUtc = now.toString(),
+                tsLocal = localTs,
+                timezone = zoneId,
+                eventType = eventType,
+                isNight = isNight,
+                profileSignature = signature,
+                basal00 = hourlyBasalUnitsPerHour[0],
+                basal01 = hourlyBasalUnitsPerHour[1],
+                basal02 = hourlyBasalUnitsPerHour[2],
+                basal03 = hourlyBasalUnitsPerHour[3],
+                basal04 = hourlyBasalUnitsPerHour[4],
+                basal05 = hourlyBasalUnitsPerHour[5],
+                basal06 = hourlyBasalUnitsPerHour[6],
+                basal07 = hourlyBasalUnitsPerHour[7],
+                basal08 = hourlyBasalUnitsPerHour[8],
+                basal09 = hourlyBasalUnitsPerHour[9],
+                basal10 = hourlyBasalUnitsPerHour[10],
+                basal11 = hourlyBasalUnitsPerHour[11],
+                basal12 = hourlyBasalUnitsPerHour[12],
+                basal13 = hourlyBasalUnitsPerHour[13],
+                basal14 = hourlyBasalUnitsPerHour[14],
+                basal15 = hourlyBasalUnitsPerHour[15],
+                basal16 = hourlyBasalUnitsPerHour[16],
+                basal17 = hourlyBasalUnitsPerHour[17],
+                basal18 = hourlyBasalUnitsPerHour[18],
+                basal19 = hourlyBasalUnitsPerHour[19],
+                basal20 = hourlyBasalUnitsPerHour[20],
+                basal21 = hourlyBasalUnitsPerHour[21],
+                basal22 = hourlyBasalUnitsPerHour[22],
+                basal23 = hourlyBasalUnitsPerHour[23]
+            )
+            runBlocking {
+                FCLAnalyzerDatabase.getInstance(context)
+                    .basalProfileHistoryDao()
+                    .insertAll(listOf(entity))
+            }
+        } catch (_: Exception) {
+            // CSV blijft de primaire, altijd-werkende log; DB-tabel is alleen
+            // een aanvulling t.b.v. de nacht-analyser.
+        }
+    }
+
+    // Eenmalige backfill (23/07/2026, Ecko): leest de al bestaande CSV-historie
+    // in en vult de tot nu toe altijd lege DB-tabel in één keer met alle
+    // eerder gelogde profiel-snapshots, zodat ook oudere nachtvensters direct
+    // (i.p.v. pas na de eerstvolgende profielwijziging) een kloppende
+    // activeProfileBasalUph krijgen. Vlag wordt VOORAF gezet — best-effort,
+    // geen herhaalde pogingen elke cyclus als het een keer niet lukt; de
+    // doorlopende persistToDb()-aanroepen houden de tabel vanaf nu sowieso bij.
+    private fun maybeBackfillDb() {
+        if (prefs.getBoolean(KEY_DB_BACKFILLED, false)) return
+        prefs.edit().putBoolean(KEY_DB_BACKFILLED, true).apply()
+        try {
+            val file = getFile()
+            if (!file.exists()) return
+            val lines = file.readLines()
+            if (lines.size <= 1) return
+            val entities = lines.drop(1).mapNotNull { parseCsvLine(it) }
+            if (entities.isNotEmpty()) {
+                runBlocking {
+                    FCLAnalyzerDatabase.getInstance(context)
+                        .basalProfileHistoryDao()
+                        .insertAll(entities)
+                }
+            }
+        } catch (_: Exception) {
+            // best-effort — CSV blijft intact; nieuwe profielwijzigingen vullen
+            // de tabel vanaf nu gewoon verder via persistToDb()
+        }
+    }
+
+    private fun parseCsvLine(line: String): BasalProfileHistoryEntity? {
+        val parts = line.split(";")
+        if (parts.size != 30) return null   // 6 vaste kolommen + 24 basaal-uren
+        return try {
+            BasalProfileHistoryEntity(
+                tsUtc = parts[0],
+                tsLocal = parts[1],
+                timezone = parts[2],
+                eventType = parts[3],
+                isNight = parts[4].toBoolean(),
+                profileSignature = parts[5],
+                basal00 = parts[6].toDouble(),
+                basal01 = parts[7].toDouble(),
+                basal02 = parts[8].toDouble(),
+                basal03 = parts[9].toDouble(),
+                basal04 = parts[10].toDouble(),
+                basal05 = parts[11].toDouble(),
+                basal06 = parts[12].toDouble(),
+                basal07 = parts[13].toDouble(),
+                basal08 = parts[14].toDouble(),
+                basal09 = parts[15].toDouble(),
+                basal10 = parts[16].toDouble(),
+                basal11 = parts[17].toDouble(),
+                basal12 = parts[18].toDouble(),
+                basal13 = parts[19].toDouble(),
+                basal14 = parts[20].toDouble(),
+                basal15 = parts[21].toDouble(),
+                basal16 = parts[22].toDouble(),
+                basal17 = parts[23].toDouble(),
+                basal18 = parts[24].toDouble(),
+                basal19 = parts[25].toDouble(),
+                basal20 = parts[26].toDouble(),
+                basal21 = parts[27].toDouble(),
+                basal22 = parts[28].toDouble(),
+                basal23 = parts[29].toDouble()
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun getEffectiveProfile(timeMillis: Long): Profile? {
