@@ -335,6 +335,57 @@ open class OpenAPSFCLPlugin @Inject constructor(
         val microBolusAllowed = true
         val flatBGsDetected = bgQualityCheck.state == BgQualityCheck.State.FLAT
 
+        // Upstream veiligheidsfix overgenomen van OpenAPSSMBPlugin (23/07/2026,
+        // Ecko, na een dev-update van die plugin). Reden identiek aan de
+        // toelichting daar: carb_ratio voedt csf (sens/carb_ratio) in
+        // DetermineBasalFCL.kt's carbsReq-berekening (het legacy oref0-
+        // vangnetpad dat nog elke cyclus meedraait naast FCLvNext's eigen
+        // pad — zie 'val csf = sens / profile.carb_ratio'), en
+        // autosensResult.ratio wordt verderop gebruikt in de sensitivityRatio-
+        // afleiding. Een niet-eindige of ≤0-waarde van sens/carb_ratio/
+        // autosensRatio zou anders een NaN/Infinity carbsReq veroorzaken. De
+        // bijbehorende round()-crash-backstop staat in DetermineBasalFCL.kt.
+        // FCL gebruikt geen dynIsfMode (variable_sens/TDD/insulinDivisor zijn
+        // hier altijd 0.0/0), dus die tak van de upstream-check is niet van
+        // toepassing.
+        val invalidInputs = !oapsProfile.sens.isFinite() || oapsProfile.sens <= 0.0 ||
+            !oapsProfile.carb_ratio.isFinite() || oapsProfile.carb_ratio <= 0.0 ||
+            !autosensResult.ratio.isFinite() || autosensResult.ratio <= 0.0
+        if (invalidInputs) {
+            val msg = "OpenAPSFCL aborting: invalid ISF inputs sens=${oapsProfile.sens} " +
+                "carb_ratio=${oapsProfile.carb_ratio} autosensRatio=${autosensResult.ratio}"
+            aapsLogger.error(LTag.APS, msg)
+
+            // Zelfde "veiliggesteld naar neutraal"-aanpak als het bestaande
+            // glucoseStatus==null-vangnet hierboven — een op dat moment lopende
+            // tijdelijke basaal mag niet zomaar blijven doorlopen terwijl deze
+            // cyclus wordt overgeslagen.
+            if (currentTemp.rate > 0.0) {
+                val safeRt = RT(
+                    algorithm = APSResult.Algorithm.FCL,
+                    runningDynamicIsf = false,
+                    timestamp = now,
+                    consoleLog = mutableListOf(),
+                    consoleError = mutableListOf(msg)
+                )
+                safeRt.reason.append(
+                    "Ongeldige ISF-invoer — lopende tijdelijke basaal " +
+                        "(${currentTemp.rate} U/u) veiliggesteld naar neutraal/nul."
+                )
+                safeRt.deliverAt = now
+                safeRt.duration = 30
+                safeRt.rate = 0.0
+
+                val safeResult = apsResultProvider.get().with(safeRt)
+                safeResult.currentTemp = currentTemp
+                lastAPSResult = safeResult
+                lastAPSRun = now
+            }
+            rxBus.send(EventResetOpenAPSGui(msg))
+            rxBus.send(EventOpenAPSUpdateGui())
+            return
+        }
+
         aapsLogger.debug(LTag.APS, ">>> Invoking FCLvNext <<<")
 
         determineBasalFCL.determine_basal(

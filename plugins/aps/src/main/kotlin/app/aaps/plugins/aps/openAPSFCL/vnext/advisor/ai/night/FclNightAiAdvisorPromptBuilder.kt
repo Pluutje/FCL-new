@@ -79,9 +79,14 @@ board (IOB) in dat uur, gemiddeld over meerdere nachten.
 3. confidence is een eerlijke inschatting: gebruik 0.3-0.5 bij een zwak maar zichtbaar
    patroon, 0.5-0.75 bij een consistent patroon over voldoende nachten, en reserveer
    >0.75 voor een sterk, ondubbelzinnig en over veel nachten herhaald patroon.
-4. suggestedShiftPct is een indicatie, geen precisievoorstel — houd 'm bescheiden
-   (doorgaans 5-20%); dit is een startpunt voor de gebruiker om zelf verder te finetunen,
-   geen exacte herberekening.
+4. suggestedShiftPct is een VOORZICHTIGE EERSTE STAP, niet de volledige geschatte
+   correctie in één keer. Ook bij een sterk patroon dat in theorie een grotere
+   aanpassing zou rechtvaardigen: geef een bescheiden stap (typisch 3-8%, nooit meer
+   dan 10%). De gebruiker herhaalt dit proces liever in een paar kleine stappen over
+   meerdere nachten dan in één keer een grote sprong te maken — vermeld dat expliciet
+   in reasonNl als het onderliggende patroon sterk genoeg lijkt voor meer dan één stap
+   (bijv. "dit is een eerste, voorzichtige stap; bij aanhoudend patroon volgt een
+   vergelijkbare stap over enkele nachten").
 """.trimIndent()
 
     private fun inputDataSection(payload: FclNightReportPayload): String {
@@ -124,7 +129,7 @@ ${json.toString(2)}
     {
       "hourLabel": "02:00",
       "direction": "LOWER",
-      "suggestedShiftPct": -10.0,
+      "suggestedShiftPct": -6.0,
       "confidence": 0.6,
       "reasonNl": "Uitleg in het Nederlands, concreet en beknopt",
       "evidenceFields": ["avgIobDelta -0.22 over 8 nachten", "avgBg 6.1 vs target 6.5, stabiel"]

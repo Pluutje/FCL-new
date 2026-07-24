@@ -426,7 +426,7 @@ class InsulinManagementViewModel @Inject constructor(
             return false
         }
         if (editedICfg.peak < hardLimits.minPeak() || editedICfg.peak > hardLimits.maxPeak()) {
-            showSnackbar(rh.gs(CoreUiR.string.value_out_of_hard_limits, rh.gs(CoreUiR.string.insulin_peak), editedICfg.peak))
+            showSnackbar(rh.gs(CoreUiR.string.value_out_of_hard_limits, rh.gs(CoreUiR.string.insulin_peak), editedICfg.peak.toDouble()))
             return false
         }
 

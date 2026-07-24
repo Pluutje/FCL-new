@@ -179,7 +179,19 @@ class DetermineBasalFCL @Inject constructor(
     }
 
     fun Double.withoutZeros(): String = DecimalFormat("0.##").format(this)
-    fun round(value: Double): Int = value.roundToInt()
+    // Upstream veiligheidsfix overgenomen van DetermineBasalSMB.kt (23/07/2026,
+    // na een dev-update van die plugin): roundToInt() crasht op NaN. Deze
+    // functie wordt o.a. gebruikt voor carbsReq via csf = sens/carb_ratio —
+    // bij een ongeldige ISF-invoer (nu al afgevangen in OpenAPSFCLPlugin.kt's
+    // invalidInputs-check, maar dit is een extra vangnet mocht een NaN toch
+    // via een ander pad hier terechtkomen) wordt 0 teruggegeven i.p.v. te
+    // crashen, met een melding in consoleError zodat het niet stilletjes
+    // verdwijnt.
+    fun round(value: Double): Int =
+        if (value.isNaN()) {
+            consoleError.add("round(): non-finite waarde vervangen door 0")
+            0
+        } else value.roundToInt()
 
     // we expect BG to rise or fall at the rate of BGI,
     // adjusted by the rate at which BG would need to rise /

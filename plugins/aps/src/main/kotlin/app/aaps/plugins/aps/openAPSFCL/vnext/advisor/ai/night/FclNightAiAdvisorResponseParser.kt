@@ -79,7 +79,16 @@ object FclNightAiAdvisorResponseParser {
                 // bron. Nodig geworden nu suggestedShiftPct ook als spreidingsinput
                 // voor buururen dient (zie applySpread hieronder): een inconsistent
                 // teken zou daar een verkeerde kant op spreiden.
-                val magnitude = kotlin.math.abs(obj.optDouble("suggestedShiftPct", 0.0))
+                // Geleidelijke-opbouw-fix (23/07/2026, Ecko): de AI kreeg al de
+                // instructie om een bescheiden EERSTE STAP te geven i.p.v. de volledige
+                // geschatte correctie in één keer, maar dat is promptgedrag — geen garantie.
+                // Harde klem hier als vangnet, zodat de kaart nooit een sprong als -10%
+                // toont naast de regel-gebaseerde adviseur die voor hetzelfde signaal een
+                // bescheiden ~3-8% geeft (zie computeAdvisedBasal in Nightwindowanalyzer.kt).
+                // Bij een aanhoudend patroon volgt vanzelf een volgende, vergelijkbare stap
+                // op een volgende ochtend, omdat currentBasalUph dan het inmiddels
+                // aangepaste profiel weerspiegelt.
+                val magnitude = kotlin.math.abs(obj.optDouble("suggestedShiftPct", 0.0)).coerceIn(3.0, 8.0)
                 val signedShift = if (direction == "LOWER") -magnitude else magnitude
 
                 suggestions += NightBasalSuggestion(

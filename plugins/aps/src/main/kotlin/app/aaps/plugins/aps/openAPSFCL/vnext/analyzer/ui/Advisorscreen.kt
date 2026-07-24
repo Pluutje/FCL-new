@@ -1028,7 +1028,10 @@ private fun NightAiAdvisorCard(context: android.content.Context) {
             }
             Text(
                 "Puur advies over basaal-uren — wordt nooit automatisch toegepast. " +
-                    "Draait zelfstandig 1x per ochtend zodra de nacht eindigt, los van de dag-adviseur.",
+                    "Draait zelfstandig 1x per ochtend zodra de nacht eindigt, los van de dag-adviseur. " +
+                    "Voorgestelde percentages zijn bewust bescheiden, eerste-stap-aanpassingen " +
+                    "(zie ook de Basaal-adviseur hieronder) — bij een aanhoudend patroon volgt " +
+                    "vanzelf een volgende, vergelijkbare stap op een volgende ochtend.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
