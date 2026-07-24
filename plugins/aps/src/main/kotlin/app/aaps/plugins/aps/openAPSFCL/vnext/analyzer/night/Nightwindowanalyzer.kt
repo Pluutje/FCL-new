@@ -21,20 +21,13 @@ enum class NightWindowClass {
     DISTURBED
 }
 
-enum class NightDriftSignal {
-    BASAL_UP,
-    BASAL_DOWN,
-    // Voorloper-signaal (23/06/2026, Ecko): BG stabiel of licht dalend TERWIJL
-    // IOB al laag/negatief is. De BG is nog nabij target, maar het feit dat er
-    // nauwelijks actieve insuline meer nodig was om op target te blijven duidt
-    // erop dat het basaal in die periode eigenlijk al te hoog was — anders had
-    // de BG zonder IOB gestegen. Vroeger te vangen dan BASAL_DOWN (die wacht
-    // tot BG al onder target - 0.6 is), en klinisch relevanter: je wilt het
-    // basaal aanpassen vóór de BG structureel te laag loopt, niet erna.
-    BASAL_DOWN_PRECURSOR,
-    NEUTRAL,
-    UNCERTAIN
-}
+// Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — de
+// Nacht-AI-adviseur (FclNightAiAdvisorScheduler/-ResponseParser) is nu het
+// enige basaal-adviespad. Reden: twee onafhankelijke adviezen naast elkaar
+// (met licht verschillende percentages) was niet eenduidig genoeg om op te
+// handelen. classification (NightWindowClass) blijft bestaan en gaat nog
+// steeds als classificationCounts naar de AI — alleen de losse NightDriftSignal-
+// classificatie en de daarvan afgeleide procentuele adviesberekening zijn weg.
 
 object NightWindowAnalyzer {
 
@@ -190,29 +183,13 @@ object NightWindowAnalyzer {
             overlappingEpisodeCount = overlappingEpisodes.size
         )
 
-        val signal = computeDriftSignal(
-            suitabilityWeight = suitabilityWeight,
-            avgBg = avgBg,
-            avgTarget = avgTarget,
-            bgSlopePerHour = bgSlopePerHour,
-            avgIob = avgIob,
-            iobDelta = iobDelta
-        )
-
-        val driftStrength = computeDriftStrength(
-            suitabilityWeight = suitabilityWeight,
-            avgBg = avgBg,
-            avgTarget = avgTarget,
-            bgSlopePerHour = bgSlopePerHour
-        )
-
-        val driftReason = buildDriftReason(
-            signal = signal,
-            avgBg = avgBg,
-            avgTarget = avgTarget,
-            bgSlopePerHour = bgSlopePerHour,
-            avgIob = avgIob
-        )
+        // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — zie
+        // toelichting bovenaan dit bestand. driftSignal/driftStrength/driftReason
+        // blijven als kolommen bestaan (geen DB-migratie nodig) maar krijgen nu
+        // vaste, neutrale waarden i.p.v. een echte berekening.
+        val signal = "NEUTRAL"
+        val driftStrength = 0.0
+        val driftReason = ""
 
         val shiftedStart = startLocal.minusMinutes(BASAL_SHIFT_MINUTES)
         val shiftedEnd = endLocal.minusMinutes(BASAL_SHIFT_MINUTES)
@@ -311,12 +288,10 @@ object NightWindowAnalyzer {
                 "CLEAN_BASAL"
         }
 
-        val (advisedShiftPct, advisedBasalUph, advisedConfidence) = computeAdvisedBasal(
-            signal = signal,
-            driftStrength = driftStrength,
-            currentBasalUph = activeProfileBasalUph,
-            suitabilityWeight = suitabilityWeight
-        )
+        // Basaal-adviseur (regel-gebaseerd) verwijderd — zie hierboven.
+        val advisedShiftPct = 0.0
+        val advisedBasalUph = 0.0
+        val advisedConfidence = 0.0
 
         return NightWindowEntity(
             id = startInstant.toString(),
@@ -337,7 +312,7 @@ object NightWindowAnalyzer {
             iobDelta = iobDelta,
             mealCarryoverScore = mealCarryoverScore,
             overlappingEpisodeCount = overlappingEpisodes.size,
-            driftSignal = signal.name,
+            driftSignal = signal,
             driftStrength = driftStrength,
             driftReason = driftReason,
             shiftedBlockLabel = "${timeFormatter.format(shiftedStart)}–${timeFormatter.format(shiftedEnd)}",
@@ -448,166 +423,11 @@ object NightWindowAnalyzer {
         return weight.coerceIn(0.0, 1.0)
     }
 
-    private fun computeDriftSignal(
-        suitabilityWeight: Double,
-        avgBg: Double,
-        avgTarget: Double,
-        bgSlopePerHour: Double,
-        avgIob: Double,
-        iobDelta: Double
-    ): NightDriftSignal {
-        if (suitabilityWeight < 0.20) return NightDriftSignal.UNCERTAIN
-
-        return when {
-            // ── Bestaand: BG boven target, stijgt nog, weinig IOB ────────────
-            avgBg >= avgTarget + 1.0 &&
-                bgSlopePerHour >= 0.10 &&
-                avgIob <= 1.5 &&
-                iobDelta <= 0.25 ->
-                NightDriftSignal.BASAL_UP
-
-            // ── Bestaand: BG al duidelijk onder target en daalt ──────────────
-            avgBg <= avgTarget - 0.6 &&
-                bgSlopePerHour <= -0.10 &&
-                avgIob <= 1.2 ->
-                NightDriftSignal.BASAL_DOWN
-
-            // ── NIEUW (23/06/2026, Ecko): voorloper-patroon ──────────────────
-            // BG stabiel of licht dalend bij minimale/negatieve IOB-belasting,
-            // terwijl BG nog nabij target ligt. Dit duidt op "basaal al te hoog
-            // in de voorafgaande periode": het systeem gaf nauwelijks iets meer
-            // dan het basaal zelf, en de BG bleef tóch niet stijgen — wat
-            // alleen kan als het basaal al voldoende (of te veel) was.
-            // Verschil met BASAL_DOWN: BG hoeft nog NIET onder target te zijn.
-            // iobDelta <= -0.10: IOB liep al actief af (minder dan een uur
-            // geleden was er meer actieve insuline — nu is die vrijwel verdwenen
-            // zonder dat er iets nieuws bij is gegeven).
-            // Negatieve slope toegestaan tot -0.35 (dalend maar niet steil):
-            // bij steile daling gaat het systeem toch al ingrijpen.
-            abs(avgBg - avgTarget) <= 0.8 &&
-                bgSlopePerHour in -0.35..0.05 &&
-                avgIob <= 1.0 &&
-                iobDelta <= -0.10 ->
-                NightDriftSignal.BASAL_DOWN_PRECURSOR
-
-            // ── NIEUW (23/07/2026, Ecko): aanhoudend-laag-IOB-patroon ────────
-            // BASAL_DOWN_PRECURSOR hierboven vangt alleen de MOMENTOPNAME waarop
-            // IOB nog actief aan het dalen is (iobDelta <= -0.10). Maar zodra IOB
-            // al eerder is 'gebodemd' en daarna een tijd vlak laag/negatief blijft
-            // hangen (iobDelta ~0 binnen dít venster — geen nieuwe daling meer),
-            // viel dat voorheen altijd in NEUTRAL. Terwijl een aanhoudend lage of
-            // negatieve IOB bij een verder stabiele BG precies hetzelfde
-            // onderliggende 'basaal staat te hoog'-signaal is — alleen is de acute
-            // daling zelf al voorbij tegen de tijd dat dit venster wordt bekeken.
-            // Aanleiding: bij Ecko bleef dit patroon meerdere weken lang bijna elke
-            // nacht optreden zonder ooit een advies op te leveren.
-            // avgIob <= -0.15 (i.p.v. simpelweg <0) vereist een duidelijk negatieve
-            // stand, geen ruis rond nul, zodat dit niet te lichtzinnig afgaat.
-            abs(avgBg - avgTarget) <= 0.8 &&
-                abs(bgSlopePerHour) <= 0.20 &&
-                avgIob <= -0.15 ->
-                NightDriftSignal.BASAL_DOWN_PRECURSOR
-
-            abs(avgBg - avgTarget) <= 0.5 &&
-                abs(bgSlopePerHour) <= 0.15 ->
-                NightDriftSignal.NEUTRAL
-
-            else ->
-                NightDriftSignal.UNCERTAIN
-        }
-    }
-
-    /**
-     * Berekent een concreet, voorzichtig basaaladvies op basis van het drift-
-     * signaal en de huidige basaalstand op het betreffende uur-slot.
-     *
-     * Teruggegeven waarden:
-     *   - advisedShiftPct: de procentuele aanpassing die geadviseerd wordt
-     *     (negatief = lager, positief = hoger). Nooit groter dan ±20% per
-     *     venster — meerdere opeenvolgende gelijke signalen zijn nodig voor
-     *     een groter effect; één venster is nooit voldoende bewijs voor meer.
-     *   - advisedBasalUph: de concreet geadviseerde basaalstand in U/h.
-     *   - confidence: 0–1 indicatie van hoe sterk het signaal is.
-     *
-     * Vuistregel: een basaaladvies is informatief, niet automatisch. De
-     * gebruiker past het profiel zelf aan.
-     */
-    fun computeAdvisedBasal(
-        signal: NightDriftSignal,
-        driftStrength: Double,
-        currentBasalUph: Double,
-        suitabilityWeight: Double
-    ): Triple<Double, Double, Double> {   // (shiftPct, advisedUph, confidence)
-        if (currentBasalUph <= 0.0) return Triple(0.0, 0.0, 0.0)
-
-        val confidence = (suitabilityWeight * driftStrength).coerceIn(0.0, 1.0)
-
-        val shiftPct = when (signal) {
-            NightDriftSignal.BASAL_UP ->
-                // Stijging ondanks lage IOB: basaal omhoog. Sterkte bepaalt hoeveel.
-                // Maximaal +20%, geschaald met signaalsterkte. Zacht: +5–15%.
-                (5.0 + driftStrength * 15.0).coerceIn(5.0, 20.0)
-
-            NightDriftSignal.BASAL_DOWN ->
-                // BG al onder target: basaal omlaag. Omzichtig: max -15%.
-                -(5.0 + driftStrength * 10.0).coerceIn(5.0, 15.0)
-
-            NightDriftSignal.BASAL_DOWN_PRECURSOR ->
-                // Vroeg signaal: kleinere stap dan BASAL_DOWN — max -10%.
-                // De BG is nog niet te laag, dus er is minder haast; een
-                // kleine aanpassing en dan opnieuw meten is de juiste aanpak.
-                -(3.0 + driftStrength * 7.0).coerceIn(3.0, 10.0)
-
-            NightDriftSignal.NEUTRAL, NightDriftSignal.UNCERTAIN -> 0.0
-        }
-
-        val advisedUph = (currentBasalUph * (1.0 + shiftPct / 100.0))
-            .coerceAtLeast(0.0)
-
-        return Triple(shiftPct, advisedUph, confidence)
-    }
-
-    private fun computeDriftStrength(
-        suitabilityWeight: Double,
-        avgBg: Double,
-        avgTarget: Double,
-        bgSlopePerHour: Double
-    ): Double {
-        val targetDelta = abs(avgBg - avgTarget).coerceAtMost(3.0) / 3.0
-        val slopeComponent = abs(bgSlopePerHour).coerceAtMost(1.0)
-        return (suitabilityWeight * (0.65 * targetDelta + 0.35 * slopeComponent))
-            .coerceIn(0.0, 1.0)
-    }
-
-    private fun buildDriftReason(
-        signal: NightDriftSignal,
-        avgBg: Double,
-        avgTarget: Double,
-        bgSlopePerHour: Double,
-        avgIob: Double
-    ): String {
-        return when (signal) {
-            NightDriftSignal.BASAL_UP ->
-                "BG ligt gemiddeld %.1f boven target en stijgt nog door bij relatief lage/aflopende IOB."
-                    .format(avgBg - avgTarget)
-
-            NightDriftSignal.BASAL_DOWN ->
-                "BG ligt gemiddeld %.1f onder target en daalt verder zonder duidelijke hoge IOB-belasting."
-                    .format(avgTarget - avgBg)
-
-            NightDriftSignal.BASAL_DOWN_PRECURSOR ->
-                "BG ligt nabij target (Δ %.1f mmol) maar IOB liep al grotendeels af zonder dat BG steeg — " +
-                "de voorafgaande basaalstand was vermoedelijk al voldoende of iets te hoog. " +
-                "Overweeg een kleine verlaging voor dit uur-slot."
-                    .format(abs(avgBg - avgTarget))
-
-            NightDriftSignal.NEUTRAL ->
-                "BG blijft dicht bij target met beperkte drift en een interpreteerbare IOB-context."
-
-            NightDriftSignal.UNCERTAIN ->
-                "Geen zuiver basaal signaal; BG/IOB-context is gemengd of nog te beïnvloed."
-        }
-    }
+    // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — zie
+    // de toelichting bij het verwijderde NightDriftSignal-enum hierboven.
+    // computeDriftSignal(), computeDriftStrength(), buildDriftReason() en
+    // computeAdvisedBasal() zaten hier vroeger; de Nacht-AI-adviseur is nu het
+    // enige basaal-adviespad.
 
     private fun generateWindowStarts(date: LocalDate): List<LocalDateTime> {
         val result = mutableListOf<LocalDateTime>()

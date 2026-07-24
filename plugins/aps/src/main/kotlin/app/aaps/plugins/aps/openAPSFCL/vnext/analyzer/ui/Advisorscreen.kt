@@ -849,135 +849,33 @@ fun NachtControlTab(
         // Dag, die ook de geleerde D/F tonen, niet de Agressiviteit-schuif).
         NfKaart(s = FclStrings.get(context), currentNf = currentNfLevel)
 
-        // ── Nacht-AI-adviseur (23/07/2026, Ecko) — volledig onafhankelijk
-        // van de dag-AI-adviseur (FclAiAdvisorScreen): eigen trigger (1x per
-        // ochtend via FclNightAiAdvisorScheduler.onCycle in DetermineBasalFCL),
-        // eigen opslag, puur advies over basaal-uren, nooit automatisch
-        // toegepast. Vóór de regel-gebaseerde vensters, want dit is het
-        // nieuwe, primaire adviespad; de vensters eronder blijven als
-        // onderliggend detail/context beschikbaar.
-        NightAiAdvisorCard(context = context)
-
-        // ── Nachtvensters (legacy — blijft zichtbaar voor context) ───────
-        NachtVenstersCompact(nightWindows = nightWindows)
+        // ── Nacht-AI-adviseur verhuisd (24/07/2026, Ecko) ────────────────
+        // Staat sindsdien op het AI-adviseur-tabblad → Nacht, naast de dag-
+        // AI-adviezen — niet meer hier, om Automaat (regel-gebaseerd/geleerd)
+        // en AI-advies duidelijk gescheiden te houden.
+        Divider()
+        Text(
+            "Zie ook: AI Advisor → Nacht voor het AI-advies over de nachtbasaal.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
 
-// ── Hulpfuncties voor gespreide basaaladviezen ────────────────────────
+// gaussWeightForOffset() en computeSpreadAdvice() (regel-gebaseerde spread-
+// advies-helpers) verwijderd (24/07/2026, Ecko) samen met de Basaal-adviseur-
+// kaart hieronder — zie NachtControlTab hierboven voor de toelichting.
 
-/**
- * Gaussische spread-gewichten voor de aangrenzende uren.
- * offset=0 → kern (100%), ±1 → 55%, ±2 → 20%.
- * Achtergrond (24/06/2026, Ecko): een circadiaan basaalprofiel heeft een
- * vloeiend verloop. Een advies van +10% op uur X zonder aanpassing van de
- * buururen geeft een onnatuurlijke knik in het profiel. De spread maakt de
- * geadviseerde wijziging vloeiend: de piek van de aanpassing valt op het
- * effectHour, de uren ervoor en erna lopen geleidelijk af/op.
- */
-// UITBREIDING (23/07/2026, Ecko): offset ±3 toegevoegd (klein gewicht 0.08) om
-// een harde "muur" aan de rand van het venster te voorkomen — zonder deze stap
-// sprong het advies van bv. -10% op uur 22 naar exact 0% op uur 21, wat bij een
-// uur-overgang een onnatuurlijke knik in het basaalprofiel zou geven. Met ±3
-// loopt de aanpassing geleidelijker naar nul uit.
-private fun gaussWeightForOffset(offset: Int): Double = when (kotlin.math.abs(offset)) {
-    0 -> 1.0
-    1 -> 0.55
-    2 -> 0.20
-    3 -> 0.08
-    else -> 0.0
-}
-
-/**
- * Berekent voor elk van de 24 klok-uren de geadviseerde aanpassing in U/h,
- * op basis van alle vensters die een actionable signaal geven.
- * Retourneert een map van klok-uur (0–23) naar geadviseerd U/h (null = geen advies).
- * Gebruikt het profiel uit de meest recente relevante vensters.
- */
-@Composable
-private fun computeSpreadAdvice(
-    nightWindows: List<NightWindowEntity>
-): Map<Int, Triple<Double, Double, Double>> {
-    // Groepeer per effectHour, filter op consistente niet-neutrale signalen
-    val byHour = nightWindows
-        .filter { it.driftSignal != "NEUTRAL" && it.driftSignal != "UNCERTAIN" }
-        .groupBy { it.effectHour }
-        .filter { it.value.size >= 2 }
-
-    // Kern-aanpassingen per uur: gewogen gemiddelde shift% van dominante signalen
-    val coreShifts = mutableMapOf<Int, Pair<Double, Double>>() // hour → (shiftPct, currentUph)
-    byHour.forEach { (hour, windows) ->
-        val signalCounts = windows.groupingBy { it.driftSignal }.eachCount()
-        val dominant = signalCounts.maxByOrNull { it.value }?.key ?: return@forEach
-        val relevant = windows.filter { it.driftSignal == dominant && it.advisedBasalUph > 0 }
-        if (relevant.isEmpty()) return@forEach
-        val avgShift = relevant.map { it.advisedShiftPct }.average()
-        val avgCurrent = relevant.map { it.activeProfileBasalUph }.average()
-        coreShifts[hour] = avgShift to avgCurrent
-    }
-
-    if (coreShifts.isEmpty()) return emptyMap()
-
-    // Spread: per klok-uur de bijdrage van het kern-uur en zijn buren optellen
-    val result = mutableMapOf<Int, Triple<Double, Double, Double>>()
-    for (targetHour in 0..23) {
-        // BUGFIX (23/07/2026, Ecko): een kern-uur (targetHour zelf heeft een eigen,
-        // rechtstreeks gemeten signaal) werd hierboven MEE geblend met zijn eigen
-        // buren — inclusief andere, eveneens kern-uren binnen bereik ±3. Bij een
-        // aaneengesloten reeks kern-uren (bv. 22,23,00,01,02,03,04 — een hele nacht)
-        // kreeg zo goed als elk uur bijdragen van 4-5 verschillende buur-kernuren
-        // tegelijk, waardoor alle percentages naar één gemiddelde toe convergeerden
-        // (het "overal -4%"-effect). Fix: een kern-uur behoudt zijn EIGEN, rechtstreeks
-        // gemeten waarde; de spread hieronder vult alleen de uren aan die zelf geen
-        // kern-uur zijn.
-        val ownCore = coreShifts[targetHour]
-        if (ownCore != null) {
-            val (ownShift, ownCurrent) = ownCore
-            val advisedUph = (ownCurrent * (1.0 + ownShift / 100.0)).coerceAtLeast(0.0)
-            val confidence = nightWindows
-                .filter { it.effectHour == targetHour && it.advisedConfidence > 0 }
-                .map { it.advisedConfidence }.average().takeIf { !it.isNaN() } ?: 0.5
-            result[targetHour] = Triple(ownShift, advisedUph, confidence)
-            continue
-        }
-
-        var weightedShiftSum = 0.0
-        var weightSum = 0.0
-        for ((coreHour, shiftAndCurrent) in coreShifts) {
-            val offset = ((targetHour - coreHour + 36) % 24) - 12
-            // Modulo-correctie: nacht loopt over middernacht heen
-            val normalOffset = if (kotlin.math.abs(offset) > 12) offset - 24 * kotlin.math.sign(offset.toDouble()).toInt() else offset
-            val w = gaussWeightForOffset(normalOffset)
-            if (w > 0) {
-                weightedShiftSum += w * shiftAndCurrent.first
-                weightSum += w
-            }
-        }
-        if (weightSum > 0.01) {
-            val blendedShift = weightedShiftSum / weightSum
-            // Haal de profielwaarde op voor dit uur uit het meest recente beschikbare venster
-            val profileUph = nightWindows
-                .filter { it.effectHour == targetHour && it.activeProfileBasalUph > 0 }
-                .maxByOrNull { it.startTs }
-                ?.activeProfileBasalUph
-                ?: continue
-            val advisedUph = (profileUph * (1.0 + blendedShift / 100.0)).coerceAtLeast(0.0)
-            val confidence = nightWindows
-                .filter { it.effectHour == targetHour && it.advisedConfidence > 0 }
-                .map { it.advisedConfidence }.average().takeIf { !it.isNaN() } ?: 0.5
-            result[targetHour] = Triple(blendedShift, advisedUph, confidence)
-        }
-    }
-    return result
-}
-
-// ── NachtVenstersCompact ──────────────────────────────────────────────────
-// Toont nachtvensters met concreet basaal-advies per uur-slot.
-// BASAL_DOWN_PRECURSOR (23/06/2026, Ecko): voorloper-signaal voor te hoog
-// basaal — BG stabiel/dalend bij negatieve IOB, nog nabij target.
+// ── NightAiAdvisorCard ────────────────────────────────────────────────────
+// Toont het rapport van de Nacht-AI-adviseur (zie FclNightAiAdvisorScheduler).
+// Sinds 24/07/2026 het enige basaal-adviespad — de regel-gebaseerde
+// Basaal-adviseur is verwijderd (zie NachtControlTab hierboven).
 
 @Composable
-private fun NightAiAdvisorCard(context: android.content.Context) {
+// Niet meer `private` (24/07/2026, Ecko) — wordt sinds de verhuizing van de
+// aanroep ook vanuit FclAiAdvisorScreen.kt (ander package) aangeroepen.
+fun NightAiAdvisorCard(context: android.content.Context) {
     var result by remember {
         mutableStateOf(
             app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
@@ -1028,10 +926,10 @@ private fun NightAiAdvisorCard(context: android.content.Context) {
             }
             Text(
                 "Puur advies over basaal-uren — wordt nooit automatisch toegepast. " +
-                    "Draait zelfstandig 1x per ochtend zodra de nacht eindigt, los van de dag-adviseur. " +
-                    "Voorgestelde percentages zijn bewust bescheiden, eerste-stap-aanpassingen " +
-                    "(zie ook de Basaal-adviseur hieronder) — bij een aanhoudend patroon volgt " +
-                    "vanzelf een volgende, vergelijkbare stap op een volgende ochtend.",
+                    "Draait zelfstandig 1x per ochtend zodra de nacht eindigt, los van de dag-adviseur " +
+                    "hiernaast. Voorgestelde percentages zijn bewust bescheiden, " +
+                    "eerste-stap-aanpassingen — bij een aanhoudend patroon volgt vanzelf een " +
+                    "volgende, vergelijkbare stap op een volgende ochtend.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1090,225 +988,7 @@ private fun NightAiAdvisorCard(context: android.content.Context) {
     }
 }
 
-@Composable
-private fun NachtVenstersCompact(nightWindows: List<NightWindowEntity>) {
-    if (nightWindows.isEmpty()) return
-
-    // ── Gespreide profieladviezen per klok-uur ────────────────────────────
-    val spreadAdvice = computeSpreadAdvice(nightWindows)
-
-    // Detecteer profiel-reset: als het meest recente activeProfileSignature
-    // anders is dan een eerder venster, is het profiel tussentijds gewijzigd.
-    // In dat geval is al het geleerde vóór de wijziging niet meer geldig.
-    val signatures = nightWindows
-        .sortedByDescending { it.startTs }
-        .map { it.activeProfileSignature }
-    val profileChangedSince = signatures.size > 1 && signatures.distinct().size > 1
-    val mostRecentSignature = signatures.firstOrNull() ?: ""
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                "Basaal-adviseur",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            if (profileChangedSince) {
-                // Profiel is tussentijds gewijzigd — geef een waarschuwing en
-                // toon alleen de data na de meest recente profielwissel.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.errorContainer,
-                            androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
-                        )
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("⚠️", style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        "Basaalprofiel is gewijzigd sinds de eerste geregistreerde nacht. " +
-                            "Alleen gegevens na de meest recente profielwijziging tellen mee. " +
-                            "Wanneer je een advies toepast, begin het leren opnieuw.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            } else {
-                Text(
-                    "Gebaseerd op nachtvensters van de afgelopen nachten. " +
-                        "Advies is informatief — pas het basaalprofiel zelf aan. " +
-                        "Na een aanpassing: reset het leren door een profielwissel door te voeren.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Divider()
-
-            // ── Gespreide per-uur adviezen ────────────────────────────────
-            // Filter alleen vensters met hetzelfde profiel als het meest recente
-            val relevantWindows = if (profileChangedSince)
-                nightWindows.filter { it.activeProfileSignature == mostRecentSignature }
-            else nightWindows
-
-            // Nacht-volgorde i.p.v. kale numerieke sort (23/07/2026, Ecko): een
-            // nachtvenster loopt over middernacht heen (bv. 22:00...04:00) — met
-            // .sorted() kwam 00:00 vóór 22:00/23:00 te staan, niet chronologisch
-            // voor deze context. Uren vóór het middaguur worden als "vroege ochtend,
-            // dus later in de nacht" behandeld (+24) zodat bv. 22,23,00,01 correct
-            // na elkaar sorteren i.p.v. 00,01,22,23.
-            val actionableHours = spreadAdvice.keys
-                .filter { hour ->
-                    val (shiftPct, _, _) = spreadAdvice[hour]!!
-                    kotlin.math.abs(shiftPct) >= 3.0  // toon alleen uren met ≥3% aanpassing
-                }
-                .sortedBy { hour -> if (hour < 12) hour + 24 else hour }
-
-            if (actionableHours.isEmpty()) {
-                Text(
-                    "Geen consistent basaal-signaal in de beschikbare nachtvensters.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Text(
-                    "Gespreide aanpassing per klok-uur (kern ± aflopende buururen):",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                actionableHours.forEach { hour ->
-                    val (shiftPct, advisedUph, confidence) = spreadAdvice[hour] ?: return@forEach
-                    val isCore = nightWindows.any {
-                        it.effectHour == hour &&
-                            it.driftSignal != "NEUTRAL" &&
-                            it.driftSignal != "UNCERTAIN"
-                    }
-                    val currentUph = nightWindows
-                        .filter { it.effectHour == hour && it.activeProfileBasalUph > 0 }
-                        .maxByOrNull { it.startTs }?.activeProfileBasalUph ?: 0.0
-
-                    val signalType = spreadAdvice.keys
-                        .filter { k -> kotlin.math.abs((hour - k + 36) % 24 - 12) <= 2 }
-                        .mapNotNull { k -> nightWindows.filter { it.effectHour == k }.maxByOrNull { it.startTs }?.driftSignal }
-                        .firstOrNull { it != "NEUTRAL" && it != "UNCERTAIN" } ?: "UNCERTAIN"
-
-                    val signalColor = when {
-                        shiftPct > 0 -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.error
-                    }
-                    val hourLabel = "${hour.toString().padStart(2,'0')}:00"
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (isCore) "● $hourLabel" else "  $hourLabel",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = if (isCore) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                        if (currentUph > 0) {
-                            Text(
-                                "%.2f → %.2f U/h  (%+.0f%%)".format(currentUph, advisedUph, shiftPct),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = signalColor,
-                                fontWeight = if (isCore) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Analysevensers onderaan — uitsluitend ter informatie over de
-            // detectiebasis. Het advies hierboven wordt ALTIJD per heel klokuur
-            // gegeven (00:00, 01:00, … 23:00), niet per detectievenster.
-            Divider()
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "Detectievensers (analysebasis)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "De analyse gebruikt schuivende vensters van 90 min per stap van 30 min. " +
-                        "Een eventueel aanpassingsadvies wordt per heel klokuur getoond (bijv. 02:00 → 0,85 U/h).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            val recent = nightWindows
-                .sortedWith(compareByDescending<NightWindowEntity> { it.localDate }
-                                .thenBy { it.startTs })
-                .take(7)
-            recent.forEach { w ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "${w.localDate} ${w.slotLabel}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Signaalindicator
-                        Text(
-                            when (w.driftSignal) {
-                                "BASAL_UP"             -> "↑"
-                                "BASAL_DOWN"           -> "↓"
-                                "BASAL_DOWN_PRECURSOR" -> "↓?"
-                                "NEUTRAL"              -> "="
-                                else                   -> "?"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = when (w.driftSignal) {
-                                "BASAL_UP"             -> MaterialTheme.colorScheme.tertiary
-                                "BASAL_DOWN"           -> MaterialTheme.colorScheme.error
-                                "BASAL_DOWN_PRECURSOR" -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                        // Kern-advies voor dit venster: huidig → advies U/h (+/- %)
-                        // Dit is de bijdrage van dit venster aan het kern-uur;
-                        // het uiteindelijke klokuur-advies is het gewogen gemiddelde
-                        // over alle vensters voor dat uur.
-                        if (w.advisedBasalUph > 0 &&
-                            w.activeProfileBasalUph > 0 &&
-                            w.driftSignal !in listOf("NEUTRAL", "UNCERTAIN")) {
-                            Text(
-                                "%.2f→%.2f U/h (%+.0f%%)".format(
-                                    w.activeProfileBasalUph,
-                                    w.advisedBasalUph,
-                                    w.advisedShiftPct
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-            if (nightWindows.size > 7) {
-                Text(
-                    "… nog ${nightWindows.size - 7} eerdere vensters",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
+// (Basaal-adviseur-kaart hier verwijderd, zie NachtControlTab hierboven.)
 
 // ── HandmatigParametersTab ────────────────────────────────────────────────
 // Toont de actuele FCLvNext-parameters als leesweergave.

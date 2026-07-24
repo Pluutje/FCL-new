@@ -183,8 +183,27 @@ object FclNightAiAdvisorResponseParser {
             }
             if (weightSum <= 0.0) continue
 
-            val blendedShift = weightedShiftSum / weightSum
-            if (kotlin.math.abs(blendedShift) < 3.0) continue   // te klein om te tonen
+            // Taper-fix (24/07/2026, Ecko): delen door weightSum (een GEMIDDELDE
+            // van de omliggende kernen) bleek geen taper op te leveren — die
+            // genormaliseerde waarde bleef altijd rond dezelfde orde van grootte
+            // als de kernen zelf, ongeacht de afstand (dus bv. -5% op zowel 1 als
+            // 3 uur van de kern, terwijl de tekst wél "geleidelijke overloop"
+            // beloofde). Wat wél echt afneemt met de afstand: de SOM van elk
+            // kern-aandeel maal zijn eigen Gauss-gewicht, zonder die te delen door
+            // het totaalgewicht — verder van de kern(en) af, hoe kleiner elke
+            // bijdrage, hoe dichter de som vanzelf naar nul zakt. Gecapt op de
+            // sterkste bijdragende kern zelf, zodat meerdere overlappende kernen de
+            // uitkomst nooit verder kunnen opstuwen dan wat één kern al aangaf.
+            val maxCoreMagnitude = cores
+                .filter { core ->
+                    var o = targetHour - core.hour
+                    if (o > 12) o -= 24
+                    if (o < -12) o += 24
+                    gaussWeight(o) > 0.0
+                }
+                .maxOfOrNull { kotlin.math.abs(it.signedShiftPct) } ?: 0.0
+            val blendedShift = weightedShiftSum.coerceIn(-maxCoreMagnitude, maxCoreMagnitude)
+            if (kotlin.math.abs(blendedShift) < 1.0) continue   // te klein om zinvol te tonen
 
             val agg = hourlyByHour[targetHour] ?: continue
             val blendedConf = (weightedConfSum / weightSum * 0.8).coerceIn(0.0, 1.0)

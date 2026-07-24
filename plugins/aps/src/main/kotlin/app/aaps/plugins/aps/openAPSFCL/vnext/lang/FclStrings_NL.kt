@@ -81,7 +81,7 @@ object FclStrings_NL : FclStrings {
     override val gegevensInfo           = "%d cycli \u2022 data direct uit AAPS database"
     override val vernieuwen             = "Vernieuwen"
     override val episodes               = "Episodes"
-    override val advisor                = "Advisor"
+    override val advisor                = "Automaat"
     override val glucoseBereiken        = "Glucose bereiken"
     override val laatseSyncLabel        = "Laatste sync:"
     override val tbr                    = "TBR"

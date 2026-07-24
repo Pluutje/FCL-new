@@ -107,6 +107,8 @@ fun FclAiAdvisorScreen(
             SettingsSection(context, onSaved = { showSettings = false })
         }
 
+        // ── Dag: bestaande inhoud, nu als tabblad (24/07/2026, Ecko) ──────
+        val dagPage = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPage("Dag") {
         // 13/07/2026 (Ecko) — directe klik-bevestiging voor "Nu vernieuwen". De
         // knoptekst hieronder ("⏳ Bezig…") leunt op FclAiAdvisorScheduler.isRunning(),
         // een plain AtomicBoolean, geen Compose-observable State — die wijzigt in de
@@ -246,6 +248,27 @@ fun FclAiAdvisorScreen(
                 }
             }
         } // einde isRefreshing-else (zie kdoc hierboven bij getoondRapportInstant)
+        }
+
+        // ── Nacht: AI-adviseur (basaal) — verhuisd hierheen vanuit Automaat
+        // → Nacht (24/07/2026, Ecko), zodat de dag- en nacht-AI-adviezen bij
+        // elkaar op één tabblad staan, gescheiden van de regel-gebaseerde
+        // Automaat-tab. Zelfde API-sleutel/model als hierboven, eigen opslag
+        // en trigger (zie FclNightAiAdvisorScheduler) blijven ongewijzigd.
+        val nachtPage = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPage("Nacht") {
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.NightAiAdvisorCard(context = context)
+            Divider()
+            Text(
+                "Zie ook: Automaat → Nacht voor de geleerde NF-basaalfactor " +
+                    "(regel-gebaseerd, los van dit AI-advies).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPager(
+            pages = listOf(dagPage, nachtPage)
+        )
 
         // einde inhoud
     }

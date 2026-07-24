@@ -81,7 +81,7 @@ object FclStrings_EN : FclStrings {
     override val gegevensInfo           = "%d cycles \u2022 data from AAPS database"
     override val vernieuwen             = "Refresh"
     override val episodes               = "Episodes"
-    override val advisor                = "Advisor"
+    override val advisor                = "Automation"
     override val glucoseBereiken        = "Glucose ranges"
     override val laatseSyncLabel        = "Last sync:"
     override val tbr                    = "TBR"
