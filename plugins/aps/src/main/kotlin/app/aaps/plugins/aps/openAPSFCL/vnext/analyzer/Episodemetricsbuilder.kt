@@ -255,8 +255,12 @@ object EpisodeMetricsBuilder {
                         it.slope >= -0.10
                 }
 
+            // 26/07/2026 (Ecko) — zie kdoc bij EpisodeMetrics.isNight.
+            val isNight = rows.firstOrNull()?.isNight ?: false
+
             EpisodeMetrics(
                 id = episode.id,
+                isNight = isNight,
                 start = episode.start,
                 end = episode.end,
                 postWindowEnd = episode.postWindowEnd,

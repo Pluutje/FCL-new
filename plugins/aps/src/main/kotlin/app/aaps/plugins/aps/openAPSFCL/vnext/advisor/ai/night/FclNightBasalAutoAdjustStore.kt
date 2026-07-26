@@ -10,10 +10,10 @@ import org.json.JSONObject
  *
  * 24/07/2026 (Ecko). Eigen SharedPreferences-bestand, zelfde patroon als
  * FclNightAiAdvisorStore — losstaand van alle andere opslag. Bewaart:
- *  - de modus (UIT / ALLEEN_LOGGEN / AUTOMATISCH), standaard UIT
+ *  - de modus, standaard UIT
  *  - het basisprofiel (per-uur basaalwaarden) waar de ±25%-drift-cap in
  *    FclNightBasalAutoAdjuster tegen wordt afgemeten — vastgelegd bij de
- *    EERSTE toepassing (dry-run of automatisch) en daarna alleen nog
+ *    EERSTE toepassing (voorstel of automatisch) en daarna alleen nog
  *    gewijzigd via een expliciete, handmatige "opnieuw vastleggen"-actie
  *    (zie resetBaseline hieronder) — NOOIT automatisch verschoven, precies
  *    zoals met Ecko besproken (24/07/2026): "mocht hij ooit tegen de max
@@ -23,10 +23,18 @@ import org.json.JSONObject
  *    (voor de "dit uur zit al N dagen tegen de grens aan"-indicatie in de
  *    UI) — gaat naar 0 zodra een uur een dag niet raakt, en helemaal
  *    opnieuw bij een baseline-reset.
+ *
+ * DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko): de eigen
+ * "enum class Mode { OFF, DRY_RUN, AUTO }" is vervangen door de gedeelde
+ * FclSystemMode (OFF/AUTO/MANUAL) — zelfde patroon als DFLearner en de
+ * dag-AI-adviseur, zodat de nacht-adjuster nu ook een echte MANUAL-modus
+ * heeft (voorstel + Accepteren/Afwijzen) i.p.v. alleen passief loggen.
+ * ALLEEN_LOGGEN/DRY_RUN wordt functioneel MANUAL: in beide gevallen wordt
+ * er berekend en gelogd maar niet automatisch toegepast — het verschil is
+ * dat MANUAL er nu ook een expliciete accepteer/afwijs-actie bovenop krijgt
+ * (zie FclNightBasalAutoAdjuster.applyPending()/rejectPending()).
  */
 object FclNightBasalAutoAdjustStore {
-
-    enum class Mode { OFF, DRY_RUN, AUTO }
 
     private const val PREFS_NAME = "fcl_night_basal_auto_adjust_prefs"
 
@@ -41,14 +49,26 @@ object FclNightBasalAutoAdjustStore {
 
     // ── Modus ────────────────────────────────────────────────────────────────
 
-    fun getMode(context: Context): Mode =
-        try {
-            Mode.valueOf(prefs(context).getString(KEY_MODE, Mode.OFF.name) ?: Mode.OFF.name)
-        } catch (_: IllegalArgumentException) {
-            Mode.OFF
+    /**
+     * Backward-compat (26/07/2026, Ecko): bestaande installaties hebben
+     * mogelijk nog de oude waarden "OFF"/"DRY_RUN"/"AUTO" opgeslagen staan.
+     * "DRY_RUN" wordt EXPLICIET naar MANUAL gemapt — bewust NIET via
+     * FclSystemMode.fromStored() (die valt voor een onherkende waarde terug
+     * op AUTO, wat hier een bestaande dry-run/test-gebruiker zonder waarschuwing
+     * naar "daadwerkelijk toepassen op de pomp" zou zetten — een serieuze
+     * veiligheidsregressie). Nooit-ingesteld (null) blijft OFF, net als
+     * voorheen — geen zelfstandige start zonder expliciete keuze.
+     */
+    fun getMode(context: Context): app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode {
+        val stored = prefs(context).getString(KEY_MODE, null)
+        return when (stored) {
+            null -> app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
+            "DRY_RUN" -> app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+            else -> app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.fromStored(stored)
         }
+    }
 
-    fun setMode(context: Context, mode: Mode) {
+    fun setMode(context: Context, mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode) {
         prefs(context).edit().putString(KEY_MODE, mode.name).apply()
     }
 

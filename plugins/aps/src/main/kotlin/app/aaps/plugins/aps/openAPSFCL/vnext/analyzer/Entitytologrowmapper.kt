@@ -17,6 +17,7 @@ import java.time.Instant
  */
 fun FCLCycleLogEntity.toLogRow(): LogRow = LogRow(
     timestamp              = Instant.ofEpochMilli(timestampMs),
+    isNight                = context.isNight,
     bg                     = glucoseIob.bg,
     target                 = glucoseIob.target,
     deltaTarget            = glucoseIob.bg - glucoseIob.target,

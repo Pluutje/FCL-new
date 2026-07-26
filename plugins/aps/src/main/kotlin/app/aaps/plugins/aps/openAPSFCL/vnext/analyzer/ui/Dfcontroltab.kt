@@ -170,7 +170,10 @@ fun DFControlTab(
             applyResult = applyResult,
             applyTs = applyTs
         )
-        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context))
+        // 26/07/2026 (Ecko) — dag/nacht-splitsing: twee onafhankelijke assen,
+        // dus twee statusregels i.p.v. één.
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = false), label = "Dag")
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = true), label = "Nacht")
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerAdvies.getLatest(context)?.let { advies ->
             Text(
                 "💡 F staat al ${advies.episodes} episodes tegen zijn plafond " +

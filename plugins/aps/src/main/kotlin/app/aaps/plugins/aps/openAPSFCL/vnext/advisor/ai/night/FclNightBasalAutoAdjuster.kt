@@ -46,11 +46,19 @@ import kotlin.math.sign
  *     Basisprofiel wordt bij de eerste run automatisch vastgelegd, en
  *     daarna alleen nog via een expliciete, handmatige "opnieuw
  *     vastleggen"-actie in de UI gewijzigd.
- *  5. Max 1x per dag (via ProfileAutoAdjustLogDao.existsForDate()).
- *  6. Modus UIT/ALLEEN_LOGGEN(dry-run)/AUTOMATISCH — alleen bij AUTOMATISCH
- *     wordt er daadwerkelijk iets naar ProfileRepository/ProfileFunction
- *     geschreven; bij ALLEEN_LOGGEN wordt precies hetzelfde berekend en
- *     gelogd, maar nooit toegepast.
+ *  5. Max 1x per dag voor de AUTOMATISCHE route (via
+ *     ProfileAutoAdjustLogDao.existsForDate()) — een handmatige "Nu
+ *     vernieuwen"-trigger negeert deze cap bewust (26/07/2026, Ecko: anders
+ *     blokkeert een eerdere run van vandaag, ongeacht de uitkomst, elke
+ *     latere handmatige verversing tot middernacht), wat geen
+ *     veiligheidsrisico geeft omdat een handmatige trigger sowieso nooit
+ *     zelf naar de pomp schrijft (zie punt 6).
+ *  6. Modus UIT/AUTOMATISCH/HANDMATIG (gedeelde FclSystemMode, zie
+ *     FclNightBasalAutoAdjustStore) — alleen bij AUTOMATISCH wordt er
+ *     daadwerkelijk iets naar ProfileRepository/ProfileFunction geschreven;
+ *     bij HANDMATIG wordt precies hetzelfde berekend en als openstaand
+ *     voorstel gelogd (zie applyPending()/rejectPending() hieronder), nooit
+ *     automatisch toegepast.
  *  7. Best-effort: elke fout (geen profiel, validatie geweigerd,
  *     ProfileRepository/ProfileFunction faalt) wordt gelogd met reden en
  *     stopt daar — nooit een crash, nooit het AI-rapport zelf beïnvloed.
@@ -84,11 +92,13 @@ object FclNightBasalAutoAdjuster {
         profileFunction: ProfileFunction,
         profileRepository: ProfileRepository,
         payload: FclNightReportPayload?,
-        result: NightAiAdvisorRunResult
+        result: NightAiAdvisorRunResult,
+        // 26/07/2026 (Ecko) — zie kdoc bij de AUTO-kortsluiting hieronder.
+        isManualTrigger: Boolean = false
     ) {
         try {
             runBlocking {
-                applyInternal(context, profileFunction, profileRepository, payload, result)
+                applyInternal(context, profileFunction, profileRepository, payload, result, isManualTrigger)
             }
         } catch (_: Exception) {
             // best-effort — zie kdoc hierboven
@@ -100,16 +110,40 @@ object FclNightBasalAutoAdjuster {
         profileFunction: ProfileFunction,
         profileRepository: ProfileRepository,
         payload: FclNightReportPayload?,
-        result: NightAiAdvisorRunResult
+        result: NightAiAdvisorRunResult,
+        isManualTrigger: Boolean
     ) {
         val mode = FclNightBasalAutoAdjustStore.getMode(context)
-        if (mode == FclNightBasalAutoAdjustStore.Mode.OFF) return
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
+        // 26/07/2026 (Ecko) — de oorspronkelijke veiligheidsafspraak bij "Nu
+        // vernieuwen" was: nooit ongevraagd echt op de pomp schrijven. Nu dat
+        // ook via de handmatige knop een berekening kan triggeren (zie kdoc
+        // bij FclNightAiAdvisorScheduler.forceRunNow()), blijft die afspraak
+        // hier expliciet gewaarborgd: bij AUTO slaat een handmatige trigger
+        // volledig over (geen berekening, geen log — exact het oude gedrag).
+        // MANUAL mag wél, want dat schrijft nooit vanzelf naar de pomp — de
+        // gebruiker moet hoe dan ook eerst expliciet Accepteren.
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO && isManualTrigger) return
         if (result.suggestions.isEmpty()) return
 
         val db = FCLAnalyzerDatabase.getInstance(context)
         val now = System.currentTimeMillis()
         val today = LocalDate.now(AMSTERDAM).toString()
-        if (db.profileAutoAdjustLogDao().existsForDate(today)) return // max 1x per dag
+        // 26/07/2026 (Ecko) — bugfix: deze cap was bedoeld om de
+        // AUTOMATISCHE, nachtelijke route tegen dubbel toepassen op dezelfde
+        // dag te beschermen (zie kdoc-item 5 bovenaan). Hij ving in de
+        // praktijk óók elke latere "Nu vernieuwen"-klik diezelfde dag af,
+        // zelfs als de bestaande rij van vandaag een oude/mislukte/
+        // afgewezen poging was — of, zoals bleek, een rij die dateert van
+        // vóór de FclSystemMode-herstructurering (nog met de letterlijke
+        // oude waarde "DRY_RUN"). "Nu vernieuwen" léék dan te werken (het
+        // AI-rapport ververste wél) maar leverde nooit een nieuw
+        // Accepteren/Afwijzen-voorstel op. Een handmatige trigger schrijft
+        // nooit vanzelf naar de pomp (zie de AUTO-kortsluiting hierboven),
+        // dus er is geen veiligheidsrisico om 'm de dagcap te laten
+        // negeren — alleen de automatische route blijft aan 1x per dag
+        // gebonden.
+        if (db.profileAutoAdjustLogDao().existsForDate(today) && !isManualTrigger) return
 
         val nightsAnalyzed = payload?.nightsAnalyzed ?: 0
         val avgConfidence = result.suggestions.map { it.confidence }.average()
@@ -167,53 +201,25 @@ object FclNightBasalAutoAdjuster {
         if (shiftByHour.isEmpty()) return
 
         // ── Nieuwe uurwaarden berekenen, met cumulatieve-drift-cap per uur ──
-        val hoursAtCap = mutableSetOf<Int>()
-        val newHourly = HashMap<Int, Double>()
-        var totalOld = 0.0
-        var totalNew = 0.0
-        for (h in 0..23) {
-            val curVal = currentHourly[h] ?: 0.0
-            totalOld += curVal
-            val shiftPct = shiftByHour[h]
-            var newVal = if (shiftPct != null) roundToStep(curVal * (1.0 + shiftPct / 100.0)) else curVal
-            if (shiftPct != null) {
-                val clamped = clampToBaseline(newVal, baseline[h] ?: curVal)
-                if (clamped != newVal) hoursAtCap.add(h)
-                newVal = clamped
-            }
-            newHourly[h] = newVal
-            totalNew += newVal
-        }
-
-        // ── Dagtotaal-cap: alleen de AANGERAAKTE uren se delta terugschalen,
-        //    niet alle 24 uur uniform knijpen — en na het schalen nogmaals
-        //    tegen de drift-cap aan houden (defensief, randgeval). ──
-        if (totalOld > 0.0 && abs(totalNew - totalOld) / totalOld > DAILY_TOTAL_CAP_FRAC) {
-            val allowedTotal = totalOld * (1.0 + DAILY_TOTAL_CAP_FRAC * sign(totalNew - totalOld))
-            val deltaWanted = totalNew - totalOld
-            val deltaAllowed = allowedTotal - totalOld
-            val scale = if (deltaWanted != 0.0) deltaAllowed / deltaWanted else 0.0
-            for (h in 0..23) {
-                val curVal = currentHourly[h] ?: 0.0
-                val delta = (newHourly[h] ?: curVal) - curVal
-                var scaledVal = roundToStep(curVal + delta * scale)
-                if (shiftByHour.containsKey(h)) {
-                    val clamped = clampToBaseline(scaledVal, baseline[h] ?: curVal)
-                    if (clamped != scaledVal) hoursAtCap.add(h)
-                    scaledVal = clamped
-                }
-                newHourly[h] = scaledVal
-            }
-        }
-
+        // (26/07/2026, Ecko) — uitbesteed aan computeNewHourly() zodat
+        // applyPending() hieronder (het "Accepteren" pad bij MANUAL) exact
+        // dezelfde cap-logica hergebruikt bij het VERS herberekenen tegen
+        // het op dát moment actuele profiel.
+        val (newHourly, hoursAtCap) = computeNewHourly(currentHourly, shiftByHour, baseline)
         FclNightBasalAutoAdjustStore.updateCapHitCounters(context, hoursAtCap, shiftByHour.keys)
 
         val oldJson = hourlyToJson(currentHourly)
         val newJson = hourlyToJson(newHourly)
         val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
 
-        if (mode == FclNightBasalAutoAdjustStore.Mode.DRY_RUN) {
-            logRow(db, now, today, mode, applied = false, skipReason = "ALLEEN_LOGGEN (dry-run)",
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL) {
+            // 26/07/2026 (Ecko) — deze rij (applied=false, skipReason="") IS
+            // het openstaande voorstel. Advisorscreen.kt herkent 'm zo via
+            // getLatest() en toont Accepteren/Afwijzen; die knoppen roepen
+            // applyPending()/rejectPending() hieronder aan, die een NIEUWE
+            // rij toevoegen (applied=true, resp. skipReason="AFGEWEZEN...")
+            // zodat deze rij niet meer als "pending" herkend wordt.
+            logRow(db, now, today, mode, applied = false, skipReason = "",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
                 hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
@@ -280,6 +286,188 @@ object FclNightBasalAutoAdjuster {
             hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
     }
 
+    /**
+     * Accepteren van een openstaand MANUAL-voorstel (26/07/2026, Ecko) — zie
+     * kdoc bij de MANUAL-tak in applyInternal(). Herberekent newHourly VERS
+     * tegen het NU actuele profiel (niet de mogelijk verouderde newBasalJson-
+     * snapshot in de pending-rij) — als de gebruiker sindsdien handmatig iets
+     * aan het profiel wijzigde, telt dat gewoon mee, precies zoals bij AUTO.
+     * Retourneert false als er niets openstond of het schrijven mislukte.
+     */
+    suspend fun applyPending(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository
+    ): Boolean {
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val pending = db.profileAutoAdjustLogDao().getLatest()
+            ?.takeIf { it.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name && !it.applied && it.skipReason.isEmpty() }
+            ?: return false
+
+        val shiftByHour = HashMap<Int, Double>()
+        try {
+            val obj = JSONObject(pending.perHourShiftJson)
+            obj.keys().forEach { k -> shiftByHour[k.toInt()] = obj.getDouble(k) }
+        } catch (_: Exception) { return false }
+        if (shiftByHour.isEmpty()) return false
+
+        val effectiveProfile = profileFunction.getProfile() ?: return false
+        val originalName = profileFunction.getOriginalProfileName()
+        val profiles = profileRepository.profiles.value
+        val index = profiles.indexOfFirst { it.name == originalName }
+        if (index == -1) return false
+        val current = profiles[index]
+
+        val currentHourly = HashMap<Int, Double>()
+        for (h in 0..23) currentHourly[h] = effectiveProfile.getBasalTimeFromMidnight(h * 3600)
+        val baseline = FclNightBasalAutoAdjustStore.getBaseline(context) ?: currentHourly
+
+        val (newHourly, hoursAtCap) = computeNewHourly(currentHourly, shiftByHour, baseline)
+        FclNightBasalAutoAdjustStore.updateCapHitCounters(context, hoursAtCap, shiftByHour.keys)
+
+        val now = System.currentTimeMillis()
+        val today = LocalDate.now(AMSTERDAM).toString()
+        val mode = app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+        val oldJson = hourlyToJson(currentHourly)
+        val newJson = hourlyToJson(newHourly)
+        val shiftJson = pending.perHourShiftJson
+
+        // (26/07/2026, Ecko) — zelfde validate→replace→createProfileSwitch-pad
+        // als de AUTO-tak in applyInternal() hierboven (bewust gedupliceerd
+        // i.p.v. via een gedeelde functie met een expliciet AAPS-profieltype
+        // in de signatuur — de exacte klassenaam van `current`/`profiles[i]`
+        // is buiten dit uploadpakket niet te verifiëren, en lokale
+        // type-inferentie (`val`, geen expliciete typeannotatie) is hier de
+        // veilige keuze om geen gok-type te introduceren dat de build breekt).
+        val newSingleProfile = current.deepClone().apply { basal = buildBasalJsonArray(newHourly) }
+
+        val errors = profileRepository.validateStructured(newSingleProfile)
+        if (errors.isNotEmpty()) {
+            logRow(db, now, today, mode, applied = false,
+                skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
+                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+            return false
+        }
+
+        val replaceResult = profileRepository.replace(index, newSingleProfile)
+        if (replaceResult.isFailure) {
+            logRow(db, now, today, mode, applied = false,
+                skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
+                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+            return false
+        }
+
+        val newProfileStore = profileRepository.profile.value
+        if (newProfileStore == null) {
+            logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
+                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+            return false
+        }
+
+        val ps = profileFunction.createProfileSwitch(
+            profileStore = newProfileStore,
+            profileName = current.name,
+            durationInMinutes = 0,
+            percentage = 100,
+            timeShiftInHours = 0,
+            timestamp = now,
+            action = Action.PROFILE_SWITCH,
+            source = Sources.Aaps,
+            note = "FCL nacht-auto (geaccepteerd): " + shiftByHour.entries
+                .sortedBy { it.key }
+                .joinToString { (h, pct) -> "%02d:00 %+.1f%%".format(h, pct) },
+            listValues = emptyList(),
+            iCfg = effectiveProfile.iCfg
+        )
+        if (ps == null) {
+            logRow(db, now, today, mode, applied = false,
+                skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
+                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+            return false
+        }
+
+        logRow(db, now, today, mode, applied = true, skipReason = "",
+            oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+        return true
+    }
+
+    /**
+     * Afwijzen van een openstaand MANUAL-voorstel — voegt een nieuwe rij toe
+     * (skipReason gevuld) zodat de pending-rij niet meer als "openstaand"
+     * wordt herkend. Er is niets om terug te draaien: er is nooit iets
+     * naar AAPS geschreven (zie kdoc bij de MANUAL-tak in applyInternal()).
+     */
+    suspend fun rejectPending(context: Context): Boolean {
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val pending = db.profileAutoAdjustLogDao().getLatest()
+            ?.takeIf { it.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name && !it.applied && it.skipReason.isEmpty() }
+            ?: return false
+        logRow(
+            db, System.currentTimeMillis(), LocalDate.now(AMSTERDAM).toString(),
+            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL, applied = false,
+            skipReason = "AFGEWEZEN (handmatig)",
+            oldJson = pending.oldBasalJson, newJson = pending.newBasalJson, shiftJson = pending.perHourShiftJson,
+            hoursAtCapCount = pending.hoursAtCapCount, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence
+        )
+        return true
+    }
+
+    /**
+     * Gedeelde cap-berekening (26/07/2026, Ecko) — zie kdoc bij de aanroep in
+     * applyInternal(). Zuiver functioneel, geen DB/AAPS-toegang, dus veilig
+     * te hergebruiken vanuit zowel de nachtelijke pipeline als applyPending().
+     */
+    private fun computeNewHourly(
+        currentHourly: Map<Int, Double>,
+        shiftByHour: Map<Int, Double>,
+        baseline: Map<Int, Double>
+    ): Pair<Map<Int, Double>, Set<Int>> {
+        val hoursAtCap = mutableSetOf<Int>()
+        val newHourly = HashMap<Int, Double>()
+        var totalOld = 0.0
+        var totalNew = 0.0
+        for (h in 0..23) {
+            val curVal = currentHourly[h] ?: 0.0
+            totalOld += curVal
+            val shiftPct = shiftByHour[h]
+            var newVal = if (shiftPct != null) roundToStep(curVal * (1.0 + shiftPct / 100.0)) else curVal
+            if (shiftPct != null) {
+                val clamped = clampToBaseline(newVal, baseline[h] ?: curVal)
+                if (clamped != newVal) hoursAtCap.add(h)
+                newVal = clamped
+            }
+            newHourly[h] = newVal
+            totalNew += newVal
+        }
+
+        // ── Dagtotaal-cap: alleen de AANGERAAKTE uren se delta terugschalen,
+        //    niet alle 24 uur uniform knijpen — en na het schalen nogmaals
+        //    tegen de drift-cap aan houden (defensief, randgeval). ──
+        if (totalOld > 0.0 && abs(totalNew - totalOld) / totalOld > DAILY_TOTAL_CAP_FRAC) {
+            val allowedTotal = totalOld * (1.0 + DAILY_TOTAL_CAP_FRAC * sign(totalNew - totalOld))
+            val deltaWanted = totalNew - totalOld
+            val deltaAllowed = allowedTotal - totalOld
+            val scale = if (deltaWanted != 0.0) deltaAllowed / deltaWanted else 0.0
+            for (h in 0..23) {
+                val curVal = currentHourly[h] ?: 0.0
+                val delta = (newHourly[h] ?: curVal) - curVal
+                var scaledVal = roundToStep(curVal + delta * scale)
+                if (shiftByHour.containsKey(h)) {
+                    val clamped = clampToBaseline(scaledVal, baseline[h] ?: curVal)
+                    if (clamped != scaledVal) hoursAtCap.add(h)
+                    scaledVal = clamped
+                }
+                newHourly[h] = scaledVal
+            }
+        }
+        return newHourly to hoursAtCap
+    }
+
     private fun clampToBaseline(value: Double, baselineValue: Double): Double {
         val low = roundToStep(baselineValue * (1.0 - CUMULATIVE_DRIFT_CAP_FRAC)).coerceAtLeast(0.01)
         val high = roundToStep(baselineValue * (1.0 + CUMULATIVE_DRIFT_CAP_FRAC))
@@ -315,7 +503,7 @@ object FclNightBasalAutoAdjuster {
         db: FCLAnalyzerDatabase,
         now: Long,
         today: String,
-        mode: FclNightBasalAutoAdjustStore.Mode,
+        mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode,
         applied: Boolean,
         skipReason: String,
         oldJson: String,

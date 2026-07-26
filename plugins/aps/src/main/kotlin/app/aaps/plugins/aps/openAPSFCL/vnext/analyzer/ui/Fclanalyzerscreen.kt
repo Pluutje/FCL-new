@@ -1005,11 +1005,16 @@ private suspend fun runAdvisorFlow(
     // maar de leerdata is nog steeds geldig voor D/F optimalisatie.
     // Als we alleen filteredMetrics gebruiken stopt het leren zodra de automaat
     // een aanpassing heeft gedaan (want dan worden alle vorige episodes CONSUMED).
-    if (DFLearner.isAutoEnabled(context)) {
-        val allCompletedMetrics = episodeMetrics.filterIndexed { i, _ ->
-            episodes.getOrNull(i)?.isComplete == true
-        }
-        val latestMetrics = allCompletedMetrics.lastOrNull()
+    // 26/07/2026 (Ecko) — dag/nacht-splitsing: latestMetrics moet EERST bekend
+    // zijn voordat de modus-gate kan bepalen welke as (dag/nacht) geldt —
+    // was voorheen een vaste DFLearner.isAutoEnabled(context) zonder as.
+    val allCompletedMetrics = episodeMetrics.filterIndexed { i, _ ->
+        episodes.getOrNull(i)?.isComplete == true
+    }
+    val latestMetricsForLearn = allCompletedMetrics.lastOrNull()
+
+    if (latestMetricsForLearn != null && DFLearner.isAutoEnabled(context, latestMetricsForLearn.isNight)) {
+        val latestMetrics = latestMetricsForLearn
 
         // Gebruik de laatste AFGESLOTEN episode voor type-detectie
         // Een lopende episode heeft mogelijk een afwijkend slopepatroon

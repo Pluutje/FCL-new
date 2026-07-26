@@ -176,8 +176,10 @@ class FCLCycleLogRepository @Inject constructor(
         // hier altijd genegeerd. Die bevat de diagnose-code en oude D/F-
         // waarden, nodig voor een leesbare uitleg bij het MANUAL-voorstel
         // (zie FclLearnerUitleg.kt) — vastgelegd in learningStep hieronder.
+        // 26/07/2026 (Ecko) — dag/nacht-splitsing: welke as geldt hangt af van
+        // de episode zelf (latestMetrics.isNight), niet van "is het nu nacht".
         var learningStep: DFLearner.LearningStep? = null
-        if (latestMetrics != null && DFLearner.isEvaluationEnabled(context)) {
+        if (latestMetrics != null && DFLearner.isEvaluationEnabled(context, latestMetrics.isNight)) {
             learningStep = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmb, manualMaxIob = manualMaxIob, effectiveIsfMmol = effectiveIsfMmol)
             // Losse leeras voor refLcd (laatste-commit-demping) — zie kdoc
             // bij DFMapping.REF_LCD_DEFAULT en DFLearner.evaluateLateCommitDecay.
@@ -214,7 +216,13 @@ class FCLCycleLogRepository @Inject constructor(
         // Alleen het TOEPASSEN (AUTO) vs. VOORSTELLEN (MANUAL) vertakt.
         // OFF: evaluate() zelf draaide al niet (zie isEvaluationEnabled
         // hierboven), dus hier is dan simpelweg niets te doen.
-        val learnerMode = DFLearner.getMode(context)
+        // 26/07/2026 (Ecko) — zelfde as als Stap 4 hierboven: welke episode
+        // net beoordeeld is (latestMetrics?.isNight) bepaalt welke modus
+        // hier geldt. Geen latestMetrics (geen episodes deze cyclus) → val
+        // terug op de DAG-as, puur zodat er iets zinnigs gebeurt; er is dan
+        // toch niets nieuws om toe te passen/voor te stellen.
+        val learnerModeIsNight = latestMetrics?.isNight ?: false
+        val learnerMode = DFLearner.getMode(context, learnerModeIsNight)
         if (learnerMode != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) {
             val d      = DFLearner.getD(context)
             val f      = DFLearner.getF(context)
@@ -267,7 +275,8 @@ class FCLCycleLogRepository @Inject constructor(
                         "earlyRiseFracMin"         to (po.earlyRiseFracMin ?: 0.0),
                         "lateCommitDecayThreshold" to (po.lateCommitDecayThreshold ?: 0.0),
                         "sustainedRiseSlopeMin"    to (po.sustainedRiseSlopeMin ?: 0.0)
-                    )
+                    ),
+                    isNight = learnerModeIsNight
                 )
             } else {
                 // MANUAL (10/07/2026, Ecko — Fase 2): voorstel opslaan i.p.v.
@@ -302,8 +311,9 @@ class FCLCycleLogRepository @Inject constructor(
         // nacht) — de eigen dagelijkse cooldown in NachtLearner zorgt dat dit
         // ondanks de uurlijkse aanroepfrequentie maar 1x per dag daadwerkelijk
         // een aanpassing doet. Toepassing op AAPS gebeurt binnen NachtLearner
-        // zelf, gegated door dezelfde DFLearner.isAutoEnabled-schakelaar als
-        // de dag-learner (Settings → Analyser Automaat).
+        // zelf, sinds 26/07/2026 gegated door de eigen NACHT-as
+        // (DFLearner.isAutoEnabled(context, isNight=true)) i.p.v. de dag-as —
+        // zie kdoc in NachtLearner.kt.
         val isNightNow = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper(preferences).isNightNow()
         if (!isNightNow) {
             val laasteEpisodeEndMs = completedEpisodes.lastOrNull()?.end?.toEpochMilli()

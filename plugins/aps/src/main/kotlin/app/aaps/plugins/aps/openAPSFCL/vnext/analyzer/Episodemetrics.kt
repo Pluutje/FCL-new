@@ -5,6 +5,12 @@ import java.time.Instant
 data class EpisodeMetrics(
     val id: Int,
 
+    // 26/07/2026 (Ecko) — dag/nacht-splitsing Learner/AI-adviseur. Bepaald
+    // door EpisodeMetricsBuilder uit de eerste rij van de episode (een
+    // episode wisselt zelden binnen zijn eigen duur van dag naar nacht of
+    // omgekeerd; de EERSTE rij is bepalend voor "welk regime hoorde hierbij").
+    val isNight: Boolean = false,
+
     val start: Instant,
     val end: Instant,
     val postWindowEnd: Instant,

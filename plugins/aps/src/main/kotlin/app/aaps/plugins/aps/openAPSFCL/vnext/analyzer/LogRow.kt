@@ -4,6 +4,10 @@ import java.time.Instant
 
 data class LogRow(
     val timestamp: Instant,
+    // 26/07/2026 (Ecko) — dag/nacht-splitsing Learner/AI-adviseur: bestond al
+    // op DB-niveau (FCLCycleLogEntity.context.isNight) maar was nooit
+    // doorgeklopt naar dit domeinmodel. Zie Entitytologrowmapper.kt.
+    val isNight: Boolean = false,
     val bg: Double,
     val target: Double,
     val deltaTarget: Double,

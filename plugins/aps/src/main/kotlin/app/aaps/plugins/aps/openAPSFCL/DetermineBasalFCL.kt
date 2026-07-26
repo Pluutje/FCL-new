@@ -115,6 +115,14 @@ class DetermineBasalFCL @Inject constructor(
         )
 
     init {
+        // 26/07/2026 (Ecko) — FclProfileBridge: maakt de al-geïnjecteerde
+        // profileFunction/profileRepository beschikbaar voor de UI-laag
+        // (ProfileAutoAdjustCard's Accepteren-knop, zie FclProfileBridge.kt
+        // voor de volledige toelichting). Eenmalig bij constructie, net als
+        // de callback-registratie hieronder — deze instanties wisselen niet
+        // per cyclus.
+        app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.set(profileFunction, profileRepository)
+
         // ✅ NIEUW (01/07/2026, Ecko): AI-parameteradviseur koppelen aan episode-
         // afsluiting. FclLearnerLogger.logEpisode() is het exacte moment waarop
         // alle episode-metrics beschikbaar zijn — logischer dan DetermineBasal-cyclus

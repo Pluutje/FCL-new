@@ -119,6 +119,15 @@ object NachtLearner {
         val today = DateTime.now().toString("yyyy-MM-dd")
         val sp    = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+        // 26/07/2026 (Ecko) — dag/nacht-splitsing: NachtLearner is inherent
+        // nacht-specifiek en gebruikt daarom voortaan zijn EIGEN NACHT-as
+        // (isNight=true) i.p.v. de dag-as die hij voorheen deelde met de
+        // Dag-Learner (zie de oude kdoc bij de isAutoEnabled-check hieronder,
+        // nu vervangen). OFF: helemaal niets — geen berekening, geen log,
+        // geen enkel effect, zelfde principe als DFLearner.isEvaluationEnabled
+        // voor de Dag-as.
+        if (!DFLearner.isEvaluationEnabled(context, isNight = true)) return
+
         // Eén evaluatie per dag (cooldown)
         if (sp.getString(KEY_LAST_EVAL_DATE, "") == today) return
 
@@ -192,39 +201,50 @@ object NachtLearner {
         )
 
         // ── Daadwerkelijk toepassen ────────────────────────────────────────
-        // Volgt exact het patroon van de dag-learner in
-        // FCLCycleLogRepository.runLearners(): alleen schrijven naar AAPS als
-        // "Automaat leert" aan staat (DFLearner.isAutoEnabled), zodat dezelfde
-        // schakelaar (nu in Settings → Analyser Automaat) dag én nacht-learner
-        // samen aan-/uitzet. Bij uit: NF wordt nog wel intern bijgehouden
-        // (UI-weergave), maar niet naar AAPS gestuurd.
+        // NF wordt intern altijd bijgewerkt (UI-weergave/geschiedenis),
+        // ongeacht modus — zelfde principe als DFLearner.evaluate() dat nu
+        // ook voor de Dag-as doet (zie BUGFIX 26/07/2026 aldaar).
         DFLearner.setNfLevel(context, nieuweNf)
 
-        if (!DFLearner.isAutoEnabled(context)) return
-
-        // Effectieve waarde = geleerde NF + handmatige Nacht-Agressiviteit-
-        // offset (DFLearner.effectiveNfLevel) — zelfde optelling als de
-        // "Toepassen in AAPS"-knop op de Nacht-tab gebruikt, zodat een
-        // handmatige stap van de gebruiker niet wordt overschreven door de
-        // automatische leerstap (vraag Ecko 19/06/2026).
+        // 26/07/2026 (Ecko) — AUTO past direct toe (ongewijzigd gedrag),
+        // MANUAL slaat een voorstel op + meldt het (zelfde Fase-2-patroon
+        // als de Dag-Learner, nu ook voor de NACHT-as). OFF is hierboven al
+        // afgevangen (isEvaluationEnabled), dus hier alleen nog AUTO/MANUAL.
         val effectieveNf = DFLearner.effectiveNfLevel(context)
+        val reason = "delta=${"%.2f".format(delta)} " +
+            "vereist=${"%.2f".format(vereist)} persistentHoog=$persistentHoog " +
+            "NF(geleerd) ${"%.1f".format(huidigeNf)}→${"%.1f".format(nieuweNf)} " +
+            "NF(effectief)=${"%.1f".format(effectieveNf)}"
 
-        val active = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter.readActiveParams()
-        val currentState = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.StvState(
-            sterkte        = active.sterkte,
-            timing         = active.timing,
-            volhoudendheid = active.volhoudendheid
-        )
-        val ok = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter.writeWithNfLevel(
-            currentState = currentState,
-            newNfLevel   = effectieveNf,
-            reason       = "auto-nachtlearner: delta=${"%.2f".format(delta)} " +
-                "vereist=${"%.2f".format(vereist)} persistentHoog=$persistentHoog " +
-                "NF(geleerd) ${"%.1f".format(huidigeNf)}→${"%.1f".format(nieuweNf)} " +
-                "NF(effectief)=${"%.1f".format(effectieveNf)}",
-            episodeCount = rows.size
-        )
-        if (ok) DFLearner.setLastAppliedNfLevel(context, nieuweNf)
+        if (DFLearner.getMode(context, isNight = true) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO) {
+            val active = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter.readActiveParams()
+            val currentState = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.StvState(
+                sterkte        = active.sterkte,
+                timing         = active.timing,
+                volhoudendheid = active.volhoudendheid
+            )
+            val ok = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ConfigOverrideWriter.writeWithNfLevel(
+                currentState = currentState,
+                newNfLevel   = effectieveNf,
+                reason       = "auto-nachtlearner: $reason",
+                episodeCount = rows.size
+            )
+            if (ok) DFLearner.setLastAppliedNfLevel(context, nieuweNf)
+        } else {
+            // MANUAL
+            NachtLearnerPendingProposal.save(
+                context,
+                NachtLearnerPendingProposal.Proposal(
+                    tsMs = System.currentTimeMillis(),
+                    huidigeNf = huidigeNf,
+                    nieuweNf = nieuweNf,
+                    effectieveNf = effectieveNf,
+                    reason = reason,
+                    episodeCount = rows.size
+                )
+            )
+            FclLearnerNotificationHelper.showPendingProposal(context)
+        }
     }
 
     /**

@@ -247,19 +247,35 @@ object DFLearner {
     // ═══════════════════════════════════════════════════════════════════════
     // Mode-schakeling (10/07/2026, Ecko) — vervangt het kale aan/uit-boolean
     // door OFF/AUTO/MANUAL (zie FclSystemMode.kt voor de volledige toelichting).
+    //
+    // DAG/NACHT-SPLITSING (26/07/2026, Ecko): voorheen gold één modus voor
+    // zowel de dag-episodes als NachtLearner (NF-schaal) — zie de oude kdoc
+    // bij NachtLearner.maybeLearnNacht(): "dezelfde schakelaar ... zet dag
+    // én nacht-learner samen aan/uit". Op verzoek nu twee onafhankelijke
+    // assen: KEY_MODE blijft de DAG-sleutel (ongewijzigd pad, geen migratie
+    // nodig voor bestaande installaties), KEY_MODE_NIGHT is nieuw voor de
+    // NACHT-as. Beide vallen terug op HETZELFDE oude KEY_AUTO-boolean zolang
+    // er nog geen expliciete keuze is gemaakt — dat is precies het vorige
+    // gecombineerde gedrag, dus geen gedragsverandering totdat de gebruiker
+    // de assen zelf uit elkaar trekt via de nieuwe Instellingen-kaart.
     // ═══════════════════════════════════════════════════════════════════════
     private const val KEY_MODE = "fcl_learner_mode"
+    private const val KEY_MODE_NIGHT = "fcl_learner_mode_night"
+
+    private fun modeKey(isNight: Boolean) = if (isNight) KEY_MODE_NIGHT else KEY_MODE
 
     /**
-     * Backward-compat: bestaande installaties hebben nog geen KEY_MODE staan,
-     * alleen het oude KEY_AUTO-boolean. isAutoEnabled=false betekende al
+     * Backward-compat: bestaande installaties hebben nog geen KEY_MODE(_NIGHT)
+     * staan, alleen het oude KEY_AUTO-boolean. isAutoEnabled=false betekende al
      * "evaluate() rekent en logt, past alleen niet toe" — functioneel bijna
      * identiek aan MANUAL, dus dat is de eerlijke default-mapping (geen
      * gedragsverandering voor bestaande gebruikers totdat ze zelf een keuze
-     * maken). isAutoEnabled=true → AUTO, exact het huidige gedrag.
+     * maken). isAutoEnabled=true → AUTO, exact het huidige gedrag. Beide
+     * assen (dag/nacht) vallen terug op dit ENE oude boolean — zie kdoc
+     * hierboven bij de dag/nacht-splitsing.
      */
-    fun getMode(context: Context): app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode {
-        val stored = prefs(context).getString(KEY_MODE, null)
+    fun getMode(context: Context, isNight: Boolean): app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode {
+        val stored = prefs(context).getString(modeKey(isNight), null)
         if (stored != null) return app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.fromStored(stored)
         return if (prefs(context).getBoolean(KEY_AUTO, false))
             app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
@@ -267,14 +283,14 @@ object DFLearner {
             app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
     }
 
-    fun setMode(context: Context, mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode) {
-        prefs(context).edit().putString(KEY_MODE, mode.name).apply()
+    fun setMode(context: Context, isNight: Boolean, mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode) {
+        prefs(context).edit().putString(modeKey(isNight), mode.name).apply()
     }
 
     /** OFF: sla evaluate()/evaluateLateCommitDecay() volledig over — geen
      *  berekening, geen log, geen enkel effect. Gebruikt vóór de aanroep. */
-    fun isEvaluationEnabled(context: Context): Boolean =
-        getMode(context) != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
+    fun isEvaluationEnabled(context: Context, isNight: Boolean): Boolean =
+        getMode(context, isNight) != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
 
     /**
      * BUGFIX (10/07/2026, Ecko): leest nu af van getMode() i.p.v. rechtstreeks
@@ -282,15 +298,16 @@ object DFLearner {
      * (FCLCycleLogRepository.kt, convergeTrackedParams) een verouderde stand
      * blijven zien zodra iemand via setMode() een nieuwe modus kiest.
      */
-    fun isAutoEnabled(context: Context): Boolean =
-        getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+    fun isAutoEnabled(context: Context, isNight: Boolean): Boolean =
+        getMode(context, isNight) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
 
-    /** Legacy setter — schrijft nog naar het oude KEY_AUTO-boolean voor wie
-     *  hier nog rechtstreeks naar verwijst, maar setMode() is nu de bron van
-     *  waarheid (zie getMode()'s fallback-volgorde). Nieuwe code: setMode(). */
+    /** Legacy setter — schrijft nog naar het oude KEY_AUTO-boolean (dus voor
+     *  BEIDE assen als fallback, zie getMode()) EN expliciet naar de DAG-as,
+     *  voor wie hier nog rechtstreeks naar verwijst. setMode() is nu de bron
+     *  van waarheid. Nieuwe code: setMode(context, isNight, mode). */
     fun setAutoEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTO, enabled).apply()
-        setMode(context, if (enabled) app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+        setMode(context, isNight = false, if (enabled) app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
         else app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL)
     }
 
@@ -408,11 +425,13 @@ object DFLearner {
      * Zachte convergentie voor alle generieke tracked-parameters, één keer per
      * episode-evaluatie. [dfDerived] bevat de op dit moment actuele D/F-
      * afgeleide waarde per parameter-sleutel (uit DFMapping.toParamOverrides()).
-     * Doet niets als de Learner-automaat uit staat (isAutoEnabled=false) — dan
-     * blijven tracked-waarden bevroren, net als D/F zelf in dat geval.
+     * Doet niets als de Learner-automaat (voor de meegegeven dag/nacht-as) uit
+     * staat (isAutoEnabled=false) — dan blijven tracked-waarden bevroren, net
+     * als D/F zelf in dat geval. [isNight] (26/07/2026, Ecko): welke as — de
+     * aanroeper geeft door of dit een dag- of nacht-episode betrof.
      */
-    fun convergeTrackedParams(context: Context, dfDerived: Map<String, Double>) {
-        if (!isAutoEnabled(context)) return
+    fun convergeTrackedParams(context: Context, dfDerived: Map<String, Double>, isNight: Boolean = false) {
+        if (!isAutoEnabled(context, isNight)) return
         for ((key, dfValue) in dfDerived) {
             val current = getTrackedParam(context, key, dfValue)
             val next = current + (dfValue - current) * TRACKED_CONVERGENCE_RATE
@@ -619,23 +638,19 @@ object DFLearner {
             return null
         }
 
-        if (!isAutoEnabled(context)) {
-            // Automaat staat uit: geen aanpassingen, maar WEL loggen zodat
-            // zichtbaar is wat de learner zou hebben gediagnosticeerd.
-            app.aaps.plugins.aps.openAPSFCL.vnext.logging.FclLearnerLogger.logEpisode(
-                metrics      = metrics,
-                diagnose     = "AUTO_DISABLED",
-                rawDeltaD    = 0.0,
-                rawDeltaF    = 0.0,
-                accumDVoor   = prefs(context).getFloat(KEY_ACCUM_D, 0f).toDouble(),
-                accumFVoor   = prefs(context).getFloat(KEY_ACCUM_F, 0f).toDouble(),
-                epCountVoor  = prefs(context).getInt(KEY_EP_COUNT, 0),
-                weekDVoor    = prefs(context).getFloat("df_week_delta_d", 0f).toDouble(),
-                weekFVoor    = prefs(context).getFloat("df_week_delta_f", 0f).toDouble(),
-                blokkade     = "AUTO_DISABLED"
-            )
-            return null
-        }
+        // BUGFIX (26/07/2026, Ecko): hier stond voorheen een interne
+        // "if (!isAutoEnabled(context)) { ...; return null }" gate, die
+        // evaluate() volledig liet stoppen (geen D/F-accumulatie, geen
+        // rawDelta-berekening) zodra de modus niet AUTO was — dus óók bij
+        // MANUAL. Dat brak de Fase-2 MANUAL-belofte: Stap 7 in
+        // FCLCycleLogRepository.kt las bij MANUAL alleen de al bestaande,
+        // ongewijzigde D/F opnieuw uit en presenteerde die als "voorstel" —
+        // in werkelijkheid was er nooit een verse berekening geweest. De
+        // buitenste gate (DFLearner.isEvaluationEnabled, gecontroleerd door
+        // de aanroeper vóór evaluate() wordt aangeroepen) dekt OFF al
+        // volledig af — MANUAL en AUTO moeten hier voorbij deze gate allebei
+        // gewoon evalueren en accumuleren; alleen het TOEPASSEN (Stap 7)
+        // verschilt nog naar automaat vs. voorstel.
 
         // Veiligheidsslot: geen aanpassing bij hoge TBR
         // (gecontroleerd door aanroeper via allRows)

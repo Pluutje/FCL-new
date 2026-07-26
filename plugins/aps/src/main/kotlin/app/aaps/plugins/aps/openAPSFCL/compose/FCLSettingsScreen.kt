@@ -282,20 +282,43 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             // hieronder), en stonden de nieuwe kaarten los in het Learner- resp.
             // AI-tabblad zelf — daar staat nu alleen nog de inhoud (het
             // openstaande voorstel), de bediening staat hier bij elkaar.
+            //
+            // DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko; herzien n.a.v. Ecko's
+            // terugkoppeling): "dat moet maar 1 keer voor de analyzer en 1 keer
+            // voor de AI zijn. Als ik hem uit wil zetten dan geldt dat zowel
+            // voor dag als nacht en als ik dag wel automatisch zou willen maar
+            // nacht niet dan zet ik nacht wel op handmatig en kan ik hem gewoon
+            // afwijzen." Eerste versie had 4 losse aan/uit-schakelaars (Learner-
+            // Dag/Nacht, AI-adviseur-Dag/Nacht apart); nu 2, via
+            // FclDayNightModeSelectorCard: ÉÉN aan/uit per as die dag+nacht
+            // samen raakt, met daaronder twee ONAFHANKELIJKE Automatisch/
+            // Handmatig-keuzes. Dag/Nacht hergebruiken/introduceren dezelfde
+            // onderliggende sleutels als voorheen (DFLearner's dag-/nacht-as,
+            // FclAiAdvisorSettingsStore, FclNightBasalAutoAdjustStore — dat nu
+            // de VOLLEDIGE nacht-AI-adviseur governt, niet alleen het
+            // profiel-bijstellen, zie kdoc in FclNightAiAdvisorScheduler.kt).
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeSelectorCard(
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclDayNightModeSelectorCard(
                     title = "Learner",
-                    initialMode = DFLearner.getMode(ctx),
-                    autoDescription = "Past D/F/timing automatisch aan na elke maaltijdepisode",
-                    manualDescription = "Berekent een voorstel, past pas toe na jouw goedkeuring",
-                    onModeChange = { DFLearner.setMode(ctx, it) }
+                    initialDayMode = DFLearner.getMode(ctx, isNight = false),
+                    initialNightMode = DFLearner.getMode(ctx, isNight = true),
+                    dayAutoDescription = "Past D/F/timing automatisch aan na elke maaltijdepisode",
+                    dayManualDescription = "Berekent een voorstel, past pas toe na jouw goedkeuring",
+                    nightAutoDescription = "Past de nacht-NF-schaal automatisch aan na elke nacht",
+                    nightManualDescription = "Berekent een NF-voorstel, past pas toe na jouw goedkeuring",
+                    onDayModeChange = { DFLearner.setMode(ctx, isNight = false, it) },
+                    onNightModeChange = { DFLearner.setMode(ctx, isNight = true, it) }
                 )
-                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeSelectorCard(
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclDayNightModeSelectorCard(
                     title = "AI-adviseur",
-                    initialMode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.getMode(ctx),
-                    autoDescription = "Past goedgekeurde parameters automatisch toe, geen melding",
-                    manualDescription = "Meldt nieuwe voorstellen, past pas toe na jouw goedkeuring",
-                    onModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.setMode(ctx, it) }
+                    initialDayMode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.getMode(ctx),
+                    initialNightMode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getMode(ctx),
+                    dayAutoDescription = "Past goedgekeurde parameters automatisch toe, geen melding",
+                    dayManualDescription = "Meldt nieuwe voorstellen, past pas toe na jouw goedkeuring",
+                    nightAutoDescription = "Genereert elk nachtrapport en past het basaal-advies automatisch toe op het pompprofiel",
+                    nightManualDescription = "Genereert elk nachtrapport; basaal-aanpassing pas na jouw Accepteren op het Nacht-tabblad",
+                    onDayModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.setMode(ctx, it) },
+                    onNightModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.setMode(ctx, it) }
                 )
             }
         }

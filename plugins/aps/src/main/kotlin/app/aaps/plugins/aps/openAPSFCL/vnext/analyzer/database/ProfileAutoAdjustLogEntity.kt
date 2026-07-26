@@ -6,15 +6,23 @@ import androidx.room.PrimaryKey
 
 /**
  * Logboek van elke run van FclNightBasalAutoAdjuster (24/07/2026, Ecko) —
- * zowel "alleen loggen" (dry-run) als daadwerkelijk toegepaste automatische
- * profielwijzigingen. Eén rij per nacht-run die de auto-adjuster daadwerkelijk
- * heeft doorlopen (dus niet als modus UIT staat, of als er die run geen
- * bruikbare AI-suggesties waren).
+ * zowel niet-toegepaste voorstellen (MANUAL) als daadwerkelijk toegepaste
+ * automatische profielwijzigingen (AUTO). Eén rij per nacht-run die de
+ * auto-adjuster daadwerkelijk heeft doorlopen (dus niet als modus UIT staat,
+ * of als er die run geen bruikbare AI-suggesties waren).
  *
  * [oldBasalJson]/[newBasalJson] zijn volledige snapshots (JSON, {"0": 0.96, ...})
  * — dit is wat de "ongedaan maken"-knop in de UI teruglegt via
  * ProfileRepository.replace()/ProfileFunction.createProfileSwitch(), en wat het
  * vergelijkingstabblad toont.
+ *
+ * DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko): [mode] bevat sinds dan de
+ * naam van de gedeelde FclSystemMode ("OFF"/"AUTO"/"MANUAL", zie
+ * FclNightBasalAutoAdjustStore.getMode()) i.p.v. de oude eigen
+ * "DRY_RUN"/"AUTO"-enum. De MEEST RECENTE rij met mode=="MANUAL" &&
+ * applied==false && skipReason=="" is het openstaande voorstel — zie
+ * FclNightBasalAutoAdjuster.applyPending()/rejectPending() en de
+ * Accepteren/Afwijzen-knoppen in Advisorscreen.kt.
  */
 @Entity(
     tableName = "profile_auto_adjust_log",

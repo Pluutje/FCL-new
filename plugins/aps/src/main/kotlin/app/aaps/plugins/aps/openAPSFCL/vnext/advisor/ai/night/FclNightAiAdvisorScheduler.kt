@@ -42,6 +42,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * op de aanroepende thread — onCycle() wordt aangeroepen vanuit
  * DetermineBasalFCL.determine_basal(), en dat pad mag nooit op een
  * netwerkaanroep wachten.
+ *
+ * MODUS (26/07/2026, Ecko — dag/nacht-herstructurering AI-adviseur/Learner):
+ * FclNightBasalAutoAdjustStore's FclSystemMode is niet langer alleen de
+ * schakelaar voor het automatisch profiel-bijstellen, maar de modus van de
+ * VOLLEDIGE Nacht-AI-adviseur ("AI-adviseur — Nacht" in Instellingen).
+ * OFF: geen enkele nacht-AI-aanroep meer, geen rapport, geen advies — zowel
+ * de dagelijkse automatische route als "Nu vernieuwen" slaan de pipeline
+ * dan over (zie de gates in runIfNotAlreadyToday()/forceRunNow() hieronder).
+ * AUTO/MANUAL: rapport wordt altijd gegenereerd; alleen het WEL/NIET
+ * automatisch toepassen van de profiel-suggestie verschilt (zie
+ * FclNightBasalAutoAdjuster.maybeApply()/applyPending()/rejectPending()).
  */
 object FclNightAiAdvisorScheduler {
 
@@ -86,6 +97,9 @@ object FclNightAiAdvisorScheduler {
         profileFunction: ProfileFunction,
         profileRepository: ProfileRepository
     ) {
+        // 26/07/2026 (Ecko) — OFF: helemaal geen nacht-AI-advies meer, zie kdoc
+        // bovenaan dit object.
+        if (FclNightBasalAutoAdjustStore.getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
         val today = LocalDate.now(AMSTERDAM).toString()
         if (FclNightAiAdvisorStore.getLastProcessedLocalDate(context) == today) return
         if (!running.compareAndSet(false, true)) return
@@ -94,21 +108,39 @@ object FclNightAiAdvisorScheduler {
     }
 
     /** Voor een handmatige "Nu vernieuwen"-knop op het Nacht-tabblad, negeert de dagelijkse dedup.
-     *  Bewust GEEN profileFunction/profileRepository hier: het automatisch profiel-bijstellen
-     *  loopt uitsluitend via de dagelijkse, nacht-rand-getriggerde route hierboven — een
-     *  handmatige "Nu vernieuwen" ververst alleen het advies, past nooit iets automatisch toe. */
+     *
+     *  26/07/2026 (Ecko, herzien): gebruikte eerder GEEN profileFunction/profileRepository, met als
+     *  reden "een handmatige 'Nu vernieuwen' ververst alleen het advies, past nooit iets automatisch
+     *  toe". Ecko's terugkoppeling: bij Handmatig verscheen na "Nu vernieuwen" geen Accepteren/
+     *  Afwijzen — logisch, want er werd door dit ontbreken helemaal geen voorstel berekend/gelogd.
+     *  Nu WEL via FclProfileBridge (dezelfde brug die de Accepteren-knop zelf ook gebruikt), zodat
+     *  Handmatig na een handmatige verversing ook een vers voorstel krijgt. De oorspronkelijke
+     *  veiligheidsgedachte — "Nu vernieuwen" mag nooit ONGEVRAAGD echt op de pomp schrijven — blijft
+     *  intact: zie de `isManualTrigger`-kortsluiting in FclNightBasalAutoAdjuster.applyInternal(),
+     *  die bij AUTO-modus een handmatige trigger nog steeds volledig overslaat (exact het oude
+     *  gedrag). Alleen bij MANUAL levert een handmatige trigger nu ook daadwerkelijk iets op.
+     *
+     *  Ook hier de OFF-gate: bij uit doet zelfs "Nu vernieuwen" niets meer (de UI verbergt de knop
+     *  dan ook, dit is de defensieve tweede laag). */
     fun forceRunNow(context: Context, onDone: (NightAiAdvisorRunResult) -> Unit = {}) {
+        if (FclNightBasalAutoAdjustStore.getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
         if (!running.compareAndSet(false, true)) return
         val today = LocalDate.now(AMSTERDAM).toString()
         FclNightAiAdvisorStore.setLastProcessedLocalDate(context, today)
-        launchPipeline(context, onDone = onDone)
+        val pf = app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.getProfileFunction()
+        val pr = app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.getProfileRepository()
+        launchPipeline(context, onDone = onDone, profileFunction = pf, profileRepository = pr, isManualTrigger = true)
     }
 
     private fun launchPipeline(
         context: Context,
         onDone: (NightAiAdvisorRunResult) -> Unit = {},
         profileFunction: ProfileFunction? = null,
-        profileRepository: ProfileRepository? = null
+        profileRepository: ProfileRepository? = null,
+        // 26/07/2026 (Ecko) — true voor "Nu vernieuwen", false voor de dagelijkse
+        // nacht-rand-route. Zie kdoc bij forceRunNow() hierboven en bij
+        // FclNightBasalAutoAdjuster.applyInternal()'s AUTO+isManualTrigger-kortsluiting.
+        isManualTrigger: Boolean = false
     ) {
         val apiKeys  = FclAiAdvisorSettingsStore.getActiveKeys(context)
         val model    = FclAiAdvisorSettingsStore.getActiveModel(context)
@@ -117,18 +149,18 @@ object FclNightAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, provider)
                 FclNightAiAdvisorStore.saveResult(context, result)
-                // Automatisch profiel-bijstellen (24/07/2026, Ecko) — alleen als deze
-                // aanroep vanuit de dagelijkse route komt (profileFunction != null, zie
-                // forceRunNow hierboven). Best-effort: een fout hier mag het AI-rapport
-                // zelf nooit blokkeren of ongedaan maken — vandaar los van de try/finally
-                // hierboven, met zijn eigen try/catch binnen de adjuster zelf.
+                // Automatisch profiel-bijstellen (24/07/2026, Ecko; herzien 26/07/2026).
+                // Best-effort: een fout hier mag het AI-rapport zelf nooit blokkeren of
+                // ongedaan maken — vandaar los van de try/finally hierboven, met zijn
+                // eigen try/catch binnen de adjuster zelf.
                 if (profileFunction != null && profileRepository != null) {
                     FclNightBasalAutoAdjuster.maybeApply(
                         context = context,
                         profileFunction = profileFunction,
                         profileRepository = profileRepository,
                         payload = lastCollectedPayload,
-                        result = result
+                        result = result,
+                        isManualTrigger = isManualTrigger
                     )
                 }
                 onDone(result)
