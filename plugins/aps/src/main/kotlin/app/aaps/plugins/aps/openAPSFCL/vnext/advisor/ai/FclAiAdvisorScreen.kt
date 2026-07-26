@@ -2,6 +2,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,8 +62,20 @@ fun FclAiAdvisorScreen(
     runResult: AiAdvisorRunResult?,
     onBack: () -> Unit,
     onRefreshNow: () -> Unit,
+    // Klikbare kruisverwijzing (24/07/2026, Ecko): laat de "Zie ook: Automaat
+    // → Nacht"-tekst op het Nacht-tabblad hierheen springen met het Nacht-
+    // tabblad al open, i.p.v. altijd op Dag te starten.
+    startOnNacht: Boolean = false,
+    onJumpToAutomaatNacht: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // Plain remember (geen key) i.p.v. rememberSaveable/afgeleid van de
+    // parameter zelf: legt de gevraagde starttab ÉÉNMALIG vast bij de eerste
+    // compositie van dit scherm. Zo kan de aanroeper (Fclanalyzerscreen.kt) de
+    // buitenste startOnNacht-vlag vlak daarna gerust weer resetten (voor een
+    // eventueel volgend, normaal bezoek) zonder dat dat de tab die je nu al
+    // ziet alsnog terugzet naar Dag.
+    val initialTab = remember { if (startOnNacht) 1 else 0 }
     var showSettings by remember { mutableStateOf(!FclAiAdvisorSettingsStore.isConfigured(context)) }
 
     // 05/07/2026 (Ecko): NIET meer automatisch dismissen bij het openen van dit
@@ -257,17 +270,23 @@ fun FclAiAdvisorScreen(
         // en trigger (zie FclNightAiAdvisorScheduler) blijven ongewijzigd.
         val nachtPage = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPage("Nacht") {
             app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.NightAiAdvisorCard(context = context)
+            app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.ProfileAutoAdjustCard(context = context)
             Divider()
             Text(
                 "Zie ook: Automaat → Nacht voor de geleerde NF-basaalfactor " +
                     "(regel-gebaseerd, los van dit AI-advies).",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                modifier = Modifier.clickable(enabled = onJumpToAutomaatNacht != null) {
+                    onJumpToAutomaatNacht?.invoke()
+                }
             )
         }
 
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPager(
-            pages = listOf(dagPage, nachtPage)
+            pages = listOf(dagPage, nachtPage),
+            initialTab = initialTab
         )
 
         // einde inhoud

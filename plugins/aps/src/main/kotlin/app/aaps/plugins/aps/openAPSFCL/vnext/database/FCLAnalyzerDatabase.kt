@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.BasalProfileHistoryEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity
 
 // ── MIGRATION_16_17 (16/07/2026, Ecko) ─────────────────────────────────────
 // Zuiver additief: 6 nieuwe kolommen op de bestaande fcl_cycle_log-tabel.
@@ -38,12 +39,41 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
     }
 }
 
+// ── MIGRATION_18_19 (24/07/2026, Ecko) ─────────────────────────────────────
+// Nieuwe, lege tabel voor FclNightBasalAutoAdjuster's logboek (dry-run en
+// daadwerkelijk toegepaste automatische profielwijzigingen). Geen bestaande
+// data betrokken — een gewone CREATE TABLE volstaat, geen ALTER TABLE nodig
+// zoals bij de eerdere additieve migraties hierboven.
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `profile_auto_adjust_log` (" +
+                "`id` INTEGER NOT NULL, " +
+                "`timestampMs` INTEGER NOT NULL, " +
+                "`localDate` TEXT NOT NULL, " +
+                "`mode` TEXT NOT NULL, " +
+                "`applied` INTEGER NOT NULL, " +
+                "`skipReason` TEXT NOT NULL, " +
+                "`oldBasalJson` TEXT NOT NULL, " +
+                "`newBasalJson` TEXT NOT NULL, " +
+                "`perHourShiftJson` TEXT NOT NULL, " +
+                "`hoursAtCapCount` INTEGER NOT NULL, " +
+                "`nightsAnalyzed` INTEGER NOT NULL, " +
+                "`avgConfidence` REAL NOT NULL, " +
+                "PRIMARY KEY(`id`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_profile_auto_adjust_log_localDate` ON `profile_auto_adjust_log` (`localDate`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_profile_auto_adjust_log_timestampMs` ON `profile_auto_adjust_log` (`timestampMs`)")
+    }
+}
+
 @Database(
     entities = [
         FCLCycleLogEntity::class,
         EpisodeEntity::class,
         NightWindowEntity::class,
-        BasalProfileHistoryEntity::class
+        BasalProfileHistoryEntity::class,
+        ProfileAutoAdjustLogEntity::class
     ],
     // v13→v15 (05/07/2026, Ecko): +curveFitR2/+curveAcceleration/+toppingOutBoost
     // (in TrendsFields), en FCLCycleLogEntity herstructureerd in @Embedded-
@@ -97,7 +127,11 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
     // als vangnet staan — als de Migration onverhoopt niet toepasbaar blijkt
     // (bijv. door een OEM-SQLite-eigenaardigheid), valt Room automatisch
     // terug op de bekende, werkende destructieve wipe i.p.v. te crashen.
-    version = 18,
+    // v18→v19 (24/07/2026, Ecko): +profile_auto_adjust_log (nieuwe, lege tabel
+    // voor FclNightBasalAutoAdjuster). Zuiver additief (nieuwe tabel, geen
+    // wijziging aan bestaande tabellen) — MIGRATION_18_19 hierboven, geen
+    // dataverlies voor de bestaande geschiedenis.
+    version = 19,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {
@@ -106,6 +140,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
     abstract fun episodeDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeDao
     abstract fun nightWindowDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowDao
     abstract fun basalProfileHistoryDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.BasalProfileHistoryDao
+    abstract fun profileAutoAdjustLogDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogDao
 
     companion object {
         private const val DB_NAME = "fcl_analyzer.db"
@@ -120,7 +155,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
                     FCLAnalyzerDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18)
+                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }

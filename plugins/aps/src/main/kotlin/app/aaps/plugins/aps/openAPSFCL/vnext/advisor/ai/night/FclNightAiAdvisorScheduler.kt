@@ -1,6 +1,8 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night
 
 import android.content.Context
+import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorService
 import app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.night.NightWindowAnalyzer
@@ -61,31 +63,53 @@ object FclNightAiAdvisorScheduler {
      * randovergang true->false en start dan (indien nog niet vandaag
      * gedaan) een run.
      */
-    fun onCycle(context: Context, isNightNow: Boolean) {
+    // profileFunction/profileRepository: alleen nodig voor het optionele
+    // automatisch-profiel-bijstellen (zie FclNightBasalAutoAdjuster.kt) — de
+    // rest van deze scheduler gebruikt ze niet. Doorgegeven vanuit
+    // DetermineBasalFCL, dat ze al via Dagger injecteert; deze scheduler is
+    // zelf een plain object, geen @Inject-klasse.
+    fun onCycle(
+        context: Context,
+        isNightNow: Boolean,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository
+    ) {
         val wasNight = FclNightAiAdvisorStore.wasNightLastCycle(context)
         FclNightAiAdvisorStore.setWasNightLastCycle(context, isNightNow)
         if (wasNight && !isNightNow) {
-            runIfNotAlreadyToday(context)
+            runIfNotAlreadyToday(context, profileFunction, profileRepository)
         }
     }
 
-    private fun runIfNotAlreadyToday(context: Context) {
+    private fun runIfNotAlreadyToday(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository
+    ) {
         val today = LocalDate.now(AMSTERDAM).toString()
         if (FclNightAiAdvisorStore.getLastProcessedLocalDate(context) == today) return
         if (!running.compareAndSet(false, true)) return
         FclNightAiAdvisorStore.setLastProcessedLocalDate(context, today)
-        launchPipeline(context)
+        launchPipeline(context, profileFunction = profileFunction, profileRepository = profileRepository)
     }
 
-    /** Voor een handmatige "Nu vernieuwen"-knop op het Nacht-tabblad, negeert de dagelijkse dedup. */
+    /** Voor een handmatige "Nu vernieuwen"-knop op het Nacht-tabblad, negeert de dagelijkse dedup.
+     *  Bewust GEEN profileFunction/profileRepository hier: het automatisch profiel-bijstellen
+     *  loopt uitsluitend via de dagelijkse, nacht-rand-getriggerde route hierboven — een
+     *  handmatige "Nu vernieuwen" ververst alleen het advies, past nooit iets automatisch toe. */
     fun forceRunNow(context: Context, onDone: (NightAiAdvisorRunResult) -> Unit = {}) {
         if (!running.compareAndSet(false, true)) return
         val today = LocalDate.now(AMSTERDAM).toString()
         FclNightAiAdvisorStore.setLastProcessedLocalDate(context, today)
-        launchPipeline(context, onDone)
+        launchPipeline(context, onDone = onDone)
     }
 
-    private fun launchPipeline(context: Context, onDone: (NightAiAdvisorRunResult) -> Unit = {}) {
+    private fun launchPipeline(
+        context: Context,
+        onDone: (NightAiAdvisorRunResult) -> Unit = {},
+        profileFunction: ProfileFunction? = null,
+        profileRepository: ProfileRepository? = null
+    ) {
         val apiKeys  = FclAiAdvisorSettingsStore.getActiveKeys(context)
         val model    = FclAiAdvisorSettingsStore.getActiveModel(context)
         val provider = FclAiAdvisorSettingsStore.getProvider(context)
@@ -93,12 +117,34 @@ object FclNightAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, provider)
                 FclNightAiAdvisorStore.saveResult(context, result)
+                // Automatisch profiel-bijstellen (24/07/2026, Ecko) — alleen als deze
+                // aanroep vanuit de dagelijkse route komt (profileFunction != null, zie
+                // forceRunNow hierboven). Best-effort: een fout hier mag het AI-rapport
+                // zelf nooit blokkeren of ongedaan maken — vandaar los van de try/finally
+                // hierboven, met zijn eigen try/catch binnen de adjuster zelf.
+                if (profileFunction != null && profileRepository != null) {
+                    FclNightBasalAutoAdjuster.maybeApply(
+                        context = context,
+                        profileFunction = profileFunction,
+                        profileRepository = profileRepository,
+                        payload = lastCollectedPayload,
+                        result = result
+                    )
+                }
                 onDone(result)
             } finally {
                 running.set(false)
             }
         }
     }
+
+    // Bewaart de payload van de LAATSTE executePipeline()-aanroep in dit proces
+    // (best-effort, geen persistente opslag nodig) zodat launchPipeline() hierboven
+    // nightsAnalyzed kan doorgeven aan de auto-adjuster zonder de hele pipeline-
+    // signatuur te moeten omgooien. Alleen gelezen binnen dezelfde executor-thread
+    // die hem net gezet heeft, dus geen synchronisatie nodig.
+    @Volatile
+    private var lastCollectedPayload: FclNightReportPayload? = null
 
     private fun executePipeline(
         context: Context,
@@ -114,6 +160,7 @@ object FclNightAiAdvisorScheduler {
         // leest wat er al in de database staat.
         rebuildNightWindows(context)
         val payload = FclNightAiAdvisorDataCollector.collect(context)
+        lastCollectedPayload = payload
         val prompt = FclNightAiAdvisorPromptBuilder.buildPrompt(payload)
         return when (val r = FclAiAdvisorService.callAdvisor(provider, apiKeys, prompt, model)) {
             is FclAiAdvisorService.Result.Success ->

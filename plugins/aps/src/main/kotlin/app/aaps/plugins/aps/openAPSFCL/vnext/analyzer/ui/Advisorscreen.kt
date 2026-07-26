@@ -49,6 +49,9 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.advisor.*
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
 import kotlin.math.roundToInt
 import app.aaps.plugins.aps.openAPSFCL.vnext.lang.FclStrings
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 @Composable
 fun AdvisorScreen(
@@ -66,8 +69,21 @@ fun AdvisorScreen(
     onApplyDFToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
     nfLevel: Double = 5.0,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)? = null,
+    // Klikbare kruisverwijzing (24/07/2026, Ecko): laat de "Zie ook: AI Advisor
+    // → Nacht"-tekst op het Nacht-tabblad hierheen springen met het Nacht-
+    // tabblad al open, i.p.v. altijd op Dag te starten.
+    startOnNacht: Boolean = false,
+    onJumpToAiAdvisorNacht: (() -> Unit)? = null,
 ) {
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
+
+    // Plain remember (geen key) i.p.v. rechtstreeks "if (startOnNacht) 1 else 0"
+    // in de InfoTabPager-aanroep verderop (24/07/2026, Ecko): legt de gevraagde
+    // starttab ÉÉNMALIG vast bij de eerste compositie. Zonder dit zou een reset
+    // van startOnNacht door de aanroeper (Fclanalyzerscreen.kt, vlak na het
+    // openen — nodig zodat een volgend, normaal bezoek weer op Dag start) de tab
+    // meteen weer terugzetten naar Dag, ook als je net op Nacht was aanbeland.
+    val initialTab = remember { if (startOnNacht) 1 else 0 }
 
     Column(
         modifier = Modifier
@@ -106,7 +122,8 @@ fun AdvisorScreen(
                 NachtControlTab(
                     currentNfLevel = DFLearner.getNfLevel(androidx.compose.ui.platform.LocalContext.current),
                     nightWindows = nightWindows,
-                    onApplyNacht = onApplyNacht
+                    onApplyNacht = onApplyNacht,
+                    onJumpToAiAdvisorNacht = onJumpToAiAdvisorNacht
                 )
             })
 
@@ -139,7 +156,8 @@ fun AdvisorScreen(
 
         InfoTabPager(
             modifier = Modifier,
-            pages = advisorPages
+            pages = advisorPages,
+            initialTab = initialTab
         )
     }
 }
@@ -712,7 +730,8 @@ private fun evidenceStatusColor(evidence: FclAxisEvidence) = when {
 fun NachtControlTab(
     currentNfLevel: Double,
     nightWindows: List<NightWindowEntity>,
-    onApplyNacht: ((Double) -> Boolean)?
+    onApplyNacht: ((Double) -> Boolean)?,
+    onJumpToAiAdvisorNacht: (() -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -857,7 +876,11 @@ fun NachtControlTab(
         Text(
             "Zie ook: AI Advisor → Nacht voor het AI-advies over de nachtbasaal.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.primary,
+            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+            modifier = Modifier.clickable(enabled = onJumpToAiAdvisorNacht != null) {
+                onJumpToAiAdvisorNacht?.invoke()
+            }
         )
     }
 }
@@ -987,6 +1010,227 @@ fun NightAiAdvisorCard(context: android.content.Context) {
         }
     }
 }
+
+// ── ProfileAutoAdjustCard (24/07/2026, Ecko) ────────────────────────────────
+// Automatisch-profiel-bijstellen: modus-keuze, dry-run-dagenteller,
+// vergelijkingstabel van de laatste run, en een handmatige, expliciete
+// "basisprofiel opnieuw vastleggen"-actie. Zie kdoc bij
+// FclNightBasalAutoAdjuster.kt voor de volledige achtergrond/veiligheidslagen.
+// Grafiekweergave bewust nog niet meegenomen — eerst de tabel + backend in
+// de praktijk laten bewijzen, de grafiek is een voor de hand liggende
+// vervolgstap zodra dat gebeurd is.
+@Composable
+fun ProfileAutoAdjustCard(context: android.content.Context) {
+    val scope = rememberCoroutineScope()
+    var mode by remember {
+        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getMode(context))
+    }
+    var dryRunDays by remember { mutableStateOf(0) }
+    var latestLog by remember {
+        mutableStateOf<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity?>(null)
+    }
+    var capHits by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var baselineSetAt by remember {
+        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getBaselineSetAt(context))
+    }
+    var showResetDialog by remember { mutableStateOf(false) }
+    var isResetting by remember { mutableStateOf(false) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    LaunchedEffect(refreshTrigger) {
+        val db = app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase.getInstance(context)
+        dryRunDays = db.profileAutoAdjustLogDao().countDistinctDates(
+            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.Mode.DRY_RUN.name,
+            baselineSetAt
+        )
+        latestLog = db.profileAutoAdjustLogDao().getLatest()
+        capHits = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getCapHitCounters(context)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "\uD83D\uDD04 Automatisch profiel bijstellen",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Past het AI-nachtadvies hierboven automatisch toe op het echte pompprofiel " +
+                    "— in kleine stapjes, met een harde grens en een terugvalmogelijkheid. " +
+                    "Standaard uit; begin met \"Alleen loggen\" om eerst te zien wat er zou " +
+                    "gebeuren zonder dat er echt iets wijzigt.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.Mode.OFF to "Uit",
+                    app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.Mode.DRY_RUN to "Alleen loggen",
+                    app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.Mode.AUTO to "Automatisch"
+                ).forEach { (m, label) ->
+                    val selected = mode == m
+                    Button(
+                        onClick = {
+                            mode = m
+                            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.setMode(context, m)
+                        },
+                        colors = if (selected) androidx.compose.material3.ButtonDefaults.buttonColors()
+                                 else androidx.compose.material3.ButtonDefaults.outlinedButtonColors(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.Mode.DRY_RUN) {
+                Text(
+                    "$dryRunDays dag(en) dry-run-data beschikbaar. Geen vaste minimumtermijn " +
+                        "— schakel over naar \"Automatisch\" zodra jij dat zelf genoeg vindt.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Divider()
+
+            val log = latestLog
+            if (log == null) {
+                Text(
+                    "Nog geen enkele run — verschijnt hier zodra de nacht-AI-adviseur voor het " +
+                        "eerst met een basaal-suggestie draait terwijl deze modus niet Uit staat.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                val modusLabel = if (log.mode == "AUTO") "automatisch" else "alleen loggen"
+                val toepasLabel = when {
+                    log.applied -> ", toegepast"
+                    log.skipReason.isNotBlank() -> ", niet toegepast: ${log.skipReason}"
+                    else -> ""
+                }
+                Text(
+                    "Laatste run: ${log.localDate} ($modusLabel$toepasLabel)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ProfileAutoAdjustTable(log = log, capHits = capHits)
+            }
+
+            OutlinedButton(
+                onClick = { showResetDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Basisprofiel opnieuw vastleggen")
+            }
+            if (baselineSetAt > 0) {
+                Text(
+                    "Huidig basisprofiel vastgelegd op " +
+                        java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+                            .withZone(java.time.ZoneId.of("Europe/Amsterdam"))
+                            .format(java.time.Instant.ofEpochMilli(baselineSetAt)) + ".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isResetting) showResetDialog = false },
+            title = { Text("Basisprofiel opnieuw vastleggen?") },
+            text = {
+                Text(
+                    "Het huidige, actieve profiel wordt het nieuwe ankerpunt waar de ±25%-grens " +
+                        "voortaan tegen wordt afgemeten. Doe dit alleen bewust, bijvoorbeeld nadat je " +
+                        "hebt gezien dat een uur herhaaldelijk tegen de oude grens aanliep."
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isResetting,
+                    onClick = {
+                        isResetting = true
+                        scope.launch {
+                            val db = app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase.getInstance(context)
+                            val latest = db.basalProfileHistoryDao().getLatest()
+                            if (latest != null) {
+                                val hourly = (0..23).associateWith { latest.basalAtHour(it) }
+                                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.setBaseline(
+                                    context, hourly, source = "manual-reset", nowMs = System.currentTimeMillis()
+                                )
+                                baselineSetAt = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getBaselineSetAt(context)
+                            }
+                            isResetting = false
+                            showResetDialog = false
+                            refreshTrigger++
+                        }
+                    }
+                ) { Text(if (isResetting) "Bezig…" else "Bevestigen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }, enabled = !isResetting) { Text("Annuleren") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProfileAutoAdjustTable(
+    log: app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity,
+    capHits: Map<Int, Int>
+) {
+    val oldMap = remember(log.oldBasalJson) { parseHourlyAdjustJson(log.oldBasalJson) }
+    val newMap = remember(log.newBasalJson) { parseHourlyAdjustJson(log.newBasalJson) }
+    val shiftMap = remember(log.perHourShiftJson) { parseHourlyAdjustJson(log.perHourShiftJson) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text("Uur", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f))
+            Text("Huidig", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("AI-voorstel", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Na caps", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Status", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        }
+        Divider()
+        shiftMap.keys.mapNotNull { it.toIntOrNull() }.sorted().forEach { hour ->
+            val oldVal = oldMap[hour.toString()] ?: 0.0
+            val newVal = newMap[hour.toString()] ?: oldVal
+            val shiftPct = shiftMap[hour.toString()] ?: 0.0
+            val voorstelVal = (oldVal * (1.0 + shiftPct / 100.0)).coerceAtLeast(0.0)
+            val hitCap = capHits[hour] ?: 0
+            val status = when {
+                hitCap > 0 && kotlin.math.abs(newVal - voorstelVal) > 0.001 -> "tegen grens (${hitCap}d)"
+                log.applied -> "toegepast"
+                log.mode == "DRY_RUN" -> "alleen gelogd"
+                else -> "berekend"
+            }
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Text("%02d:00".format(hour), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.8f))
+                Text("%.2f".format(oldVal), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text("%.2f (%+.0f%%)".format(voorstelVal, shiftPct), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text("%.2f".format(newVal), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(status, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private fun parseHourlyAdjustJson(json: String): Map<String, Double> =
+    try {
+        val obj = org.json.JSONObject(json)
+        val map = LinkedHashMap<String, Double>()
+        obj.keys().forEach { k -> map[k] = obj.getDouble(k) }
+        map
+    } catch (_: Exception) {
+        emptyMap()
+    }
 
 // (Basaal-adviseur-kaart hier verwijderd, zie NachtControlTab hierboven.)
 

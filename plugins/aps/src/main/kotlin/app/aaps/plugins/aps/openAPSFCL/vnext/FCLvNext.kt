@@ -776,6 +776,64 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 // hier beschreven te-vroeg-plafonneren-probleem.
 private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
 
+// ── Post-hypo-rebound rem (24/07/2026, Ecko) ────────────────────────────
+// AANLEIDING: 24/07 17:08-17:13 en 18:13-18:23 — een BG-stijging die volgde
+// op een net afgelopen hypo-risico (episodeHypoDebtU>0: er is al minstens
+// één keer deze episode een dosis teruggeknepen wegens hypoProtection) werd
+// behandeld als een gewone maaltijd. mealCompensationFactor in
+// hypoProtection() haalde daar nog eens 45% van de rem af, met commits van
+// 2,78U en 1,56U tot gevolg terwijl de IOB-ratio al 0,25-0,50 was — vaak
+// zijn dit koolhydraten die gegeten zijn om het net ontstane hypo-risico
+// zelf op te vangen, geen nieuwe maaltijd. Dosering daar bovenop kan een
+// nieuwe, tegenovergestelde dip veroorzaken (precies wat gebeurde: ratio
+// liep door naar 0,66, hypo_active werd 10 min later weer true).
+//
+// Dit patroon is uit BG-vorm en IOB alleen niet betrouwbaar te onderscheiden
+// van een gewone maaltijd die toevallig al een paar commits verder is (zie
+// doorrekening 24/07, Ecko akkoord): op weekbasis (17-24/07) raakte een
+// strengere aanpak ook 80-130 ogenschijnlijk normale commits. Vandaar:
+// altijd afremmen zodra episodeHypoDebtU>0 bij een CONFIRMED stijging, MAAR
+// met een vangnet — als de BG ondanks de rem alsnog voldoende doorstijgt
+// (aanhoudend, dus met recentSlope boven de drempel) is dit toch een echte,
+// doorlopende maaltijd: eenmalig de normale dosis doorlaten, daarna gaat de
+// rem weer dicht. POST_HYPO_BRAKE_CATCHUP_RISE=1.0 mmol/L is bepaald door
+// alle 19 vergelijkbare episodes in de week 17-24/07 door te rekenen: bij
+// 1.0 mmol werden alle 10 grote, doorlopende maaltijden binnen 1-3 cycli
+// gered en bleven alle 9 vlakke/kleine episodes (incl. de twee 24/07-
+// incidenten zelf) terecht geremd; bij hogere drempels (2.0+) bleven ook
+// duidelijk echte maaltijden te lang onterecht onderdrukt.
+private const val POST_HYPO_BRAKE_CATCHUP_RISE = 1.0   // mmol/L sinds rem-activatie
+private const val POST_HYPO_BRAKE_CATCHUP_SLOPE = 2.0  // recentSlope, zelfde drempel als "bevestigd stijgend" elders
+// TOEVOEGING (24/07/2026, Ecko): de twee incidenten die tot deze rem leidden
+// vielen allebei op een relatief lage BG (7,1-7,2 mmol/L) — weinig marge als
+// het toch omslaat. Een vangnet dat alleen op "genoeg gestegen" let, kan in
+// theorie nog steeds een volle dosis vrijgeven terwijl de BG nog in dat
+// kwetsbare gebied zit. Doorgerekend tegen dezelfde 19 episodes (17-24/07):
+// bij een ondergrens van 7.0 mmol/L werden nog steeds alle 10 echte
+// maaltijden gered (BG bij het daadwerkelijke vangnet-moment lag daar in de
+// testweek altijd al ruim boven) — pas vanaf 7.5+ ging dat ten koste van een
+// eerste, kleinere maaltijd. 7.0 kost dus niets aantoonbaars en dekt precies
+// het scenario af dat Ecko signaleerde.
+private const val POST_HYPO_BRAKE_CATCHUP_MIN_BG = 7.0 // mmol/L, ondergrens voor het vangnet
+
+// AANSCHERPING (25/07/2026, Ecko) — twee nieuwe, structurele valse triggers
+// gevonden binnen 24 uur na livegang (24/07 20:38-22:28 en 25/07 13:58-lunch,
+// kibbeling met patat): allebei een doodgewone maaltijd, GEEN voorafgaande
+// hypo — episodeHypoDebtU>0 ontstond simpelweg omdat hypoProtection() aan het
+// begin van een normale maaltijd voorzichtig een dosis right-sizede, niet
+// omdat er echt een hypo-risico was afgewend. In het ECHTE incident (17:08-
+// 17:13) was de iobRatio op het moment van de rem-activatie al 0,25-0,50 —
+// in beide valse triggers hierboven nog maar 0,03-0,07. Vandaar: de rem mag
+// pas aanslaan als er ook al een relevante hoeveelheid insuline aan boord
+// is, niet bij elke incidentele right-sizing. Doorgerekend tegen 21
+// historische hypo-debt-episodes (hele week 18-24/07 + de 2 nieuwe): bij
+// 0,25 slaat de rem nog aan bij 14 van de 21 (was 21/21), het incident blijft
+// gewoon gevangen, en het maximum aan ONONDERBROKEN onderdrukking binnen een
+// episode daalt met de ratchet hieronder sowieso naar <=10 minuten bij elke
+// geteste drempel (was 90-120 minuten) — zie ook de kdoc bij de ratchet
+// verderop voor waarom dát de eigenlijke fix is.
+private const val POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO = 0.25
+
 // ─────────────────────────────────────────────
 // WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
 // Vervangt de harde aan/uit-drempel op deltaToTarget door een kwadratische
@@ -2800,13 +2858,17 @@ private fun computeEarlyDoseDecision(
     //
     // Voorbeeld: schuld=0.40U, basis=0.80U → bonus = min(0.50*0.80, 0.40) = 0.40U
     //            effectieve dosis = 0.80 + 0.40 = 1.20U (nog steeds ≤ 1.5×maxSMB cap)
-    val debtCompensationU = if (episodeHypoDebtU > 0.01 &&
-        mealSignal.state == MealState.CONFIRMED &&
-        hypoProjectedMinNoInsulin >= 4.8) {
-        val baseTargetU = config.maxSMB * factor * config.doseStrengthMul * effectiveBoostFactor
-        val maxBonus = baseTargetU * 0.50          // max 50% van de basiskaart als bonus
-        minOf(maxBonus, episodeHypoDebtU)           // nooit meer dan de schuld zelf
-    } else 0.0
+    // UITGEZET (24/07/2026, Ecko): deze bonus probeerde eerder teruggehouden
+    // insuline actief "in te halen" zodra er weer een CONFIRMED stijging was —
+    // precies de verkeerde kant op als die stijging zelf een reactie is op het
+    // hypo-risico dat de terughouding veroorzaakte (correctie-koolhydraten
+    // i.p.v. een nieuwe maaltijd). Zie POST_HYPO_BRAKE_CATCHUP_RISE hierboven:
+    // die mechaniek beslist nu expliciet, op basis van een aanhoudende
+    // BG-stijging, of het toch een echte maaltijd is — in plaats van hier
+    // stilzwijgend een bonus te geven. debtCompensationU blijft op 0.0 staan;
+    // remainingDebtU (verderop) blijft daardoor gewoon gelijk aan de opgebouwde
+    // schuld, wat correct is: er wordt niets "terugbetaald".
+    val debtCompensationU = 0.0
 
     // ── Sustain-based T1-versterking: toepassing ──────────────────────────
     // Achtergrond (13/07/2026, Ecko): analyse van 905503de + Ecko-datasets toont
@@ -3627,7 +3689,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v37-2026-07-24-1230"
+    private val FCL_CODE_VERSION = "v42-2026-07-25-2330"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3853,6 +3915,15 @@ class FCLvNext(
     //   - Reset bij episode-start en episode-einde
     private var episodeHypoDebtU: Double = 0.0  // achtergehouden insuline door hypo-rem
 
+    // ── Post-hypo-rebound rem (24/07/2026, Ecko) — zie kdoc bij
+    // POST_HYPO_BRAKE_CATCHUP_RISE hierboven en bij de toepassing verderop.
+    private var postHypoBrakeActive: Boolean = false
+    // postHypoBrakeCatchUpUsed bestaat niet meer (25/07/2026) — vervangen door
+    // een ratchet: postHypoBrakeBg schuift bij elke vrijgave mee naar de
+    // actuele BG, dus geen apart eenmalig-gebruikt-vlag meer nodig. Zie kdoc
+    // bij de toepassing verderop en bij POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO.
+    private var postHypoBrakeBg: Double = 0.0
+
     // ── Sustained Rise tracking ───────────────────────────────────────────
     // Telt hoeveel minuten de slope al aanhoudend boven de drempel is.
     // Niet gereset bij episode-grenzen — meet puur de actuele BG-trend.
@@ -4045,6 +4116,8 @@ class FCLvNext(
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
+            postHypoBrakeActive = false
+            postHypoBrakeBg = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
@@ -4696,6 +4769,8 @@ class FCLvNext(
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
+            postHypoBrakeActive = false
+            postHypoBrakeBg = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
@@ -4731,6 +4806,8 @@ class FCLvNext(
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
+            postHypoBrakeActive = false
+            postHypoBrakeBg = 0.0
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
@@ -6797,6 +6874,75 @@ class FCLvNext(
             commandedDose = minOf(commandedDose, config.maxSMB * topGuard.capFactor)
             status.append("${topGuard.reason}: ${"%.2f".format(before)}→${"%.2f".format(commandedDose)}U\n")
             logRow.guardPeakLimited = true
+        }
+
+        // ── Post-hypo-rebound rem: activeren + toepassen (24/07/2026, Ecko;
+        // aangescherpt + ratchet 25/07/2026, Ecko) ──────────────────────────
+        // Zie kdoc bij POST_HYPO_BRAKE_CATCHUP_RISE en
+        // POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO hierboven. Bewust hier, ná beide
+        // hypo-checks en topGuard, als allerlaatste stap vóór de resterende
+        // bezorg-guards: episodeHypoDebtU kan deze cyclus zelf al opgebouwd
+        // zijn (door de eerste hypo-check hierboven), en die opbouw moet dan
+        // óók meteen deze cyclus al gelden — niet pas de volgende.
+        //
+        // AANSCHERPING: naast episodeHypoDebtU>0 nu ook iobRatio>=drempel
+        // vereist — zie kdoc bij POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO voor het
+        // bewijs dat "elke right-sizing telt mee" te breed was.
+        if (mealSignal.state == MealState.CONFIRMED && episodeHypoDebtU > 0.01 &&
+            ctx.iobRatio >= POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO && !postHypoBrakeActive
+        ) {
+            postHypoBrakeActive = true
+            postHypoBrakeBg = ctx.input.bgNow
+            status.append(
+                "POST-HYPO BRAKE AAN: episodeHypoDebtU=${"%.2f".format(episodeHypoDebtU)}U, " +
+                    "iobRatio=${"%.2f".format(ctx.iobRatio)} bij CONFIRMED stijging " +
+                    "(bgNow=${"%.1f".format(ctx.input.bgNow)}) — mogelijk correctie-koolhydraten " +
+                    "i.p.v. nieuwe maaltijd\n"
+            )
+        }
+
+        // RATCHET (25/07/2026, Ecko): was een eenmalige catch-up ("1x los,
+        // daarna voorgoed weer dicht"). Backtest tegen de lunch van 25/07
+        // (kibbeling met patat, BG bleef na de ene catch-up gewoon doorstijgen
+        // van 8,0 naar 19,2 mmol terwijl de rem 90+ minuten potdicht bleef)
+        // toonde dat dat bij een écht doorlopende maaltijd tot een gevaarlijk
+        // lange, onnodige onderdrukking leidt. Nu: elke vrijgave verschuift
+        // het ankerpunt (postHypoBrakeBg) naar de actuele BG, dus een
+        // aanhoudende stijging kan steeds opnieuw (met dezelfde 1,0 mmol/
+        // 2,0-slope/7,0-mmol-eisen) insuline vrijgeven — geen limiet op het
+        // aantal vrijgaves per episode. Vlakt de stijging af (recentSlope
+        // zakt onder de drempel, bijv. rond de piek), dan stopt de rem
+        // vanzelf weer met vrijgeven, net als voorheen. Doorgerekend tegen 21
+        // historische episodes: max. ononderbroken onderdrukking binnen een
+        // episode nu <=10 min (was tot 120 min), voor elke geteste iobRatio-
+        // drempel.
+        if (postHypoBrakeActive && commandedDose > 0.0) {
+            val riseSinceBrake = ctx.input.bgNow - postHypoBrakeBg
+            if (riseSinceBrake >= POST_HYPO_BRAKE_CATCHUP_RISE &&
+                ctx.recentSlope >= POST_HYPO_BRAKE_CATCHUP_SLOPE &&
+                ctx.input.bgNow >= POST_HYPO_BRAKE_CATCHUP_MIN_BG
+            ) {
+                val prevAnchor = postHypoBrakeBg
+                postHypoBrakeBg = ctx.input.bgNow   // ratchet: nieuw ankerpunt voor de volgende vrijgave
+                status.append(
+                    "POST-HYPO BRAKE RATCHET-VRIJGAVE: BG ${"%.1f".format(prevAnchor)}→" +
+                        "${"%.1f".format(ctx.input.bgNow)} ondanks rem doorgestegen, boven " +
+                        "${"%.1f".format(POST_HYPO_BRAKE_CATCHUP_MIN_BG)} mmol/L " +
+                        "(recentSlope=${"%.2f".format(ctx.recentSlope)}) — dit lijkt toch een echte " +
+                        "maaltijd, dosis dit cyclus toegestaan; rem blijft aan voor de volgende ${"%.1f".format(POST_HYPO_BRAKE_CATCHUP_RISE)} mmol\n"
+                )
+            } else {
+                val before = commandedDose
+                commandedDose = commandedDose.coerceAtMost(config.smallCorrectionMaxU)
+                if (before > commandedDose) {
+                    status.append(
+                        "POST-HYPO BRAKE: ${"%.2f".format(before)}→${"%.2f".format(commandedDose)}U " +
+                            "(episodeHypoDebtU=${"%.2f".format(episodeHypoDebtU)}U, sinds rem " +
+                            "${"%.2f".format(riseSinceBrake)} mmol gestegen)\n"
+                    )
+                    logRow.guardPeakLimited = true
+                }
+            }
         }
 
         // ─────────────────────────────────────────────

@@ -29,11 +29,20 @@ data class InfoTabPage(
 @Composable
 fun InfoTabPager(
     pages: List<InfoTabPage>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Klikbare kruisverwijzingen (24/07/2026, Ecko): laat een aanroeper een
+    // ander tabblad dan het eerste laten openen — bijvoorbeeld "Zie ook: ..."
+    // tekst op een ander scherm die hierheen springt en direct op Nacht wil
+    // uitkomen i.p.v. altijd op het eerste (Dag-)tabblad.
+    initialTab: Int = 0
 ) {
     if (pages.isEmpty()) return
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // Gekeyed op initialTab (i.p.v. een kale rememberSaveable { ... }) zodat een
+    // nieuwe navigatie-aanvraag met een ander gewenst starttabblad altijd wordt
+    // gehonoreerd, ook als deze pager bij een vorig bezoek al op een andere tab
+    // stond.
+    var selectedTab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
     val swipeEnabled = pages.size > 3
 
     Column(

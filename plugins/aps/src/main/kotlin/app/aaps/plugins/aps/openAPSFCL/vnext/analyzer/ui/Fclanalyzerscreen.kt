@@ -96,6 +96,15 @@ fun FclAnalyzerScreen(
     val advisorResultState = remember { mutableStateOf<FclAdvisorRecommendation?>(null) }
     var episodeEntities by remember { mutableStateOf<List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity>>(emptyList()) }
 
+    // Klikbare kruisverwijzing tussen Automaat en AI Advisor (24/07/2026, Ecko)
+    // — zie de "Zie ook: ..."-tekst in Advisorscreen.kt (NachtControlTab) en
+    // FclAiAdvisorScreen.kt (Nacht-tabblad). Los van startOnAiAdvisor/
+    // startOnLearner hierboven: die zijn one-shot vlaggen van BUITEN de app
+    // (tik op een notificatie), deze zijn interne, herbruikbare state — de
+    // gebruiker kan zo'n kruisverwijzing meerdere keren per sessie aantikken.
+    var jumpToAiAdvisorNacht by remember { mutableStateOf(false) }
+    var jumpToAdvisorNacht by remember { mutableStateOf(false) }
+
     fun loadFromDatabase(entities: List<FCLCycleLogEntity>) {
         val latest = entities.maxByOrNull { it.timestampMs }
         val aggLevel = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner.getAggressiveness(context)
@@ -366,6 +375,11 @@ fun FclAnalyzerScreen(
         }
     }
 
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == Screen.AI_ADVISOR) jumpToAiAdvisorNacht = false
+        if (currentScreen == Screen.ADVISOR) jumpToAdvisorNacht = false
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -433,6 +447,35 @@ fun FclAnalyzerScreen(
                             scope.launch(Dispatchers.Main) { aiAdvisorResult = result }
                         }
                     )
+                },
+                startOnNacht = jumpToAiAdvisorNacht,
+                // Klikbare kruisverwijzing (24/07/2026, Ecko): repliceert exact
+                // dezelfde pijplijn als de Dashboard-knop "onOpenAdvisor" hieronder
+                // (en LaunchedEffect(startOnLearner) hierboven) — Screen.ADVISOR
+                // rendert alleen als advisorResultState.value niet-null is, dus een
+                // directe currentScreen-sprong zonder deze pijplijn zou een blijvend
+                // leeg scherm geven.
+                onJumpToAutomaatNacht = {
+                    jumpToAdvisorNacht = true
+                    refreshData {
+                        if (episodes != null && episodeMetrics != null && classifications != null && currentAxisState != null) {
+                            scope.launch {
+                                runAdvisorFlow(
+                                    context = context,
+                                    episodes = episodes!!,
+                                    episodeMetrics = episodeMetrics!!,
+                                    classifications = classifications!!,
+                                    currentAxisState = currentAxisState!!,
+                                    allRows = allRows ?: emptyList(),
+                                    onMetricsUpdated = { episodeMetrics = it },
+                                    onResult = {
+                                        advisorResultState.value = it
+                                        currentScreen = Screen.ADVISOR
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             )
 
@@ -531,7 +574,16 @@ fun FclAnalyzerScreen(
                                 episodeCount = episodes?.size ?: 0
                             )
                         },
-                        onApplyParams = null
+                        onApplyParams = null,
+                        startOnNacht = jumpToAdvisorNacht,
+                        // Klikbare kruisverwijzing (24/07/2026, Ecko): AI_ADVISOR is,
+                        // anders dan ADVISOR, een simpele directe toestandswissel — geen
+                        // refreshData/runAdvisorFlow-pijplijn nodig (zie ook
+                        // onOpenAiAdvisor hierboven, dat hetzelfde al deed).
+                        onJumpToAiAdvisorNacht = {
+                            jumpToAiAdvisorNacht = true
+                            currentScreen = Screen.AI_ADVISOR
+                        }
                     )
                 } ?: run {
                     currentScreen = Screen.DASHBOARD

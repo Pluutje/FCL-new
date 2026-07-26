@@ -79,6 +79,14 @@ class DetermineBasalFCL @Inject constructor(
     private val iobCobCalculator: IobCobCalculator,
     private val profileFunction: ProfileFunction,
     private val cycleLogRepository: app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogRepository,
+    // ── Automatisch nacht-basaal-profiel bijstellen (24/07/2026, Ecko) ──────
+    // Alleen gebruikt om door te geven aan FclNightAiAdvisorScheduler.onCycle();
+    // DetermineBasalFCL zelf doet er verder niets mee. Zie kdoc bij
+    // FclNightBasalAutoAdjuster.kt voor de volledige toelichting.
+    // (profileSwitchSilentGate is bewust NIET meegenomen — die klasse leeft in
+    // app.aaps.implementation.profile, een module waar deze plugin geen
+    // compile-afhankelijkheid van heeft; zie kdoc in FclNightBasalAutoAdjuster.kt.)
+    private val profileRepository: app.aaps.core.interfaces.profile.ProfileRepository,
 
     ) {
 
@@ -449,7 +457,7 @@ class DetermineBasalFCL @Inject constructor(
         // de bestaande (dag-)AI-adviseur. onCycle() keert altijd direct terug
         // en start de eventuele HTTP-aanroep nooit synchroon op dit pad.
         app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
-            .onCycle(context, isNight)
+            .onCycle(context, isNight, profileFunction, profileRepository)
 
         // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
         // FCLvNextDayNightHelper.minutesSinceNightStart() en
