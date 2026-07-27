@@ -37,6 +37,12 @@ object FclLearnerApplier {
             episodeCount   = p.episodeCount
         )
         if (ok) {
+            // 27/07/2026 (Ecko) — snapshot bewaren VOORDAT de pending-rij
+            // gewist wordt, zodat FCLCycleLogRepository.kt (Stap 7) een
+            // volgende, bijna-identieke berekening kan herkennen als "niets
+            // nieuws" en niet opnieuw hoeft te melden. Zie
+            // FclLearnerPendingProposal.isMeaningfullyDifferent().
+            FclLearnerPendingProposal.saveLastApplied(context, p)
             FclLearnerPendingProposal.clear(context)
             FclLearnerNotificationHelper.dismissAdvice(context)
         }

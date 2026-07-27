@@ -87,6 +87,43 @@ object FclNightBasalAutoAdjuster {
     private const val MIN_AVG_CONFIDENCE = 0.55
     private const val BASAL_ROUND_STEP = 0.05
 
+    // 27/07/2026 (Ecko) — wachtperiode na een wijziging, op verzoek: "ik heb
+    // gister de basaal aangepast en nu na 1 nacht komt hij weer met een
+    // voorstel om te verlagen". nightsAnalyzed hierboven is een ROLLEND
+    // venster over meerdere dagen data (voor de AI-zekerheid); het zegt
+    // niets over hoe lang het HUIDIGE profiel al loopt. Zonder aparte gate
+    // kan het systeem dus al na de eerstvolgende nacht opnieuw een
+    // verschuiving voorstellen op een profiel dat net is neergezet en nog
+    // nauwelijks is waargenomen. MANUAL: het voorstel/de tabel blijft gewoon
+    // zichtbaar (nuttige info), maar Accepteren verschijnt pas na
+    // MANUAL_COOLDOWN_NIGHTS nachten — zie isPending-berekening in
+    // Advisorscreen.kt. AUTOMATISCH schrijft sowieso al zonder tussenkomst,
+    // dus daar geldt bewust een langere, extra voorzichtige
+    // AUTO_COOLDOWN_NIGHTS (Ecko's eigen suggestie: "misschien is dan 3
+    // nachten wachten zelfs wel beter").
+    const val MANUAL_COOLDOWN_NIGHTS = 2
+    const val AUTO_COOLDOWN_NIGHTS = 3
+
+    /**
+     * Aantal volle kalendernachten sinds de laatste écht doorgevoerde
+     * wijziging — het latere van (a) het moment waarop het basisprofiel
+     * voor het laatst is vastgelegd (initieel, of via "Basisprofiel
+     * opnieuw vastleggen") en (b) de laatste daadwerkelijk toegepaste rij
+     * (Accepteren bij MANUAL, of een automatische toepassing). Beide zijn
+     * een signaal van "dit profiel is bewust net zo neergezet" en resetten
+     * dus de wachtperiode. Nooit een wijziging geweest → 0 (geen wachttijd,
+     * dan is er ook niets om tegen te wachten).
+     */
+    suspend fun nightsSinceLastChange(context: Context, db: FCLAnalyzerDatabase): Int {
+        val baselineSetAt = FclNightBasalAutoAdjustStore.getBaselineSetAt(context)
+        val lastAppliedAt = db.profileAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val lastChangeAt = maxOf(baselineSetAt, lastAppliedAt)
+        if (lastChangeAt <= 0L) return 0
+        val changeDate = java.time.Instant.ofEpochMilli(lastChangeAt).atZone(AMSTERDAM).toLocalDate()
+        val today = LocalDate.now(AMSTERDAM)
+        return java.time.temporal.ChronoUnit.DAYS.between(changeDate, today).toInt().coerceAtLeast(0)
+    }
+
     fun maybeApply(
         context: Context,
         profileFunction: ProfileFunction,
@@ -220,6 +257,19 @@ object FclNightBasalAutoAdjuster {
             // rij toevoegen (applied=true, resp. skipReason="AFGEWEZEN...")
             // zodat deze rij niet meer als "pending" herkend wordt.
             logRow(db, now, today, mode, applied = false, skipReason = "",
+                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        // ── mode == AUTO: wachtperiode-gate vóór daadwerkelijk toepassen ──
+        // (27/07/2026, Ecko) — zie kdoc bij nightsSinceLastChange()/
+        // AUTO_COOLDOWN_NIGHTS hierboven.
+        val nightsSince = nightsSinceLastChange(context, db)
+        if (nightsSince < AUTO_COOLDOWN_NIGHTS) {
+            logRow(db, now, today, mode, applied = false,
+                skipReason = "wachtperiode: nog ${AUTO_COOLDOWN_NIGHTS - nightsSince} nacht(en) sinds de " +
+                    "laatste wijziging (min $AUTO_COOLDOWN_NIGHTS)",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
                 hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return

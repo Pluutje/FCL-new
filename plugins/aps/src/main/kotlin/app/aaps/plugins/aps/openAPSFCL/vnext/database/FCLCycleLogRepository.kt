@@ -261,6 +261,24 @@ class FCLCycleLogRepository @Inject constructor(
                         episodeCount   = episodeMetrics.size
                     )
 
+                // 27/07/2026 (Ecko) — ook hier de "laatst toegepast"-snapshot
+                // bijwerken (zie FclLearnerPendingProposal.isMeaningfullyDifferent()
+                // / Stap 7's MANUAL-tak hieronder): schakel je later van
+                // Automatisch naar Handmatig, dan wordt het eerstvolgende
+                // MANUAL-voorstel vergeleken tegen wat AUTO hier het laatst
+                // heeft geschreven — niet tegen een oude, mogelijk allang
+                // ingehaalde handmatige goedkeuring van weken terug.
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.saveLastApplied(
+                    context,
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.Proposal(
+                        tsMs = System.currentTimeMillis(),
+                        d = d, f = f, vExtra = vExtra,
+                        refWmd = refWmd, refWff = refWff, refEb = refEb,
+                        refPeakBias = refPeakBias, refLcd = refLcd,
+                        agg = agg, episodeCount = episodeMetrics.size, reason = reason
+                    )
+                )
+
                 // 10/07/2026 (Ecko) — zachte convergentie voor de 7 AI-aanpasbare
                 // parameters zonder eigen dedicated evaluator (zie kdoc bij
                 // DFLearner.convergeTrackedParams). Hergebruikt de po die hierboven
@@ -282,27 +300,44 @@ class FCLCycleLogRepository @Inject constructor(
                 // MANUAL (10/07/2026, Ecko — Fase 2): voorstel opslaan i.p.v.
                 // direct toepassen, en de gebruiker via dezelfde native-
                 // notificatie-methode als de AI-adviseur op de hoogte stellen.
-                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.save(
-                    context,
-                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.Proposal(
-                        tsMs = System.currentTimeMillis(),
-                        d = d, f = f, vExtra = vExtra,
-                        refWmd = refWmd, refWff = refWff, refEb = refEb,
-                        refPeakBias = refPeakBias, refLcd = refLcd,
-                        agg = agg, episodeCount = episodeMetrics.size,
-                        reason = reason,
-                        // 10/07/2026 (Ecko) — voor de leesbare uitleg in de kaart
-                        // (FclLearnerUitleg). learningStep is null als evaluate()
-                        // deze cyclus geblokkeerd werd (cooldown/manual-correction/
-                        // te weinig episodes) — dan vallen oldD/oldF terug op de
-                        // huidige d/f (geen zichtbare verandering te tonen).
-                        diagnose = learningStep?.diagnose ?: "",
-                        oldD = learningStep?.oldD ?: d,
-                        oldF = learningStep?.oldF ?: f
+                //
+                // BUGFIX (27/07/2026, Ecko): dit draaide voorheen ONVOORWAARDELIJK
+                // bij elke episode — ook vlak na een Goedkeuring, wanneer d/f/etc.
+                // nog nauwelijks van de zojuist toegepaste waarde waren afgeweken.
+                // Gevolg: "die bleef een paar keer komen met hetzelfde advies ook
+                // nadat ik het had geaccepteerd" — een technisch NIEUW voorstel
+                // met bijna dezelfde getallen, dat de kaart/notificatie opnieuw
+                // deed verschijnen. isMeaningfullyDifferent() vergelijkt tegen de
+                // laatst toegepaste snapshot (Goedkeuren, of de laatste
+                // AUTO-toepassing hierboven) en slaat een niet-wezenlijk-ander
+                // voorstel gewoon over — geen save(), geen notificatie. Zodra
+                // evaluate() écht iets nieuws heeft geleerd (buiten de kleine
+                // marges), komt het voorstel gewoon weer terug.
+                if (app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.isMeaningfullyDifferent(
+                        context, d, f, vExtra, refWmd, refWff, refEb, refPeakBias, refLcd
+                    )) {
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.save(
+                        context,
+                        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal.Proposal(
+                            tsMs = System.currentTimeMillis(),
+                            d = d, f = f, vExtra = vExtra,
+                            refWmd = refWmd, refWff = refWff, refEb = refEb,
+                            refPeakBias = refPeakBias, refLcd = refLcd,
+                            agg = agg, episodeCount = episodeMetrics.size,
+                            reason = reason,
+                            // 10/07/2026 (Ecko) — voor de leesbare uitleg in de kaart
+                            // (FclLearnerUitleg). learningStep is null als evaluate()
+                            // deze cyclus geblokkeerd werd (cooldown/manual-correction/
+                            // te weinig episodes) — dan vallen oldD/oldF terug op de
+                            // huidige d/f (geen zichtbare verandering te tonen).
+                            diagnose = learningStep?.diagnose ?: "",
+                            oldD = learningStep?.oldD ?: d,
+                            oldF = learningStep?.oldF ?: f
+                        )
                     )
-                )
-                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerNotificationHelper
-                    .showPendingProposal(context)
+                    app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerNotificationHelper
+                        .showPendingProposal(context)
+                }
             }
         }
 

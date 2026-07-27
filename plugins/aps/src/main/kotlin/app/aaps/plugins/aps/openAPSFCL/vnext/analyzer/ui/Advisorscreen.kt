@@ -1098,6 +1098,9 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
     // "wordt naar de pomp geschreven"-melding, met daarin nog een keer
     // Accepteren/Afwijzen. Pas het klikken in de popup voert de actie uit.
     var showAcceptConfirmDialog by remember { mutableStateOf(false) }
+    // 27/07/2026 (Ecko) — wachtperiode-teller, zie
+    // FclNightBasalAutoAdjuster.nightsSinceLastChange()/MANUAL_COOLDOWN_NIGHTS.
+    var nightsSinceChange by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshTrigger) {
         val db = app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase.getInstance(context)
@@ -1107,6 +1110,8 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
         )
         latestLog = db.profileAutoAdjustLogDao().getLatest()
         capHits = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getCapHitCounters(context)
+        nightsSinceChange = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
+            .nightsSinceLastChange(context, db)
     }
 
     if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) {
@@ -1165,9 +1170,16 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
             Divider()
 
             val log = latestLog
-            val isPending = log != null &&
+            // 27/07/2026 (Ecko) — hasOpenProposal (was: isPending) is puur
+            // "staat er een onbeoordeeld voorstel klaar"; canAccept voegt de
+            // wachtperiode toe. Afwijzen blijft altijd beschikbaar zodra er
+            // een open voorstel is — alleen Accepteren wacht op voldoende
+            // nachten sinds de laatste wijziging (zie MANUAL_COOLDOWN_NIGHTS).
+            val hasOpenProposal = log != null &&
                 log.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name &&
                 !log.applied && log.skipReason.isEmpty()
+            val canAccept = hasOpenProposal &&
+                nightsSinceChange >= app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster.MANUAL_COOLDOWN_NIGHTS
 
             if (log == null) {
                 Text(
@@ -1194,7 +1206,13 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 val modusLabel = if (log.mode == "AUTO") "Automatisch" else "Handmatig"
                 val statusLabel = when {
                     log.applied -> "Toegepast op de pomp"
-                    isPending -> "Wacht op jouw keuze — zie Accepteren/Afwijzen hieronder"
+                    hasOpenProposal && canAccept -> "Wacht op jouw keuze — zie Accepteren/Afwijzen hieronder"
+                    hasOpenProposal && !canAccept -> {
+                        val resterend = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
+                            .MANUAL_COOLDOWN_NIGHTS - nightsSinceChange
+                        "Voorlopige inschatting — gebaseerd op nog maar $nightsSinceChange nacht(en) sinds de " +
+                            "laatste wijziging. Accepteren komt beschikbaar over $resterend nacht(en); Afwijzen kan al wel."
+                    }
                     log.skipReason.isNotBlank() -> "Niet toegepast: ${friendlySkipReason(log.skipReason)}"
                     else -> "Niet toegepast"
                 }
@@ -1215,13 +1233,18 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 )
                 ProfileAutoAdjustTable(log = log, capHits = capHits)
 
-                if (isPending) {
+                if (hasOpenProposal) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
-                            enabled = !isActing,
-                            modifier = Modifier.weight(1f),
-                            onClick = { showAcceptConfirmDialog = true }
-                        ) { Text("Accepteren") }
+                        // 27/07/2026 (Ecko) — Accepteren verschijnt pas als de
+                        // wachtperiode voorbij is (canAccept); Afwijzen staat er
+                        // altijd, ook tijdens het wachten.
+                        if (canAccept) {
+                            Button(
+                                enabled = !isActing,
+                                modifier = Modifier.weight(1f),
+                                onClick = { showAcceptConfirmDialog = true }
+                            ) { Text("Accepteren") }
+                        }
                         OutlinedButton(
                             enabled = !isActing,
                             modifier = Modifier.weight(1f),
