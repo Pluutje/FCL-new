@@ -1,6 +1,7 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
 import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
@@ -1077,41 +1081,40 @@ fun NightAiAdvisorCard(context: android.content.Context) {
 @Composable
 fun ProfileAutoAdjustCard(context: android.content.Context) {
     val scope = rememberCoroutineScope()
-    val mode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getMode(context)
-    var manualDays by remember { mutableStateOf(0) }
-    var latestLog by remember {
-        mutableStateOf<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity?>(null)
-    }
+    val Adjuster = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
+    val Store = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore
+    val AUTO = app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO
+    val MANUAL = app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+    val mode = Store.getMode(context)
     var capHits by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
-    var baselineSetAt by remember {
-        mutableStateOf(app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getBaselineSetAt(context))
-    }
+    var baselineSetAt by remember { mutableStateOf(Store.getBaselineSetAt(context)) }
     var showResetDialog by remember { mutableStateOf(false) }
     var isResetting by remember { mutableStateOf(false) }
     var refreshTrigger by remember { mutableStateOf(0) }
-    // 26/07/2026 (Ecko) — Accepteren/Afwijzen-status voor het openstaande
-    // MANUAL-voorstel (zie FclNightBasalAutoAdjuster.applyPending/rejectPending).
+    // 27/07/2026 (Ecko) — Accepteren-status voor het gewogen gemiddelde-
+    // voorstel (zie FclNightBasalAutoAdjuster.applyPending/computeCurrentProposal).
+    // Geen Afwijzen meer — zie kdoc bovenaan FclNightBasalAutoAdjuster.kt.
     var isActing by remember { mutableStateOf(false) }
     var actionResult by remember { mutableStateOf<String?>(null) }
     // 26/07/2026 (Ecko) — extra bevestigingsstap op verzoek: Accepteren opent
     // eerst een popup met de huidig/nieuw-vergelijking en een expliciete
     // "wordt naar de pomp geschreven"-melding, met daarin nog een keer
-    // Accepteren/Afwijzen. Pas het klikken in de popup voert de actie uit.
+    // Accepteren. Pas het klikken in de popup voert de actie uit.
     var showAcceptConfirmDialog by remember { mutableStateOf(false) }
-    // 27/07/2026 (Ecko) — wachtperiode-teller, zie
-    // FclNightBasalAutoAdjuster.nightsSinceLastChange()/MANUAL_COOLDOWN_NIGHTS.
-    var nightsSinceChange by remember { mutableStateOf(0) }
+    // 27/07/2026 (Ecko) — het (gewogen) gemiddelde-voorstel over de nachten
+    // sinds de laatste wijziging; zelfde berekening als applyPending()/de
+    // AUTO-toepassing, zie computeCurrentProposal() se kdoc.
+    var proposal by remember {
+        mutableStateOf<app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster.NightlyProposal?>(null)
+    }
 
     LaunchedEffect(refreshTrigger) {
-        val db = app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase.getInstance(context)
-        manualDays = db.profileAutoAdjustLogDao().countDistinctDates(
-            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name,
-            baselineSetAt
-        )
-        latestLog = db.profileAutoAdjustLogDao().getLatest()
-        capHits = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getCapHitCounters(context)
-        nightsSinceChange = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
-            .nightsSinceLastChange(context, db)
+        capHits = Store.getCapHitCounters(context)
+        // AUTO: venster is precies AUTO_COOLDOWN_NIGHTS (zo toont de kaart
+        // exact de nachten die zullen meetellen bij de volgende toepassing).
+        // MANUAL: venster groeit tot MANUAL_MAX_WINDOW_NIGHTS (zie kdoc).
+        val windowCap = if (mode == AUTO) Adjuster.AUTO_COOLDOWN_NIGHTS else Adjuster.MANUAL_MAX_WINDOW_NIGHTS
+        proposal = Adjuster.computeCurrentProposal(context, windowCap)
     }
 
     if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) {
@@ -1121,7 +1124,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "🔄 Automatisch profiel bijstellen",
+                    "🔄 Profiel bijstellen — Uit",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -1144,129 +1147,104 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // 27/07/2026 (Ecko), op verzoek: de titel zelf zegt nu meteen in
+            // welke modus dit kaartje draait — "Automatisch profiel
+            // bijstellen" als vaste titel botste met de beschrijving eronder
+            // bij Handmatig (dat past niets automatisch toe).
             Text(
-                "\uD83D\uDD04 Automatisch profiel bijstellen",
+                if (mode == AUTO) "🔄 Profiel bijstellen — Automatisch" else "🔄 Profiel bijstellen — Handmatig",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO)
-                    "Past het AI-nachtadvies hierboven automatisch toe op het echte pompprofiel " +
-                        "in kleine stapjes, met een harde grens en een terugvalmogelijkheid."
+                if (mode == AUTO)
+                    "Past het (gewogen) gemiddelde AI-nachtadvies automatisch toe op het echte " +
+                        "pompprofiel, in kleine stapjes met een harde grens en een terugvalmogelijkheid."
                 else
-                    "Berekent elke nacht een voorstel op basis van het AI-nachtadvies hierboven " +
-                        "jij accepteert of wijst het af, er wordt nooit iets automatisch toegepast.",
+                    "Berekent elke nacht een (gewogen) gemiddeld voorstel op basis van het AI-" +
+                        "nachtadvies hierboven. Na acceptatie wordt dat toegepast op het echte " +
+                        "pompprofiel — er wordt nooit automatisch iets doorgevoerd.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL) {
-                Text(
-                    "$manualDays dag(en) handmatige voorstellen beschikbaar sinds het huidige basisprofiel.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
+            // ── 27/07/2026 (Ecko): duidelijke subkop, om de eerdere klacht
+            //    ("de tekst loopt een beetje doorelkaar") te verhelpen — dit
+            //    blok gaat puur over het VOORSTEL, de reset-actie hieronder
+            //    staat straks onder een eigen, apart gelabelde subkop. ──
             Divider()
+            Text(
+                "Profielvoorstel",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
 
-            val log = latestLog
-            // 27/07/2026 (Ecko) — hasOpenProposal (was: isPending) is puur
-            // "staat er een onbeoordeeld voorstel klaar"; canAccept voegt de
-            // wachtperiode toe. Afwijzen blijft altijd beschikbaar zodra er
-            // een open voorstel is — alleen Accepteren wacht op voldoende
-            // nachten sinds de laatste wijziging (zie MANUAL_COOLDOWN_NIGHTS).
-            val hasOpenProposal = log != null &&
-                log.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name &&
-                !log.applied && log.skipReason.isEmpty()
-            val canAccept = hasOpenProposal &&
-                nightsSinceChange >= app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster.MANUAL_COOLDOWN_NIGHTS
-
-            if (log == null) {
+            val p = proposal
+            if (p == null) {
                 Text(
-                    "Nog geen enkele run — verschijnt hier zodra de nacht-AI-adviseur voor het " +
-                        "eerst met een basaal-suggestie draait terwijl deze modus niet Uit staat.",
+                    "Nog geen gegevens sinds de laatste wijziging — verschijnt hier zodra de " +
+                        "nacht-AI-adviseur voor het eerst met een basaal-suggestie draait.",
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
-                // 26/07/2026 (Ecko) — status opgesplitst in losse, duidelijke
-                // regels op verzoek ("die tekst is totaal niet duidelijk").
-                // Was één dichte regel als "26/07/2026 (dry_run, niet
-                // toegepast: ALLEEN_LOGGEN (dry-run))" — onbedoeld rauw
-                // enum-jargon uit de OUDE modus (vóór de FclSystemMode-
-                // herstructurering) dat gewoon werd doorgegeven. Terecht
-                // afgekeurd ("je zet in een UI neer wat het doet, niet wat
-                // het niet doet") — een eerdere poging legde uit dat de oude
-                // modus niet meer bestaat, wat zelf ook geen antwoord geeft
-                // op "wat gebeurt hier dan wél". Nu: een oude "DRY_RUN"-rij
-                // wordt gewoon als Handmatig getoond (functioneel altijd al
-                // hetzelfde geweest, zie FclNightBasalAutoAdjustStore en
-                // ProfileAutoAdjustLogEntity kdoc), en skipReason gaat door
-                // friendlySkipReason() voor gewone taal i.p.v. rauwe
-                // interne tekst.
-                val modusLabel = if (log.mode == "AUTO") "Automatisch" else "Handmatig"
-                val statusLabel = when {
-                    log.applied -> "Toegepast op de pomp"
-                    hasOpenProposal && canAccept -> "Wacht op jouw keuze — zie Accepteren/Afwijzen hieronder"
-                    hasOpenProposal && !canAccept -> {
-                        val resterend = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
-                            .MANUAL_COOLDOWN_NIGHTS - nightsSinceChange
-                        "Voorlopige inschatting — gebaseerd op nog maar $nightsSinceChange nacht(en) sinds de " +
-                            "laatste wijziging. Accepteren komt beschikbaar over $resterend nacht(en); Afwijzen kan al wel."
-                    }
-                    log.skipReason.isNotBlank() -> "Niet toegepast: ${friendlySkipReason(log.skipReason)}"
-                    else -> "Niet toegepast"
+                val statusText = when {
+                    mode == MANUAL && p.nightsUsed < Adjuster.MANUAL_COOLDOWN_NIGHTS ->
+                        "Voorlopige inschatting — gebaseerd op nog maar ${p.nightsUsed} nacht(en) " +
+                            "sinds de laatste wijziging (t/m ${p.newestLocalDate}). Accepteren komt " +
+                            "beschikbaar over ${Adjuster.MANUAL_COOLDOWN_NIGHTS - p.nightsUsed} nacht(en)."
+                    mode == MANUAL ->
+                        "Gewogen gemiddelde over de laatste ${p.nightsUsed} nacht(en) sinds de " +
+                            "laatste wijziging (t/m ${p.newestLocalDate}) — klaar om te accepteren. " +
+                            "Dit venster groeit door tot maximaal ${Adjuster.MANUAL_MAX_WINDOW_NIGHTS} nachten."
+                    p.nightsUsed < Adjuster.AUTO_COOLDOWN_NIGHTS ->
+                        "Verzamelt gegevens: nacht ${p.nightsUsed} van ${Adjuster.AUTO_COOLDOWN_NIGHTS}. " +
+                            "Bij nacht ${Adjuster.AUTO_COOLDOWN_NIGHTS} wordt het gewogen gemiddelde " +
+                            "automatisch op de pomp toegepast."
+                    else ->
+                        "Gewogen gemiddelde over de laatste ${Adjuster.AUTO_COOLDOWN_NIGHTS} nachten " +
+                            "wordt bij de eerstvolgende cyclus automatisch toegepast."
                 }
                 Text(
-                    "Laatste run: ${log.localDate}",
+                    statusText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    "Modus: $modusLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "Status: $statusLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                ProfileAutoAdjustTable(log = log, capHits = capHits)
 
-                if (hasOpenProposal) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // 27/07/2026 (Ecko) — Accepteren verschijnt pas als de
-                        // wachtperiode voorbij is (canAccept); Afwijzen staat er
-                        // altijd, ook tijdens het wachten.
-                        if (canAccept) {
-                            Button(
-                                enabled = !isActing,
-                                modifier = Modifier.weight(1f),
-                                onClick = { showAcceptConfirmDialog = true }
-                            ) { Text("Accepteren") }
-                        }
-                        OutlinedButton(
-                            enabled = !isActing,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                isActing = true
-                                actionResult = null
-                                scope.launch {
-                                    app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
-                                        .rejectPending(context)
-                                    actionResult = "Afgewezen."
-                                    isActing = false
-                                    refreshTrigger++
-                                }
-                            }
-                        ) { Text("Afwijzen") }
-                    }
+                ProfileAutoAdjustTable(
+                    oldHourly = p.oldHourly,
+                    newHourly = p.newHourly,
+                    shiftByHour = p.shiftByHour,
+                    hoursAtCap = p.hoursAtCap,
+                    capHits = capHits
+                )
+
+                // 27/07/2026 (Ecko), op verzoek: grafische vergelijking onder
+                // de tabel — in één oogopslag zien wat het effect van
+                // eventueel accepteren op het profiel zou zijn.
+                Spacer(Modifier.height(4.dp))
+                BasalProfileChart(oldHourly = p.oldHourly, newHourly = p.newHourly)
+
+                if (mode == MANUAL && p.nightsUsed >= Adjuster.MANUAL_COOLDOWN_NIGHTS) {
+                    Button(
+                        enabled = !isActing,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showAcceptConfirmDialog = true }
+                    ) { Text("Accepteren") }
                     actionResult?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
 
+            // ── 27/07/2026 (Ecko): tweede, eigen subkop voor de reset-actie —
+            //    dit is het ENIGE reset-mechanisme (geen Afwijzen meer); zie
+            //    kdoc bovenaan FclNightBasalAutoAdjuster.kt. ──
+            Divider()
+            Text(
+                "Basisprofiel resetten",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
             // 26/07/2026 (Ecko) — uitleg vooraf toegevoegd op verzoek ("geen
             // idee wat die doet"). De bevestigingsdialoog legde het al uit,
             // maar pas NA klikken — dit zet het ervoor, zodat je het al weet
@@ -1275,8 +1253,10 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 "Elk uur mag maximaal ±25% afwijken van een vast referentiepunt " +
                     "(niet van gisteren, anders zou die grens langzaam betekenisloos " +
                     "worden). Deze knop legt het HUIDIGE profiel vast als dat nieuwe " +
-                    "referentiepunt — alleen nodig als een uur herhaaldelijk tegen de " +
-                    "oude grens aanloopt en je bewust meer ruimte wilt geven.",
+                    "referentiepunt — en telt bovendien als het startpunt van een NIEUW " +
+                    "voorstel-venster hierboven (nacht 0). Alleen nodig als een uur " +
+                    "herhaaldelijk tegen de oude grens aanloopt, of als je bewust opnieuw " +
+                    "wilt beginnen met tellen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1306,8 +1286,10 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
             text = {
                 Text(
                     "Het huidige, actieve profiel wordt het nieuwe ankerpunt waar de ±25%-grens " +
-                        "voortaan tegen wordt afgemeten. Doe dit alleen bewust, bijvoorbeeld nadat je " +
-                        "hebt gezien dat een uur herhaaldelijk tegen de oude grens aanliep."
+                        "voortaan tegen wordt afgemeten, én het startpunt (nacht 0) van een nieuw " +
+                        "voorstel-venster. Doe dit alleen bewust, bijvoorbeeld nadat je hebt gezien " +
+                        "dat een uur herhaaldelijk tegen de oude grens aanliep, of na een paar " +
+                        "nachten waarvan je de gegevens niet wilt laten meetellen."
                 )
             },
             confirmButton = {
@@ -1320,10 +1302,10 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                             val latest = db.basalProfileHistoryDao().getLatest()
                             if (latest != null) {
                                 val hourly = (0..23).associateWith { latest.basalAtHour(it) }
-                                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.setBaseline(
+                                Store.setBaseline(
                                     context, hourly, source = "manual-reset", nowMs = System.currentTimeMillis()
                                 )
-                                baselineSetAt = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.getBaselineSetAt(context)
+                                baselineSetAt = Store.getBaselineSetAt(context)
                             }
                             isResetting = false
                             showResetDialog = false
@@ -1342,16 +1324,14 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
     // een extra bevestiging uit veiligheidsoogpunt echt nodig is dan zou ik
     // na accepteren eerder een popup verwachten met daarop nog een keer de
     // actuele en nieuwe waarden vermeld en nog een keer de melding dat de
-    // wijzigingen naar de pomp zullen worden geschreven en daarop nog een
-    // keer een accepteren en afwijzen knop." Toont dezelfde
-    // ProfileAutoAdjustTable (Huidig/AI-voorstel/Na caps) als het kaartje
-    // zelf, zodat de vergelijking niet twee keer apart onderhouden hoeft te
-    // worden. Afwijzen hier wijst het voorstel ook echt af (net als de
-    // buitenste Afwijzen-knop) — zo kun je een verkeerde klik op Accepteren
-    // meteen herstellen zonder de popup te moeten sluiten en opnieuw te
-    // zoeken naar Afwijzen.
+    // wijzigingen naar de pomp zullen worden geschreven." Toont dezelfde
+    // ProfileAutoAdjustTable (Huidig/Voorstel/Na caps) als het kaartje zelf,
+    // zodat de vergelijking niet twee keer apart onderhouden hoeft te worden.
+    // 27/07/2026 (Ecko) — geen Afwijzen-knop meer hier: gewoon annuleren/
+    // wegklikken laat het voorstel ongewijzigd staan (het venster blijft
+    // gewoon doorgroeien tot de volgende keer dat je hier terugkomt).
     if (showAcceptConfirmDialog) {
-        val pendingLog = latestLog
+        val pendingProposal = proposal
         AlertDialog(
             onDismissRequest = { if (!isActing) showAcceptConfirmDialog = false },
             title = { Text("Voorstel toepassen op de pomp?") },
@@ -1368,8 +1348,20 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                             "actieve pompprofiel. Controleer de vergelijking en bevestig " +
                             "pas als je het ermee eens bent."
                     )
-                    if (pendingLog != null) {
-                        ProfileAutoAdjustTable(log = pendingLog, capHits = capHits)
+                    if (pendingProposal != null) {
+                        ProfileAutoAdjustTable(
+                            oldHourly = pendingProposal.oldHourly,
+                            newHourly = pendingProposal.newHourly,
+                            shiftByHour = pendingProposal.shiftByHour,
+                            hoursAtCap = pendingProposal.hoursAtCap,
+                            capHits = capHits
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        BasalProfileChart(
+                            oldHourly = pendingProposal.oldHourly,
+                            newHourly = pendingProposal.newHourly,
+                            heightDp = 100
+                        )
                     }
                 }
             },
@@ -1383,8 +1375,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                             val pf = app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.getProfileFunction()
                             val pr = app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.getProfileRepository()
                             val ok = if (pf != null && pr != null)
-                                app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
-                                    .applyPending(context, pf, pr)
+                                Adjuster.applyPending(context, pf, pr)
                             else false
                             actionResult = if (ok) "Toegepast." else "Mislukt, probeer het later opnieuw."
                             isActing = false
@@ -1397,19 +1388,8 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
             dismissButton = {
                 TextButton(
                     enabled = !isActing,
-                    onClick = {
-                        isActing = true
-                        actionResult = null
-                        scope.launch {
-                            app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjuster
-                                .rejectPending(context)
-                            actionResult = "Afgewezen."
-                            isActing = false
-                            showAcceptConfirmDialog = false
-                            refreshTrigger++
-                        }
-                    }
-                ) { Text("Afwijzen") }
+                    onClick = { showAcceptConfirmDialog = false }
+                ) { Text("Annuleren") }
             }
         )
     }
@@ -1417,34 +1397,29 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
 
 @Composable
 private fun ProfileAutoAdjustTable(
-    log: app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity,
+    oldHourly: Map<Int, Double>,
+    newHourly: Map<Int, Double>,
+    shiftByHour: Map<Int, Double>,
+    hoursAtCap: Set<Int>,
     capHits: Map<Int, Int>
 ) {
-    val oldMap = remember(log.oldBasalJson) { parseHourlyAdjustJson(log.oldBasalJson) }
-    val newMap = remember(log.newBasalJson) { parseHourlyAdjustJson(log.newBasalJson) }
-    val shiftMap = remember(log.perHourShiftJson) { parseHourlyAdjustJson(log.perHourShiftJson) }
-
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Text("Uur", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f))
             Text("Huidig", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("AI-voorstel", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Voorstel", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Na caps", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Status", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         }
         Divider()
-        shiftMap.keys.mapNotNull { it.toIntOrNull() }.sorted().forEach { hour ->
-            val oldVal = oldMap[hour.toString()] ?: 0.0
-            val newVal = newMap[hour.toString()] ?: oldVal
-            val shiftPct = shiftMap[hour.toString()] ?: 0.0
+        shiftByHour.keys.sorted().forEach { hour ->
+            val oldVal = oldHourly[hour] ?: 0.0
+            val newVal = newHourly[hour] ?: oldVal
+            val shiftPct = shiftByHour[hour] ?: 0.0
             val voorstelVal = (oldVal * (1.0 + shiftPct / 100.0)).coerceAtLeast(0.0)
-            val hitCap = capHits[hour] ?: 0
-            val status = when {
-                hitCap > 0 && kotlin.math.abs(newVal - voorstelVal) > 0.001 -> "tegen grens (${hitCap}d)"
-                log.applied -> "toegepast"
-                log.mode == "MANUAL" -> "voorstel"
-                else -> "berekend"
-            }
+            val atCap = hour in hoursAtCap
+            val hitCount = capHits[hour] ?: 0
+            val status = if (atCap) "tegen grens" + (if (hitCount > 0) " (${hitCount}d)" else "") else "voorstel"
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                 Text("%02d:00".format(hour), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.8f))
                 Text("%.2f".format(oldVal), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -1456,37 +1431,90 @@ private fun ProfileAutoAdjustTable(
     }
 }
 
-private fun parseHourlyAdjustJson(json: String): Map<String, Double> =
-    try {
-        val obj = org.json.JSONObject(json)
-        val map = LinkedHashMap<String, Double>()
-        obj.keys().forEach { k -> map[k] = obj.getDouble(k) }
-        map
-    } catch (_: Exception) {
-        emptyMap()
-    }
-
 /**
- * friendlySkipReason (26/07/2026, Ecko) — vertaalt de interne, technische
- * skipReason-strings uit FclNightBasalAutoAdjuster naar gewone taal voor op
- * het scherm. Onbekende/toekomstige reden-teksten vallen terug op de rauwe
- * tekst (beter een technische zin dan een lege regel), maar de bekende
- * gevallen — inclusief de oude, vóór-FclSystemMode "ALLEEN_LOGGEN
- * (dry-run)"-tekst — krijgen een leesbare omschrijving van wat er toen
- * gebeurde.
+ * BasalProfileChart (27/07/2026, Ecko, op verzoek) — trapvormige grafiek
+ * (elk uur is een constante waarde, net als een echt basaalprofiel) met
+ * Huidig en Voorstel over elkaar heen, zodat het effect van eventueel
+ * accepteren in één oogopslag te zien is naast de cijfertabel erboven.
+ * newHourly = "na caps" — dus exact wat er zou worden weggeschreven.
  */
-private fun friendlySkipReason(raw: String): String = when {
-    raw.startsWith("confidence-gate") ->
-        "nog niet genoeg nachten geanalyseerd, of het AI-advies is nog niet zeker genoeg"
-    raw == "geen actief profiel" -> "er was geen actief pompprofiel gevonden"
-    raw.contains("niet gevonden in ProfileRepository") -> "het profiel kon niet worden teruggevonden"
-    raw.startsWith("validatie geweigerd") -> "AAPS keurde het nieuwe profiel af bij het controleren"
-    raw.startsWith("ProfileRepository.replace()") -> "het wegschrijven naar het profiel is mislukt"
-    raw.startsWith("geen ProfileStore") -> "het wegschrijven naar het profiel is mislukt"
-    raw.startsWith("createProfileSwitch()") -> "de pomp accepteerde de wijziging niet"
-    raw == "AFGEWEZEN (handmatig)" -> "handmatig afgewezen"
-    raw == "ALLEEN_LOGGEN (dry-run)" -> "er werd toen niets berekend"
-    else -> raw
+@Composable
+private fun BasalProfileChart(
+    oldHourly: Map<Int, Double>,
+    newHourly: Map<Int, Double>,
+    heightDp: Int = 140
+) {
+    val oldColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    val newColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(oldColor)
+            )
+            Text("Huidig", style = MaterialTheme.typography.labelSmall, color = labelColor)
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(newColor)
+            )
+            Text("Voorstel (na caps)", style = MaterialTheme.typography.labelSmall, color = labelColor)
+        }
+        Spacer(Modifier.height(4.dp))
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(heightDp.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+            val maxVal = (oldHourly.values + newHourly.values).filter { it.isFinite() }
+                .maxOrNull()?.let { it * 1.15 } ?: 1.0
+            val safeMax = if (maxVal <= 0.0) 1.0 else maxVal
+
+            fun x(hour: Int): Float = w * (hour / 24f)
+            fun y(v: Double): Float = h - (h * (v / safeMax)).toFloat()
+
+            // Gridlijnen elke 6 uur.
+            listOf(0, 6, 12, 18, 24).forEach { hr ->
+                val xg = x(hr)
+                drawLine(gridColor, Offset(xg, 0f), Offset(xg, h), strokeWidth = 1.5f)
+            }
+            drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
+
+            fun drawStairs(hourly: Map<Int, Double>, color: Color, strokeWidthPx: Float) {
+                var prevY: Float? = null
+                for (hour in 0..23) {
+                    val v = hourly[hour] ?: continue
+                    val x0 = x(hour)
+                    val x1 = x(hour + 1)
+                    val yv = y(v)
+                    // Verticale connector naar de vorige trede (als die er was).
+                    if (prevY != null && prevY != yv) {
+                        drawLine(color, Offset(x0, prevY), Offset(x0, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round)
+                    }
+                    // Horizontale trede voor dit uur.
+                    drawLine(color, Offset(x0, yv), Offset(x1, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round)
+                    prevY = yv
+                }
+            }
+
+            drawStairs(oldHourly, oldColor, 4f)
+            drawStairs(newHourly, newColor, 4f)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(0, 6, 12, 18, 24).forEach { hr ->
+                Text("%02d".format(hr % 24), style = MaterialTheme.typography.labelSmall, color = labelColor)
+            }
+        }
+    }
 }
 
 // (Basaal-adviseur-kaart hier verwijderd, zie NachtControlTab hierboven.)

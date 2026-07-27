@@ -57,8 +57,12 @@ import kotlin.math.sign
  *     FclNightBasalAutoAdjustStore) — alleen bij AUTOMATISCH wordt er
  *     daadwerkelijk iets naar ProfileRepository/ProfileFunction geschreven;
  *     bij HANDMATIG wordt precies hetzelfde berekend en als openstaand
- *     voorstel gelogd (zie applyPending()/rejectPending() hieronder), nooit
- *     automatisch toegepast.
+ *     voorstel gelogd (zie applyPending()/computeCurrentProposal()
+ *     hieronder), nooit automatisch toegepast. Er is bewust geen
+ *     "Afwijzen"-actie meer: niet activeren betekent al niet toegepast, en
+ *     "Basisprofiel opnieuw vastleggen" is het expliciete reset-mechanisme
+ *     (27/07/2026, Ecko: een aparte afwijsknop zou het gemiddelde-venster
+ *     onduidelijk kunnen resetten).
  *  7. Best-effort: elke fout (geen profiel, validatie geweigerd,
  *     ProfileRepository/ProfileFunction faalt) wordt gelogd met reden en
  *     stopt daar — nooit een crash, nooit het AI-rapport zelf beïnvloed.
@@ -87,21 +91,34 @@ object FclNightBasalAutoAdjuster {
     private const val MIN_AVG_CONFIDENCE = 0.55
     private const val BASAL_ROUND_STEP = 0.05
 
-    // 27/07/2026 (Ecko) — wachtperiode na een wijziging, op verzoek: "ik heb
-    // gister de basaal aangepast en nu na 1 nacht komt hij weer met een
-    // voorstel om te verlagen". nightsAnalyzed hierboven is een ROLLEND
-    // venster over meerdere dagen data (voor de AI-zekerheid); het zegt
-    // niets over hoe lang het HUIDIGE profiel al loopt. Zonder aparte gate
-    // kan het systeem dus al na de eerstvolgende nacht opnieuw een
-    // verschuiving voorstellen op een profiel dat net is neergezet en nog
-    // nauwelijks is waargenomen. MANUAL: het voorstel/de tabel blijft gewoon
-    // zichtbaar (nuttige info), maar Accepteren verschijnt pas na
-    // MANUAL_COOLDOWN_NIGHTS nachten — zie isPending-berekening in
-    // Advisorscreen.kt. AUTOMATISCH schrijft sowieso al zonder tussenkomst,
-    // dus daar geldt bewust een langere, extra voorzichtige
-    // AUTO_COOLDOWN_NIGHTS (Ecko's eigen suggestie: "misschien is dan 3
-    // nachten wachten zelfs wel beter").
+    // 27/07/2026 (Ecko) — wachtperiode + gemiddelde over meerdere nachten,
+    // op verzoek: "ik heb gister de basaal aangepast en nu na 1 nacht komt
+    // hij weer met een voorstel om te verlagen". nightsAnalyzed hierboven is
+    // een ROLLEND venster over meerdere dagen data (voor de AI-zekerheid);
+    // het zegt niets over hoe lang het HUIDIGE profiel al loopt.
+    //
+    // Ontwerp (herzien 27/07/2026, n.a.v. verdere terugkoppeling): niet
+    // langer "laat hetzelfde losse nachtvoorstel zien totdat de wachttijd
+    // om is", maar een écht (gewogen) GEMIDDELDE over de nachten sinds de
+    // laatste wijziging:
+    //  - HANDMATIG: elke nacht wordt gewoon los gelogd (ongewijzigd, zie de
+    //    MANUAL-tak hieronder). Accepteren verschijnt pas vanaf
+    //    MANUAL_COOLDOWN_NIGHTS nachten, en toont dan het gewogen gemiddelde
+    //    over ALLE beschikbare nachten sinds de wijziging — dat venster
+    //    groeit vanzelf mee (2, 3, 4, ... ) tot een rollend maximum van
+    //    MANUAL_MAX_WINDOW_NIGHTS (de oudste nacht valt er dan weer af).
+    //  - AUTOMATISCH: schrijft niet meer elke nacht, maar precies 1x per
+    //    AUTO_COOLDOWN_NIGHTS nachten, en dan met het gemiddelde van EXACT
+    //    die laatste AUTO_COOLDOWN_NIGHTS nachten (Ecko's eigen suggestie:
+    //    "misschien is dan 3 nachten wachten zelfs wel beter"). Na een
+    //    toepassing begint de teller vanzelf weer op 0 (zie
+    //    nightsSinceLastChange()), dus dit herhaalt zich vanzelf.
+    //
+    // Zie collectRecentNightlyShifts()/weightedAverageShift() hieronder voor
+    // de daadwerkelijke verzameling/middeling, en computeCurrentProposal()
+    // voor de UI-laag (Advisorscreen.kt).
     const val MANUAL_COOLDOWN_NIGHTS = 2
+    const val MANUAL_MAX_WINDOW_NIGHTS = 7
     const val AUTO_COOLDOWN_NIGHTS = 3
 
     /**
@@ -122,6 +139,117 @@ object FclNightBasalAutoAdjuster {
         val changeDate = java.time.Instant.ofEpochMilli(lastChangeAt).atZone(AMSTERDAM).toLocalDate()
         val today = LocalDate.now(AMSTERDAM)
         return java.time.temporal.ChronoUnit.DAYS.between(changeDate, today).toInt().coerceAtLeast(0)
+    }
+
+    private fun lastChangeDate(context: Context, db: FCLAnalyzerDatabase, lastAppliedAt: Long): LocalDate {
+        val baselineSetAt = FclNightBasalAutoAdjustStore.getBaselineSetAt(context)
+        val lastChangeAt = maxOf(baselineSetAt, lastAppliedAt)
+        return if (lastChangeAt > 0L) java.time.Instant.ofEpochMilli(lastChangeAt).atZone(AMSTERDAM).toLocalDate()
+        else LocalDate.MIN
+    }
+
+    /** Eén nacht se ruwe AI-voorstel, zoals gelogd (dus vóór middeling). */
+    private data class NightlyShift(
+        val localDate: String,
+        val oldHourly: Map<Int, Double>,
+        val shiftByHour: Map<Int, Double>,
+        val nightsAnalyzed: Int,
+        val avgConfidence: Double
+    )
+
+    /**
+     * 27/07/2026 (Ecko) — verzamelt de rijen NA [since] (exclusief) die een
+     * echte berekening bevatten (perHourShiftJson != "{}" — skip-rijen zoals
+     * confidence-gate/geen-profiel tellen dus niet mee), reduceert tot de
+     * MEEST RECENTE rij per kalenderdag (meerdere "Nu vernieuwen"-klikken op
+     * dezelfde dag tellen dus als 1 nacht), en houdt van de nieuwste
+     * [maxNights] dagen over. Retourneert chronologisch OPLOPEND (oudste
+     * eerst) — handig voor recency-weging in weightedAverageShift().
+     */
+    private suspend fun collectRecentNightlyShifts(
+        db: FCLAnalyzerDatabase,
+        since: LocalDate,
+        maxNights: Int
+    ): List<NightlyShift> {
+        val rows = db.profileAutoAdjustLogDao().getSinceDateDesc(since.toString())
+            .filter { it.perHourShiftJson != "{}" }
+        val byDate = LinkedHashMap<String, ProfileAutoAdjustLogEntity>()
+        for (row in rows) {
+            // rows is al nieuwste-eerst, dus de EERSTE keer dat een datum
+            // voorkomt is meteen de meest recente rij van die datum.
+            if (!byDate.containsKey(row.localDate)) byDate[row.localDate] = row
+        }
+        return byDate.entries.take(maxNights).reversed().map { (date, row) ->
+            NightlyShift(
+                localDate = date,
+                oldHourly = jsonToHourlyMap(row.oldBasalJson),
+                shiftByHour = jsonToHourlyMap(row.perHourShiftJson),
+                nightsAnalyzed = row.nightsAnalyzed,
+                avgConfidence = row.avgConfidence
+            )
+        }
+    }
+
+    /**
+     * (Eventueel) gewogen gemiddelde per uur over [nights] — chronologisch
+     * oplopend verwacht (oudste eerst, zie collectRecentNightlyShifts()).
+     * Recency-weging: lineair, oudste nacht weegt 1x, nieuwste weegt Nx —
+     * een nacht die net iets langer geleden is telt dus nog steeds mee, maar
+     * de recentste nacht(en) hebben het meeste gewicht. Bij 1 nacht is dit
+     * triviaal gelijk aan die ene nacht.
+     */
+    private fun weightedAverageShift(nights: List<NightlyShift>): Map<Int, Double> {
+        val result = HashMap<Int, Double>()
+        for (h in 0..23) {
+            var weightedSum = 0.0
+            var weightTotal = 0.0
+            nights.forEachIndexed { idx, night ->
+                val weight = (idx + 1).toDouble()
+                weightedSum += (night.shiftByHour[h] ?: 0.0) * weight
+                weightTotal += weight
+            }
+            result[h] = if (weightTotal > 0.0) weightedSum / weightTotal else 0.0
+        }
+        return result
+    }
+
+    private fun jsonToHourlyMap(json: String): Map<Int, Double> {
+        val map = HashMap<Int, Double>()
+        return try {
+            val obj = JSONObject(json)
+            obj.keys().forEach { k -> k.toIntOrNull()?.let { map[it] = obj.getDouble(k) } }
+            map
+        } catch (_: Exception) {
+            map
+        }
+    }
+
+    /** Het (gewogen) gemiddelde voorstel over de laatste [maxNights] nachten
+     *  sinds de laatste wijziging — de UI-laag (Advisorscreen.kt) gebruikt
+     *  dit rechtstreeks voor de tabel/statustekst, zodat daar en bij
+     *  applyPending()/de AUTO-toepassing hieronder altijd exact dezelfde
+     *  berekening gebruikt wordt. Null als er nog geen enkele kwalificerende
+     *  nacht is sinds de wijziging. */
+    data class NightlyProposal(
+        val nightsUsed: Int,
+        val newestLocalDate: String,
+        val oldHourly: Map<Int, Double>,
+        val newHourly: Map<Int, Double>,
+        val shiftByHour: Map<Int, Double>,
+        val hoursAtCap: Set<Int>
+    )
+
+    suspend fun computeCurrentProposal(context: Context, maxNights: Int = MANUAL_MAX_WINDOW_NIGHTS): NightlyProposal? {
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val lastAppliedAt = db.profileAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val since = lastChangeDate(context, db, lastAppliedAt)
+        val nights = collectRecentNightlyShifts(db, since, maxNights)
+        if (nights.isEmpty()) return null
+        val avgShift = weightedAverageShift(nights)
+        val oldHourly = nights.last().oldHourly
+        val baseline = FclNightBasalAutoAdjustStore.getBaseline(context) ?: oldHourly
+        val (newHourly, hoursAtCap) = computeNewHourly(oldHourly, avgShift, baseline)
+        return NightlyProposal(nights.size, nights.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap)
     }
 
     fun maybeApply(
@@ -250,40 +378,50 @@ object FclNightBasalAutoAdjuster {
         val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
 
         if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL) {
-            // 26/07/2026 (Ecko) — deze rij (applied=false, skipReason="") IS
-            // het openstaande voorstel. Advisorscreen.kt herkent 'm zo via
-            // getLatest() en toont Accepteren/Afwijzen; die knoppen roepen
-            // applyPending()/rejectPending() hieronder aan, die een NIEUWE
-            // rij toevoegen (applied=true, resp. skipReason="AFGEWEZEN...")
-            // zodat deze rij niet meer als "pending" herkend wordt.
+            // 27/07/2026 (Ecko) — deze rij is puur de RUWE data van vannacht;
+            // ze wordt niet meer 1-op-1 als "het voorstel" getoond. Advisor-
+            // screen.kt (via computeCurrentProposal()) middelt zelf over alle
+            // beschikbare nachten sinds de laatste wijziging. Geen Afwijzen
+            // meer nodig/aanwezig: niet-Accepteren betekent al vanzelf "niet
+            // toegepast", en het venster groeit gewoon door met meer nachten.
             logRow(db, now, today, mode, applied = false, skipReason = "",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
                 hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
-        // ── mode == AUTO: wachtperiode-gate vóór daadwerkelijk toepassen ──
-        // (27/07/2026, Ecko) — zie kdoc bij nightsSinceLastChange()/
-        // AUTO_COOLDOWN_NIGHTS hierboven.
-        val nightsSince = nightsSinceLastChange(context, db)
-        if (nightsSince < AUTO_COOLDOWN_NIGHTS) {
-            logRow(db, now, today, mode, applied = false,
-                skipReason = "wachtperiode: nog ${AUTO_COOLDOWN_NIGHTS - nightsSince} nacht(en) sinds de " +
-                    "laatste wijziging (min $AUTO_COOLDOWN_NIGHTS)",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
-            return
-        }
+        // ── mode == AUTO: eerst ALTIJD de ruwe data van vannacht loggen ──
+        // (27/07/2026, Ecko) — nodig als datapunt voor de 3-nachten-middeling
+        // hieronder, ongeacht of dit de nacht is waarop ook echt geschreven
+        // wordt. Dit was voorheen een losse skip-rij zonder de echte
+        // berekening (oldJson/shiftJson="{}"); nu bevat elke nacht altijd de
+        // ruwe cijfers, precies zoals bij MANUAL hierboven.
+        logRow(db, now, today, mode, applied = false, skipReason = "",
+            oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
 
-        // ── mode == AUTO: daadwerkelijk toepassen ──
-        val newSingleProfile = current.deepClone().apply { basal = buildBasalJsonArray(newHourly) }
+        // ── mode == AUTO: 1x per AUTO_COOLDOWN_NIGHTS nachten toepassen,
+        //    met het gemiddelde van EXACT die nachten (Ecko's suggestie) ──
+        val nightsSince = nightsSinceLastChange(context, db)
+        if (nightsSince < AUTO_COOLDOWN_NIGHTS) return
+        val window = collectRecentNightlyShifts(db, lastChangeDate(context, db, db.profileAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L), AUTO_COOLDOWN_NIGHTS)
+        if (window.size < AUTO_COOLDOWN_NIGHTS) return // nog niet elke nacht een echte berekening gehad
+        val avgShift = weightedAverageShift(window)
+        val (avgNewHourly, avgHoursAtCap) = computeNewHourly(currentHourly, avgShift, baseline)
+        FclNightBasalAutoAdjustStore.updateCapHitCounters(context, avgHoursAtCap, avgShift.keys)
+        val avgOldJson = oldJson
+        val avgNewJson = hourlyToJson(avgNewHourly)
+        val avgShiftJson = JSONObject().apply { avgShift.forEach { (h, v) -> put(h.toString(), v) } }.toString()
+
+        // ── daadwerkelijk toepassen (met het gemiddelde, niet de losse nacht) ──
+        val newSingleProfile = current.deepClone().apply { basal = buildBasalJsonArray(avgNewHourly) }
 
         val errors = profileRepository.validateStructured(newSingleProfile)
         if (errors.isNotEmpty()) {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
@@ -291,16 +429,16 @@ object FclNightBasalAutoAdjuster {
         if (replaceResult.isFailure) {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
         val newProfileStore = profileRepository.profile.value
         if (newProfileStore == null) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
@@ -317,7 +455,7 @@ object FclNightBasalAutoAdjuster {
             timestamp = now,
             action = Action.PROFILE_SWITCH,
             source = Sources.Aaps,
-            note = "FCL nacht-auto: " + shiftByHour.entries
+            note = "FCL nacht-auto (gemiddelde over ${window.size} nachten): " + avgShift.entries
                 .sortedBy { it.key }
                 .joinToString { (h, pct) -> "%02d:00 %+.1f%%".format(h, pct) },
             listValues = emptyList(),
@@ -326,23 +464,27 @@ object FclNightBasalAutoAdjuster {
         if (ps == null) {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
         logRow(db, now, today, mode, applied = true, skipReason = "",
-            oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+            oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+            hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
     }
 
     /**
-     * Accepteren van een openstaand MANUAL-voorstel (26/07/2026, Ecko) — zie
-     * kdoc bij de MANUAL-tak in applyInternal(). Herberekent newHourly VERS
-     * tegen het NU actuele profiel (niet de mogelijk verouderde newBasalJson-
-     * snapshot in de pending-rij) — als de gebruiker sindsdien handmatig iets
-     * aan het profiel wijzigde, telt dat gewoon mee, precies zoals bij AUTO.
-     * Retourneert false als er niets openstond of het schrijven mislukte.
+     * Accepteren van het openstaande MANUAL-voorstel (26/07/2026, Ecko;
+     * herzien 27/07/2026 voor het gemiddelde-over-meerdere-nachten-ontwerp).
+     * Gebruikt dezelfde vensterverzameling/-middeling als
+     * computeCurrentProposal() (UI-laag) — zodat wat je ziet exact is wat er
+     * wordt toegepast — maar herberekent newHourly VERS tegen het NU actuele
+     * profiel (niet een mogelijk verouderde snapshot): als de gebruiker
+     * sindsdien handmatig iets aan het profiel wijzigde, telt dat gewoon mee,
+     * precies zoals bij AUTO. Retourneert false als er nog geen kwalificerend
+     * venster is (minder dan MANUAL_COOLDOWN_NIGHTS nachten) of het schrijven
+     * mislukte.
      */
     suspend fun applyPending(
         context: Context,
@@ -350,16 +492,12 @@ object FclNightBasalAutoAdjuster {
         profileRepository: ProfileRepository
     ): Boolean {
         val db = FCLAnalyzerDatabase.getInstance(context)
-        val pending = db.profileAutoAdjustLogDao().getLatest()
-            ?.takeIf { it.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name && !it.applied && it.skipReason.isEmpty() }
-            ?: return false
-
-        val shiftByHour = HashMap<Int, Double>()
-        try {
-            val obj = JSONObject(pending.perHourShiftJson)
-            obj.keys().forEach { k -> shiftByHour[k.toInt()] = obj.getDouble(k) }
-        } catch (_: Exception) { return false }
-        if (shiftByHour.isEmpty()) return false
+        val lastAppliedAt = db.profileAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val since = lastChangeDate(context, db, lastAppliedAt)
+        val window = collectRecentNightlyShifts(db, since, MANUAL_MAX_WINDOW_NIGHTS)
+        if (window.size < MANUAL_COOLDOWN_NIGHTS) return false
+        val shiftByHour = weightedAverageShift(window)
+        val newest = window.last()
 
         val effectiveProfile = profileFunction.getProfile() ?: return false
         val originalName = profileFunction.getOriginalProfileName()
@@ -380,7 +518,7 @@ object FclNightBasalAutoAdjuster {
         val mode = app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
         val oldJson = hourlyToJson(currentHourly)
         val newJson = hourlyToJson(newHourly)
-        val shiftJson = pending.perHourShiftJson
+        val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
 
         // (26/07/2026, Ecko) — zelfde validate→replace→createProfileSwitch-pad
         // als de AUTO-tak in applyInternal() hierboven (bewust gedupliceerd
@@ -396,7 +534,7 @@ object FclNightBasalAutoAdjuster {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
@@ -405,7 +543,7 @@ object FclNightBasalAutoAdjuster {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
@@ -413,7 +551,7 @@ object FclNightBasalAutoAdjuster {
         if (newProfileStore == null) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
@@ -426,7 +564,7 @@ object FclNightBasalAutoAdjuster {
             timestamp = now,
             action = Action.PROFILE_SWITCH,
             source = Sources.Aaps,
-            note = "FCL nacht-auto (geaccepteerd): " + shiftByHour.entries
+            note = "FCL nacht-auto (geaccepteerd, gemiddelde over ${window.size} nachten): " + shiftByHour.entries
                 .sortedBy { it.key }
                 .joinToString { (h, pct) -> "%02d:00 %+.1f%%".format(h, pct) },
             listValues = emptyList(),
@@ -436,34 +574,13 @@ object FclNightBasalAutoAdjuster {
             logRow(db, now, today, mode, applied = false,
                 skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
                 oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
+                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
         logRow(db, now, today, mode, applied = true, skipReason = "",
             oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence)
-        return true
-    }
-
-    /**
-     * Afwijzen van een openstaand MANUAL-voorstel — voegt een nieuwe rij toe
-     * (skipReason gevuld) zodat de pending-rij niet meer als "openstaand"
-     * wordt herkend. Er is niets om terug te draaien: er is nooit iets
-     * naar AAPS geschreven (zie kdoc bij de MANUAL-tak in applyInternal()).
-     */
-    suspend fun rejectPending(context: Context): Boolean {
-        val db = FCLAnalyzerDatabase.getInstance(context)
-        val pending = db.profileAutoAdjustLogDao().getLatest()
-            ?.takeIf { it.mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL.name && !it.applied && it.skipReason.isEmpty() }
-            ?: return false
-        logRow(
-            db, System.currentTimeMillis(), LocalDate.now(AMSTERDAM).toString(),
-            app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL, applied = false,
-            skipReason = "AFGEWEZEN (handmatig)",
-            oldJson = pending.oldBasalJson, newJson = pending.newBasalJson, shiftJson = pending.perHourShiftJson,
-            hoursAtCapCount = pending.hoursAtCapCount, nightsAnalyzed = pending.nightsAnalyzed, avgConfidence = pending.avgConfidence
-        )
+            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
         return true
     }
 

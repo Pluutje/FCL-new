@@ -36,6 +36,15 @@ interface ProfileAutoAdjustLogDao {
     @Query("SELECT COUNT(DISTINCT localDate) FROM profile_auto_adjust_log WHERE mode = :mode AND timestampMs >= :sinceMs")
     suspend fun countDistinctDates(mode: String, sinceMs: Long): Int
 
+    /** 27/07/2026 (Ecko) — voor het (gewogen) gemiddelde-voorstel over de
+     *  laatste N nachten sinds een wijziging: alle rijen NA [sinceDate]
+     *  (exclusief), nieuwste eerst. FclNightBasalAutoAdjuster verzamelt
+     *  hieruit zelf de meest recente rij per kalenderdag en filtert rijen
+     *  zonder echte berekening (perHourShiftJson == "{}") eruit — zie
+     *  collectRecentNightlyShifts(). */
+    @Query("SELECT * FROM profile_auto_adjust_log WHERE localDate > :sinceDate ORDER BY timestampMs DESC")
+    suspend fun getSinceDateDesc(sinceDate: String): List<ProfileAutoAdjustLogEntity>
+
     @Query("DELETE FROM profile_auto_adjust_log WHERE timestampMs < :cutoffMs")
     suspend fun deleteOlderThan(cutoffMs: Long)
 }
