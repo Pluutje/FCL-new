@@ -1026,6 +1026,62 @@ private fun calculateEnergy(
     return EnergyResult(total = total, delta = delta, slope = slope, accel = accel)
 }
 
+// ── Snelle-afremming demping (27/07/2026, Ecko) — zie kdoc bij de aanroep
+// in FCLvNext.buildAdvice()/de hoofdcyclus voor de volledige aanleiding
+// (maaltijd 27/07, cyclus 19:18: ctx.slope liep nog voor op een al
+// ingestorte ctx.recentSlope). FAST_LANE_MIN_MUL is een BODEM, geen extra
+// hard-stop — de bestaande IOB-/peak-/downtrend-gates blijven ongemoeid
+// naast deze factor werken.
+private const val FAST_LANE_MIN_SLOPE = 1.5          // mmol/L/h — alleen relevant bij echte druk
+private const val FAST_LANE_RATIO_THRESHOLD = 0.35   // recentSlope/slope onder deze grens = "gat"
+// 27/07/2026 (Ecko) — bewust GEEN meercyclus-bevestiging (i.t.t. de meeste
+// andere confirm-cycles in dit bestand): backtest tegen de 27/07-log liet
+// zien dat het "gat" tussen slope en recentSlope hier typisch maar 1 cyclus
+// breed is — bij de volgende cyclus is slope zelf al meegezakt (of de trend
+// is dan al duidelijk negatief, waar updateDowntrendGate het overneemt), dus
+// een 2e bevestigende cyclus komt vrijwel altijd te laat en zou de fix voor
+// precies het gerapporteerde geval (19:18) krachteloos maken. De strengheid
+// zit in de drie-voorwaardige AND hierboven i.p.v. in herhaling over cycli.
+private const val FAST_LANE_CONFIRM_CYCLES = 1
+private const val FAST_LANE_MIN_MUL = 0.6            // bodem van de demping (nooit sterker)
+
+private data class FastLaneDampening(
+    val mul: Double,
+    val confirmCount: Int,
+    val locked: Boolean,
+    val reason: String
+)
+
+private fun computeFastLaneDampening(
+    ctx: FCLvNextContext,
+    confirmCountIn: Int
+): FastLaneDampening {
+    val slopeRatio = if (ctx.slope > 0.01) ctx.recentSlope / ctx.slope else 1.0
+
+    val collapsed =
+        ctx.slope >= FAST_LANE_MIN_SLOPE &&
+            ctx.deltaToTarget > 0.3 &&
+            slopeRatio < FAST_LANE_RATIO_THRESHOLD
+
+    val confirmCount = if (collapsed) (confirmCountIn + 1).coerceAtMost(10) else 0
+    val locked = confirmCount >= FAST_LANE_CONFIRM_CYCLES
+
+    val mul = if (locked) {
+        // Ratio op (of net onder) de drempel → mul ≈ 1.0 (geen sprong).
+        // Ratio richting 0 (of negatief, d.w.z. al aan het omslaan) → mul
+        // zakt geleidelijk naar de bodem FAST_LANE_MIN_MUL.
+        val t = smooth01((FAST_LANE_RATIO_THRESHOLD - slopeRatio.coerceAtLeast(0.0)) / FAST_LANE_RATIO_THRESHOLD)
+        lerp(1.0, FAST_LANE_MIN_MUL, t)
+    } else 1.0
+
+    val reason = if (locked)
+        "SNELLE AFREMMING: recentSlope=${"%.2f".format(ctx.recentSlope)} vs slope=${"%.2f".format(ctx.slope)} " +
+            "(ratio ${"%.2f".format(slopeRatio)}) → energie x${"%.2f".format(mul)}"
+    else ""
+
+    return FastLaneDampening(mul = mul, confirmCount = confirmCount, locked = locked, reason = reason)
+}
+
 private fun calculateStagnationBoost(
     ctx: FCLvNextContext,
     config: FCLvNextConfig
@@ -3689,7 +3745,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v43-2026-07-26-1800"
+    private val FCL_CODE_VERSION = "v44-2026-07-27-2100"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3774,8 +3830,75 @@ class FCLvNext(
             .edit().putLong(EPISODE_KEY, value).apply()
 
     private var mealEpisodeCounter: Long = loadEpisodeCounter()
-    private var activeMealEpisodeId: Long = -1
-    private var mealEpisodeStartTime: DateTime? = null
+
+    // ── Episode-anker persistent over herstarts heen (27/07/2026, Ecko) ─────
+    // AANLEIDING: maaltijd 27/07 18:44-20:33 — een onvrijwillige herstart om
+    // 19:14 (24 min in de maaltijd, IOB al 7,29U) zette activeMealEpisodeId
+    // terug naar -1 (was nooit gepersisteerd, in tegenstelling tot
+    // episodeCommitCount/episodePeakCommitU hieronder, die dat sinds 15/07
+    // WEL zijn). Dat leek onschuldig, maar triggerde het "START nieuwe
+    // episode"-blok verderop (episodeTrigger && activeMealEpisodeId == -1L) —
+    // en dat blok zet OOK episodeCommitCount/episodePeakCommitU/
+    // lastKnownLateDecayMul terug naar hun verse-episode-startwaarden. Met
+    // andere woorden: de persistentie van 15/07 laadde bij init keurig de
+    // laatst bekende waarde, maar die werd een fractie later in diezelfde
+    // cyclus alsnog overschreven omdat het START-blok ten onrechte vuurde.
+    // Gevolg: een laat, fors commit (1,09U, IOB al 7,29U) werd behandeld als
+    // vroege fase van een verse maaltijd i.p.v. een laat commit ná het
+    // buigpunt van een maaltijd die al 24 minuten en 6+U IOB onderweg was.
+    //
+    // Fix: activeMealEpisodeId/mealEpisodeStartTime/mealEpisodeStartBg alle
+    // drie persisteren — zelfde SharedPreferences-patroon als hierboven —
+    // zodat het START-blok bij de eerste cyclus na een herstart al ziet dat
+    // er nog een episode loopt en dus niet opnieuw begint. Eén veiligheidsgrens
+    // bij het laden: een hersteld anker OUDER dan EPISODE_ANCHOR_MAX_AGE_MIN
+    // wordt genegeerd (val terug op "geen actieve episode") — anders zou een
+    // herstart die pas UREN na een allang afgelopen maaltijd plaatsvindt een
+    // vergeten episode weer tot leven kunnen wekken. 240 minuten = dezelfde
+    // grens als het bestaande "Exit C: harde timeout"-vangnet verderop
+    // (staleEpisode). De drie waarden worden ATOMISCH samen geladen (één
+    // Triple, niet drie losse reads) zodat er nooit een inconsistente
+    // restore ontstaat (bijv. wel een id, geen starttijd).
+    private val EPISODE_ANCHOR_PREFS = "fcl_episode_anchor"
+    private val EPISODE_ANCHOR_ID_KEY = "active_meal_episode_id"
+    private val EPISODE_ANCHOR_START_MS_KEY = "meal_episode_start_ms"
+    private val EPISODE_ANCHOR_START_BG_KEY = "meal_episode_start_bg"
+    private val EPISODE_ANCHOR_MAX_AGE_MIN = 240
+
+    private fun loadEpisodeAnchor(): Triple<Long, DateTime?, Double?> {
+        val prefs = context.getSharedPreferences(EPISODE_ANCHOR_PREFS, android.content.Context.MODE_PRIVATE)
+        val id = prefs.getLong(EPISODE_ANCHOR_ID_KEY, -1L)
+        val startMs = prefs.getLong(EPISODE_ANCHOR_START_MS_KEY, -1L)
+        if (id == -1L || startMs == -1L) return Triple(-1L, null, null)
+        val startTime = DateTime(startMs)
+        val ageMin = org.joda.time.Minutes.minutesBetween(startTime, DateTime.now()).minutes
+        if (ageMin > EPISODE_ANCHOR_MAX_AGE_MIN) return Triple(-1L, null, null)  // te oud — genegeerd
+        val startBgRaw = prefs.getFloat(EPISODE_ANCHOR_START_BG_KEY, -1f)
+        val startBg = if (startBgRaw < 0f) null else startBgRaw.toDouble()
+        return Triple(id, startTime, startBg)
+    }
+
+    private fun saveEpisodeAnchor(id: Long, startTime: DateTime?, startBg: Double?) {
+        context.getSharedPreferences(EPISODE_ANCHOR_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putLong(EPISODE_ANCHOR_ID_KEY, id)
+            .putLong(EPISODE_ANCHOR_START_MS_KEY, startTime?.millis ?: -1L)
+            .putFloat(EPISODE_ANCHOR_START_BG_KEY, (startBg ?: -1.0).toFloat())
+            .apply()
+    }
+
+    private val restoredEpisodeAnchor = loadEpisodeAnchor()
+
+    private var activeMealEpisodeId: Long = restoredEpisodeAnchor.first
+        set(value) {
+            field = value
+            saveEpisodeAnchor(value, mealEpisodeStartTime, mealEpisodeStartBg)
+        }
+    private var mealEpisodeStartTime: DateTime? = restoredEpisodeAnchor.second
+        set(value) {
+            field = value
+            saveEpisodeAnchor(activeMealEpisodeId, value, mealEpisodeStartBg)
+        }
 
     // ── Maaltijd-anticipatie geschiedenis (05/07/2026, Ecko) ────────────────
     // Opslag zelf leeft in FclMealTimeAnticipation.kt (gedeeld met
@@ -3793,7 +3916,12 @@ class FCLvNext(
     // Voorkomt dat dezelfde episode meerdere cycli achter elkaar (zolang hij
     // CONFIRMED blijft) opnieuw wordt vastgelegd — precies één event per episode.
     private var lastRecordedMealTimeEpisodeId: Long = -1
-    private var mealEpisodeStartBg: Double? = null
+    // Derde deel van het episode-anker hierboven — zelfde persistentie-reden.
+    private var mealEpisodeStartBg: Double? = restoredEpisodeAnchor.third
+        set(value) {
+            field = value
+            saveEpisodeAnchor(activeMealEpisodeId, mealEpisodeStartTime, value)
+        }
     // Frontload-shift tracking: bijgehouden per episode
     // ── Taper-clamp-status persistent (15/07/2026, Ecko) ───────────────────
     // Aanleiding: maaltijd 15/07 19:07-19:42 — een onvrijwillige Android-herstart
@@ -3897,9 +4025,15 @@ class FCLvNext(
     private var vroegeStijgingBevestigdUsedThisEpisode: Boolean = false
     private var plateauSinceVroegeStijging: Boolean = false
 
-    // ── Snelle-afremming guard (zie updateRapidDecelGate) ──────────────────
-    // Houdt de hoogste recentSlope sinds episode-start bij, om een relatieve
-    // terugval te kunnen detecteren los van de absolute downtrend-drempels.
+    // ── Snelle-afremming guard ───────────────────────────────────────────
+    // rapidDecelLocked/rapidDecelConfirm: bijgewerkt door
+    // computeFastLaneDampening() (27/07/2026, Ecko — zie kdoc daar en bij de
+    // aanroep in de hoofdcyclus) — dempt de energy-berekening zodra
+    // ctx.recentSlope al ver is weggezakt terwijl het tragere ctx.slope dat
+    // nog niet heeft bijgebeend. episodePeakRecentSlope wordt momenteel niet
+    // gebruikt door die functie (die vergelijkt recentSlope rechtstreeks met
+    // slope, niet met een episode-piek) — gereserveerd voor een eventuele
+    // toekomstige per-episode-variant, bewust ongemoeid gelaten.
     private var episodePeakRecentSlope: Double = 0.0
     private var rapidDecelLocked: Boolean = false
     private var rapidDecelConfirm: Int = 0
@@ -4657,6 +4791,40 @@ class FCLvNext(
             config = config
         )
         var energy = energyResult.total
+
+        // ─────────────────────────────────────────────
+        // 🐌 SNELLE-AFREMMING DEMPING (27/07/2026, Ecko)
+        // ─────────────────────────────────────────────
+        // AANLEIDING: maaltijd 27/07 18:44-20:33, cyclus 19:18. calculateEnergy()
+        // hierboven gebruikt ctx.slope — het gladde/tragere signaal — voor de
+        // "snelheid"-component. Bij 19:18 stond ctx.slope nog op 2,65 (nog
+        // hoog, door de voorgaande snelle stijging) terwijl ctx.recentSlope
+        // in DIEZELFDE cyclus al was ingestort naar 0,44: de stijging vlakte
+        // zichtbaar af, maar energy "wist" dat nog niet en bleef een
+        // substantiële dosis (0,55U geleverd) aansturen. downGate hieronder
+        // (updateDowntrendGate) vangt dit niet — die reageert pas op een
+        // NEGATIEVE recentSlope/recentΔ5m (een echte daling), niet op een
+        // sterke terugval vanaf een hogere recentSlope terwijl de trend zelf
+        // nog (net) positief is.
+        //
+        // Fix: een kleine, uitsluitend DEMPENDE (nooit versterkende) factor
+        // op energy zodra ctx.recentSlope ver onder ctx.slope is weggezakt.
+        // Geen meercyclus-bevestiging (zie kdoc bij FAST_LANE_CONFIRM_CYCLES
+        // hierboven) — de strengheid zit in de drie-voorwaardige AND in
+        // computeFastLaneDampening(). Alleen relevant bij een reeds
+        // duidelijke stijging/druk (ctx.slope hoog genoeg, ctx.deltaToTarget
+        // > 0.3) — anders is er niets om te overschatten.
+        // Hergebruikt rapidDecelConfirm/rapidDecelLocked (al gedeclareerd,
+        // al gereset op de 3 episode-grens-plekken, maar tot nu toe nooit
+        // daadwerkelijk bijgewerkt — kennelijk eerder als scaffolding
+        // aangelegd voor precies dit doel).
+        val fastLaneDampening = computeFastLaneDampening(ctx, rapidDecelConfirm)
+        rapidDecelConfirm = fastLaneDampening.confirmCount
+        rapidDecelLocked = fastLaneDampening.locked
+        if (fastLaneDampening.locked) {
+            energy *= fastLaneDampening.mul
+            status.append(fastLaneDampening.reason + "\n")
+        }
 
         // ─────────────────────────────────────────────
         // 🔒 ENERGY EXHAUSTION GATE (post-rise hard stop)
