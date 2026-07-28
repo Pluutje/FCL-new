@@ -36,6 +36,7 @@ import kotlin.math.roundToInt
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclNachtOvergangSettings
+import app.aaps.plugins.aps.openAPSFCL.vnext.FclWakeDetector
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNext
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextInput
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice
@@ -161,21 +162,11 @@ class DetermineBasalFCL @Inject constructor(
                 persistenceLayer     = persistenceLayer,
                 context              = context
             )
-
-            // ✅ NIEUW (14/07/2026, Ecko): AIGF-geschiedenis bijwerken bij elke
-            // episodestart. Zelfde cadans/moment als de ActivityLogger hierboven —
-            // één sample per episode is precies wat de glijdende 7-daagse baseline
-            // nodig heeft (zie FclActivitySensitivity.kt), geen elke-cyclus-opslag.
-            try {
-                val cal8h = computeAigfCal8hTotal(System.currentTimeMillis())
-                if (cal8h >= 0.0) {
-                    val history = app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.loadFrom(context)
-                    val updated = app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.record(
-                        history, System.currentTimeMillis(), cal8h
-                    )
-                    app.aaps.plugins.aps.openAPSFCL.vnext.FclActivitySensitivity.saveTo(context, updated)
-                }
-            } catch (e: Exception) { }
+            // AIGF-geschiedenis bijwerken gebeurt sinds 28/07/2026 niet meer hier
+            // (episodestart is een te vroeg, nog onzeker moment) maar in
+            // FCLvNext.kt zelf, bij het eerste écht bevestigde commit van de
+            // episode — zie kdoc bij FclActivitySensitivity.kt en de AIGF-B-
+            // sectie in FCLvNext.kt.
         }
     }
 
@@ -229,21 +220,24 @@ class DetermineBasalFCL @Inject constructor(
         consoleError.add(msg)
     }
 
-    // ── AIGF: 8-uurs-calorietotal (14/07/2026, Ecko) ───────────────────────
+    // ── AIGF: N-uurs-calorietotal (14/07/2026, Ecko; verallgemeend 28/07/2026
+    // voor de A/B-herziening — zie kdoc bij FclActivitySensitivity.kt) ──────
     // Zelfde methode/grenzen als FclActivityLogger.logEpisodeStart() gebruikt
-    // voor cal_totaal_8h (8 losse 1-uurs deelvensters, opgeteld) — BEWUST
-    // niet één enkele caloriesInWindow()-aanroep met een 8u-venster: die
+    // voor cal_totaal_8h (losse 1-uurs deelvensters, opgeteld) — BEWUST niet
+    // één enkele caloriesInWindow()-aanroep met een N-uursvenster: die
     // functie neemt voor het activiteitstype-onderdeel altijd de MEEST
     // RECENTE classificatie (FclActivityTypeCache.latest) en vermenigvuldigt
-    // die met de volledige venstertijd — bij één 8u-aanroep zou een korte
-    // fietsrit van 20 min dan over 8 volle uren worden uitgesmeerd. Met 8
-    // losse 1u-deelvensters (zoals hier en in FclActivityLogger) krijgt elk
-    // uur zijn eigen, correcte classificatie.
+    // die met de volledige venstertijd — bij één N-uursaanroep zou een korte
+    // fietsrit van 20 min dan over N volle uren worden uitgesmeerd. Met losse
+    // 1u-deelvensters (zoals hier en in FclActivityLogger) krijgt elk uur
+    // zijn eigen, correcte classificatie.
     // Retourneert -1.0 als er geen enkel geldig deelvenster was (i.p.v. 0.0,
     // om "geen data" te kunnen onderscheiden van "écht stilgezeten").
-    private fun computeAigfCal8hTotal(nowMs: Long): Double {
+    // hours=24 voedt component A (vorige dag/naijling), hours=4 component B
+    // (recente uren) — zie FCLvNextInput.activityCal24h/activityCal4h.
+    private fun computeAigfCalTotal(nowMs: Long, hours: Int): Double {
         val hourMs = 3_600_000L
-        val perHour = (1..8).map { h ->
+        val perHour = (1..hours).map { h ->
             val boundary = nowMs - (h - 1) * hourMs
             try {
                 val stepsThisHour = kotlinx.coroutines.runBlocking {
@@ -263,6 +257,53 @@ class DetermineBasalFCL @Inject constructor(
         }
         val valid = perHour.filter { it >= 0.0 }
         return if (valid.isEmpty()) -1.0 else valid.sum()
+    }
+
+    // ── FclWakeDetector-koppeling (28/07/2026, Ecko) ────────────────────────
+    // FCLvNext.kt heeft geen directe PersistenceLayer-toegang, dus deze
+    // wrapper haalt het stappental van de laatste FclWakeDetector.STEP_
+    // WINDOW_MIN minuten op en geeft dat door aan checkAndUpdate() — elke
+    // cyclus aangeroepen (goedkoop: één extra stappen-opvraag, zelfde pad
+    // als hierboven), zodat de allereerste overschrijding van vandaag zo
+    // snel mogelijk na het moment zelf wordt vastgelegd.
+    //
+    // Tijd-fallback (28/07/2026, Ecko: "dagstart + 1 uur pakken als
+    // trigger"): op een dag met weinig stappen (geen hondenwandeling, ziek)
+    // zou de stappen-trigger nooit afgaan en zou component B tot middernacht
+    // "onbekend" blijven. `ochtendStartFallbackDeadlineMs()` herbruikt de
+    // bestaande, al ingestelde `ochtend_start`/`ochtend_start_weekend`
+    // (dezelfde instelling als FCLvNextDayNightHelper.isNightNow() gebruikt)
+    // + 1 uur als achtervang-kloktijd; de stappen-trigger blijft leidend en
+    // wint als hij eerder afgaat.
+    private fun ochtendStartFallbackDeadlineMs(nowMs: Long): Long? {
+        return try {
+            val nowDt = DateTime(nowMs)
+            val isWeekend = FCLvNextDayNightHelper.isWeekendDay(
+                nowDt.dayOfWeek, preferences.get(StringKey.WeekendDagen)
+            )
+            val ochtendStartStr = if (isWeekend) preferences.get(StringKey.OchtendStartWeekend)
+            else preferences.get(StringKey.OchtendStart)
+            val parts = ochtendStartStr.split(":")
+            val uur = parts[0].toInt()
+            val min = if (parts.size > 1) parts[1].toInt() else 0
+            nowDt.withTime(uur, min, 0, 0).plusHours(1).millis
+        } catch (e: Exception) { null }
+    }
+
+    private fun updateAndGetDaystartTodayMs(nowMs: Long): Long? {
+        val windowMs = FclWakeDetector.STEP_WINDOW_MIN * 60_000L
+        val stepsInWindow = try {
+            kotlinx.coroutines.runBlocking {
+                persistenceLayer.getLastStepsCountFromTimeToTime(
+                    startTime = nowMs - windowMs,
+                    endTime = nowMs
+                )?.steps10min ?: 0
+            }
+        } catch (e: Exception) { 0 }
+        val fallbackDeadlineMs = ochtendStartFallbackDeadlineMs(nowMs)
+        return try {
+            FclWakeDetector.checkAndUpdate(context, nowMs, stepsInWindow, fallbackDeadlineMs)
+        } catch (e: Exception) { null }
     }
 
     private fun getMaxSafeBasal(profile: OapsProfileFCL): Double =
@@ -596,13 +637,20 @@ class DetermineBasalFCL @Inject constructor(
             val pendingBolusU10min = (realDelivered10min.bolusU - realDelivered8min.bolusU)
                 .coerceAtLeast(0.0)
 
-            // ✅ NIEUW (14/07/2026, Ecko): 8-uurs-calorietotal voor AIGF — elke
-            // cyclus opnieuw berekend (i.t.t. de eenmalige episodestart-opslag
-            // hierboven, die de HISTORIE/baseline bijhoudt). Dit is de "huidige
-            // waarde" die FCLvNext.kt tegen die historische baseline aflegt.
-            val activityCal8h = try {
-                computeAigfCal8hTotal(currentTime)
+            // ✅ NIEUW (14/07/2026, Ecko; herzien 28/07/2026 — twee vensters
+            // i.p.v. één, zie kdoc bij FclActivitySensitivity.kt): elke cyclus
+            // opnieuw berekend. Dit zijn de "huidige waarden" die FCLvNext.kt
+            // tegen hun eigen historische baseline afleggen (component A resp.
+            // B) — de HISTORIE/baseline zelf wordt niet meer hier bijgehouden,
+            // dat gebeurt sinds 28/07/2026 in FCLvNext.kt bij het eerste écht
+            // bevestigde commit van een episode.
+            val activityCal24h = try {
+                computeAigfCalTotal(currentTime, 24)
             } catch (e: Exception) { -1.0 }
+            val activityCal4h = try {
+                computeAigfCalTotal(currentTime, 4)
+            } catch (e: Exception) { -1.0 }
+            val daystartTodayMs = updateAndGetDaystartTodayMs(currentTime)
 
             val fclInput = FCLvNextInput(
                 bgNow = bgNowMmol,
@@ -626,7 +674,9 @@ class DetermineBasalFCL @Inject constructor(
                 activityInsulinPct = activity.insulinPercentage,
                 activityTargetAdjust = activity.targetAdjust,
                 aapsMultiplier = aaps_multiplier,
-                activityCal8h = activityCal8h
+                activityCal24h = activityCal24h,
+                activityCal4h = activityCal4h,
+                daystartTodayMs = daystartTodayMs
             )
 
             val advice = fclvNext.getAdvice(fclInput)
@@ -725,12 +775,19 @@ class DetermineBasalFCL @Inject constructor(
                 recentHr1h = recentHr1h,
                 recentActivityType = recentActivity?.activityType,
                 recentActivityConfidencePct = recentActivity?.confidencePct ?: 0,
-                aigfPct = if (advice.aigfActive) advice.aigfPct else null,
                 aigfEnabled = advice.aigfActive,
-                aigfReasonNl = advice.aigfReasonNl,
-                aigfCurrentCal8h = advice.aigfCurrentCal8h,
-                aigfBaselineCal8h = advice.aigfBaselineCal8h,
-                aigfDaysOfHistory = advice.aigfDaysOfHistory
+                aigfAPct = if (advice.aigfActive) advice.aigfAPct else null,
+                aigfAReasonNl = advice.aigfAReasonNl,
+                aigfACurrentCal24h = advice.aigfACurrentCal24h,
+                aigfABaselineCal24h = advice.aigfABaselineCal24h,
+                aigfADaysOfHistory = advice.aigfADaysOfHistory,
+                aigfBPct = if (advice.aigfActive) advice.aigfBPct else null,
+                aigfBReasonNl = advice.aigfBReasonNl,
+                aigfBCurrentCal4h = advice.aigfBCurrentCal4h,
+                aigfBBaselineCal4h = advice.aigfBBaselineCal4h,
+                aigfBDaysOfHistory = advice.aigfBDaysOfHistory,
+                aigfBWakeOverlapFrac = advice.aigfBWakeOverlapFrac,
+                aigfDaystartTodayMs = advice.aigfDaystartTodayMs
             )
             val uiText = statusFormatter.buildStatus(
                 isNight = isNight,

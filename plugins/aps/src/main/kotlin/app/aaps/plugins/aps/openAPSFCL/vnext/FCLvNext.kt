@@ -56,15 +56,25 @@ data class FCLvNextInput(
     val activityTargetAdjust: Double = 0.0,     // mmol/L
     // Schaalt alleen de oref0/SMB-fallback-laag (Laag 2), niet FCLvNext zelf.
     val aapsMultiplier: Double = 1.0,
-    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
-    // Huidige 8-uurs-calorieschatting, berekend door DetermineBasalFCL.kt via
-    // EstimatedCaloriesCalculator.caloriesInWindow(), zelfde bron als de
-    // bestaande 1-uurs activiteitsvelden hierboven maar dan met een 8u-venster.
-    // -1.0 = nog geen geldige meting beschikbaar (zie FclActivitySensitivity).
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko,
+    // herontworpen 28/07/2026 — zie kdoc bij FclActivitySensitivity.kt) ─────
+    // Twee losse vensters i.p.v. het oude, structureel ochtend-bevooroordeelde
+    // 8-uursvenster: activityCal24h voor component A (vorige dag/naijling,
+    // continu), activityCal4h voor component B (recente uren, alleen zinvol
+    // rond een maaltijd). Beide berekend door DetermineBasalFCL.kt via
+    // EstimatedCaloriesCalculator.caloriesInWindow(), zelfde bron/methode als
+    // de bestaande 1-uurs activiteitsvelden hierboven, nu met een 24u- resp.
+    // 4u-venster. -1.0 = nog geen geldige meting beschikbaar.
     // Losstaand van activityActive/activityInsulinPct/activityTargetAdjust
     // hierboven — dat is de kortetermijn-stappen-mechaniek (FCLActivityModule),
-    // dit is de nieuwe langetermijn-baseline-mechaniek (FclActivitySensitivity).
-    val activityCal8h: Double = -1.0,
+    // dit is de langetermijn-baseline-mechaniek (FclActivitySensitivity).
+    val activityCal24h: Double = -1.0,
+    val activityCal4h: Double = -1.0,
+    // Moment (epoch ms) waarop vandaag voor het eerst ~150 stappen binnen
+    // 10 minuten zijn gemeten (zie FclWakeDetector.kt) — null als dat vandaag
+    // nog niet is vastgesteld. Bepaalt hoeveel van de laatste 4 uur vóór een
+    // maaltijd binnen wakkere uren viel (component B's wake-weging).
+    val daystartTodayMs: Long? = null,
     // ── Werkelijke pomp-max-basaal, E/u (22/07/2026, Ecko) ─────────────────
     // Door DetermineBasalFCL.kt doorgegeven vanuit profile.max_basal, die op
     // zijn beurt door OpenAPSFCLPlugin.kt pomptype-bewust wordt berekend
@@ -116,29 +126,37 @@ data class FCLvNextAdvice(
     // debug / UI
     val statusText: String,
 
-    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
-    // aigfPct: 100 = neutraal, 125 = 25% gevoeliger (minder insuline nodig),
-    // 75 = 25% minder gevoelig (meer insuline nodig). Voor weergave in de
-    // status formatter en logging; de daadwerkelijke toepassing (afterload-
-    // verlaging bij >100, grote-commit-verhoging bij <100) gebeurt al intern
-    // in FCLvNext vóórdat getAdvice() terugkeert.
-    val aigfPct: Double = 100.0,
-    // aigfActive: staat de functie AAN in Settings (los van of er deze
-    // cyclus ook daadwerkelijk een verse berekening was — zie aigfReasonNl).
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko,
+    // herontworpen 28/07/2026 in twee losse componenten — zie kdoc bij
+    // FclActivitySensitivity.kt en bij de AIGF-sectie verderop in dit
+    // bestand) ──────────────────────────────────────────────────────────
+    // aigfActive: staat de functie AAN in Settings (geldt voor beide
+    // componenten samen — één schakelaar).
     val aigfActive: Boolean = false,
-    // Leesbare reden waarom er geen verse AIGF-berekening was deze cyclus
-    // (bijv. te weinig historie); leeg als er wel een verse berekening was.
-    // Alleen relevant/gevuld als aigfActive=true — anders altijd leeg.
-    val aigfReasonNl: String = "",
-    // 16/07/2026 (Ecko) — voor een leesbaardere AIGF-statusregel: de
-    // geschatte calorieën van de afgelopen 8 uur (huidig moment) en de
-    // 7-daagse mediaan-baseline waar dat tegen afgezet wordt, plus hoeveel
-    // dagen die baseline-historie al beslaat (zie DAYS_FOR_FULL_CONFIDENCE
-    // in FclActivitySensitivity.kt). Alleen zinvol als aigfReasonNl leeg is
-    // (dus een verse berekening deze cyclus).
-    val aigfCurrentCal8h: Double = 0.0,
-    val aigfBaselineCal8h: Double = 0.0,
-    val aigfDaysOfHistory: Double = 0.0
+    // Component A — vorige dag/naijling, continu, stuurt de afterload-
+    // reductie aan. 100 = neutraal, 125 = 25% gevoeliger (minder insuline).
+    val aigfAPct: Double = 100.0,
+    val aigfAReasonNl: String = "",
+    val aigfACurrentCal24h: Double = 0.0,
+    val aigfABaselineCal24h: Double = 0.0,
+    val aigfADaysOfHistory: Double = 0.0,
+    // Component B — recente uren, bevroren per maaltijd-episode bij het
+    // eerste écht bevestigde commit, stuurt de commit-verhoging aan (< 100
+    // = meer insuline). Blijft 100 (neutraal) zolang er deze episode nog
+    // geen eerste échte commit is geweest.
+    val aigfBPct: Double = 100.0,
+    val aigfBReasonNl: String = "",
+    val aigfBCurrentCal4h: Double = 0.0,
+    val aigfBBaselineCal4h: Double = 0.0,
+    val aigfBDaysOfHistory: Double = 0.0,
+    // Hoeveel van het 4-uursvenster vóór het laatst berekende component-B-
+    // moment binnen wakkere uren viel (0..1) — puur diagnostisch, legt uit
+    // waarom aigfBPct dicht bij 100 kan blijven ondanks een lage rawRatio.
+    val aigfBWakeOverlapFrac: Double = 0.0,
+    // Vandaag gedetecteerde "dag begon om"-tijdstip (epoch ms) via
+    // FclWakeDetector — null als nog niet vastgesteld (bijv. vóór het
+    // ontbijt, nog geen 150 stappen/10 min gezien).
+    val aigfDaystartTodayMs: Long? = null
 )
 
 private data class DecisionResult(
@@ -2325,6 +2343,22 @@ private fun smooth01(x: Double): Double {
 private fun lerp(a: Double, b: Double, t: Double): Double =
     a + (b - a) * t.coerceIn(0.0, 1.0)
 
+// ── AIGF component B: wakker-aandeel van een terugkijkvenster (28/07/2026,
+// Ecko) ──────────────────────────────────────────────────────────────────
+// Hoeveel van [nowMs - windowMs, nowMs] viel binnen wakkere uren, gegeven
+// het door FclWakeDetector.kt vastgestelde "dag begon om"-moment van
+// VANDAAG (null = nog niet vastgesteld, bijv. vóór de eerste ~150
+// stappen/10 min). Bewust conservatief: onbekend/nog niet wakker → 0.0,
+// niet 1.0 — dat is precies het gedrag dat het ontbijt neutraal houdt
+// zolang er nog geen stappen zijn gezien.
+private fun computeWakeOverlapFrac(daystartTodayMs: Long?, nowMs: Long, windowMs: Long): Double {
+    if (daystartTodayMs == null) return 0.0
+    val windowStartMs = nowMs - windowMs
+    if (daystartTodayMs <= windowStartMs) return 1.0   // hele venster al na het wakker worden
+    if (daystartTodayMs >= nowMs) return 0.0            // dag "begint" nog niet eens (randgeval)
+    return ((nowMs - daystartTodayMs).toDouble() / windowMs.toDouble()).coerceIn(0.0, 1.0)
+}
+
 private data class MealAggression(
     val a: Double,          // 0..1
     val reason: String
@@ -3745,7 +3779,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v46-2026-07-28-1900"
+    private val FCL_CODE_VERSION = "v48-2026-07-28-2330"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3805,21 +3839,36 @@ class FCLvNext(
         context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
             .getFloat(AIGF_MAX_PCT_KEY, AIGF_DEFAULT_MAX_PCT).toDouble()
 
-    // ── AIGF: vloeiende overgang (14/07/2026, Ecko — na live-observatie dat) ──
-    // een ruwe, direct-berekende AIGF van cyclus op cyclus fors kan springen
-    // (bijv. door een episodegrens die de 8u-inputwaarde in één keer doet
-    // omslaan). lastSmoothedAigfPct is de daadwerkelijk GEBRUIKTE waarde
-    // (voor zowel dosering als status-weergave); die beweegt maximaal
-    // AIGF_MAX_STEP_PER_CYCLE_PCT procentpunt per cyclus richting de nieuw
-    // berekende waarde. Bij ~5 min/cyclus is dat ongeveer 24 procentpunt/uur —
-    // een volledige sprong van 75 naar 125 kost dan ~2 uur i.p.v. één cyclus.
+    // ── AIGF: vloeiende overgang, component A (14/07/2026, Ecko — na live-
+    // observatie dat een ruwe, direct-berekende AIGF van cyclus op cyclus
+    // fors kan springen). lastSmoothedAigfAPct is de daadwerkelijk GEBRUIKTE
+    // waarde van component A (vorige dag/naijling — continu, stuurt de
+    // afterload-reductie aan); die beweegt maximaal AIGF_MAX_STEP_PER_CYCLE_PCT
+    // procentpunt per cyclus richting de nieuw berekende waarde. Bij ~5
+    // min/cyclus is dat ongeveer 24 procentpunt/uur.
     // Bewust in-memory (niet gepersisteerd): bij een herstart is 100 (neutraal)
-    // een veilig startpunt, geen reden om dit over herstarts heen te bewaren.
-    // Pas gerust aan indien gewenst — zie ook MIN_HISTORY_FOR_BASELINE in
-    // FclActivitySensitivity.kt voor de samenhang met hoe snel er überhaupt
-    // een eerste berekening beschikbaar komt.
+    // een veilig startpunt.
+    //
+    // Component B (28/07/2026, Ecko — herontwerp) krijgt GEEN doorlopende
+    // gladstrijking: die wordt precies éénmaal per maaltijd-episode berekend
+    // (bij het eerste écht bevestigde commit, zie episodeAigfBPct hieronder)
+    // en blijft daarna voor de rest van die episode ongewijzigd staan — een
+    // sprong bij een nieuwe episode is hier juist correct (het is een nieuwe
+    // maaltijd met een eigen "recente uren"-context), geen ruis om glad te
+    // strijken.
     private val AIGF_MAX_STEP_PER_CYCLE_PCT = 2.0
-    private var lastSmoothedAigfPct: Double = 100.0
+    private var lastSmoothedAigfAPct: Double = 100.0
+
+    // Component B, bevroren per episode — zie kdoc hierboven. Reset naar 100
+    // (neutraal) op de 3 episode-grens-plekken verderop, net als
+    // episodeCommitCount/episodeBoostBudgetU e.d. Bewust in-memory: bij een
+    // herstart mid-episode is "nog geen component-B-berekening deze episode"
+    // (dus neutraal 100 tot het volgende commit) veiliger dan een oude,
+    // mogelijk sterk afwijkende waarde te herstellen zonder de onderliggende
+    // meting nog te kunnen verifiëren.
+    private var episodeAigfBPct: Double = 100.0
+    private var episodeAigfBResult: FclActivitySensitivity.AigfResult? = null
+    private var episodeAigfBWakeOverlapFrac: Double = 0.0
 
     private fun loadEpisodeCounter(): Long =
         context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
@@ -3938,8 +3987,9 @@ class FCLvNext(
     // dezelfde weg gewoon 0 weg, dus er is geen apart "verval"-mechanisme
     // nodig: de opgeslagen waarde is altijd exact de laatst bekende in-memory
     // waarde, of die nu 0 is (episode echt afgelopen) of >0 (herstart
-    // mid-episode). lastSmoothedAigfPct hierboven is bewust WEL alleen
-    // in-memory gebleven — dat raakt de dosering niet, dit wel.
+    // mid-episode). lastSmoothedAigfAPct/episodeAigfBPct hierboven zijn
+    // bewust WEL alleen in-memory gebleven — dat raakt de dosering niet zo
+    // direct/gevaarlijk als een taper-clamp-reset, dit wel.
     private val TAPER_STATE_PREFS = "fcl_taper_state"
     private val TAPER_STATE_PEAK_COMMIT_U_KEY = "episode_peak_commit_u"
     private val TAPER_STATE_COMMIT_COUNT_KEY = "episode_commit_count"
@@ -4288,6 +4338,9 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodeAigfBPct = 100.0
+            episodeAigfBResult = null
+            episodeAigfBWakeOverlapFrac = 0.0
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -4698,20 +4751,19 @@ class FCLvNext(
 
         val zoneEnum = computeBgZone(ctx)
 
-        // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
-        // Eén berekening per cyclus, hier al vroeg zodat zowel de afterload-
-        // reductie (verderop, bij afterloadScale) als de grote-commit-
-        // verhoging (verderop, bij committedDose) dezelfde waarde gebruiken.
+        // ── AIGF component A: vorige dag/naijling (14/07/2026, Ecko,
+        // herontworpen 28/07/2026 — zie kdoc bij FclActivitySensitivity.kt) ──
+        // Eén berekening per cyclus, hier al vroeg zodat de afterload-reductie
+        // (verderop, bij afterloadScale) 'm kan gebruiken. Continu venster
+        // (24u vs. 24u-eigen-baseline) — reageert niet op één specifieke
+        // maaltijd maar op "hoe actief was de afgelopen dag" in het algemeen.
         // Standaard UIT (aigfEnabled=false in Settings) → geen enkel effect op
-        // de dosering. Zie FclActivitySensitivity.kt voor de volledige
-        // toelichting op de formule (vaste referentie-squash → proportionele
-        // herschaling naar het ingestelde min/max-bereik) en waarom de
-        // baseline glijdend is.
+        // de dosering.
         val aigfEnabled = isAigfActive()
-        val aigfRawResult = if (aigfEnabled) {
-            FclActivitySensitivity.compute(
-                history = FclActivitySensitivity.loadFrom(context),
-                currentCal8h = input.activityCal8h,
+        val aigfARawResult = if (aigfEnabled) {
+            FclActivitySensitivity.computeComponentA(
+                history = FclActivitySensitivity.loadHistoryA(context),
+                currentCal24h = input.activityCal24h,
                 minPct = getAigfMinPct(),
                 maxPct = getAigfMaxPct(),
                 nowMs = now.millis
@@ -4722,31 +4774,37 @@ class FCLvNext(
                 reasonNl = "AIGF staat uit in Settings"
             )
         }
-        // ── Vloeiende overgang (14/07/2026, Ecko, na gebruikersfeedback) ────────
-        // lastSmoothedAigfPct is de waarde die ECHT gebruikt wordt (dosering +
-        // status), nooit de ruwe aigfRawResult.aigf rechtstreeks. Bij geen
-        // geldige berekening deze cyclus (aigfRawResult.active=false) blijft de
-        // vorige gladde waarde gewoon staan — geen reset naar 100, dat zou zelf
-        // weer een sprong veroorzaken zodra de data terugkomt. Zie
-        // AIGF_MAX_STEP_PER_CYCLE_PCT hierboven voor de stapgrootte.
-        if (aigfRawResult.active) {
-            val delta = (aigfRawResult.aigf - lastSmoothedAigfPct)
+        // ── Vloeiende overgang, component A (14/07/2026, Ecko) ─────────────
+        // lastSmoothedAigfAPct is de waarde die ECHT gebruikt wordt (afterload +
+        // status), nooit de ruwe aigfARawResult.aigf rechtstreeks. Bij geen
+        // geldige berekening deze cyclus blijft de vorige gladde waarde staan.
+        if (aigfARawResult.active) {
+            val delta = (aigfARawResult.aigf - lastSmoothedAigfAPct)
                 .coerceIn(-AIGF_MAX_STEP_PER_CYCLE_PCT, AIGF_MAX_STEP_PER_CYCLE_PCT)
-            lastSmoothedAigfPct += delta
+            lastSmoothedAigfAPct += delta
         }
-        val aigfSmoothedPct = lastSmoothedAigfPct
+        val aigfSmoothedAPct = lastSmoothedAigfAPct
         if (aigfEnabled) {
-            if (aigfRawResult.active) {
+            if (aigfARawResult.active) {
                 status.append(
-                    "AIGF=${"%.1f".format(aigfSmoothedPct)} (ruw=${"%.1f".format(aigfRawResult.aigf)} " +
-                        "ratio=${"%.2f".format(aigfRawResult.rawRatio)} " +
-                        "baseline=${"%.0f".format(aigfRawResult.baselineMedian)}kcal " +
-                        "n=${aigfRawResult.sampleCount} " +
-                        "historie=${"%.1f".format(aigfRawResult.daysOfHistory)}/${"%.0f".format(5.0)}d)\n"
+                    "AIGF-A (vorige dag)=${"%.1f".format(aigfSmoothedAPct)} (ruw=${"%.1f".format(aigfARawResult.aigf)} " +
+                        "ratio=${"%.2f".format(aigfARawResult.rawRatio)} " +
+                        "baseline=${"%.0f".format(aigfARawResult.baselineMedian)}kcal/24u " +
+                        "n=${aigfARawResult.sampleCount} " +
+                        "historie=${"%.1f".format(aigfARawResult.daysOfHistory)}/${"%.0f".format(5.0)}d)\n"
                 )
             } else {
-                status.append("AIGF AAN maar geen verse berekening: ${aigfRawResult.reasonNl} (huidig=${"%.1f".format(aigfSmoothedPct)})\n")
+                status.append("AIGF-A AAN maar geen verse berekening: ${aigfARawResult.reasonNl} (huidig=${"%.1f".format(aigfSmoothedAPct)})\n")
             }
+            // Component B: puur de laatst bevroren waarde tonen (zie de
+            // eigenlijke berekening/bevriezing verderop, bij het eerste
+            // écht bevestigde commit van deze episode).
+            status.append(
+                "AIGF-B (recente uren, bevroren per maaltijd)=${"%.1f".format(episodeAigfBPct)}" +
+                    (if (episodeAigfBResult?.active == true)
+                        " (wakker-aandeel=${"%.0f".format(episodeAigfBWakeOverlapFrac * 100.0)}%)"
+                    else " (nog geen commit deze episode)") + "\n"
+            )
         }
 
         logRow.guardIobLimited = false
@@ -4975,6 +5033,9 @@ class FCLvNext(
             mealEpisodeStartBg = ctx.input.bgNow
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodeAigfBPct = 100.0
+            episodeAigfBResult = null
+            episodeAigfBWakeOverlapFrac = 0.0
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -5012,6 +5073,9 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
+            episodeAigfBPct = 100.0
+            episodeAigfBResult = null
+            episodeAigfBWakeOverlapFrac = 0.0
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -6713,22 +6777,80 @@ class FCLvNext(
                     } else normaalGeplafonneerd
                 }
 
-                // ── AIGF-verhoging op de grote commit(s) (14/07/2026, Ecko) ──────
-                // Toegepast op het commit-resultaat zelf (niet op finalDose of
-                // andere doses elders) — dit IS "de grote commit(s)" waar de
-                // gebruiker het over had. Alleen actief als AIGF<100 (minder
-                // gevoelig, meer insuline nodig); AIGF>100 werkt uitsluitend via
-                // de afterload-reductie hieronder (zie aigfAfterloadScale).
-                val aigfCommitBoost = if (aigfEnabled && aigfSmoothedPct < 100.0 - 1e-9)
-                    (100.0 / aigfSmoothedPct)
-                else 1.0
-                val committedDose =
-                    (if (peakCategory >= PeakCategory.HIGH)
+                // Vóór de AIGF-boost: dit is de dosis die telt voor "is dit de
+                // eerste écht bevestigde commit van deze episode" (zie hieronder)
+                // — de AIGF-B-berekening zelf mag niet meebepalen of ze getriggerd
+                // wordt (kip-ei), dus de anchor-toets gebruikt bewust de
+                // ONGEBOOSTE waarde.
+                val preAigfCommittedDose =
+                    if (peakCategory >= PeakCategory.HIGH)
                         maxOf(cappedFinalDose, commitDose * 1.15)
                     else
-                        maxOf(cappedFinalDose, commitDose)) * aigfCommitBoost
+                        maxOf(cappedFinalDose, commitDose)
+
+                // ── AIGF component B: berekenen en bevriezen bij het eerste
+                // écht bevestigde commit van deze episode (28/07/2026, Ecko) ──
+                // Zie kdoc bij FclActivitySensitivity.kt. "Eerste écht bevestigde
+                // commit" = dezelfde drempel (PEAK_ANCHOR_THRESHOLD_FRAC) als het
+                // bestaande piek-anker hieronder al gebruikt — geen los, nieuw
+                // begrip, en het voorkomt dat een vroege, kleine, onzekere
+                // correctie de meting/historie al zou vastzetten.
+                if (aigfEnabled &&
+                    episodePeakCommitU <= 1e-9 &&
+                    preAigfCommittedDose >= config.maxSMB * PEAK_ANCHOR_THRESHOLD_FRAC
+                ) {
+                    val wakeOverlap = computeWakeOverlapFrac(
+                        input.daystartTodayMs, now.millis, 4L * 60L * 60L * 1000L
+                    )
+                    val bResult = FclActivitySensitivity.computeComponentB(
+                        history = FclActivitySensitivity.loadHistoryB(context),
+                        currentCal4h = input.activityCal4h,
+                        wakeOverlapFrac = wakeOverlap,
+                        minPct = getAigfMinPct(),
+                        maxPct = getAigfMaxPct(),
+                        nowMs = now.millis
+                    )
+                    episodeAigfBPct = if (bResult.active) bResult.aigf else 100.0
+                    episodeAigfBResult = bResult
+                    episodeAigfBWakeOverlapFrac = wakeOverlap
+                    status.append(
+                        "AIGF-B BEVROREN voor deze episode: ${"%.1f".format(episodeAigfBPct)}% " +
+                            "(wakker-aandeel=${"%.0f".format(wakeOverlap * 100.0)}%" +
+                            (if (!bResult.active) ", ${bResult.reasonNl}" else "") + ")\n"
+                    )
+                    // Historie bijschrijven — component A altijd (continu, geen
+                    // wakker-eis), component B alleen als dit venster overtuigend
+                    // wakker was (zie WAKE_OVERLAP_MIN_FOR_HISTORY: anders raakt de
+                    // "typisch wakker"-baseline zelf weer vervuild met slaapuren).
+                    if (input.activityCal24h >= 0.0) {
+                        val ha = FclActivitySensitivity.record(
+                            FclActivitySensitivity.loadHistoryA(context), now.millis, input.activityCal24h
+                        )
+                        FclActivitySensitivity.saveHistoryA(context, ha)
+                    }
+                    if (wakeOverlap >= FclActivitySensitivity.WAKE_OVERLAP_MIN_FOR_HISTORY && input.activityCal4h >= 0.0) {
+                        val hb = FclActivitySensitivity.record(
+                            FclActivitySensitivity.loadHistoryB(context), now.millis, input.activityCal4h
+                        )
+                        FclActivitySensitivity.saveHistoryB(context, hb)
+                    }
+                }
+
+                // ── AIGF-verhoging op de grote commit(s) (14/07/2026, Ecko,
+                // herzien 28/07/2026) ────────────────────────────────────────
+                // Toegepast op het commit-resultaat zelf (niet op finalDose of
+                // andere doses elders) — dit IS "de grote commit(s)" waar de
+                // gebruiker het over had. Gebruikt nu component B (bevroren per
+                // episode, hierboven) i.p.v. de oude, ongesplitste waarde. Alleen
+                // actief als AIGF-B<100 (minder gevoelig, meer insuline nodig);
+                // AIGF-A>100 werkt uitsluitend via de afterload-reductie
+                // hieronder (zie aigfAfterloadScale).
+                val aigfCommitBoost = if (aigfEnabled && episodeAigfBPct < 100.0 - 1e-9)
+                    (100.0 / episodeAigfBPct)
+                else 1.0
+                val committedDose = preAigfCommittedDose * aigfCommitBoost
                 if (aigfCommitBoost > 1.0 + 1e-9) {
-                    status.append("AIGF COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf=${"%.1f".format(aigfSmoothedPct)})\n")
+                    status.append("AIGF-B COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf-b=${"%.1f".format(episodeAigfBPct)})\n")
                 }
                 logRow.commitDoseFinal = committedDose
                 // ── Piek-anker alleen bij een "echte" commit (15/07/2026, Ecko) ──
@@ -7514,10 +7636,13 @@ class FCLvNext(
             // fase (futureDrop60/highIobLateWave/lateSecondWave/postBigCommit
             // werken hier allemaal al zo) — precies zoals de gebruiker vroeg:
             // "getallen boven de 100 als extra afbouw nadat de eerste echt
-            // grotere commit is geweest". AIGF<100 heeft hier bewust GEEN
+            // grotere commit is geweest". AIGF-B<100 heeft hier bewust GEEN
             // effect (dat loopt uitsluitend via aigfCommitBoost hierboven).
-            val aigfAfterloadScale = if (aigfEnabled && aigfSmoothedPct > 100.0 + 1e-9)
-                (100.0 / aigfSmoothedPct)
+            // 28/07/2026 (Ecko, herzien): gebruikt nu component A (continu,
+            // vorige-dag-naijling) i.p.v. de oude, ongesplitste waarde — dit is
+            // precies het "gehele volgende 24 uur"-effect dat A moet dekken.
+            val aigfAfterloadScale = if (aigfEnabled && aigfSmoothedAPct > 100.0 + 1e-9)
+                (100.0 / aigfSmoothedAPct)
             else 1.0
             val afterloadScale = futureDrop60Scale * highIobLateWaveScale * lateSecondWaveScale * postBigCommitScale * aigfAfterloadScale
             logRow.afterloadFutureDrop60Scale = futureDrop60Scale
@@ -7819,11 +7944,17 @@ class FCLvNext(
         // Diagnose-uitbreiding (16/07/2026, Ecko) — zie FCL_CODE_VERSION/
         // isFirstCycleSinceInit hierboven, en de kdoc bij AIGF/
         // episodePeakCommitU elders in dit bestand. aigfPct is bewust de
-        // TOEGEPASTE (gladgestreken) waarde, niet aigfRawResult.aigf — dat is
+        // TOEGEPASTE (gladgestreken) waarde, niet aigfARawResult.aigf — dat is
         // ook wat dosering/status daadwerkelijk gebruiken.
-        logRow.aigfPct = aigfSmoothedPct
+        // 28/07/2026 (Ecko, herzien): logRow/CSV heeft nog maar één AIGF-kolom
+        // (geen DB-migratie voor dit onderzoek) — die toont component A
+        // (continu, elke cyclus vers). Component B's bevroren waarde en de
+        // wakker-weging staan bij elk commit al volledig uitgeschreven in de
+        // status-tekst hierboven (→ decision_reason-kolom), dat was voor de
+        // analyse van dit incident al genoeg.
+        logRow.aigfPct = aigfSmoothedAPct
         logRow.aigfActive = aigfEnabled
-        logRow.aigfReason = if (aigfRawResult.active) "" else aigfRawResult.reasonNl
+        logRow.aigfReason = if (aigfARawResult.active) "" else aigfARawResult.reasonNl
         logRow.episodePeakCommitU = episodePeakCommitU
 
         cycleLogRepository.insert(logRow.toEntity())
@@ -7846,12 +7977,19 @@ class FCLvNext(
 
             statusText = status.toString(),
 
-            aigfPct = aigfSmoothedPct,
             aigfActive = aigfEnabled,
-            aigfReasonNl = if (aigfRawResult.active) "" else aigfRawResult.reasonNl,
-            aigfCurrentCal8h = input.activityCal8h,
-            aigfBaselineCal8h = aigfRawResult.baselineMedian,
-            aigfDaysOfHistory = aigfRawResult.daysOfHistory
+            aigfAPct = aigfSmoothedAPct,
+            aigfAReasonNl = if (aigfARawResult.active) "" else aigfARawResult.reasonNl,
+            aigfACurrentCal24h = input.activityCal24h,
+            aigfABaselineCal24h = aigfARawResult.baselineMedian,
+            aigfADaysOfHistory = aigfARawResult.daysOfHistory,
+            aigfBPct = episodeAigfBPct,
+            aigfBReasonNl = episodeAigfBResult?.let { if (it.active) "" else it.reasonNl } ?: "nog geen commit deze episode",
+            aigfBCurrentCal4h = input.activityCal4h,
+            aigfBBaselineCal4h = episodeAigfBResult?.baselineMedian ?: 0.0,
+            aigfBDaysOfHistory = episodeAigfBResult?.daysOfHistory ?: 0.0,
+            aigfBWakeOverlapFrac = episodeAigfBWakeOverlapFrac,
+            aigfDaystartTodayMs = input.daystartTodayMs
         )
     }
 }

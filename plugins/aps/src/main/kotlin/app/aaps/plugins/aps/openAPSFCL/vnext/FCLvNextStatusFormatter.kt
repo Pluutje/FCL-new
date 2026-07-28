@@ -44,25 +44,33 @@ data class FclUiSnapshot(
     // RUNNING/STILL/IN_VEHICLE/TILTING/ON_FOOT), null als er niets recents is.
     val recentActivityType: String? = null,
     val recentActivityConfidencePct: Int = 0,
-    // 14/07/2026 (Ecko) — Activiteits Insuline Gevoeligheids Factor (AIGF).
-    // null = AIGF staat uit in Settings, of nog geen geldige berekening
-    // beschikbaar (te weinig historie) — dan wordt de regel niet getoond.
-    // 100 = neutraal, 125 = 25% gevoeliger (minder insuline), 75 = 25%
-    // minder gevoelig (meer insuline). Zie FclActivitySensitivity.kt.
-    val aigfPct: Double? = null,
-    // 14/07/2026 (Ecko) — staat AIGF AAN in Settings? Los van of er deze
-    // cyclus ook een verse berekening was (zie aigfReasonNl). Bepaalt of de
-    // AIGF-regel in de Activiteit-sectie überhaupt getoond wordt.
+    // 14/07/2026 (Ecko) — Activiteits Insuline Gevoeligheids Factor (AIGF),
+    // HERONTWORPEN 28/07/2026 in twee losse componenten (zie uitgebreide
+    // kdoc bij FclActivitySensitivity.kt): A = vorige dag/naijling (continu),
+    // B = recente uren vóór de huidige maaltijd (bevroren per episode bij
+    // het eerste écht bevestigde commit). 100 = neutraal, 125 = 25%
+    // gevoeliger (minder insuline), 75 = 25% minder gevoelig (meer insuline).
     val aigfEnabled: Boolean = false,
-    // Leesbare reden waarom er geen verse berekening was (leeg = wel een
-    // verse berekening, of AIGF staat uit).
-    val aigfReasonNl: String = "",
-    // 16/07/2026 (Ecko) — voor de uitgebreide AIGF-statusregel: geschatte
-    // kcal afgelopen 8 uur (huidig) en de 7-daagse mediaan-baseline waar dat
-    // tegen afgezet wordt, plus hoeveel dagen die baseline al beslaat.
-    val aigfCurrentCal8h: Double = 0.0,
-    val aigfBaselineCal8h: Double = 0.0,
-    val aigfDaysOfHistory: Double = 0.0
+    // Component A — continu, stuurt de afterload-reductie aan.
+    val aigfAPct: Double? = null,
+    val aigfAReasonNl: String = "",
+    val aigfACurrentCal24h: Double = 0.0,
+    val aigfABaselineCal24h: Double = 0.0,
+    val aigfADaysOfHistory: Double = 0.0,
+    // Component B — bevroren per maaltijd-episode, stuurt de commit-
+    // verhoging aan. Blijft 100 zolang deze episode nog geen eerste échte
+    // commit heeft gehad.
+    val aigfBPct: Double? = null,
+    val aigfBReasonNl: String = "",
+    val aigfBCurrentCal4h: Double = 0.0,
+    val aigfBBaselineCal4h: Double = 0.0,
+    val aigfBDaysOfHistory: Double = 0.0,
+    // Hoeveel van het laatst-beoordeelde 4-uursvenster binnen wakkere uren
+    // viel (0..1) — legt uit waarom aigfBPct dicht bij 100 kan blijven.
+    val aigfBWakeOverlapFrac: Double = 0.0,
+    // Vandaag gedetecteerde "dag begon om"-tijdstip (epoch ms), null als nog
+    // niet vastgesteld — zie FclWakeDetector.kt.
+    val aigfDaystartTodayMs: Long? = null
 )
 
 class FCLvNextStatusFormatter(
@@ -226,7 +234,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v4.0.4")
+        appendLine(" 🧠 FCL V7 v4.0.5")
         appendLine("════════════════════════")
         appendLine()
 
@@ -260,30 +268,60 @@ class FCLvNextStatusFormatter(
             appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
         }
         // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN
-        // staat in Settings, ook als er (nog) geen verse berekening is — dan
-        // toont de regel de reden i.p.v. stilzwijgend niets te laten zien.
-        // 16/07/2026 (Ecko) — bijgewerkt: lege regel voor/na in BEIDE paden
-        // (stond eerder alleen bij de reden-tak), leesbare titel i.p.v. de
-        // kale afkorting, en bij een verse berekening ook de 8u-nu/7d-basis
-        // kcal en (zolang de historie nog opbouwt) de opbouw-voortgang.
+        // staat in Settings. HERSCHREVEN 28/07/2026 (Ecko) na het herontwerp
+        // in twee componenten: leesbare, begrijpelijke taal i.p.v. kale
+        // getallen — zie kdoc bij FclActivitySensitivity.kt voor de
+        // achtergrond. Component A (vorige dag) en B (recente uren, per
+        // maaltijd) krijgen elk hun eigen regel, plus een regel met het
+        // vandaag gedetecteerde "wakker sinds"-moment.
         if (ui.aigfEnabled) {
             appendLine()
-            if (ui.aigfReasonNl.isNotEmpty()) {
-                appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): AAN — ${ui.aigfReasonNl}")
+            appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): AAN")
+
+            // ── Component A: vorige dag/naijling ──
+            if (ui.aigfAReasonNl.isNotEmpty()) {
+                appendLine("   Vorige dag: nog geen berekening — ${ui.aigfAReasonNl}")
             } else {
-                val pct = ui.aigfPct ?: 100.0
-                val aigfIcon = when {
-                    pct > 100.5 -> "⬆️"
-                    pct < 99.5  -> "⬇️"
-                    else        -> "➡️"
+                val pctA = ui.aigfAPct ?: 100.0
+                val uitlegA = when {
+                    pctA > 100.5 -> "je was de afgelopen 24 uur duidelijk actiever dan gebruikelijk — iets minder insuline dan normaal"
+                    pctA < 99.5  -> "je was de afgelopen 24 uur rustiger dan gebruikelijk — iets meer insuline dan normaal"
+                    else         -> "ongeveer zoals gebruikelijk, geen aanpassing"
                 }
-                appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): $aigfIcon ${"%.1f".format(pct)}%")
-                val curTxt = "${"%.0f".format(ui.aigfCurrentCal8h)} kcal"
-                val baseTxt = "${"%.0f".format(ui.aigfBaselineCal8h)} kcal"
-                val opbouwTxt = if (ui.aigfDaysOfHistory < 5.0)
-                    " · opbouw: ${"%.1f".format(ui.aigfDaysOfHistory)}/5,0d" else ""
-                appendLine("   8u nu: $curTxt · 7d-basis: $baseTxt$opbouwTxt")
+                appendLine("   Vorige dag: ${"%.0f".format(pctA)}% — $uitlegA")
+                val opbouwA = if (ui.aigfADaysOfHistory < 5.0)
+                    " (nog opbouwend: ${"%.1f".format(ui.aigfADaysOfHistory)}/5,0 dagen historie)" else ""
+                appendLine(
+                    "     ${"%.0f".format(ui.aigfACurrentCal24h)} kcal laatste 24u, " +
+                        "gebruikelijk ${"%.0f".format(ui.aigfABaselineCal24h)} kcal$opbouwA"
+                )
             }
+
+            // ── Component B: recente uren, per maaltijd ──
+            if (ui.aigfBReasonNl == "nog geen commit deze episode" || ui.aigfBPct == null) {
+                appendLine("   Deze maaltijd: nog geen eerste bevestigd commit — neutraal (100%)")
+            } else if (ui.aigfBReasonNl.isNotEmpty()) {
+                appendLine("   Deze maaltijd: nog geen berekening — ${ui.aigfBReasonNl}")
+            } else {
+                val pctB = ui.aigfBPct
+                val wakePct = ui.aigfBWakeOverlapFrac * 100.0
+                val uitlegB = when {
+                    wakePct < 25.0 -> "de uren ervoor waren grotendeels nachtrust, dus dit telt nauwelijks mee"
+                    pctB > 100.5   -> "duidelijk actiever dan gebruikelijk vlak vóór deze maaltijd — iets minder insuline"
+                    pctB < 99.5    -> "rustiger dan gebruikelijk vlak vóór deze maaltijd — iets meer insuline"
+                    else           -> "ongeveer zoals gebruikelijk, geen aanpassing"
+                }
+                appendLine("   Deze maaltijd: ${"%.0f".format(pctB)}% (wakker-aandeel ${"%.0f".format(wakePct)}%) — $uitlegB")
+                appendLine(
+                    "     ${"%.0f".format(ui.aigfBCurrentCal4h)} kcal laatste 4u, " +
+                        "gebruikelijk ${"%.0f".format(ui.aigfBBaselineCal4h)} kcal (bevroren bij eerste commit)"
+                )
+            }
+
+            // ── Vandaag "wakker sinds" ──
+            val wakkerTxt = ui.aigfDaystartTodayMs?.let { DateTime(it).toString("HH:mm") }
+                ?: "nog niet vastgesteld (nog geen ${FclWakeDetector.STEP_THRESHOLD} stappen binnen ${FclWakeDetector.STEP_WINDOW_MIN} min gezien vandaag)"
+            appendLine("   Actief sinds vandaag: $wakkerTxt")
             appendLine()
         }
         appendLine(activityLog ?: str.geenActiviteitdata)

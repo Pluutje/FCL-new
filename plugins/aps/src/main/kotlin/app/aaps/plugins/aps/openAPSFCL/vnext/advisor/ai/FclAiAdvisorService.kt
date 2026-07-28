@@ -39,13 +39,27 @@ object FclAiAdvisorService {
 
     sealed class Result {
         data class Success(val rawText: String) : Result()
-        data class Failure(val reasonNl: String) : Result()
+        // httpCode (28/07/2026, Ecko): los veld i.p.v. de tekst parsen, zodat
+        // callAdvisor() een 503 betrouwbaar kan onderscheiden van andere
+        // fouten (verkeerde/verlopen key, timeout, ...) — zie hieronder.
+        // Blijft null bij een lokale fout (timeout/verbindingsfout) waar
+        // geen HTTP-respons is ontvangen.
+        data class Failure(val reasonNl: String, val httpCode: Int? = null) : Result()
     }
 
     /**
      * Synchrone aanroep — altijd op een achtergrond-thread.
      * Probeert keys in volgorde; bij een fout (HTTP 4xx/5xx, timeout) wordt
      * de volgende key geprobeerd. Lege keys worden overgeslagen.
+     *
+     * UITZONDERING — HTTP 503 (28/07/2026, Ecko: "is het een optie om bij
+     * een 503 error de 2de key niet te gebruiken"): een 503 betekent dat
+     * Google's servers tijdelijk overbelast zijn, niet dat déze key ongeldig
+     * of leeg is. De 2e key aanroepen lost dat niet op (dezelfde
+     * overbelaste dienst) en verdubbelt alleen het aantal requests dat
+     * mogelijk tegen de dag-quota meetelt. Bij een 503 wordt daarom meteen
+     * gestopt — geen 2e key geprobeerd — en stuurt FclAiAdvisorScheduler
+     * de retry na RETRY_INTERVAL naar dezelfde eerste key.
      */
     fun callAdvisor(
         provider: FclAiAdvisorSettingsStore.Provider,
@@ -67,7 +81,11 @@ object FclAiAdvisorService {
             }
             when (result) {
                 is Result.Success -> return result
-                is Result.Failure -> lastError = result.reasonNl  // probeer volgende key
+                is Result.Failure -> {
+                    lastError = result.reasonNl
+                    if (result.httpCode == 503) return result  // niet naar 2e key, zie kdoc
+                    // anders: probeer volgende key
+                }
             }
         }
         return Result.Failure(lastError)
@@ -100,7 +118,7 @@ object FclAiAdvisorService {
         val code = connection.responseCode
         if (code != HttpURLConnection.HTTP_OK) {
             val err = readStream(connection.errorStream)
-            return Result.Failure("Claude HTTP $code: $err")
+            return Result.Failure("Claude HTTP $code: $err", httpCode = code)
         }
         val resp = JSONObject(readStream(connection.inputStream))
         val content = resp.optJSONArray("content") ?: return Result.Failure("Geen 'content' in Claude-antwoord")
@@ -143,7 +161,7 @@ object FclAiAdvisorService {
         val code = connection.responseCode
         if (code != HttpURLConnection.HTTP_OK) {
             val err = readStream(connection.errorStream)
-            return Result.Failure("Gemini HTTP $code: $err")
+            return Result.Failure("Gemini HTTP $code: $err", httpCode = code)
         }
         val resp = JSONObject(readStream(connection.inputStream))
         // Gemini: candidates[0].content.parts[0].text

@@ -38,7 +38,14 @@ object FclAiAdvisorScheduler {
     // Bij een tijdelijke fout (timeout, 503) wordt de run opnieuw geprobeerd
     // elke RETRY_INTERVAL, totdat er een succesvol rapport is of MIN_INTERVAL
     // verstreken is voor de volgende dag-run.
-    private val RETRY_INTERVAL = Duration.ofMinutes(10)
+    // 10 → 30 min (28/07/2026, Ecko): bij aanhoudende 503's ("te veel demand")
+    // stapelden retries elke 10 min op — samen met de per-poging 2 keys
+    // (zie FclAiAdvisorService.callAdvisor, dat nu bij een 503 overigens niet
+    // meer naar de 2e key doorschakelt) kon dat bij een langere periode van
+    // Google-overbelasting alleen al tientallen requests kosten. 30 min geeft
+    // de overbelasting meer ruimte om te zakken tussen pogingen in, zonder
+    // de "eerste succesvolle run vandaag"-ervaring merkbaar te vertragen.
+    private val RETRY_INTERVAL = Duration.ofMinutes(30)
 
     private val cachedResult = AtomicReference<AiAdvisorRunResult?>(null)
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)

@@ -8,46 +8,73 @@ import org.json.JSONObject
  * FclActivitySensitivity — Activiteits Insuline Gevoeligheids Factor (AIGF)
  * ============================================================================
  *
- * Ontwerp overeengekomen met Ecko, 14/07/2026.
+ * Ontwerp overeengekomen met Ecko, 14/07/2026 — HERONTWORPEN 28/07/2026 na
+ * een gesprek over een structurele ochtendbias (zie hieronder).
  *
- * Doel: een glijdende, per-episode berekende gevoeligheidsfactor die uitdrukt
- * hoe actief de afgelopen 8 uur waren t.o.v. het eigen, voortschrijdende
- * 7-daagse gemiddelde van diezelfde persoon. 125 betekent "25% gevoeliger
- * voor insuline" (dus minder insuline nodig); de toepassing elders
- * (FCLvNext.kt) is altijd: aangepaste_dosis = ruwe_dosis / (AIGF / 100).
+ * ── HERONTWERP 28/07/2026 (Ecko) — waarom ────────────────────────────────
+ * De oorspronkelijke versie vergeleek één rollend 8-uursvenster (gemeten bij
+ * elke maaltijd) tegen een 7-daagse mediaan die ALLE momenten van de dag
+ * door elkaar mengde (ontbijt- én lunch- én dinermetingen samen). Bij het
+ * ontbijt bestaat dat 8-uursvenster vrijwel volledig uit slaap — dat ligt
+ * structureel onder de gemengde mediaan (die door de hogere lunch/diner-
+ * metingen omhoog wordt getrokken), ongeacht hoe actief de gebruiker
+ * werkelijk was. Gevolg, bevestigd in de logs van 27-28/07: een gladde,
+ * bijna identieke dag-op-dag AIGF-curve met een dieptepunt exact rond
+ * 07:00-08:00 (~90%) en een piek rond middernacht (~101%) — dat is geen
+ * signaal dat reageert op een afwijkende dag, dat is een klok.
  *
- * BEWUST GEEN vaste referentieperiode: het gemiddelde waartegen vergeleken
- * wordt schuift continu mee (rolling window, WINDOW_DAYS). Reden (Ecko):
- * als iemand structureel actiever wordt, hoort die verandering via de
- * bestaande Learner/AI-adviseur te lopen (die de sterkte over de weken
- * toch al bijstelt) — een vaste baseline zou dezelfde verandering een
- * TWEEDE keer verwerken, via deze factor. Met een glijdend venster reageert
- * de AIGF alleen nog op de kortetermijn-afwijking t.o.v. een intussen al
- * meebewegende, persoonlijke norm.
+ * Daarnaast bleek het oorspronkelijke ontwerp eigenlijk twee dingen wilde
+ * vangen: (A) een naijleffect van een actieve VORIGE dag (tot 25%
+ * gevoeliger, opbouwend "zolang het goed gaat", werkend tot in de volgende
+ * ~24 uur) en (B) een kortetermijn-effect van de RECENTE uren vóór een
+ * specifieke maaltijd (een actieve ochtend → minder insuline bij de lunch
+ * die volgt). Eén 8-uursvenster kan geen van beide goed vangen: te kort om
+ * "gisteren" te zien, en niet eerlijk vergeleken voor "recent, t.o.v. wat
+ * normaal is op dit moment".
  *
- * DATABRON: FclActivityLogger.kt schrijft dezelfde 8-uurs-calorieschatting
- * al weg naar FCLvNext_ActivityLog_v2.csv (cal_totaal_8h) — bewust een
- * andere weg voor de HISTORIE hier: die CSV lezen tijdens dosering zou
- * bestandsdruk op het hot path van elke cyclus geven. In plaats daarvan
- * houdt dit bestand zijn eigen, lichte, JSON-in-SharedPreferences-historie
- * bij (zelfde patroon als FclMealTimeAnticipation.kt), bijgewerkt op
- * hetzelfde moment (episodestart) door DetermineBasalFCL.kt.
+ * Nu twee losse componenten, elk met hun eigen historie en eigen
+ * toepassing (zie kdoc bij FCLvNext.kt's AIGF-sectie voor de toepassing):
  *
- * NORMEREN, NIET CLIPPEN: de ruwe ratio (huidige 8u-kcal / historische
- * mediaan) wordt eerst gesquasht naar een VASTE interne score tussen -1 en
- * +1 over een vaste referentie (RATIO_REF_LOW..RATIO_REF_HIGH, bewust NIET
- * instelbaar — voorkomt dat één foutieve meting, bijv. IN_VEHICLE die als
- * beweging telt, meteen de volle bandbreedte triggert). Pas in de laatste
- * stap wordt die vaste interne score proportioneel uitgerekt naar het door
- * de gebruiker ingestelde bereik (minPct..maxPct) — nooit een harde afkap
- * op de grens: bij een kleiner ingesteld bereik krimpt de hele curve mee,
- * in dezelfde relatieve verhouding.
+ *   COMPONENT A — vorige dag / naijling. Rollend 24-uurstotaal, vergeleken
+ *   met de eigen 7-daagse mediaan van datzelfde 24-uurstotaal (dus altijd
+ *   dezelfde vensterbreedte tegen dezelfde vensterbreedte — geen 8u-tegen-
+ *   gemengd-probleem meer). Werkt continu door (niet gebonden aan een
+ *   specifieke maaltijd), stuurt de afterload-reductie aan.
+ *
+ *   COMPONENT B — recente uren. Laatste 4 uur vóór het eerste écht
+ *   bevestigde commit van een maaltijd-episode, vergeleken met een eigen
+ *   7-daagse baseline van "hoeveel ik typisch doe in 4 wakkere uren".
+ *   Cruciaal: zowel de HUIDIGE meting als de HISTORIE worden gewogen naar
+ *   hoeveel van dat 4-uursvenster daadwerkelijk binnen wakkere uren viel
+ *   (zie wakeOverlapFrac, aangeleverd door FclWakeDetector.kt — eerste
+ *   ~150 stappen binnen 10 minuten, niet een vaste kloktijd). Bij het
+ *   ontbijt is dat aandeel ~0 (bijna alle 4 uur was slaap) → component B
+ *   telt dan vanzelf niet mee. Metingen met een te laag wakker-aandeel
+ *   worden ook niet in de HISTORIE opgenomen (zie
+ *   WAKE_OVERLAP_MIN_FOR_HISTORY) — anders zou de baseline zelf weer
+ *   vervuild raken met slaapuren, hetzelfde probleem in een nieuwe vorm.
+ *   Bewust GEEN maaltijd-volgnummer of dagdeel-bucket (koek-ambiguïteit:
+ *   soms telt een tussendoortje als eigen episode, soms niet — dat maakt
+ *   volgnummer als index onbetrouwbaar).
+ *
+ * BEWUST GEEN vaste referentieperiode voor beide componenten: het gemiddelde
+ * waartegen vergeleken wordt schuift continu mee (rolling window,
+ * WINDOW_DAYS). Reden (Ecko, 14/07/2026, nog steeds geldig): een
+ * structurele verandering hoort via de bestaande Learner/AI-adviseur te
+ * lopen, niet een tweede keer via deze factor.
+ *
+ * NORMEREN, NIET CLIPPEN: zie RATIO_REF_LOW/HIGH hieronder — ongewijzigd
+ * t.o.v. de oorspronkelijke versie, geldt voor beide componenten.
  */
 object FclActivitySensitivity {
 
-    // ── Opslag (zelfde patroon als FclMealTimeAnticipation.kt) ────────────
-    private const val PREFS = "fcl_activity_sensitivity"
-    private const val KEY = "cal8h_history_json"
+    // ── Opslag — component A en B krijgen elk hun EIGEN historie, bewust
+    // niet gedeeld (zie kdoc hierboven: mengen van de twee vensterbreedtes
+    // was precies het oorspronkelijke probleem). ────────────────────────────
+    private const val PREFS_A = "fcl_activity_sensitivity_a"
+    private const val KEY_A = "cal24h_history_json"
+    private const val PREFS_B = "fcl_activity_sensitivity_b"
+    private const val KEY_B = "wake4h_history_json"
 
     private const val WINDOW_DAYS = 7L
     private const val WINDOW_MS = WINDOW_DAYS * 24L * 60L * 60L * 1000L
@@ -56,34 +83,34 @@ object FclActivitySensitivity {
     private const val MIN_HISTORY_FOR_BASELINE = 5
 
     // ── Opbouw-vertrouwen o.b.v. gevulde historie (16/07/2026, Ecko) ────────
-    // Aanleiding: bij een verse installatie (of vlak na de 7-daagse window
-    // die net begint te vullen) kan de historie bijv. maar 2 dagen beslaan —
-    // 1 heel actieve en 1 heel rustige dag geeft dan al een extreme mediaan-
-    // afwijking, terwijl dat helemaal geen betrouwbaar "normaal" patroon is.
-    // MIN_HISTORY_FOR_BASELINE hierboven bewaakt alleen het AANTAL metingen,
-    // niet over hoeveel TIJD die verspreid zijn — 5 metingen kunnen ook
-    // allemaal in dezelfde actieve dag vallen. DAYS_FOR_FULL_CONFIDENCE dekt
-    // dat: de afwijking t.o.v. 100 wordt lineair gedempt met hoeveel dagen
-    // de OUDSTE bruikbare meting in het venster al terug ligt — 20% van de
-    // volle afwijking per dag, tot bij 5+ dagen de volle (ongedempte)
-    // waarde. Bijv. bij een berekende 110%: 1 dag → 102%, 2 dagen → 104%,
-    // ... 5+ dagen → 110%. Puur een vertrouwens-demping, GEEN aparte
-    // referentie — de mediaan/ratio-berekening zelf blijft ongewijzigd.
+    // Zie de oorspronkelijke kdoc-uitleg (ongewijzigd, geldt voor beide
+    // componenten): de afwijking t.o.v. 100 wordt lineair gedempt met hoeveel
+    // dagen de OUDSTE bruikbare meting in het venster al terug ligt.
     private const val DAYS_FOR_FULL_CONFIDENCE = 5.0
     private const val MS_PER_DAY = 24L * 60L * 60L * 1000L
 
     // Vaste referentie voor ruwe ratio → interne score -1..+1 (14/07/2026,
-    // Ecko: bewust NIET instelbaar, zie kdoc hierboven).
+    // Ecko: bewust NIET instelbaar).
     private const val RATIO_REF_LOW = 0.4
     private const val RATIO_REF_HIGH = 2.5
 
-    data class Sample(val tsMs: Long, val cal8h: Double)
+    // ── Component B: wakker-weging (28/07/2026, Ecko) ──────────────────────
+    // Een meting wordt alleen in de HISTORIE van component B opgenomen als
+    // minstens dit aandeel van het 4-uursvenster binnen wakkere uren viel —
+    // anders raakt de "typisch wakker"-baseline zelf vervuild met slaapuren.
+    // De HUIDIGE meting van een specifieke maaltijd wordt altijd berekend,
+    // maar de resulterende afwijking t.o.v. 100 wordt vermenigvuldigd met
+    // het eigen wakeOverlapFrac (dus bij het ontbijt ~0 effect, ook al is
+    // de baseline zelf schoon).
+    const val WAKE_OVERLAP_MIN_FOR_HISTORY = 0.75
 
-    /** Rolling geschiedenis van 8-uurs-calorieschattingen, één per episodestart. */
+    data class Sample(val tsMs: Long, val value: Double)
+
+    /** Rolling geschiedenis van metingen, één per opgeslagen moment. */
     data class History(var samples: MutableList<Sample> = mutableListOf()) {
         fun serialize(): String {
             val arr = JSONArray()
-            for (s in samples) arr.put(JSONObject().put("ts", s.tsMs).put("cal", s.cal8h))
+            for (s in samples) arr.put(JSONObject().put("ts", s.tsMs).put("val", s.value))
             return JSONObject().put("samples", arr).toString()
         }
 
@@ -95,7 +122,12 @@ object FclActivitySensitivity {
                     val list = mutableListOf<Sample>()
                     for (i in 0 until arr.length()) {
                         val o = arr.getJSONObject(i)
-                        list.add(Sample(o.getLong("ts"), o.getDouble("cal")))
+                        // "val" i.p.v. het oude "cal" — nieuwe historie-vorm
+                        // (28/07/2026); oude bestanden onder de oude sleutel
+                        // (cal8h_history_json) worden simpelweg niet meer
+                        // gelezen, geen migratie nodig (zelfde patroon als
+                        // eerdere nieuwe-SharedPreferences-bestand-fixes).
+                        list.add(Sample(o.getLong("ts"), o.getDouble("val")))
                     }
                     History(list)
                 } catch (e: Exception) {
@@ -105,49 +137,51 @@ object FclActivitySensitivity {
         }
     }
 
-    fun loadFrom(context: android.content.Context): History =
+    fun loadHistoryA(context: android.content.Context): History =
         History.deserialize(
-            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-                .getString(KEY, "") ?: ""
+            context.getSharedPreferences(PREFS_A, android.content.Context.MODE_PRIVATE)
+                .getString(KEY_A, "") ?: ""
         )
 
-    fun saveTo(context: android.content.Context, h: History) {
-        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-            .edit().putString(KEY, h.serialize()).apply()
+    fun saveHistoryA(context: android.content.Context, h: History) {
+        context.getSharedPreferences(PREFS_A, android.content.Context.MODE_PRIVATE)
+            .edit().putString(KEY_A, h.serialize()).apply()
+    }
+
+    fun loadHistoryB(context: android.content.Context): History =
+        History.deserialize(
+            context.getSharedPreferences(PREFS_B, android.content.Context.MODE_PRIVATE)
+                .getString(KEY_B, "") ?: ""
+        )
+
+    fun saveHistoryB(context: android.content.Context, h: History) {
+        context.getSharedPreferences(PREFS_B, android.content.Context.MODE_PRIVATE)
+            .edit().putString(KEY_B, h.serialize()).apply()
     }
 
     /**
-     * Voeg een meting toe (bij episodestart, vanuit DetermineBasalFCL.kt) en
-     * trim tot het glijdende venster. Caller (DetermineBasalFCL.kt) persisteert
-     * het resultaat via saveTo(). Foutwaarden (cal8h < 0, zie
-     * EstimatedCaloriesCalculator-conventie) worden niet opgeslagen — die
-     * zouden de mediaan alleen maar vervuilen.
+     * Voeg een meting toe en trim tot het glijdende venster. Caller
+     * persisteert het resultaat via saveHistoryA()/saveHistoryB().
+     * Foutwaarden (value < 0) worden niet opgeslagen.
      */
-    fun record(h: History, tsMs: Long, cal8h: Double): History {
-        if (cal8h < 0.0) return h
+    fun record(h: History, tsMs: Long, value: Double): History {
+        if (value < 0.0) return h
         val newSamples = h.samples.toMutableList()
-        newSamples.add(Sample(tsMs, cal8h))
+        newSamples.add(Sample(tsMs, value))
         val cutoff = tsMs - WINDOW_MS
         newSamples.removeAll { it.tsMs < cutoff }
         return History(newSamples)
     }
 
     data class AigfResult(
-        /** false = te weinig historie of ongeldige huidige meting; AIGF dan neutraal (100). */
+        /** false = te weinig historie of ongeldige huidige meting; component dan neutraal (100). */
         val active: Boolean,
         val aigf: Double,
         // Puur diagnostisch, voor de status-formatter/logging:
         val rawRatio: Double,
         val baselineMedian: Double,
         val sampleCount: Int,
-        // 14/07/2026 (Ecko) — leesbare reden waarom er GEEN verse berekening is
-        // (active=false); leeg als active=true. Voor de status-formatter, zodat
-        // "AAN maar geen effect" een concrete verklaring krijgt i.p.v. stilte.
         val reasonNl: String = "",
-        // 16/07/2026 (Ecko) — hoeveel dagen de historie in het 7d-venster al
-        // beslaat (oudste bruikbare meting t.o.v. nu), zie
-        // DAYS_FOR_FULL_CONFIDENCE hierboven. Puur diagnostisch/voor de
-        // status-formatter — de demping zelf is al verwerkt in `aigf`.
         val daysOfHistory: Double = 0.0
     )
 
@@ -158,34 +192,33 @@ object FclActivitySensitivity {
         else (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
     }
 
-    /**
-     * Bereken de AIGF. De baseline is altijd puur historisch (de huidige
-     * meting zelf zit niet in `history` — die wordt apart, ná episodestart,
-     * toegevoegd via record()) — geen data-lek uit het huidige moment naar
-     * zijn eigen referentie.
-     *
-     * @param minPct/maxPct  door de gebruiker ingestelde grenzen (bijv. 95/105
-     *                       bij een voorzichtige start, later evt. breder).
-     */
-    fun compute(
+    // ── Gedeelde kernberekening (14/07/2026, herzien 28/07/2026) ────────────
+    // Ratio → vaste interne score (-1..+1) → proportionele herschaling naar
+    // minPct..maxPct → opbouw-vertrouwensdemping. Identiek voor component A
+    // en B; het enige verschil tussen de twee zit in WAT ze meegeven als
+    // `currentValue`/`history` en (alleen bij B) de wake-weging die de
+    // AANROEPER (computeComponentB hieronder) er nog overheen legt.
+    private fun computeCore(
         history: History,
-        currentCal8h: Double,
+        currentValue: Double,
         minPct: Double,
         maxPct: Double,
-        nowMs: Long
+        nowMs: Long,
+        geenHistorieReden: String,
+        geenMetingReden: String
     ): AigfResult {
-        val usableSamples = history.samples.filter { it.cal8h >= 0.0 }
-        val usable = usableSamples.map { it.cal8h }
+        val usableSamples = history.samples.filter { it.value >= 0.0 }
+        val usable = usableSamples.map { it.value }
         if (usable.size < MIN_HISTORY_FOR_BASELINE) {
             return AigfResult(
                 active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size,
-                reasonNl = "nog te weinig meetpunten (${usable.size}/$MIN_HISTORY_FOR_BASELINE)"
+                reasonNl = "$geenHistorieReden (${usable.size}/$MIN_HISTORY_FOR_BASELINE)"
             )
         }
-        if (currentCal8h < 0.0) {
+        if (currentValue < 0.0) {
             return AigfResult(
                 active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = usable.size,
-                reasonNl = "geen geldige huidige calorie-meting deze cyclus"
+                reasonNl = geenMetingReden
             )
         }
         val baselineMedian = median(usable)
@@ -196,7 +229,7 @@ object FclActivitySensitivity {
             )
         }
 
-        val rawRatio = currentCal8h / baselineMedian
+        val rawRatio = currentValue / baselineMedian
 
         val internalScore = when {
             rawRatio <= RATIO_REF_LOW -> -1.0
@@ -206,18 +239,12 @@ object FclActivitySensitivity {
             else -> 0.0
         }.coerceIn(-1.0, 1.0)
 
-        // Proportionele herschaling naar het ingestelde bereik (geen clip op
-        // de grens — zie kdoc bovenaan). internalScore zelf is al -1..+1.
         val rawAigf = if (internalScore >= 0.0) {
             100.0 + internalScore * (maxPct - 100.0)
         } else {
             100.0 + internalScore * (100.0 - minPct)
         }
 
-        // Opbouw-vertrouwen (16/07/2026, Ecko) — zie DAYS_FOR_FULL_CONFIDENCE
-        // hierboven. Oudste bruikbare meting bepaalt hoeveel dagen de
-        // historie al beslaat; daaronder wordt de afwijking t.o.v. 100
-        // proportioneel gedempt, nooit versterkt (coerceIn 0..1).
         val oldestUsableTsMs = usableSamples.minOf { it.tsMs }
         val daysOfHistory = ((nowMs - oldestUsableTsMs).coerceAtLeast(0L) / MS_PER_DAY.toDouble())
         val confidence = (daysOfHistory / DAYS_FOR_FULL_CONFIDENCE).coerceIn(0.0, 1.0)
@@ -227,5 +254,51 @@ object FclActivitySensitivity {
             active = true, aigf = aigf, rawRatio = rawRatio, baselineMedian = baselineMedian,
             sampleCount = usable.size, daysOfHistory = daysOfHistory
         )
+    }
+
+    /**
+     * Component A — vorige dag/naijling. `currentCal24h` is het rollende
+     * 24-uurstotaal NU; `history` is de 7-daagse reeks van datzelfde
+     * 24-uurstotaal, gemeten op eerdere momenten (zie FCLvNext.kt: bij elk
+     * eerste écht bevestigde commit van een maaltijd-episode).
+     */
+    fun computeComponentA(
+        history: History,
+        currentCal24h: Double,
+        minPct: Double,
+        maxPct: Double,
+        nowMs: Long
+    ): AigfResult = computeCore(
+        history, currentCal24h, minPct, maxPct, nowMs,
+        geenHistorieReden = "nog te weinig meetpunten (24u-historie)",
+        geenMetingReden = "geen geldige 24u-calorie-meting deze cyclus"
+    )
+
+    /**
+     * Component B — recente uren, wakker-gewogen. `currentCal4h` is het
+     * 4-uurstotaal vlak vóór het eerste échte commit; `wakeOverlapFrac`
+     * (0..1) geeft aan hoeveel van dat venster binnen wakkere uren viel
+     * (zie FclWakeDetector.kt). De resulterende afwijking t.o.v. 100 wordt
+     * MET dat aandeel vermenigvuldigd — bij een grotendeels-slaap-venster
+     * (zoals vóór het ontbijt) blijft het resultaat dus dicht bij 100,
+     * ongeacht hoe laag currentCal4h op zichzelf is.
+     */
+    fun computeComponentB(
+        history: History,
+        currentCal4h: Double,
+        wakeOverlapFrac: Double,
+        minPct: Double,
+        maxPct: Double,
+        nowMs: Long
+    ): AigfResult {
+        val core = computeCore(
+            history, currentCal4h, minPct, maxPct, nowMs,
+            geenHistorieReden = "nog te weinig meetpunten (wakkere-uren-historie)",
+            geenMetingReden = "geen geldige 4u-calorie-meting bij dit commit"
+        )
+        if (!core.active) return core
+        val w = wakeOverlapFrac.coerceIn(0.0, 1.0)
+        val weightedAigf = 100.0 + (core.aigf - 100.0) * w
+        return core.copy(aigf = weightedAigf)
     }
 }
