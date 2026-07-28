@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -1444,19 +1445,42 @@ private fun BasalProfileChart(
     newHourly: Map<Int, Double>,
     heightDp: Int = 140
 ) {
-    val oldColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    // 28/07/2026 (Ecko), op verzoek: het contrast tussen Huidig/Voorstel was
+    // in beide thema's nauwelijks te zien — logisch, want de twee lijnen
+    // liggen bij de meeste uren exact op elkaar (alleen een paar uur wijken
+    // af), en een halfdoorzichtige grijze lijn onder een gelijke ondoor-
+    // zichtige lijn verdwijnt dan bijna volledig. Twee onafhankelijke fixes,
+    // die ELKAAR versterken i.p.v. vervangen — bewust GEEN verticale
+    // pixel-verschuiving (dat zou een verschil suggereren waar geen is):
+    //  1. Huidig krijgt een vaste, van het thema onafhankelijke kleur
+    //     (amber) i.p.v. een doorzichtige grijstint — leesbaar op zowel een
+    //     donkere als een lichte achtergrond, en duidelijk te onderscheiden
+    //     van het paarse Voorstel ongeacht thema.
+    //  2. Voorstel wordt eerst getekend als brede, effen band; Huidig
+    //     daarna eroverheen als smallere GESTREEPTE lijn. Waar de twee
+    //     waarden identiek zijn (het merendeel van de uren) blijft zo de
+    //     paarse band zichtbaar tussen de amberkleurige streepjes door —
+    //     i.p.v. dat de ene lijn de andere volledig aan het oog onttrekt.
+    val oldColor = FCL_CHART_HUIDIG_COLOR
     val newColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val dashEffect = remember { PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(oldColor)
-            )
+            // Streepjes-swatch voor Huidig (i.p.v. een effen blokje) — zodat
+            // de legenda meteen laat zien dat dit de gestippelde lijn is.
+            Canvas(modifier = Modifier.size(width = 18.dp, height = 10.dp)) {
+                drawLine(
+                    oldColor,
+                    Offset(0f, size.height / 2f),
+                    Offset(size.width, size.height / 2f),
+                    strokeWidth = 3.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = dashEffect
+                )
+            }
             Text("Huidig", style = MaterialTheme.typography.labelSmall, color = labelColor)
             Spacer(Modifier.width(10.dp))
             Box(
@@ -1489,7 +1513,7 @@ private fun BasalProfileChart(
             }
             drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
 
-            fun drawStairs(hourly: Map<Int, Double>, color: Color, strokeWidthPx: Float) {
+            fun drawStairs(hourly: Map<Int, Double>, color: Color, strokeWidthPx: Float, pathEffect: PathEffect? = null) {
                 var prevY: Float? = null
                 for (hour in 0..23) {
                     val v = hourly[hour] ?: continue
@@ -1498,16 +1522,20 @@ private fun BasalProfileChart(
                     val yv = y(v)
                     // Verticale connector naar de vorige trede (als die er was).
                     if (prevY != null && prevY != yv) {
-                        drawLine(color, Offset(x0, prevY), Offset(x0, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round)
+                        drawLine(color, Offset(x0, prevY), Offset(x0, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round, pathEffect = pathEffect)
                     }
                     // Horizontale trede voor dit uur.
-                    drawLine(color, Offset(x0, yv), Offset(x1, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round)
+                    drawLine(color, Offset(x0, yv), Offset(x1, yv), strokeWidth = strokeWidthPx, cap = StrokeCap.Round, pathEffect = pathEffect)
                     prevY = yv
                 }
             }
 
-            drawStairs(oldHourly, oldColor, 4f)
-            drawStairs(newHourly, newColor, 4f)
+            // Volgorde is bewust: Voorstel EERST (brede, effen band), Huidig
+            // DAARNA eroverheen (smallere, gestreepte lijn) — zie kdoc
+            // hierboven. Zo blijft Voorstel zichtbaar tussen de streepjes
+            // door zodra de twee waarden gelijk zijn.
+            drawStairs(newHourly, newColor, 7f)
+            drawStairs(oldHourly, oldColor, 3.5f, dashEffect)
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             listOf(0, 6, 12, 18, 24).forEach { hr ->
@@ -1516,6 +1544,12 @@ private fun BasalProfileChart(
         }
     }
 }
+
+// 28/07/2026 (Ecko) — vaste, thema-onafhankelijke kleur voor de Huidig-lijn
+// in BasalProfileChart (zie kdoc daar). Amber leest goed op zowel een
+// donkere als een lichte achtergrond, en contrasteert met het paarse
+// Voorstel (MaterialTheme.colorScheme.primary) ongeacht thema.
+private val FCL_CHART_HUIDIG_COLOR = Color(0xFFFFA000)
 
 // (Basaal-adviseur-kaart hier verwijderd, zie NachtControlTab hierboven.)
 

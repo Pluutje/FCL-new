@@ -3745,7 +3745,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v44-2026-07-27-2100"
+    private val FCL_CODE_VERSION = "v45-2026-07-28-1000"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3968,6 +3968,10 @@ class FCLvNext(
             if (field != value) saveEpisodeCommitCount(value)
             field = value
         }
+    // 28/07/2026 (Ecko) — ondanks de naam telt dit sinds de "NU: telt de VOLLEDIGE
+    // dosis"-herziening (07/07/2026) ELKE afgeleverde dosis deze episode mee, niet
+    // alleen earlyBoost-fires — zie de BOOST BUDGET TOP-UP verderop, die WFF-/
+    // commit-only cycli (zonder een vurend early.active-blok) alsnog bijschrijft.
     private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
     // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
     // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
@@ -5484,6 +5488,11 @@ class FCLvNext(
 
 
         var earlyFiredThisCycle = false  // wordt true als early floor deze cyclus vuurt
+        // Hoeveel van episodeBoostBudgetU is deze cyclus al bijgeschreven via het
+        // early.active-blok hieronder — nodig voor de top-up verderop (zie
+        // BOOST BUDGET TOP-UP, 28/07/2026, Ecko) die het restant (WFF/commit,
+        // buiten dit blok om) alsnog meetelt.
+        var boostBudgetCountedThisCycle = 0.0
 // Apply early floor AFTER dampers (maar vóór cap/commit)
 // ✅ NIET toepassen als we al aan het afremmen zijn (accel < 0)
         // Snapshot vóór deze cyclus' eigen boost-budget-update: de geboost
@@ -5536,6 +5545,7 @@ class FCLvNext(
             // afbouw altijd een compleet beeld heeft van "hoeveel is er al gegeven".
             if (finalDose > 0.01) {
                 episodeBoostBudgetU += finalDose
+                boostBudgetCountedThisCycle = finalDose
                 status.append(
                     "BOOST BUDGET +${"%.2f".format(finalDose)}U " +
                         "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
@@ -7535,6 +7545,29 @@ class FCLvNext(
         // ✅ NEW: als het onder de zichtbare/werkelijke delivery drempel is, behandel als 0
         val effectiveDeliveredNow =
             if (deliveredNow >= minDeliveryU) deliveredNow else 0.0
+
+        // ── BOOST BUDGET TOP-UP (28/07/2026, Ecko) ──────────────────────────
+        // episodeBoostBudgetU werd hierboven alleen bijgewerkt als het early.active-
+        // blok deze cyclus vuurde — WFF- of commit-only cycli (early.active=false)
+        // telden nooit mee, ook al leverden ze evengoed een grote dosis. Incident
+        // 28/07 07:28-07:33: een WFF-commit van 3,59U bij 07:28 (early.active=false
+        // die cyclus) werd nergens meegeteld, waardoor boostBudgetTaper bij 07:33
+        // nog dacht dat er niets was gegeven — EarlyBoost vuurde vervolgens alsnog
+        // op volle 2,8× sterkte (3,79U), alsof het de eerste fire van de episode
+        // was. Top-up hier: tel alles wat deze cyclus daadwerkelijk is afgeleverd
+        // en nog niet is meegeteld alsnog bij, ongeacht welk mechanisme het gaf —
+        // zodat wffBudgetScaling, de boostedCap-taper (hierboven) en de
+        // late-commit-decay (verderop) altijd een compleet beeld hebben van
+        // "hoeveel is er al gegeven deze episode", ook over cyclusgrenzen heen.
+        val boostBudgetTopUp = (effectiveDeliveredNow - boostBudgetCountedThisCycle).coerceAtLeast(0.0)
+        if (boostBudgetTopUp > 0.01) {
+            episodeBoostBudgetU += boostBudgetTopUp
+            status.append(
+                "BOOST BUDGET TOP-UP +${"%.2f".format(boostBudgetTopUp)}U (WFF/commit) " +
+                    "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
+            )
+        }
+
         if (commandedDose > 0.0 && deliveredNow > 0.0 && effectiveDeliveredNow == 0.0) {
             logRow.guardMinDeliverClipped = true
         }
