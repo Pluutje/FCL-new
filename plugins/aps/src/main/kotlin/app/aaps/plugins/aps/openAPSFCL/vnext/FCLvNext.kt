@@ -3745,7 +3745,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v45-2026-07-28-1000"
+    private val FCL_CODE_VERSION = "v46-2026-07-28-1900"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3968,11 +3968,48 @@ class FCLvNext(
             if (field != value) saveEpisodeCommitCount(value)
             field = value
         }
-    // 28/07/2026 (Ecko) — ondanks de naam telt dit sinds de "NU: telt de VOLLEDIGE
-    // dosis"-herziening (07/07/2026) ELKE afgeleverde dosis deze episode mee, niet
-    // alleen earlyBoost-fires — zie de BOOST BUDGET TOP-UP verderop, die WFF-/
-    // commit-only cycli (zonder een vurend early.active-blok) alsnog bijschrijft.
+    // LET OP (28/07/2026, Ecko — zie hieronder): dit veld wordt UITSLUITEND
+    // bijgewerkt binnen het early.active-blok verderop (dus niet bij een
+    // WFF- of commit-only cyclus) — dat is bewust, want dit budget stuurt
+    // ook budgetDecay/de langlopende late-commit-afbouw over véél commits
+    // aan. Voor de kórte-termijn kruischeck tussen WFF en EarlyBoost (twee
+    // grote frontload-mechanismen die elkaar niet vlak na elkaar onbeperkt
+    // mogen verrassen) is er een APART, kort-lopend signaal:
+    // recentFrontloadDoseU/recentFrontloadAt, direct hieronder.
     private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
+
+    // ── Kort-lopend frontload-signaal (28/07/2026, Ecko) ────────────────────
+    // AANLEIDING: episodeBoostBudgetU (hierboven) een tijdje breder gemaakt
+    // (elke dosis, ongeacht mechanisme) om te voorkomen dat WFF en EarlyBoost
+    // elkaar kort na elkaar allebei onbeperkt konden verrassen (incident 28/07
+    // 07:28→07:33: WFF gaf 3,59U ongeteld, EarlyBoost vuurde 5 min later alsnog
+    // vol als was het de eerste dosis). Bijwerking: omdat episodeBoostBudgetU
+    // ook budgetDecay aanstuurt (de afbouw over veel commits, geschaald met
+    // commitNr), stapelden budget én commitNr bij een lange, legitieme
+    // maaltijd (28/07 17:00, 8 commits) elkaar op — late_decay_mul kelderde
+    // naar 0,04 terwijl BG nog boven de 10 hing en IOB (ratio 0,44) nog ruim
+    // onder de gebruikelijke rem-drempels zat. Twee verschillende problemen
+    // met één gedeeld getal, niet goed te tunen voor allebei tegelijk.
+    //
+    // Oplossing: de kruischeck krijgt een eigen, kort-lopend geheugen — alleen
+    // de laatste afgeleverde dosis + tijdstip, en alleen relevant binnen
+    // RECENT_FRONTLOAD_WINDOW_MIN minuten. episodeBoostBudgetU/budgetDecay
+    // raken hier niet aan en gedragen zich weer zoals vóór 28/07 ochtend.
+    //
+    // Bewust NIET gereset op de 3 episode-grens-plekken (in tegenstelling tot
+    // episodeCommitCount/episodeBoostBudgetU e.d.): het venster is zo kort
+    // (10 min) dat het vanzelf vervalt, en een nieuwe episode die binnen dat
+    // venster van een vorige start (bijv. een tweede hap vlak na een grote
+    // maaltijd) mag de net gegeven frontload nog steeds meewegen.
+    private var recentFrontloadDoseU: Double = 0.0
+    private var recentFrontloadAt: DateTime? = null
+    private val RECENT_FRONTLOAD_WINDOW_MIN = 10
+
+    private fun recentFrontloadBudget(now: DateTime): Double {
+        val at = recentFrontloadAt ?: return 0.0
+        val ageMin = org.joda.time.Minutes.minutesBetween(at, now).minutes
+        return if (ageMin in 0..RECENT_FRONTLOAD_WINDOW_MIN) recentFrontloadDoseU else 0.0
+    }
     // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
     // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
     // Mag GROEIEN als een latere commit terecht groter is (echte, doorzettende
@@ -5488,18 +5525,16 @@ class FCLvNext(
 
 
         var earlyFiredThisCycle = false  // wordt true als early floor deze cyclus vuurt
-        // Hoeveel van episodeBoostBudgetU is deze cyclus al bijgeschreven via het
-        // early.active-blok hieronder — nodig voor de top-up verderop (zie
-        // BOOST BUDGET TOP-UP, 28/07/2026, Ecko) die het restant (WFF/commit,
-        // buiten dit blok om) alsnog meetelt.
-        var boostBudgetCountedThisCycle = 0.0
 // Apply early floor AFTER dampers (maar vóór cap/commit)
 // ✅ NIET toepassen als we al aan het afremmen zijn (accel < 0)
-        // Snapshot vóór deze cyclus' eigen boost-budget-update: de geboost
-        // maxSMB-cap hieronder moet reageren op het budget dat AL was
-        // opgebouwd door eerdere fires in deze episode, niet op het budget
-        // inclusief de fire die nu net wordt berekend (kip-ei).
-        val episodeBoostBudgetUSnapshot = episodeBoostBudgetU
+        // Snapshot vóór deze cyclus' eigen frontload-update: de geboost
+        // maxSMB-cap hieronder moet reageren op wat er AL was gegeven door
+        // eerdere fires (elk mechanisme, laatste RECENT_FRONTLOAD_WINDOW_MIN
+        // minuten), niet op de fire die nu net wordt berekend (kip-ei).
+        // 28/07/2026 (Ecko, herzien): was episodeBoostBudgetU (alleen
+        // EarlyBoost-fires) — nu recentFrontloadBudget() (elk mechanisme,
+        // kort-lopend), zie kdoc bij recentFrontloadDoseU hierboven.
+        val recentFrontloadSnapshot = recentFrontloadBudget(now)
         if (
             early.active &&
             early.targetU > 0.0 &&
@@ -5545,7 +5580,6 @@ class FCLvNext(
             // afbouw altijd een compleet beeld heeft van "hoeveel is er al gegeven".
             if (finalDose > 0.01) {
                 episodeBoostBudgetU += finalDose
-                boostBudgetCountedThisCycle = finalDose
                 status.append(
                     "BOOST BUDGET +${"%.2f".format(finalDose)}U " +
                         "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
@@ -5718,10 +5752,11 @@ class FCLvNext(
         // opnieuw de volle 1.8× ruimte, ook al was de eerste fire net
         // gegeven. Bij een korte, niet-aanhoudende stijging (snoep/drop)
         // stapelde dit tot een te grote totale dosis. De eerste fire in een
-        // episode behoudt de volle 1.8× (episodeBoostBudgetUSnapshot=0);
-        // naarmate er binnen de episode al meer boost-budget is opgebouwd
-        // (via eerdere fires), boogt de extra ruimte geleidelijk af richting
-        // de normale maxSMB. Bij budget >= 0.5×maxSMB is de escape dicht.
+        // episode behoudt de volle 1.8× (recentFrontloadSnapshot=0);
+        // naarmate er de laatste RECENT_FRONTLOAD_WINDOW_MIN minuten al een
+        // grote dosis is gegeven (via eerdere fires, elk mechanisme), boogt
+        // de extra ruimte geleidelijk af richting de normale maxSMB. Bij
+        // budget >= 0.5×maxSMB is de escape dicht.
         //
         // LET OP — bewuste afweging, geen garantie: vergelijkbare episodes
         // met meerdere grote, legitieme boost-fires komen wel degelijk voor
@@ -5731,8 +5766,11 @@ class FCLvNext(
         // Divisor 0.5× (i.p.v. een agressievere 0.3×) is bewust gekozen om
         // de impact op de eerste 1-2 vervolgfires te beperken; de eerste
         // fire in elke episode blijft altijd volledig ongewijzigd.
+        // 28/07/2026 (Ecko, herzien): gebruikt nu recentFrontloadSnapshot
+        // (kort-lopend, elk mechanisme) i.p.v. episodeBoostBudgetUSnapshot
+        // (cumulatief, alleen EarlyBoost) — zie kdoc bij recentFrontloadDoseU.
         val boostBudgetTaper =
-            (1.0 - episodeBoostBudgetUSnapshot / (config.maxSMB.coerceAtLeast(0.01) * 0.5)).coerceIn(0.0, 1.0)
+            (1.0 - recentFrontloadSnapshot / (config.maxSMB.coerceAtLeast(0.01) * 0.5)).coerceIn(0.0, 1.0)
         val effectiveMaxSmb = if (
             early.boostActive &&
             earlyFiredThisCycle &&
@@ -5829,8 +5867,15 @@ class FCLvNext(
             peak.predictedPeak >= 11.0 -> 0.65
             else                       -> 0.50
         }
-        val wffBudgetScaling = if (episodeBoostBudgetU > 0.1) {
-            (1.0 - episodeBoostBudgetU / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
+        // 28/07/2026 (Ecko, herzien): gebruikt nu recentFrontloadBudget(now)
+        // (kort-lopend, elk mechanisme) i.p.v. episodeBoostBudgetU (cumulatief,
+        // alleen EarlyBoost) — zie kdoc bij recentFrontloadDoseU hierboven.
+        // Was episodeBoostBudgetU: dat liet bij een lange maaltijd met veel
+        // commits (28/07 17:00) het WFF-target onnodig ver afkalven, ook toen
+        // de "recente frontload" allang niet meer relevant was.
+        val recentFrontload = recentFrontloadBudget(now)
+        val wffBudgetScaling = if (recentFrontload > 0.1) {
+            (1.0 - recentFrontload / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
         // ── Watching consolidation: vergroot watching commits na grote frontload ──
         // Probleem: na een stage2 commit van bijv. 3.5U geeft het systeem 4-5
@@ -7546,26 +7591,15 @@ class FCLvNext(
         val effectiveDeliveredNow =
             if (deliveredNow >= minDeliveryU) deliveredNow else 0.0
 
-        // ── BOOST BUDGET TOP-UP (28/07/2026, Ecko) ──────────────────────────
-        // episodeBoostBudgetU werd hierboven alleen bijgewerkt als het early.active-
-        // blok deze cyclus vuurde — WFF- of commit-only cycli (early.active=false)
-        // telden nooit mee, ook al leverden ze evengoed een grote dosis. Incident
-        // 28/07 07:28-07:33: een WFF-commit van 3,59U bij 07:28 (early.active=false
-        // die cyclus) werd nergens meegeteld, waardoor boostBudgetTaper bij 07:33
-        // nog dacht dat er niets was gegeven — EarlyBoost vuurde vervolgens alsnog
-        // op volle 2,8× sterkte (3,79U), alsof het de eerste fire van de episode
-        // was. Top-up hier: tel alles wat deze cyclus daadwerkelijk is afgeleverd
-        // en nog niet is meegeteld alsnog bij, ongeacht welk mechanisme het gaf —
-        // zodat wffBudgetScaling, de boostedCap-taper (hierboven) en de
-        // late-commit-decay (verderop) altijd een compleet beeld hebben van
-        // "hoeveel is er al gegeven deze episode", ook over cyclusgrenzen heen.
-        val boostBudgetTopUp = (effectiveDeliveredNow - boostBudgetCountedThisCycle).coerceAtLeast(0.0)
-        if (boostBudgetTopUp > 0.01) {
-            episodeBoostBudgetU += boostBudgetTopUp
-            status.append(
-                "BOOST BUDGET TOP-UP +${"%.2f".format(boostBudgetTopUp)}U (WFF/commit) " +
-                    "→ totaal=${"%.2f".format(episodeBoostBudgetU)}U\n"
-            )
+        // ── RECENT FRONTLOAD TRACKING (28/07/2026, Ecko, herzien) ────────────
+        // Zie kdoc bij recentFrontloadDoseU/recentFrontloadAt hierboven. Los van
+        // episodeBoostBudgetU (dat de langlopende afbouw aanstuurt en dus alleen
+        // via het early.active-blok bijwerkt, ongewijzigd) — dit is puur het
+        // korte-termijn geheugen voor de WFF/EarlyBoost-kruischeck, en vervalt
+        // vanzelf na RECENT_FRONTLOAD_WINDOW_MIN minuten.
+        if (effectiveDeliveredNow > 0.01) {
+            recentFrontloadDoseU = effectiveDeliveredNow
+            recentFrontloadAt = now
         }
 
         if (commandedDose > 0.0 && deliveredNow > 0.0 && effectiveDeliveredNow == 0.0) {
