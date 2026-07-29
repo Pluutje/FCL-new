@@ -3779,7 +3779,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v49-2026-07-29-1500"
+    private val FCL_CODE_VERSION = "v50-2026-07-29-1630"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4059,6 +4059,47 @@ class FCLvNext(
         val at = recentFrontloadAt ?: return 0.0
         val ageMin = org.joda.time.Minutes.minutesBetween(at, now).minutes
         return if (ageMin in 0..RECENT_FRONTLOAD_WINDOW_MIN) recentFrontloadDoseU else 0.0
+    }
+
+    // ── Budget-nasleep tussen opeenvolgende episodes (29/07/2026, Ecko) ─────
+    // AANLEIDING: 3,01U-bolus 29/07 11:03 (AIGF/anticipatie-onderzoek) leidde
+    // tot de vraag of een vroege, grote dosis daarna consequent wordt
+    // "teruggepakt", en of dat ooit misgaat bij een 2e, snel-opeenvolgende
+    // episode (bijv. hoofdgerecht → toetje). Nagerekend tegen de week 22-29/7:
+    // op 23/7 20:43 (2e episode, 80 min na een 1e van 6,7U) was commitIobFactor
+    // al 0,65 (IOB=4,10U discounteerde dus wél degelijk) — maar watchingFrontload-
+    // TargetU zelf stond nog op 1,58U, berekend alsof dit een verse, op zichzelf
+    // staande maaltijd was. 0,65 × [ongedempt vers-maaltijd-doel] leverde alsnog
+    // 2,34U (geplafonneerd door guardMaxSmbLimited — de onderliggende wens was
+    // nóg groter), gevolgd door een derde episode om 20:43-20:53 en uiteindelijk
+    // een dieptepunt van 2,9 mmol om 22:53. Ecko's conclusie (29/07): de generieke
+    // IOB-rem ving dit dus AL gedeeltelijk op, maar niet genoeg — een gerichte,
+    // aparte correctie op de WFF/EarlyBoost-DOELGROOTTE zelf (niet nog een
+    // algemene IOB-vermenigvuldiger, dat zou dubbelop zijn) is gerechtvaardigd.
+    //
+    // ONTWERP: in tegenstelling tot recentFrontloadDoseU/At hierboven (bewaart
+    // alleen de LAATSTE dosis, voldoende voor een venster van 10 min) moet dit
+    // een rollende SOM zijn over een veel langer venster (90 min) — bij het
+    // 23/7-incident waren er meerdere commits vóór de 2e episode begon.
+    // Bewust NIET gereset op episode-grenzen (zelfde reden als recentFrontload-
+    // DoseU): het venster is de bescherming TUSSEN episodes, dus moet juist
+    // over een episode-grens heen blijven gelden. Alleen in-memory (niet
+    // gepersisteerd via SharedPreferences) — bij een app-herstart binnen het
+    // venster van 90 min gaat dit korte-termijn-geheugen verloren, net als bij
+    // recentFrontloadDoseU (10 min), maar met een iets groter (geaccepteerd)
+    // blootstellingsvenster gezien de langere duur.
+    private val recentEpisodeCommits: MutableList<Pair<DateTime, Double>> = mutableListOf()
+    private val RECENT_EPISODE_BUDGET_WINDOW_MIN = 90
+
+    private fun recordRecentEpisodeCommit(now: DateTime, doseU: Double) {
+        if (doseU > 0.01) recentEpisodeCommits.add(now to doseU)
+        val cutoff = now.minusMinutes(RECENT_EPISODE_BUDGET_WINDOW_MIN)
+        recentEpisodeCommits.removeAll { it.first.isBefore(cutoff) }
+    }
+
+    private fun recentEpisodeBudget(now: DateTime): Double {
+        val cutoff = now.minusMinutes(RECENT_EPISODE_BUDGET_WINDOW_MIN)
+        return recentEpisodeCommits.filter { !it.first.isBefore(cutoff) }.sumOf { it.second }
     }
     // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
     // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
@@ -5908,6 +5949,33 @@ class FCLvNext(
         val wffBudgetScaling = if (recentFrontload > 0.1) {
             (1.0 - recentFrontload / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
+
+        // ── Budget-nasleep tussen episodes (29/07/2026, Ecko) ───────────────
+        // Zie kdoc bij recentEpisodeCommits/recentEpisodeBudget() hierboven —
+        // dempt WFF's DOELGROOTTE zelf naar rato van wat er in de laatste
+        // RECENT_EPISODE_BUDGET_WINDOW_MIN (90) minuten al is gegeven, ook als
+        // dat uit een net-afgesloten ANDERE episode kwam (23/7-incident:
+        // hoofdgerecht → toetje, elk met een eigen, onwetende frontload-doel).
+        //
+        // Bewust alleen gaat gelden bij de EERSTE commit van een (nieuwe of
+        // hervatte) episode (episodePeakCommitU<=1e-9 — zelfde "nog niks
+        // gecommitteerd deze episode"-signaal als elders gebruikt, o.a.
+        // AIGF-B/peak-anchor): zodra de episode zelf al commits heeft, doen
+        // de bestaande, hierop toegesneden mechanismen (episodeBoostBudgetU/
+        // late_decay_mul, én recentFrontload hierboven) al precies dit werk.
+        // Zonder deze gate zou dit dubbelop tellen met die mechanismen.
+        //
+        // Bewust GEEN aparte IOB-rem (commitIobFactor verderop dempt al op
+        // IOB an sich, zie de wffIobPenalty-verwijdering hierboven) — dit
+        // reageert specifiek op RECENT GEGEVEN volume, niet op de resterende
+        // IOB-hoeveelheid, wat een ander signaal is: bijv. IOB van 6 uur
+        // geleden (grotendeels uitgewerkt qua glucose-effect, wel nog deels
+        // IOB) hoort dit budget niet te raken, terwijl een net-afgesloten
+        // episode van 15-80 min geleden dat wel moet.
+        val recentEpisodeScaling = if (episodePeakCommitU <= 1e-9) {
+            val budget = recentEpisodeBudget(now)
+            if (budget > 0.1) (1.0 - budget / (config.maxSMB * 2.5)).coerceIn(0.40, 1.0) else 1.0
+        } else 1.0
         // ── Watching consolidation: vergroot watching commits na grote frontload ──
         // Probleem: na een stage2 commit van bijv. 3.5U geeft het systeem 4-5
         // kleine watching commits (~0.70U elk) terwijl één geconsolideerde
@@ -5962,7 +6030,7 @@ class FCLvNext(
         // commitIobFactor regelt de IOB-rem consistent voor alle commits.
         val watchingFrontloadTargetU =
             (config.maxSMB * config.watchingFrontloadFrac * wffBudgetScaling
-                * watchingConsolidationFactor)
+                * recentEpisodeScaling * watchingConsolidationFactor)
                 .coerceAtMost(config.maxSMB)
 
         // ── Delta-to-target ramp (05/07/2026, Ecko) ──────────────────────
@@ -6014,6 +6082,13 @@ class FCLvNext(
         }
 
 // 5) Pas dosing toe als triggered
+        if (recentEpisodeScaling < 0.99) {
+            status.append(
+                "BUDGET-NASLEEP: WFF-doel gedempt ×${"%.2f".format(recentEpisodeScaling)} " +
+                    "(${"%.2f".format(recentEpisodeBudget(now))}U al gegeven in laatste " +
+                    "$RECENT_EPISODE_BUDGET_WINDOW_MIN min, incl. evt. vorige episode)\n"
+            )
+        }
         if (watchingFrontloadTriggered) {
 
             if (finalDose < watchingFrontloadTargetUEffective) {
@@ -7693,6 +7768,11 @@ class FCLvNext(
             recentFrontloadDoseU = effectiveDeliveredNow
             recentFrontloadAt = now
         }
+        // Budget-nasleep (29/07/2026, Ecko) — zie kdoc bij recentEpisodeCommits
+        // hierboven. Zelfde onvoorwaardelijke update-voorwaarde als hierboven
+        // (elke daadwerkelijk afgeleverde dosis, ongeacht mechanisme), maar dan
+        // in de rollende 90-minuten-som i.p.v. alleen de laatste dosis.
+        recordRecentEpisodeCommit(now, effectiveDeliveredNow)
 
         if (commandedDose > 0.0 && deliveredNow > 0.0 && effectiveDeliveredNow == 0.0) {
             logRow.guardMinDeliverClipped = true
