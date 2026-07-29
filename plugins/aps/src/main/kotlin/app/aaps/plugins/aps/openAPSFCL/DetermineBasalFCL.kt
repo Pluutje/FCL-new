@@ -43,7 +43,6 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice
 
 
 import org.joda.time.DateTime
-import org.joda.time.DateTimeZone
 
 import android.content.Context
 
@@ -463,34 +462,23 @@ class DetermineBasalFCL @Inject constructor(
         targetMgdl += activity.targetAdjust * 18.0
 
         // ─────────────────────────────────────────────
-        // 🍽️⏰ MAALTIJD-TIJD-ANTICIPATIE (05/07/2026, Ecko)
+        // 🍽️⏰ MAALTIJD-TIJD-ANTICIPATIE — VERWIJDERD (29/07/2026, Ecko)
         // ─────────────────────────────────────────────
-        // Zelfde pragmatische aanpak als de activiteitscorrectie hierboven:
-        // een kortstondige, lokale aanpassing van targetMgdl vóórdat
-        // FCLvNextInput wordt gebouwd — geen aparte AAPS-tijdelijke-
-        // streefwaarde-entiteit. Bewuste keuze (Ecko, 05/07/2026): dit is een
-        // kortdurende aanpassing (net als activiteit); zou dit uren aanhouden
-        // dan zou een echte TemporaryTarget via persistenceLayer meer voor de
-        // hand liggen, maar voor dit korte venster is dit de pragmatische en
-        // beproefde route.
-        //
-        // Leren (welke tijden, CONFIRMED-episodes) gebeurt in FCLvNext.kt —
-        // hier wordt alleen het resultaat (geleerde modi) gelezen en, indien
-        // het korte anticipatievenster nu actief is, toegepast.
-        val mealTimeHistory = app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.loadFrom(context)
-        val isWeekendNowForMealTime = FCLvNextDayNightHelper.isWeekendDay(
-            DateTime.now().dayOfWeek, preferences.get(StringKey.WeekendDagen)
-        )
-        val localOffsetMsForMealTime = DateTimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong()
-        val mealAnticipationHit = app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.preMealWindow(
-            mealTimeHistory,
-            DateTime.now().minuteOfDay,
-            localOffsetMsForMealTime,
-            isWeekendNowForMealTime
-        )
-        if (mealAnticipationHit != null) {
-            targetMgdl -= app.aaps.plugins.aps.openAPSFCL.vnext.FclMealTimeAnticipation.TARGET_LOWER_MMOL * 18.0
-        }
+        // Het hele FclMealTimeAnticipation-mechanisme (05/07/2026) is
+        // verwijderd. In de praktijk (week 22-29/7) vuurde het ~10-13x per
+        // dag, dag én nacht — veel vaker dan er daadwerkelijk maaltijden
+        // zijn, vermoedelijk doordat ook tussendoortjes en nachtelijke
+        // correcties als geleerde "maaltijdmomenten" meetelden. Elke keer
+        // dat zo'n geleerd moment overlapte met een al zelfstandig door de
+        // reactieve detectie bevestigde maaltijd, stapelde de extra
+        // target-verlaging bovenop de toch al lopende eerste volle commit —
+        // concreet aangetoond bij de 3,01U-bolus om 29/07 11:03 (WFF-doel
+        // 0,33→3,10U) en twee vergelijkbare gevallen (24/07 15:54, 28/07
+        // 13:48). Ecko's conclusie: de kans op een te hoge dosis bij iets
+        // dat geen echte maaltijd is (een koekje bij de koffie) woog
+        // zwaarder dan de bedoelde marginale voorsprong bij een echte
+        // maaltijd. FclMealTimeAnticipation.kt is niet langer onderdeel van
+        // de build; het leren/vastleggen aan de FCLvNext.kt-kant is ook weg.
 
         target_bg = targetMgdl
         // ─────────────────────────────────────────────

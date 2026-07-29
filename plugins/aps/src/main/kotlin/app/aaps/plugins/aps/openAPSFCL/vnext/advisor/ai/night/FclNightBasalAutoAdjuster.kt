@@ -89,7 +89,6 @@ object FclNightBasalAutoAdjuster {
     private const val CUMULATIVE_DRIFT_CAP_FRAC = 0.25
     private const val MIN_NIGHTS_ANALYZED = 5
     private const val MIN_AVG_CONFIDENCE = 0.55
-    private const val BASAL_ROUND_STEP = 0.05
 
     // 27/07/2026 (Ecko) — wachtperiode + gemiddelde over meerdere nachten,
     // op verzoek: "ik heb gister de basaal aangepast en nu na 1 nacht komt
@@ -316,10 +315,10 @@ object FclNightBasalAutoAdjuster {
         // ── Confidence-gate ──
         if (nightsAnalyzed < MIN_NIGHTS_ANALYZED || avgConfidence < MIN_AVG_CONFIDENCE) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "confidence-gate: nachten=$nightsAnalyzed (min $MIN_NIGHTS_ANALYZED) " +
-                    "gem.confidence=${"%.2f".format(avgConfidence)} (min $MIN_AVG_CONFIDENCE)",
-                oldJson = "{}", newJson = "{}", shiftJson = "{}",
-                hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   skipReason = "confidence-gate: nachten=$nightsAnalyzed (min $MIN_NIGHTS_ANALYZED) " +
+                       "gem.confidence=${"%.2f".format(avgConfidence)} (min $MIN_AVG_CONFIDENCE)",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
@@ -327,8 +326,8 @@ object FclNightBasalAutoAdjuster {
         val effectiveProfile = profileFunction.getProfile()
         if (effectiveProfile == null) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen actief profiel",
-                oldJson = "{}", newJson = "{}", shiftJson = "{}",
-                hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
         val originalName = profileFunction.getOriginalProfileName()
@@ -336,9 +335,9 @@ object FclNightBasalAutoAdjuster {
         val index = profiles.indexOfFirst { it.name == originalName }
         if (index == -1) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "profiel '$originalName' niet gevonden in ProfileRepository",
-                oldJson = "{}", newJson = "{}", shiftJson = "{}",
-                hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   skipReason = "profiel '$originalName' niet gevonden in ProfileRepository",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
         val current = profiles[index]
@@ -385,8 +384,8 @@ object FclNightBasalAutoAdjuster {
             // meer nodig/aanwezig: niet-Accepteren betekent al vanzelf "niet
             // toegepast", en het venster groeit gewoon door met meer nachten.
             logRow(db, now, today, mode, applied = false, skipReason = "",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
@@ -397,8 +396,8 @@ object FclNightBasalAutoAdjuster {
         // berekening (oldJson/shiftJson="{}"); nu bevat elke nacht altijd de
         // ruwe cijfers, precies zoals bij MANUAL hierboven.
         logRow(db, now, today, mode, applied = false, skipReason = "",
-            oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+               oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+               hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
 
         // ── mode == AUTO: 1x per AUTO_COOLDOWN_NIGHTS nachten toepassen,
         //    met het gemiddelde van EXACT die nachten (Ecko's suggestie) ──
@@ -419,26 +418,26 @@ object FclNightBasalAutoAdjuster {
         val errors = profileRepository.validateStructured(newSingleProfile)
         if (errors.isNotEmpty()) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
-                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
-                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
         val replaceResult = profileRepository.replace(index, newSingleProfile)
         if (replaceResult.isFailure) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
-                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
-                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
         val newProfileStore = profileRepository.profile.value
         if (newProfileStore == null) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
-                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
-                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
@@ -463,15 +462,15 @@ object FclNightBasalAutoAdjuster {
         )
         if (ps == null) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
-                oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
-                hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+                   skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
             return
         }
 
         logRow(db, now, today, mode, applied = true, skipReason = "",
-            oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
-            hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
+               oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+               hoursAtCapCount = avgHoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
     }
 
     /**
@@ -532,26 +531,26 @@ object FclNightBasalAutoAdjuster {
         val errors = profileRepository.validateStructured(newSingleProfile)
         if (errors.isNotEmpty()) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
+                   skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
         val replaceResult = profileRepository.replace(index, newSingleProfile)
         if (replaceResult.isFailure) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
+                   skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
         val newProfileStore = profileRepository.profile.value
         if (newProfileStore == null) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
@@ -572,15 +571,15 @@ object FclNightBasalAutoAdjuster {
         )
         if (ps == null) {
             logRow(db, now, today, mode, applied = false,
-                skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
-                oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
+                   skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
             return false
         }
 
         logRow(db, now, today, mode, applied = true, skipReason = "",
-            oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
-            hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
+               oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+               hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = newest.nightsAnalyzed, avgConfidence = newest.avgConfidence)
         return true
     }
 
@@ -602,7 +601,7 @@ object FclNightBasalAutoAdjuster {
             val curVal = currentHourly[h] ?: 0.0
             totalOld += curVal
             val shiftPct = shiftByHour[h]
-            var newVal = if (shiftPct != null) roundToStep(curVal * (1.0 + shiftPct / 100.0)) else curVal
+            var newVal = if (shiftPct != null) cleanPrecision(curVal * (1.0 + shiftPct / 100.0)) else curVal
             if (shiftPct != null) {
                 val clamped = clampToBaseline(newVal, baseline[h] ?: curVal)
                 if (clamped != newVal) hoursAtCap.add(h)
@@ -623,7 +622,7 @@ object FclNightBasalAutoAdjuster {
             for (h in 0..23) {
                 val curVal = currentHourly[h] ?: 0.0
                 val delta = (newHourly[h] ?: curVal) - curVal
-                var scaledVal = roundToStep(curVal + delta * scale)
+                var scaledVal = cleanPrecision(curVal + delta * scale)
                 if (shiftByHour.containsKey(h)) {
                     val clamped = clampToBaseline(scaledVal, baseline[h] ?: curVal)
                     if (clamped != scaledVal) hoursAtCap.add(h)
@@ -636,15 +635,36 @@ object FclNightBasalAutoAdjuster {
     }
 
     private fun clampToBaseline(value: Double, baselineValue: Double): Double {
-        val low = roundToStep(baselineValue * (1.0 - CUMULATIVE_DRIFT_CAP_FRAC)).coerceAtLeast(0.01)
-        val high = roundToStep(baselineValue * (1.0 + CUMULATIVE_DRIFT_CAP_FRAC))
+        val low = cleanPrecision(baselineValue * (1.0 - CUMULATIVE_DRIFT_CAP_FRAC)).coerceAtLeast(0.01)
+        val high = cleanPrecision(baselineValue * (1.0 + CUMULATIVE_DRIFT_CAP_FRAC))
         return value.coerceIn(low, high)
     }
 
-    private fun roundToStep(value: Double): Double {
-        val stepped = Math.round(value / BASAL_ROUND_STEP) * BASAL_ROUND_STEP
-        // Nette 2 decimalen — voorkomt drijvendekomma-restjes zoals 0.9199999999.
-        return Math.round(stepped * 100.0) / 100.0
+    // 29/07/2026 (Ecko, n.a.v. terugkoppeling) — voorheen snapte roundToStep()
+    // elke berekende uurwaarde naar een vaste 0.05 U/u-grid vóórdat 'm naar
+    // het profiel werd geschreven. Dat hoorde hier niet: de daadwerkelijke
+    // afronding naar de pomp-stapgrootte gebeurt AAPS-breed altijd al correct
+    // op het moment dat er echt naar de pomp gestuurd wordt (zie round_basal()
+    // in DetermineBasalFCL.kt — een bewuste no-op hier, precies omdat AAPS
+    // core die stap al doet), ongeacht welke precisie in het PROFIEL zelf
+    // staat. De grid-snap hier gaf twee problemen:
+    //  1. een kleine %-verschuiving (1-2%) werd door de 0.05-stap soms
+    //     volledig weggeslikt (afgerond naar 0 verschil) of juist naar de
+    //     verkeerde kant afgerond — een tegen-intuïtief effect bij een AI-
+    //     advies dat zelf wél netjes 1-2% voorstelde.
+    //  2. elke volgende nacht leest currentHourly weer uit het AL AFGERONDE
+    //     profiel (effectiveProfile.getBasalTimeFromMidnight(...)), dus
+    //     stapelde die kwantisatiefout nacht na nacht op — een aannemelijke
+    //     verklaring voor de "vreemde sprong" tussen 23:00 en 00:00 die in de
+    //     Analyzer-tabel zichtbaar werd: niet elk uur landt op dezelfde
+    //     afstand tot de dichtstbijzijnde 0.05-grens, dus de afronding kan
+    //     twee buururen met vergelijkbare %-verschuiving toch uit elkaar
+    //     laten lopen, en dat effect groeit door over meerdere nachten.
+    // Nu alleen nog drijvendekomma-restjes opruimen (bv. 0.8199999999999),
+    // niet meer naar een vaste stapgrootte snappen — het profiel bewaart de
+    // volle precisie van de %-berekening.
+    private fun cleanPrecision(value: Double): Double {
+        return Math.round(value * 1000.0) / 1000.0
     }
 
     private fun hourlyToJson(hourly: Map<Int, Double>): String {

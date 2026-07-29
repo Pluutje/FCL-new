@@ -3779,7 +3779,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v48-2026-07-28-2330"
+    private val FCL_CODE_VERSION = "v49-2026-07-29-1500"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3949,22 +3949,22 @@ class FCLvNext(
             saveEpisodeAnchor(activeMealEpisodeId, value, mealEpisodeStartBg)
         }
 
-    // ── Maaltijd-anticipatie geschiedenis (05/07/2026, Ecko) ────────────────
-    // Opslag zelf leeft in FclMealTimeAnticipation.kt (gedeeld met
-    // DetermineBasalFCL.kt, die de daadwerkelijke target-verlaging toepast —
-    // zie de toelichting daar). FCLvNext.kt is hier alleen de SCHRIJVER: het
-    // legt een nieuw event vast zodra een episode voor het eerst CONFIRMED is.
-    private fun loadMealTimeHistory(): FclMealTimeAnticipation.History =
-        FclMealTimeAnticipation.loadFrom(context)
-
-    private fun saveMealTimeHistory(h: FclMealTimeAnticipation.History) =
-        FclMealTimeAnticipation.saveTo(context, h)
-
-    private var mealTimeHistory: FclMealTimeAnticipation.History = loadMealTimeHistory()
-
-    // Voorkomt dat dezelfde episode meerdere cycli achter elkaar (zolang hij
-    // CONFIRMED blijft) opnieuw wordt vastgelegd — precies één event per episode.
-    private var lastRecordedMealTimeEpisodeId: Long = -1
+    // ── Maaltijd-anticipatie geschiedenis — VERWIJDERD (29/07/2026, Ecko) ───
+    // Het hele FclMealTimeAnticipation-mechanisme (05/07/2026) is verwijderd:
+    // in de praktijk (week 22-29/7) bleek het ~10-13x per dag te vuren, dag
+    // én nacht, veel vaker dan er daadwerkelijk maaltijden zijn — vermoedelijk
+    // doordat ook tussendoortjes en nachtelijke correcties als geleerde
+    // "maaltijdmomenten" meetelden. Elke keer dat zo'n geleerd moment
+    // overlapte met een al zelfstandig door de reactieve detectie bevestigde
+    // maaltijd, stapelde de extra target-verlaging bovenop de toch al lopende
+    // eerste volle commit — concreet aangetoond bij de 3,01U-bolus om
+    // 29/07 11:03 (WFF-doel 0,33→3,10U) en twee vergelijkbare, kleinere
+    // gevallen (24/07 15:54, 28/07 13:48). Ecko's conclusie: de kans dat dit
+    // een te hoge dosis veroorzaakt bij iets dat geen echte maaltijd is (een
+    // koekje bij de koffie) woog zwaarder dan de bedoelde marginale
+    // voorsprong bij een echte maaltijd. Zie DetermineBasalFCL.kt voor de
+    // (eveneens verwijderde) toepassing van de target-verlaging;
+    // FclMealTimeAnticipation.kt zelf is niet langer onderdeel van de build.
     // Derde deel van het episode-anker hierboven — zelfde persistentie-reden.
     private var mealEpisodeStartBg: Double? = restoredEpisodeAnchor.third
         set(value) {
@@ -4730,20 +4730,10 @@ class FCLvNext(
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────
-        // 🍽️⏰ Maaltijd-tijd-anticipatie — ALLEEN de leerkant zit hier
-        // (05/07/2026, Ecko, herzien na architectuurcorrectie) ──────────────
-        // De daadwerkelijke target-verlaging gebeurt in DetermineBasalFCL.kt,
-        // exact zoals FCLActivityModule dat al doet voor activiteit: lokaal
-        // op targetMgdl toegepast vóórdat FCLvNextInput wordt gebouwd — dus
-        // input.targetBG komt hier al aangepast binnen als het venster actief
-        // is. FCLvNext.kt hoeft dat venster dus niet zelf opnieuw te
-        // evalueren; het bewaart alleen `isWeekendNow` voor de opname-hook
-        // verderop (die legt vast WANNEER een CONFIRMED maaltijd plaatsvond,
-        // los van of de anticipatie deze cyclus toevallig actief was).
-        val isWeekendNow = app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextDayNightHelper.isWeekendDay(
-            now.dayOfWeek, preferences.get(StringKey.WeekendDagen)
-        )
-
+        // 🍽️⏰ Maaltijd-tijd-anticipatie — VERWIJDERD (29/07/2026, Ecko)
+        // Zie de kdoc bij mealEpisodeStartBg hierboven voor de reden. Zowel
+        // deze `isWeekendNow`-berekening (die alleen voor de nu-verwijderde
+        // opname-hook bestond) als de hook zelf verderop zijn weg.
         // ─────────────────────────────────────────────
 
         val ctx = buildContext(input, config)
@@ -5086,29 +5076,6 @@ class FCLvNext(
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             plateauSinceVroegeStijging = false
-        }
-
-        // ── Maaltijd-anticipatie: episode vastleggen zodra CONFIRMED (05/07/2026, Ecko) ──
-        // Precies één keer per episode (dedupe via lastRecordedMealTimeEpisodeId),
-        // op het moment dat mealSignal voor het eerst CONFIRMED is — niet bij
-        // UNCERTAIN, om te voorkomen dat een later weer wegvallende hypothese
-        // het geleerde patroon vervuilt. Gebruikt mealEpisodeStartTime (het
-        // begin van de stijging) als het te leren tijdstip, niet het moment
-        // waarop het algoritme zeker werd — dat laatste kan bij een langzame
-        // stijging aanzienlijk later liggen.
-        if (mealSignal.state == MealState.CONFIRMED &&
-            activeMealEpisodeId != -1L &&
-            activeMealEpisodeId != lastRecordedMealTimeEpisodeId &&
-            mealEpisodeStartTime != null
-        ) {
-            mealTimeHistory = FclMealTimeAnticipation.record(
-                mealTimeHistory,
-                mealEpisodeStartTime!!.millis,
-                isWeekendNow
-            )
-            saveMealTimeHistory(mealTimeHistory)
-            lastRecordedMealTimeEpisodeId = activeMealEpisodeId
-            status.append("MAALTIJD-ANTICIPATIE: episode $activeMealEpisodeId vastgelegd voor tijdpatroon-leren\n")
         }
 
         // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
