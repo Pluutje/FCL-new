@@ -117,22 +117,49 @@ object FclNightAiAdvisorResponseParser {
     // buururen kan geven (bv. wel -15% om 00:00, niets om 01:00, dan weer -8%
     // om 02:00). Zelfde probleem, zelfde oplossing als de bestaande
     // regel-gebaseerde adviseur (zie gaussWeightForOffset/computeSpreadAdvice in
-    // Advisorscreen.kt): een Gauss-gewicht (kern 100%, buur ±1u 55%, ±2u 20%)
-    // vult ALLEEN de uren aan die het model zelf niet beoordeeld heeft — een uur
-    // waar de AI wél een eigen oordeel over gaf, wordt nooit overschreven of
-    // afgezwakt door een buurvenster. Afgeleide (gespreide) uren krijgen een
-    // duidelijk gemarkeerde reden/bewijs ("Afgeleid van...") zodat nooit de indruk
-    // ontstaat dat de AI dat specifieke uur zelf heeft beoordeeld, en een iets
-    // lager vertrouwen (×0.8) omdat er voor dát uur geen directe evidentie is.
-    // UITBREIDING (23/07/2026, Ecko): offset ±3 toegevoegd, zelfde als de
-    // rule-based gaussWeightForOffset() in Advisorscreen.kt — voorkomt een
-    // harde knik aan de rand van het kernbereik (bv. -10% op 22:00 direct
-    // gevolgd door 0% op 21:00).
-    private fun gaussWeight(offset: Int): Double = when (kotlin.math.abs(offset)) {
-        0 -> 1.0
-        1 -> 0.55
-        2 -> 0.20
-        3 -> 0.08
+    // Advisorscreen.kt): een Gauss-gewicht vult uren aan die het model zelf niet
+    // beoordeeld heeft.
+    //
+    // HERZIEN (30/07/2026, Ecko, op verzoek — "de sprong tussen 23:00 en 00:00
+    // is er nog steeds"): de kdoc hierboven beloofde "vloeiend", maar de
+    // implementatie vulde tot nu toe UITSLUITEND uren aan waar de AI zelf geen
+    // oordeel over gaf — twee buururen die de AI allebei ONAFHANKELIJK van
+    // elkaar beoordeelde (bv. 23:00 -1%, 00:00 -4%) werden nooit onderling
+    // gladgestreken. Dat was dus een TWEEDE, nooit gedichte opening voor
+    // precies dezelfde sprong als de 29/07-afrondingsfix (roundToStep() →
+    // cleanPrecision() in FclNightBasalAutoAdjuster.kt) al deels oploste. Fix:
+    // blendCoveredHour() hieronder mengt nu ook een eigen AI-oordeel voorzichtig
+    // (30%) met het Gauss-gewogen gemiddelde van de buururen — het eigen oordeel
+    // blijft dominant (70%), maar een geïsoleerde uitschieter naast rustige
+    // buururen wordt niet langer onaangeroerd doorgezet. Bij een geblende uur
+    // toont de UI het gewoon als het definitieve advies; de kdoc-belofte
+    // "afgezwakt door een buurvenster" hieronder klopt dus niet meer letterlijk
+    // en is bijgewerkt.
+    //
+    // TWEEDE HERZIENING (30/07/2026, Ecko, op verzoek — "de eerste verlaging
+    // mag best wat eerder beginnen, gekoppeld aan mijn DIA van 10 uur"): het
+    // gewicht is bewust ASYMMETRISCH gemaakt. Vooruit in de tijd (een kern-uur
+    // heeft nog een NASLEEP in het uur erna) blijft het bestaande, kortere
+    // bereik (±1..3u, ongewijzigd). Terug in de tijd (ANTICIPATIE — een
+    // probleem dat pas om bv. 02:00 zichtbaar wordt, mag al eerder een
+    // voorzichtige daling krijgen, in lijn met hoe lang een basaalwijziging via
+    // de insulinewerkingsduur nog doorwerkt) is het bereik nu 4 uur i.p.v. 3,
+    // met een iets minder steile afname — zie ANTICIPATION_WEIGHTS hieronder.
+    // Dit is een BOVENOP de bestaande BASAL_SHIFT_MINUTES=75min-correctie in
+    // Nightwindowanalyzer.kt (die blijft ongewijzigd — dat is een vaste
+    // natuurkundige onset-vertraging, geen instelbare marge): effectHour ligt
+    // dus al zo'n 30-75 min vóór het waargenomen probleem, en dit
+    // anticipatie-bereik trekt daar bovenop nog eens tot 4 uur voor het
+    // (eventueel al verschoven) kern-uur een geleidelijk aflopend signaal door.
+    private fun gaussWeight(offset: Int): Double = when {
+        offset == 0 -> 1.0
+        offset == 1 -> 0.55    // nasleep: 1u ná een beoordeeld uur
+        offset == 2 -> 0.20
+        offset == 3 -> 0.08
+        offset == -1 -> 0.65   // anticipatie: 1u vóór een beoordeeld/problematisch uur
+        offset == -2 -> 0.50
+        offset == -3 -> 0.35
+        offset == -4 -> 0.20
         else -> 0.0
     }
 
@@ -142,6 +169,14 @@ object FclNightAiAdvisorResponseParser {
         val confidence: Double,
         val label: String
     )
+
+    // 30/07/2026 (Ecko) — hoeveel gewicht een eigen AI-oordeel behoudt bij het
+    // blenden met de buururen hieronder. Bewust ruim aan de kant van "het
+    // eigen oordeel telt het meest" (70/30) — dit mag nooit een uur dat de AI
+    // zelf sterk en met citaten onderbouwde laten verdwijnen in het gemiddelde
+    // van zwakkere buren, alleen de hardste sprongen afvlakken.
+    private const val OWN_JUDGMENT_WEIGHT = 0.7
+    private const val NEIGHBOR_BLEND_WEIGHT = 1.0 - OWN_JUDGMENT_WEIGHT
 
     private fun applySpread(
         rawSuggestions: List<NightBasalSuggestion>,
@@ -160,9 +195,52 @@ object FclNightAiAdvisorResponseParser {
         }
         if (cores.isEmpty()) return rawSuggestions
 
+        // ── Stap 1: eigen AI-oordelen licht blenden met hun buururen ────────
+        // (30/07/2026, Ecko) — zie de herziene kdoc bij gaussWeight() hierboven.
+        // Alleen toegepast als er daadwerkelijk buur-kernen binnen bereik zijn
+        // (weightSum>0); anders blijft het oorspronkelijke, ongewijzigde
+        // voorstel gewoon staan.
+        val blendedCore = rawSuggestions.map { s ->
+            val hour = s.hourLabel.substringBefore(":").toIntOrNull() ?: return@map s
+
+            var weightedNeighborSum = 0.0
+            var weightSum = 0.0
+            val neighborSources = mutableListOf<String>()
+            for (core in cores) {
+                if (core.hour == hour) continue   // alleen ándere kernen tellen als "buur"
+                var offset = hour - core.hour
+                if (offset > 12) offset -= 24
+                if (offset < -12) offset += 24
+                val w = gaussWeight(offset)
+                if (w > 0.0) {
+                    weightedNeighborSum += w * core.signedShiftPct
+                    weightSum += w
+                    neighborSources += core.label
+                }
+            }
+            if (weightSum <= 0.0) return@map s   // geen buren binnen bereik — onaangeroerd
+
+            val neighborAvg = weightedNeighborSum / weightSum
+            val blended = OWN_JUDGMENT_WEIGHT * s.suggestedShiftPct + NEIGHBOR_BLEND_WEIGHT * neighborAvg
+            // Te verwaarlozen verschil (<0,3 procentpunt) niet apart vermelden —
+            // dan was de AI toch al vrijwel in lijn met de buururen.
+            if (kotlin.math.abs(blended - s.suggestedShiftPct) < 0.3) return@map s
+
+            s.copy(
+                direction = if (blended < 0) "LOWER" else "HIGHER",
+                suggestedShiftPct = blended,
+                reasonNl = s.reasonNl + " (licht bijgesteld richting buururen " +
+                    neighborSources.distinct().joinToString(", ") + " voor een vloeiender verloop.)"
+            )
+        }
+
+        // ── Stap 2: overgebleven, nog niet beoordeelde uren aanvullen ───────
+        // (ongewijzigd t.o.v. vóór 30/07/2026, behalve dat gaussWeight()
+        // hierboven nu asymmetrisch is — zie kdoc daar voor de anticipatie-
+        // uitbreiding naar 4u terug in de tijd.)
         val derived = mutableListOf<NightBasalSuggestion>()
         for (targetHour in 0..23) {
-            if (targetHour in coveredHours) continue   // eigen AI-oordeel — niet aanraken
+            if (targetHour in coveredHours) continue   // eigen AI-oordeel — al verwerkt in stap 1
 
             var weightedShiftSum = 0.0
             var weightSum = 0.0
@@ -227,7 +305,7 @@ object FclNightAiAdvisorResponseParser {
         // reden/aanpak als de rule-based lijst in Advisorscreen.kt: een
         // nachtvenster loopt over middernacht heen, dus 22:00/23:00 horen vóór
         // 00:00 te staan, niet erna.
-        return (rawSuggestions + derived)
+        return (blendedCore + derived)
             .sortedBy { s ->
                 val hour = s.hourLabel.substringBefore(":").toIntOrNull() ?: 99
                 if (hour < 12) hour + 24 else hour

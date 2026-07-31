@@ -1404,18 +1404,25 @@ private fun ProfileAutoAdjustTable(
     hoursAtCap: Set<Int>,
     capHits: Map<Int, Int>
 ) {
+    // 30/07/2026 (Ecko, op verzoek) — "Na caps"-kolom verwijderd: sinds de
+    // 29/07-fix (roundToStep() vervangen door cleanPrecision(), zie
+    // FclNightBasalAutoAdjuster.kt) is newVal vrijwel altijd gelijk aan
+    // voorstelVal — het enige overgebleven verschil (een ECHTE cap, zoals
+    // clampToBaseline()/de dagtotaal-herschaling) wordt al zichtbaar gemaakt
+    // via de Status-kolom ("tegen grens"), dus de aparte kolom voegde geen
+    // informatie meer toe. newHourly blijft ongebruikt gewoon als parameter
+    // staan (nog nodig voor atCap hieronder en voor de call-sites elders die
+    // 'm ook aan BasalProfileChart doorgeven).
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Text("Uur", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f))
             Text("Huidig", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Voorstel", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("Na caps", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Status", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         }
         Divider()
         shiftByHour.keys.sorted().forEach { hour ->
             val oldVal = oldHourly[hour] ?: 0.0
-            val newVal = newHourly[hour] ?: oldVal
             val shiftPct = shiftByHour[hour] ?: 0.0
             val voorstelVal = (oldVal * (1.0 + shiftPct / 100.0)).coerceAtLeast(0.0)
             val atCap = hour in hoursAtCap
@@ -1425,7 +1432,6 @@ private fun ProfileAutoAdjustTable(
                 Text("%02d:00".format(hour), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.8f))
                 Text("%.2f".format(oldVal), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 Text("%.2f (%+.0f%%)".format(voorstelVal, shiftPct), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                Text("%.2f".format(newVal), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 Text(status, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             }
         }

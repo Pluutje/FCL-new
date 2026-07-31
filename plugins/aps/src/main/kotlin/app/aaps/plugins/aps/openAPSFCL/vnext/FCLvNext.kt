@@ -3,6 +3,8 @@ package app.aaps.plugins.aps.openAPSFCL.vnext
 
 import android.annotation.SuppressLint
 import org.joda.time.DateTime
+import org.json.JSONArray
+import org.json.JSONObject
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.DoubleKey
@@ -966,6 +968,16 @@ private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
 // Gebruikt door computePeakBrake() (30/06/2026, Ecko: consolidatie van
 // peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
 private var prevRecentSlopeForBrake: Double? = null
+
+// ── Peak-brake persistentie-tracking (01/08/2026, Ecko) ──────────────────
+// Incident 31/07 19:00 maaltijd: het ruwe deceleratiesignaal in
+// computePeakBrake() (curveFit-bevestigde recentSlope-knik) sloeg meerdere
+// keren vals aan tijdens een feitelijk nog stevig doorgaande stijging
+// (BG 11,0→14,8 mmol in ruim een uur). Deze vlag onthoudt of dat RUWE signaal
+// ook al in de vorige cyclus aanwezig was, zodat computePeakBrake() een
+// 2-cycli-persistentie-eis kan hanteren — zelfde precedent als de
+// sensorBlip-streak-guard elders in dit bestand.
+private var prevRawDecelForBrake: Boolean = false
 
 // ── Peak-brake hysterese-tracking (17/07/2026, Ecko) ──────────────────────────────────────────────
 // Incident 17/07 13:12 UTC: iobRatio flipperde cyclus-op-cyclus rond de
@@ -3072,7 +3084,12 @@ private data class PeakBrakeResult(
     val severity: Double,          // 0..1, voor logging/debug
     val slopeCeiling: Double,      // voor logging/debug
     val recentSlopeDrop: Double,   // voor logging/debug
-    val reason: String
+    val reason: String,
+    // 01/08/2026 (Ecko, na analyse incident 31/07 19:00 maaltijd): het RUWE
+    // (nog niet 2-cycli-bevestigde) deceleratiesignaal van DEZE cyclus — zie
+    // prevRawDecel's kdoc bij computePeakBrake(). De aanroeper bewaart dit
+    // voor de volgende cyclus, net als recentSlopeDrop/wasActiveLastCycle.
+    val rawDecelSignal: Boolean
 )
 
 private fun computePeakBrake(
@@ -3080,7 +3097,11 @@ private fun computePeakBrake(
     peak: PeakEstimate,
     config: FCLvNextConfig,
     prevRecentSlope: Double?,
-    wasActiveLastCycle: Boolean = false
+    wasActiveLastCycle: Boolean = false,
+    // 01/08/2026 (Ecko, na analyse incident 31/07 19:00 maaltijd — zie
+    // decelTriggered hieronder): of het RUWE deceleratiesignaal (vóór de
+    // 2-cyclus-bevestiging) ook al in de VORIGE cyclus aanwezig was.
+    prevRawDecel: Boolean = false
 ): PeakBrakeResult {
 
     val suppressThreshold = config.peakIobBrakeSuppressThreshold   // nu actief 0.30
@@ -3091,6 +3112,38 @@ private fun computePeakBrake(
     val maxReduction = 0.45        // ⚠️ eerste inschatting, evt. bijstellen bij volgende update
 
     val recentSlopeDrop = (prevRecentSlope ?: ctx.recentSlope) - ctx.recentSlope
+
+    // BUGFIX (10/07/2026, Ecko): recentSlope is een kort/ruizig signaal — een
+    // tijdelijke knik daarin (bijv. één cyclus lager door meetruis) werd tot nu
+    // toe zonder tegencontrole als "aan het afvlakken" behandeld, ook als de
+    // BG (en het gladdere slope-veld) gewoon stevig bleef doorstijgen. Concreet
+    // voorbeeld: BG 11,3→11,5→11,9→12,8→14,2 mmol, slope bleef 8,6-9,9, maar
+    // recentSlope zakte één cyclus van 12,71 naar 8,79 — genoeg om de rem 2
+    // cycli (10 min) te activeren terwijl curveAcceleration op dat moment nog
+    // gewoon +6,93 was (dus nog altijd versnellend). Zelfde patroon en
+    // dezelfde oplossing als bij bgStijgtNogFors: alleen als de curve-fit
+    // (betrouwbaarder, minder ruizig) de omslag BEVESTIGT, telt de knik mee.
+    val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration <= 0.0
+    val rawDecelSignal = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold &&
+        curveConfirmtOmslag
+
+    // PERSISTENTIE-EIS (01/08/2026, Ecko): incident 31/07 19:00 maaltijd —
+    // curveConfirmtOmslag hierboven filtert al ÉÉN soort ruis (een enkele
+    // rare recentSlope-waarde terwijl de curve-fit nog gewoon versnelt), maar
+    // niet het geval waarin de curve-fit ZELF een paar cycli wiebelt binnen
+    // een feitelijk nog stevig doorgaande stijging — BG liep door van 11,0
+    // naar 14,8 mmol over ruim een uur, maar rawDecelSignal sloeg intussen
+    // meerdere keren aan op cycli waarin de fit tijdelijk "curveAcceleration
+    // <=0" liet zien binnen een verder duidelijk stijgende reeks. Een
+    // 2-cycli-eis (dit signaal moet twee cycli ACHTER ELKAAR aanhouden
+    // voordat het als "afvlakking" telt) filtert dat verder — zelfde aanpak
+    // als de sensorBlip-guard elders met een streak-limiet. Backtest tegen de
+    // volledige logweek (01/08/2026, ~2000 cycli): alle wisselingen in rem-
+    // status gaan richting MINDER rem, nooit meer — waaronder 2 van de 3
+    // valse triggers binnen dit incident zelf. Bij de handvol cycli waar de
+    // rem toevallig al op de eerste cyclus terecht aansloeg, schuift de
+    // activering exact 5 minuten op (de 2e cyclus remt alsnog), nooit langer.
+    val decelTriggered = rawDecelSignal && prevRawDecel
 
     // HYSTERESE (17/07/2026, Ecko): incident 13:12 UTC — iobRatio flipperde
     // cyclus-op-cyclus net rond suppressThreshold (0,45→0,56→0,58→0,49→0,60),
@@ -3105,30 +3158,17 @@ private fun computePeakBrake(
         if (wasActiveLastCycle) suppressThreshold - releaseMargin else suppressThreshold
 
     if (peak.state == PeakPredictionState.IDLE || ctx.iobRatio < effectiveSuppressThreshold) {
-        return PeakBrakeResult(1.0, false, 0.0, 0.50, recentSlopeDrop, "NONE")
+        return PeakBrakeResult(1.0, false, 0.0, 0.50, recentSlopeDrop, "NONE", rawDecelSignal)
     }
 
     val t = smooth01((ctx.iobRatio - suppressThreshold) / (fullBrakeIobRatio - suppressThreshold))
     val slopeCeiling = 0.50 + t * (maxSlopeCeiling - 0.50)
 
-    // BUGFIX (10/07/2026, Ecko): recentSlope is een kort/ruizig signaal — een
-    // tijdelijke knik daarin (bijv. één cyclus lager door meetruis) werd tot nu
-    // toe zonder tegencontrole als "aan het afvlakken" behandeld, ook als de
-    // BG (en het gladdere slope-veld) gewoon stevig bleef doorstijgen. Concreet
-    // voorbeeld: BG 11,3→11,5→11,9→12,8→14,2 mmol, slope bleef 8,6-9,9, maar
-    // recentSlope zakte één cyclus van 12,71 naar 8,79 — genoeg om de rem 2
-    // cycli (10 min) te activeren terwijl curveAcceleration op dat moment nog
-    // gewoon +6,93 was (dus nog altijd versnellend). Zelfde patroon en
-    // dezelfde oplossing als bij bgStijgtNogFors: alleen als de curve-fit
-    // (betrouwbaarder, minder ruizig) de omslag BEVESTIGT, telt de knik mee.
-    val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration <= 0.0
-    val decelTriggered = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold &&
-        curveConfirmtOmslag
     val brakeCondition =
         (ctx.slope <= slopeCeiling || decelTriggered) && ctx.deltaToTarget >= 0.8
 
     if (!brakeCondition) {
-        return PeakBrakeResult(1.0, false, 0.0, slopeCeiling, recentSlopeDrop, "NONE")
+        return PeakBrakeResult(1.0, false, 0.0, slopeCeiling, recentSlopeDrop, "NONE", rawDecelSignal)
     }
 
     val hardBrake = ctx.iobRatio >= lockoutThreshold
@@ -3141,7 +3181,7 @@ private fun computePeakBrake(
     val softBrakeFactor = 1.0 - severity * maxReduction
 
     val reason = if (hardBrake) "HARD_BRAKE" else "SOFT_BRAKE"
-    return PeakBrakeResult(softBrakeFactor, hardBrake, severity, slopeCeiling, recentSlopeDrop, reason)
+    return PeakBrakeResult(softBrakeFactor, hardBrake, severity, slopeCeiling, recentSlopeDrop, reason, rawDecelSignal)
 }
 
 private fun evaluatePostPeak(
@@ -3155,7 +3195,8 @@ private fun evaluatePostPeak(
     sensorBlipStreak: Int = 0,          // huidig aantal opeenvolgende blip-cycli
     bgRising3Cycles: Boolean = false,    // waren de laatste 3 BG-delta's alle positief?
     prevRecentSlope: Double? = null,     // voor computePeakBrake() deceleratie-signaal
-    prevBrakeActive: Boolean = false     // voor computePeakBrake() hysterese (17/07/2026)
+    prevBrakeActive: Boolean = false,    // voor computePeakBrake() hysterese (17/07/2026)
+    prevRawDecel: Boolean = false        // voor computePeakBrake() persistentie-eis (01/08/2026)
 ): PostPeakSummary {
 
     val inAbsorption = isInAbsorptionWindow(now, config)
@@ -3262,7 +3303,7 @@ private fun evaluatePostPeak(
 
     // ✅ GECONSOLIDEERD (30/06/2026): predictieve IOB-rem via computePeakBrake().
     // Vervangt de oude losse peakIobBrake-conditie (ctx.slope <= 0.50 vaste grens).
-    val peakBrake = computePeakBrake(ctx, peak, config, prevRecentSlope, prevBrakeActive)
+    val peakBrake = computePeakBrake(ctx, peak, config, prevRecentSlope, prevBrakeActive, prevRawDecel)
     val peakIobBrake = peakBrake.reason != "NONE"   // soft of hard → telt als brake-signaal
 
 
@@ -3533,6 +3574,7 @@ private fun maybeResetEarlyOnDecel(
     sensorBlipStreakCount = 0
     recentBgHistory.clear()
     peakBrakeWasActiveLastCycle = false
+    prevRawDecelForBrake = false
 
     status.append(
         "EARLY RESET (deceleration): " +
@@ -3779,7 +3821,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v50-2026-07-29-1630"
+    private val FCL_CODE_VERSION = "v51-2026-07-29-2100"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -3993,6 +4035,16 @@ class FCLvNext(
     private val TAPER_STATE_PREFS = "fcl_taper_state"
     private val TAPER_STATE_PEAK_COMMIT_U_KEY = "episode_peak_commit_u"
     private val TAPER_STATE_COMMIT_COUNT_KEY = "episode_commit_count"
+    // 29/07/2026 (Ecko) — vier nieuwe sleutels, zie kdoc's verderop bij elk
+    // veld voor de aanleiding (18:53-incident: app-herstart midden in een
+    // episode van 7 commits "vergat" precies de remmen die op dat moment het
+    // hardst aan het knijpen waren).
+    private val TAPER_STATE_LATE_DECAY_MUL_KEY = "last_known_late_decay_mul"
+    private val TAPER_STATE_BOOST_BUDGET_U_KEY = "episode_boost_budget_u"
+    private val TAPER_STATE_HYPO_DEBT_U_KEY = "episode_hypo_debt_u"
+    private val TAPER_STATE_RECENT_FRONTLOAD_DOSE_U_KEY = "recent_frontload_dose_u"
+    private val TAPER_STATE_RECENT_FRONTLOAD_AT_KEY = "recent_frontload_at_ms"
+    private val TAPER_STATE_RECENT_EPISODE_COMMITS_KEY = "recent_episode_commits_json"
 
     private fun loadEpisodePeakCommitU(): Double =
         context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
@@ -4001,6 +4053,74 @@ class FCLvNext(
     private fun saveEpisodePeakCommitU(value: Double) =
         context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
             .edit().putFloat(TAPER_STATE_PEAK_COMMIT_U_KEY, value.toFloat()).apply()
+
+    private fun loadLateDecayMul(): Double =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(TAPER_STATE_LATE_DECAY_MUL_KEY, 1.0f).toDouble()
+
+    private fun saveLateDecayMul(value: Double) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(TAPER_STATE_LATE_DECAY_MUL_KEY, value.toFloat()).apply()
+
+    private fun loadEpisodeBoostBudgetU(): Double =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(TAPER_STATE_BOOST_BUDGET_U_KEY, 0.0f).toDouble()
+
+    private fun saveEpisodeBoostBudgetU(value: Double) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(TAPER_STATE_BOOST_BUDGET_U_KEY, value.toFloat()).apply()
+
+    private fun loadEpisodeHypoDebtU(): Double =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(TAPER_STATE_HYPO_DEBT_U_KEY, 0.0f).toDouble()
+
+    private fun saveEpisodeHypoDebtU(value: Double) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putFloat(TAPER_STATE_HYPO_DEBT_U_KEY, value.toFloat()).apply()
+
+    private fun loadRecentFrontload(): Pair<Double, DateTime?> {
+        val prefs = context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+        val dose = prefs.getFloat(TAPER_STATE_RECENT_FRONTLOAD_DOSE_U_KEY, 0.0f).toDouble()
+        val atMs = prefs.getLong(TAPER_STATE_RECENT_FRONTLOAD_AT_KEY, -1L)
+        return dose to (if (atMs > 0L) DateTime(atMs) else null)
+    }
+
+    private fun saveRecentFrontload(dose: Double, at: DateTime) =
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(TAPER_STATE_RECENT_FRONTLOAD_DOSE_U_KEY, dose.toFloat())
+            .putLong(TAPER_STATE_RECENT_FRONTLOAD_AT_KEY, at.millis)
+            .apply()
+
+    // recentEpisodeCommits: simpele JSON-array van {"ts":<ms>,"u":<dose>}-objecten
+    // — zelfde lichte stijl als FclActivitySensitivity.History elders. Fouten
+    // bij het lezen (corrupte/oude data) geven gewoon een lege lijst terug,
+    // nooit een crash.
+    private fun loadRecentEpisodeCommits(): MutableList<Pair<DateTime, Double>> {
+        val raw = context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .getString(TAPER_STATE_RECENT_EPISODE_COMMITS_KEY, "") ?: ""
+        if (raw.isBlank()) return mutableListOf()
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<Pair<DateTime, Double>>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(DateTime(o.getLong("ts")) to o.getDouble("u"))
+            }
+            list
+        } catch (e: Exception) {
+            mutableListOf()
+        }
+    }
+
+    private fun saveRecentEpisodeCommits(list: List<Pair<DateTime, Double>>) {
+        val arr = JSONArray()
+        for ((ts, u) in list) {
+            arr.put(JSONObject().put("ts", ts.millis).put("u", u))
+        }
+        context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putString(TAPER_STATE_RECENT_EPISODE_COMMITS_KEY, arr.toString()).apply()
+    }
 
     private fun loadEpisodeCommitCount(): Int =
         context.getSharedPreferences(TAPER_STATE_PREFS, android.content.Context.MODE_PRIVATE)
@@ -4026,7 +4146,17 @@ class FCLvNext(
     // grote frontload-mechanismen die elkaar niet vlak na elkaar onbeperkt
     // mogen verrassen) is er een APART, kort-lopend signaal:
     // recentFrontloadDoseU/recentFrontloadAt, direct hieronder.
-    private var episodeBoostBudgetU: Double = 0.0  // extra U gegeven door earlyBoost
+    // 29/07/2026 (Ecko) — nu persistent, zelfde reden en zelfde set()-patroon
+    // als episodeCommitCount hierboven. AANLEIDING: incident 29/07 18:53 — een
+    // app-herstart om 18:47 (7 commits in, IOB 3,3U) zette episodeBoostBudgetU
+    // terug naar 0, waardoor budgetDecay (die hierop leunt) weer op vol vermogen
+    // stond en de eerstvolgende commit ongeremd doorkwam terwijl BG al richting
+    // 4,8 zakte.
+    private var episodeBoostBudgetU: Double = loadEpisodeBoostBudgetU()  // extra U gegeven door earlyBoost
+        set(value) {
+            if (field != value) saveEpisodeBoostBudgetU(value)
+            field = value
+        }
 
     // ── Kort-lopend frontload-signaal (28/07/2026, Ecko) ────────────────────
     // AANLEIDING: episodeBoostBudgetU (hierboven) een tijdje breder gemaakt
@@ -4051,9 +4181,23 @@ class FCLvNext(
     // (10 min) dat het vanzelf vervalt, en een nieuwe episode die binnen dat
     // venster van een vorige start (bijv. een tweede hap vlak na een grote
     // maaltijd) mag de net gegeven frontload nog steeds meewegen.
-    private var recentFrontloadDoseU: Double = 0.0
-    private var recentFrontloadAt: DateTime? = null
+    // 29/07/2026 (Ecko) — nu tóch gepersisteerd, ondanks de kdoc hierboven die
+    // dit bewust in-memory hield. Reden voor de omkeer: het 10-min venster is
+    // kort, dus het exposure-venster bij een herstart was al klein — maar
+    // Ecko's expliciete instructie na het 18:53-incident was om ook de kans op
+    // een edge-case die hier tóch last van krijgt weg te nemen, ook al is die
+    // kans klein. recordRecentFrontload() hieronder is de enige plek die deze
+    // twee velden zet (verving de eerdere directe toekenning verderop in de
+    // hoofdcyclus) — zie kdoc daar.
+    private var recentFrontloadDoseU: Double = loadRecentFrontload().first
+    private var recentFrontloadAt: DateTime? = loadRecentFrontload().second
     private val RECENT_FRONTLOAD_WINDOW_MIN = 10
+
+    private fun recordRecentFrontload(now: DateTime, doseU: Double) {
+        recentFrontloadDoseU = doseU
+        recentFrontloadAt = now
+        saveRecentFrontload(doseU, now)
+    }
 
     private fun recentFrontloadBudget(now: DateTime): Double {
         val at = recentFrontloadAt ?: return 0.0
@@ -4088,13 +4232,20 @@ class FCLvNext(
     // venster van 90 min gaat dit korte-termijn-geheugen verloren, net als bij
     // recentFrontloadDoseU (10 min), maar met een iets groter (geaccepteerd)
     // blootstellingsvenster gezien de langere duur.
-    private val recentEpisodeCommits: MutableList<Pair<DateTime, Double>> = mutableListOf()
+    //
+    // HERZIEN (29/07/2026, Ecko, na 18:53-incident): tóch gepersisteerd, om
+    // dezelfde reden als recentFrontloadDoseU/At hierboven — Ecko's expliciete
+    // voorkeur om ook kleine, resterende edge-case-kansen weg te nemen.
+    // loadRecentEpisodeCommits()/saveRecentEpisodeCommits() staan hierboven bij
+    // de overige TAPER_STATE-functies.
+    private val recentEpisodeCommits: MutableList<Pair<DateTime, Double>> = loadRecentEpisodeCommits()
     private val RECENT_EPISODE_BUDGET_WINDOW_MIN = 90
 
     private fun recordRecentEpisodeCommit(now: DateTime, doseU: Double) {
         if (doseU > 0.01) recentEpisodeCommits.add(now to doseU)
         val cutoff = now.minusMinutes(RECENT_EPISODE_BUDGET_WINDOW_MIN)
         recentEpisodeCommits.removeAll { it.first.isBefore(cutoff) }
+        saveRecentEpisodeCommits(recentEpisodeCommits)
     }
 
     private fun recentEpisodeBudget(now: DateTime): Double {
@@ -4106,7 +4257,43 @@ class FCLvNext(
     // Mag GROEIEN als een latere commit terecht groter is (echte, doorzettende
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
+    // BUGFIX (29/07/2026, Ecko): dit veld had tot nu toe GEEN eigen setter —
+    // loadEpisodePeakCommitU() werd wél bij init gelezen, maar elke latere
+    // toekenning (episodePeakCommitU = 0.0 op episode-einde,
+    // episodePeakCommitU = maxOf(episodePeakCommitU, committedDose) bij een
+    // nieuwe piek) bleef puur in-memory. De kdoc hierboven en bij
+    // TAPER_STATE_PREFS suggereerde dat dit veld al over herstarts heen
+    // bewaard bleef ("net als episodeCommitCount") — dat klopte dus niet
+    // helemaal: de EERSTE waarde (bij object-constructie) kwam wel uit
+    // SharedPreferences, maar werd nooit teruggeschreven na een update.
+    // Ontdekt tijdens onderzoek naar het 18:53-incident. Zelfde set()-patroon
+    // als episodeCommitCount, nu toegevoegd.
     private var episodePeakCommitU: Double = loadEpisodePeakCommitU()
+        set(value) {
+            if (field != value) saveEpisodePeakCommitU(value)
+            field = value
+        }
+
+    // ── Herstart-blokkade, optie 2 (29/07/2026, Ecko) ───────────────────────
+    // AANLEIDING: 18:53-incident — een app-herstart om 18:47 zat middenin een
+    // episode van 7 commits (episodeCommitCount=7, episodePeakCommitU>0 op dat
+    // moment) en "vergat" precies de remmen (episodeBoostBudgetU/
+    // episodeHypoDebtU/lastKnownLateDecayMul) die op dat moment het hardst aan
+    // het knijpen waren, ondanks de fixes hierboven bij episodeCommitCount/
+    // episodePeakCommitU (die WEL al persisteerden, sinds 15/07). Ecko wilde
+    // niet alleen "reken met de herstart" (optie 1, hierboven/hieronder al
+    // opgelost door alsnog alles te persisteren) maar OOK, als extra, 100%
+    // veilige vangrail: de eerste commit-cyclus na een herstart die middenin
+    // een lopende episode blijkt te zitten, blokkeren, ongeacht wat de formule
+    // verderop berekent. Dit is dus een blunt-maar-zeker vangnet BOVENOP de
+    // (nu complete) state-persistentie, niet een vervanging ervoor.
+    //
+    // Momentopname: precies éénmaal gelezen bij object-constructie (dus vóór
+    // enige reset dit object ooit kan uitvoeren), zodat dit exact weerspiegelt
+    // wat er ná herstart uit SharedPreferences kwam. episodeCommitCount is
+    // hierboven al gedeclareerd/geladen; episodePeakCommitU hierboven ook net.
+    private val hadOngoingEpisodeAtRestart: Boolean =
+        (episodeCommitCount > 0 || episodePeakCommitU > 1e-9)
 
     // ── SensorBlip-teller: seed bij opstart (22/07/2026, Ecko) ──────────────
     // De teller zelf blijft top-level (zie kdoc daar voor waarom), maar het
@@ -4134,9 +4321,20 @@ class FCLvNext(
     // hierboven — zelfde levenscyclus, zelfde reset-momenten. Een cyclus die
     // het commit-pad niet mag draaien, erft zo de LAATST bekende, echte
     // afbouwstand i.p.v. terug te vallen op "geen afbouw".
-    private var lastKnownLateDecayMul: Double = 1.0
+    //
+    // BUGFIX (29/07/2026, Ecko): "overleeft nu de cyclus" hierboven klopte dus
+    // NIET over een app-herstart heen — de init-waarde stond hard op 1.0
+    // (nooit geladen uit SharedPreferences) en de setter riep per ongeluk
+    // saveEpisodePeakCommitU(value) aan, wat bij elke wijziging van dit veld
+    // (zeer frequent) de episode_peak_commit_u-sleutel overschreef met een
+    // lateDecayMul-waarde — precies de bug die de kdoc hierboven had moeten
+    // voorkomen, maar zelf introduceerde. Ontdekt tijdens onderzoek naar het
+    // 18:53-incident. Fix: eigen, dedicated load/save-functies
+    // (loadLateDecayMul()/saveLateDecayMul(), zie TAPER_STATE-blok hierboven),
+    // niet langer gedeeld met episodePeakCommitU.
+    private var lastKnownLateDecayMul: Double = loadLateDecayMul()
         set(value) {
-            if (field != value) saveEpisodePeakCommitU(value)
+            if (field != value) saveLateDecayMul(value)
             field = value
         }
     // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Vastgelegd
@@ -4179,7 +4377,15 @@ class FCLvNext(
     //   - Alleen actief als de stijging CONFIRMED is (sterk genoeg signaal)
     //   - Veiligheidsgrens: maximale compensatie = 1× de normale dosis
     //   - Reset bij episode-start en episode-einde
-    private var episodeHypoDebtU: Double = 0.0  // achtergehouden insuline door hypo-rem
+    //
+    // 29/07/2026 (Ecko) — nu persistent, zelfde reden/patroon als
+    // episodeBoostBudgetU hierboven (18:53-incident: dit veld reset ten
+    // onrechte naar 0 bij een herstart mid-episode).
+    private var episodeHypoDebtU: Double = loadEpisodeHypoDebtU()  // achtergehouden insuline door hypo-rem
+        set(value) {
+            if (field != value) saveEpisodeHypoDebtU(value)
+            field = value
+        }
 
     // ── Post-hypo-rebound rem (24/07/2026, Ecko) — zie kdoc bij
     // POST_HYPO_BRAKE_CATCHUP_RISE hierboven en bij de toepassing verderop.
@@ -4326,6 +4532,7 @@ class FCLvNext(
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
             peakBrakeWasActiveLastCycle = false
+            prevRawDecelForBrake = false
         }
 
         // ── episode exit (niet te snel!) ──
@@ -4374,6 +4581,7 @@ class FCLvNext(
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
             peakBrakeWasActiveLastCycle = false
+            prevRawDecelForBrake = false
             activeMealEpisodeId = -1
             mealEpisodeStartTime = null
             mealEpisodeStartBg = null
@@ -4406,6 +4614,7 @@ class FCLvNext(
                 sensorBlipStreakCount = 0
                 recentBgHistory.clear()
                 peakBrakeWasActiveLastCycle = false
+                prevRawDecelForBrake = false
             }
         }
 
@@ -5481,13 +5690,15 @@ class FCLvNext(
             sensorBlipStreak = sensorBlipStreakCount,
             bgRising3Cycles  = bgRising3Cycles || explosiveRise,
             prevRecentSlope  = prevRecentSlopeForBrake,
-            prevBrakeActive  = peakBrakeWasActiveLastCycle
+            prevBrakeActive  = peakBrakeWasActiveLastCycle,
+            prevRawDecel     = prevRawDecelForBrake
         )
         status.append(postPeak.reason + "\n")
         // bijwerken voor de volgende cyclus (computePeakBrake deceleratie-signaal +
-        // hysterese-status, 17/07/2026)
+        // hysterese-status, 17/07/2026 + persistentie-status, 01/08/2026)
         prevRecentSlopeForBrake = ctx.recentSlope
         peakBrakeWasActiveLastCycle = postPeak.peakBrake.reason != "NONE"
+        prevRawDecelForBrake = postPeak.peakBrake.rawDecelSignal
 
         // ✅ NIEUW: early reset zodra afremmen/omkeer start
         val earlyResetThisCycle = maybeResetEarlyOnDecel(ctx, peak, now, status)
@@ -6246,6 +6457,7 @@ class FCLvNext(
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
             peakBrakeWasActiveLastCycle = false
+            prevRawDecelForBrake = false
 
             status.append("SEGMENT: re-entry → new impulse window\n")
         }
@@ -7741,6 +7953,42 @@ class FCLvNext(
             commandedDose = absoluteVeiligheidsCap
         }
 
+        // ── Herstart-blokkade, optie 2 (29/07/2026, Ecko) ────────────────────
+        // Zie de uitgebreide kdoc bij hadOngoingEpisodeAtRestart (bij de
+        // episodePeakCommitU-declaratie hierboven) voor de volledige aanleiding
+        // (18:53-incident) en de afweging tussen optie 1 (reken met de
+        // herstart — nu opgelost door alsnog ALLE taper-/geheugen-state te
+        // persisteren, zie de fixes bij episodeBoostBudgetU/episodeHypoDebtU/
+        // lastKnownLateDecayMul/recentFrontloadDoseU/recentEpisodeCommits
+        // hierboven) en optie 2 (blunt, 100% veilig tegen hypo's: blokkeer de
+        // eerste commit na een herstart per definitie). Ecko's instructie:
+        // "Bouw maar 1 en 2 samen" — dus dit blok is een EXTRA, onvoorwaardelijke
+        // vangrail bovenop de nu-complete persistentie, niet een vervanging
+        // ervoor. Bewust helemaal aan het eind, na de generieke
+        // absoluteVeiligheidsCap-check hierboven en vlak vóór executeDelivery:
+        // niets muteert commandedDose meer tussen dit punt en de daadwerkelijke
+        // afgifte.
+        //
+        // Vuurt UITSLUITEND op de allereerste cyclus na een (her)start van dit
+        // object (isFirstCycleSinceInit) ÉN alleen als die herstart middenin
+        // een al lopende episode bleek te zitten (hadOngoingEpisodeAtRestart,
+        // momentopname bij constructie — dus vóór dit object ooit iets kon
+        // resetten). Een herstart tussen twee maaltijden door (geen lopende
+        // episode) wordt dus NIET geraakt — daar is een blokkade niet nodig en
+        // zou hij alleen een terechte eerste dosis van een nieuwe maaltijd
+        // vertragen.
+        if (isFirstCycleSinceInit && hadOngoingEpisodeAtRestart && commandedDose > 0.0) {
+            status.append(
+                "🛑 HERSTART-BLOKKADE: eerste cyclus na app-herstart, midden in een " +
+                    "lopende episode (episodeCommitCount=$episodeCommitCount, " +
+                    "episodePeakCommitU=${"%.2f".format(episodePeakCommitU)}U) — " +
+                    "commandedDose (${"%.2f".format(commandedDose)}U) geblokkeerd deze " +
+                    "cyclus, ongeacht de formule hierboven. Vanaf de volgende cyclus " +
+                    "gelden de (nu herstelde) taper-remmen weer normaal.\n"
+            )
+            commandedDose = 0.0
+        }
+
         // ─────────────────────────────────────────────
         // 🔟 Execution: SMB / hybride bolus + basaal
         // ─────────────────────────────────────────────
@@ -7765,8 +8013,7 @@ class FCLvNext(
         // korte-termijn geheugen voor de WFF/EarlyBoost-kruischeck, en vervalt
         // vanzelf na RECENT_FRONTLOAD_WINDOW_MIN minuten.
         if (effectiveDeliveredNow > 0.01) {
-            recentFrontloadDoseU = effectiveDeliveredNow
-            recentFrontloadAt = now
+            recordRecentFrontload(now, effectiveDeliveredNow)
         }
         // Budget-nasleep (29/07/2026, Ecko) — zie kdoc bij recentEpisodeCommits
         // hierboven. Zelfde onvoorwaardelijke update-voorwaarde als hierboven

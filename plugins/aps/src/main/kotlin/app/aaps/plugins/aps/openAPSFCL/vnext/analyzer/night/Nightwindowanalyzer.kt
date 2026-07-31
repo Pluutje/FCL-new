@@ -35,7 +35,29 @@ object NightWindowAnalyzer {
     private const val STEP_MINUTES = 30L
     private const val LAST_WINDOW_START_HOUR = 6
     private const val LAST_WINDOW_START_MINUTE = 30
-    private const val BASAL_SHIFT_MINUTES = 75L
+
+    // 30/07/2026 (Ecko, op verzoek) — was: private const val BASAL_SHIFT_MINUTES
+    // = 75L, een vaste aanname. Ecko's terugkoppeling: dit is geen fysieke
+    // "tijd tot een basaalwijziging BG beïnvloedt" maar een rekenkundige
+    // eigenschap van hoe AAPS basaal-IOB berekent — calculateAbsoluteIobFrom-
+    // BaseBasals() in IobCobCalculatorPlugin.kt zet het profiel-basaal om in
+    // een stroom synthetische 5-min-"bolusjes" die door dezelfde
+    // ICfg.iobCalcForTreatment() gaan als een echte bolus (bevestigd via de
+    // door Ecko aangeleverde broncode). Daarin is `tp = peak` (ICfg.peak, in
+    // minuten) LETTERLIJK het piektijd-argument van de bilineaire
+    // activiteitscurve — dus hoe snel een aanhoudend tekort tegenover het
+    // profiel (bv. tijdens ultra smooth, waar >95% van de TDD via de
+    // temp-basaalroute loopt) zich vertaalt naar een merkbaar negatieve IOB
+    // wordt rechtstreeks door die piektijd bepaald, niet door een vaste 75.
+    // 75 was vermoedelijk gewoon een generieke default-piektijd-aanname.
+    //
+    // Nu een instelbare parameter met 75L als defensieve fallback (zie
+    // build() hieronder) voor het geval de actieve profiel/ICfg niet
+    // beschikbaar is bij het bouwen van de vensters — de aanroepers
+    // (FclNightAiAdvisorScheduler.kt/Fclanalyzerscreen.kt) geven voortaan
+    // de daadwerkelijke ICfg.peak van het actieve profiel door (bij Ecko nu
+    // 50 min, Lyumjev U200).
+    private const val DEFAULT_BASAL_SHIFT_MINUTES = 75L
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -43,7 +65,8 @@ object NightWindowAnalyzer {
         rows: List<FCLCycleLogEntity>,
         episodes: List<EpisodeEntity>,
         profiles: List<BasalProfileHistoryEntity>,
-        zone: ZoneId = ZoneId.of("Europe/Amsterdam")
+        zone: ZoneId = ZoneId.of("Europe/Amsterdam"),
+        basalShiftMinutes: Long = DEFAULT_BASAL_SHIFT_MINUTES
     ): List<NightWindowEntity> {
         if (rows.isEmpty()) return emptyList()
 
@@ -93,7 +116,8 @@ object NightWindowAnalyzer {
                         rows = windowRows,
                         episodes = parsedEpisodes,
                         profiles = profiles,
-                        zone = zone
+                        zone = zone,
+                        basalShiftMinutes = basalShiftMinutes
                     )
                 }
             }
@@ -109,7 +133,8 @@ object NightWindowAnalyzer {
         rows: List<ParsedRow>,
         episodes: List<ParsedEpisode>,
         profiles: List<BasalProfileHistoryEntity>,
-        zone: ZoneId
+        zone: ZoneId,
+        basalShiftMinutes: Long
     ): NightWindowEntity {
         val sortedRows = rows.sortedBy { it.instant }
 
@@ -191,8 +216,8 @@ object NightWindowAnalyzer {
         val driftStrength = 0.0
         val driftReason = ""
 
-        val shiftedStart = startLocal.minusMinutes(BASAL_SHIFT_MINUTES)
-        val shiftedEnd = endLocal.minusMinutes(BASAL_SHIFT_MINUTES)
+        val shiftedStart = startLocal.minusMinutes(basalShiftMinutes)
+        val shiftedEnd = endLocal.minusMinutes(basalShiftMinutes)
         val shiftedMid = shiftedStart.plusMinutes(WINDOW_MINUTES / 2)
         val effectHour = shiftedMid.hour
         val effectHourLabel =

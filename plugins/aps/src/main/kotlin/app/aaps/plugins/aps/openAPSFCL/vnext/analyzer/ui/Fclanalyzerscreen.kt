@@ -333,7 +333,17 @@ fun FclAnalyzerScreen(
                 val recentEpisodes = db.episodeDao().getAllEpisodes()
                 val profiles = db.basalProfileHistoryDao().getAll()
                 if (recentEntities.isNotEmpty()) {
-                    val windows = NightWindowAnalyzer.build(recentEntities, recentEpisodes, profiles)
+                    // 30/07/2026 (Ecko) — zelfde basalShiftMinutes-fix als in
+                    // FclNightAiAdvisorScheduler.rebuildNightWindows(): eigen
+                    // ingestelde piektijd (ICfg.peak) i.p.v. de vaste 75-min-
+                    // aanname, zie de kdoc bij DEFAULT_BASAL_SHIFT_MINUTES in
+                    // Nightwindowanalyzer.kt.
+                    val peakMinutes = app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge
+                        .getProfileFunction()?.getProfile()?.iCfg?.peak?.toLong()?.takeIf { it > 0 }
+                    val windows = if (peakMinutes != null)
+                        NightWindowAnalyzer.build(recentEntities, recentEpisodes, profiles, basalShiftMinutes = peakMinutes)
+                    else
+                        NightWindowAnalyzer.build(recentEntities, recentEpisodes, profiles)
                     db.nightWindowDao().insertNightWindows(windows)
                 }
             }

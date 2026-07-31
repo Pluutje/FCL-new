@@ -234,7 +234,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v4.1.0")
+        appendLine(" 🧠 FCL V7 v4.1.1a")
         appendLine("════════════════════════")
         appendLine()
 
@@ -267,7 +267,7 @@ class FCLvNextStatusFormatter(
         if (ui.recentActivityType != null) {
             appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
         }
-        // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN
+        // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN    lyumjev
         // staat in Settings. HERSCHREVEN 28/07/2026 (Ecko) na het herontwerp
         // in twee componenten: leesbare, begrijpelijke taal i.p.v. kale
         // getallen — zie kdoc bij FclActivitySensitivity.kt voor de
