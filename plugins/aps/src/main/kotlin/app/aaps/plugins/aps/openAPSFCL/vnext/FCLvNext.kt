@@ -754,6 +754,26 @@ private const val TOTAL_NEED_MAX_EXTRA_DECAY = 0.12    // max. extra effectiveDe
 // de volledige analyse (maaltijd 05:12-05:52, vervroegde commit ~13-19 min).
 private const val VROEGE_STIJGING_SUSTAIN_MIN = 15.0      // min. aanhoudend hoge slope vereist (sustainedHighSlopeMinutes)
 private const val VROEGE_STIJGING_PLATEAU_SLOPE = 1.0     // mmol/u — onder deze ctx.slope geldt de stijging als afgevlakt; opent de deur weer voor een eventuele 2e gang
+
+// ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ──────────────
+// Zie de uitgebreide kdoc bij declineStreakMinutes/nieuweMaaltijdTrogBevestigd
+// hieronder voor de volledige aanleiding (3/8 12:18-15:28-incident) en de
+// tegen 5 dagen echte data (30/07-3/08, code-versie v51) doorgerekende
+// kalibratie. Kernidee: alleen een volle "nieuwe maaltijd"-reset toestaan als
+// (1) er een ECHTE, aaneengesloten daling is geweest sinds de vorige reset
+// (geen korte dip), gevolgd door (2) een nieuwe, aantoonbaar STEILE stijging
+// — niet zomaar "een tijdje positieve acceleratie", dat bleek in de
+// doorrekening een te traag/onbetrouwbaar signaal (3 van de 9 kandidaten met
+// die lossere eis waren achteraf risicovol, zie kdoc bij de toepassing).
+private const val NIEUWE_MAALTIJD_DECLINE_SLOPE_MAX = -1.0      // mmol/u — recentSlope onder dit niveau telt mee voor de trog
+private const val NIEUWE_MAALTIJD_DECLINE_DELTA5M_MAX = -0.15   // mmol/5m — alternatieve trog-voorwaarde
+private const val NIEUWE_MAALTIJD_DECLINE_MIN_MINUTES = 20.0    // min. aaneengesloten daal-tijd vereist
+private const val NIEUWE_MAALTIJD_DECLINE_MIN_DROP = 1.0        // mmol — min. daling t.o.v. het lokale hoogtepunt sinds de trog-start
+private const val NIEUWE_MAALTIJD_SLOPE_MIN = 3.0               // mmol/u — HUIDIGE steilheid (niet opgehoopt) vereist voor bevestiging
+private const val NIEUWE_MAALTIJD_RECENT_SLOPE_MIN = 4.0        // mmol/u — fast-lane bevestiging van dezelfde, echte stijging
+private const val NIEUWE_MAALTIJD_IOB_MAX = 0.30                // reset alleen toestaan als er nog niet te veel IOB van de vorige maaltijd over is
+private const val NIEUWE_MAALTIJD_COMMIT_NR_MIN = 4             // alleen relevant als het gewone eenmalige mechanisme (vroegeStijgingBevestigd) al aantoonbaar verbruikt is
+private const val NIEUWE_MAALTIJD_COOLDOWN_MIN = 30             // min. minuten tussen twee nieuwe-maaltijd-resets (voorkomt herhaald vuren binnen dezelfde stijging)
 // Hoeveel bgStijgtNogFors nog boven de normale afbouw mag uitkomen ALS hij
 // afgaat vlak na een net-al-vervroegde grote commit, zolang er nog GEEN
 // afvlakking (plateau) is geweest sinds die vervroegde commit — dus nog
@@ -795,6 +815,12 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 // gevalideerd tegen een ná-piek-overdosering-scenario — alleen tegen het
 // hier beschreven te-vroeg-plafonneren-probleem.
 private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
+
+// Zie kdoc bij de toepassing in hypoProtection() ("Hypo-recovery harde
+// vloer"). Los instelbaar gehouden: bij ongewenst gedrag eerst hier
+// bijstellen (hoger = voorzichtiger, meer situaties geblokkeerd; lager =
+// dichter bij het oude gedrag, alleen blockThreshold zelf als vloer).
+private const val HYPO_CURRENT_BG_HARD_FLOOR = 4.9  // mmol/L
 
 // ── Post-hypo-rebound rem (24/07/2026, Ecko) ────────────────────────────
 // AANLEIDING: 24/07 17:08-17:13 en 18:13-18:23 — een BG-stijging die volgde
@@ -853,6 +879,40 @@ private const val POST_HYPO_BRAKE_CATCHUP_MIN_BG = 7.0 // mmol/L, ondergrens voo
 // geteste drempel (was 90-120 minuten) — zie ook de kdoc bij de ratchet
 // verderop voor waarom dát de eigenlijke fix is.
 private const val POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO = 0.25
+
+// ── Auto-disarm voor de post-hypo-brake (03/08/2026, Ecko) ──────────────
+// AANLEIDING: de rem hierboven heeft geen eigen expiry — alleen een volledige
+// episode-reset (episodeCommitCount etc.) zet 'm terug, en die bleef tijdens
+// de maaltijd van 3/8 (18:03-21:03+) de hele tijd uit omdat de officiële
+// episode-grens niet sloot (zelfde onderliggende "episode sluit niet"-
+// probleem als de NIEUWE-MAALTIJD-fix hierboven adresseert, maar dan voor
+// een ANDER stuk state dat die fix niet meeneemt). Gevolg: 175 minuten lang
+// commandedDose geclampt op smallCorrectionMaxU terwijl BG van 7,7 naar 15,2
+// doorsteeg en het eigen energiemodel (final_dose) steeds 5-10x meer wilde
+// geven.
+//
+// Doorgerekend tegen alle hypo-debt-episodes >20 minuten in de week 27/7-3/8
+// (30 episodes, code_version v43-v52): in 13 daarvan zou deze auto-disarm
+// eerder hebben losgelaten (totaal 834 minuten minder onnodige onderdrukking
+// over de week, waarvan 155 van de 175 minuten in de 3/8-maaltijd). In GEEN
+// van die 13 gevallen kwam de BG binnen 90 minuten na het (vroegere)
+// disarm-moment onder de 4,2 mmol/L — de losstaande, elke cyclus actieve
+// hypoBlockThreshold-check in hypoProtection() blijft namelijk gewoon
+// intact en is de eigenlijke, altijd-actuele veiligheidslaag; deze
+// auto-disarm ontgrendelt alleen de EXTRA geheugen-laag erbovenop zodra BG
+// al ruim boven target zit én de live check toch al "veilig" zegt. De 17
+// episodes waar BG nooit boven target+3 kwam (de gevallen met een reëel
+// dalend beloop nadien, laagste ooit 4,1-4,2 mmol/L) blijven onaangeroerd —
+// de regel is zelf-begrenzend.
+//
+// Grenzen expliciet los instelbaar gehouden (zie kdoc-eis Ecko): mocht dit
+// in de praktijk toch een keer te vroeg loslaten, eerst
+// POST_HYPO_BRAKE_DISARM_ABOVE_TARGET verhogen (minder ver van hypo-zorg af
+// nodig) en/of POST_HYPO_BRAKE_MIN_ARMED_MIN verhogen (langer gewapend
+// blijven voor auto-disarm mag) — geen van beide raakt de losstaande
+// hypoBlockThreshold-check.
+private const val POST_HYPO_BRAKE_DISARM_ABOVE_TARGET = 3.0  // mmol/L boven target, vereist voor auto-disarm
+private const val POST_HYPO_BRAKE_MIN_ARMED_MIN = 15         // min. minuten gewapend voordat auto-disarm mag
 
 // ─────────────────────────────────────────────
 // WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
@@ -1802,6 +1862,45 @@ private fun hypoProtection(
         val capped = maxByHorizon.coerceIn(0.0, plannedU)
         val step = 0.05
         return (kotlin.math.floor(capped / step) * step).coerceIn(0.0, plannedU)
+    }
+
+    // ── Hypo-recovery harde vloer (04/08/2026, Ecko) ─────────────────────
+    // AANLEIDING: 4/8 17:29-17:40 — drie doses (0,09+0,38+0,38=0,85U)
+    // gegeven terwijl bgNow nog maar 4,5/4,7/4,8 was, middenin een
+    // urenlange, nog niet afgeronde ernstige low (dieptepunt 2,8 om 18:35,
+    // het laagste punt van die dag). Geen van de vier bypasses hieronder
+    // was van toepassing (mealSignal was NONE; bgNow lag onder alle
+    // bypass-drempels — 5.5/7.0/7.5) — het was de kale
+    // projectedMin>=blockThreshold-toets verderop die doorliet, puur op
+    // basis van een korte, ondiepe rebound-stijging (macro-slope
+    // 0,81-1,36 mmol/u) na een urenlange daling. Achteraf een tijdelijke
+    // stuiter, geen echt herstel.
+    //
+    // Onvoorwaardelijk, VOOR alle bypasses: zolang bgNow onder
+    // HYPO_CURRENT_BG_HARD_FLOOR zit, wordt niet gedoseerd, ongeacht welke
+    // trend-projectie of bypass daarna nog zou volgen. Bewust een aparte,
+    // iets hogere constante dan blockThreshold (4,70) — bij bgNow<4,70
+    // alleen was 17:29 (4,5) gedekt geweest maar 17:33/17:40 (4,7/4,8) niet.
+    //
+    // Doorgerekend tegen alle 8 beschikbare dagen (27/7-4/8): in totaal 6
+    // cycli met bgNow<5,0 & hypo_active=false & dose>0. Met een vloer van
+    // 4,9 worden alle drie de 4/8-doses gedekt, plus 1 eerder, ogenschijnlijk
+    // onschuldig geval (30/7 18:23, 0,38U bij bgNow 4,7, bleef die dag
+    // stabiel op 4,7-4,9) — bewust geaccepteerd: het kost hooguit een kleine,
+    // vermoedelijk toch niet noodzakelijke correctie, tegenover het risico
+    // van opnieuw doseren midden in een nog niet afgeronde ernstige low. De
+    // twee gevallen op exact bgNow=4,9 (30/7 18:28, 31/7 13:33 — beide bleven
+    // stabiel) vallen er met een STRIKTE "<4,9" bewust buiten.
+    if (ctx.input.bgNow < HYPO_CURRENT_BG_HARD_FLOOR) {
+        return HypoProtection(
+            active = true,
+            projectedMin = projectedMin,
+            projectedMinNoInsulin = projectedMinNoInsulin,
+            projectedMinWithPlannedInsulin = projectedMinWithInsulin,
+            reason = "HYPO PROTECT HARD FLOOR (bgNow=${"%.1f".format(ctx.input.bgNow)} < " +
+                "${"%.1f".format(HYPO_CURRENT_BG_HARD_FLOOR)}, geen bypass toegestaan)",
+            maxSafeDoseU = 0.0
+        )
     }
 
     // fastLaneRising: bypas bij agressieve maaltijdstijging met lage IOB.
@@ -3821,7 +3920,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v51-2026-07-29-2100"
+    private val FCL_CODE_VERSION = "v55-2026-08-04-2130"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4355,6 +4454,60 @@ class FCLvNext(
     private var vroegeStijgingBevestigdUsedThisEpisode: Boolean = false
     private var plateauSinceVroegeStijging: Boolean = false
 
+    // ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ────────
+    // AANLEIDING: incident 3/8 12:18-15:28 — ontbijt (piek 11:03, BG 10,6)
+    // en lunch (12:18-14:13, BG 6,3→10,5) vielen samen tot ÉÉN doorlopende
+    // episode omdat BG tussen beide maaltijden nooit dicht genoeg bij target
+    // kwam (alleen tot 6,3, delta_target bleef >0,6) om de normale
+    // episode-grens (episodeShouldBeActive/Exit A-C, zie updatePeakEstimate())
+    // te laten sluiten. Gevolg: vroegeStijgingBevestigdUsedThisEpisode was al
+    // "verbruikt" door het ontbijt, dus de lunch kreeg NOOIT een eigen,
+    // volwaardige eerste commit — elke lunch-commit liep gewoon door vanaf
+    // commitNr 9+, met een allang uitgewerkte lateDecayMul (0,04-0,21) én
+    // zonder ooit episodePeakCommitU te verankeren (zie firstUnanchoredCap
+    // Factor/PEAK_ANCHOR_THRESHOLD_FRAC), waardoor de hele lunch-stijging
+    // bleef steken op ~0,10-0,17U per cyclus terwijl BG drie uur boven de
+    // 9 mmol bleef — precies tegen de rode draad in ("zo vroeg mogelijk de
+    // volledige benodigde insuline, zonder onveilig te worden").
+    //
+    // OPLOSSING: een "trog-detector" die, ONAFHANKELIJK van de officiële
+    // episode-grens, herkent dat er een ECHTE nieuwe maaltijd bezig is — een
+    // aaneengesloten daling (BG zakt écht, geen korte dip) gevolgd door een
+    // nieuwe, aantoonbaar STEILE stijging — en in dat geval alsnog een volle
+    // "nieuwe maaltijd"-reset geeft (episodeCommitCount, episodePeakCommitU,
+    // vroegeStijgingBevestigdUsedThisEpisode, plateauSinceVroegeStijging).
+    // Zie NIEUWE_MAALTIJD_*-constanten hieronder en de toepassing vlak vóór
+    // "val commitNr = episodeCommitCount + 1".
+    //
+    // KALIBRATIE (doorgerekend tegen 5 dagen echte data, 30/07-3/08, zelfde
+    // codeversie v51): een eerste versie die alleen "sustainedHighSlopeMinutes
+    // >=15 + acceleratie>0" als stijgings-bevestiging gebruikte (dezelfde
+    // voorwaarde als vroegeStijgingBevestigd) gaf 9 kandidaat-momenten, maar 3
+    // daarvan bleken bij het echte vervolgverloop duidelijk RISICOVOL (bijv.
+    // 1/8 22:28: BG stond al vlak en begon vlak dáárna vanzelf te zakken naar
+    // 5,1 met hypo_active=true, terwijl deze eerste versie daar +3,27U extra
+    // had willen geven) — sustainedHighSlopeMinutes is een opgehoopt, dus
+    // TRAAG signaal dat nog "waar" kan zijn terwijl de stijging feitelijk al
+    // aan het pieken/omslaan is. Vervangen door een eis dat de HUIDIGE
+    // steilheid zelf hoog is (NIEUWE_MAALTIJD_SLOPE_MIN/RECENT_SLOPE_MIN) —
+    // daarmee vielen alle 3 risicovolle momenten vanzelf af, en bleven 4
+    // over die stuk voor stuk kloppen met het echte vervolgverloop (BG bleef
+    // in 3 van de 4 gevallen nog fors doorstijgen na het triggermoment).
+    // Totaal over die 5 dagen: ~7U eerder gegeven insuline, verdeeld over 4
+    // echte maaltijden — geen extreme hoeveelheid, en géén van de eerder
+    // geïdentificeerde risicovolle momenten meer aanwezig.
+    //
+    // Bewuste asymmetrie: de trog-eis + steile-stijging-eis + IOB-plafond
+    // maken dit mechanisme selectief (het mist liever een randgeval dan dat
+    // het een keer te veel geeft) — bij twijfel blijft het bestaande,
+    // voorzichtige gedrag (afgebouwde commits) gewoon van kracht, dat is
+    // altijd het veiligere alternatief.
+    private var declineStreakMinutes: Double = 0.0
+    private var declineStreakPeakBg: Double? = null
+    private var declineStreakLastUpdateAt: DateTime? = null
+    private var nieuweMaaltijdTrogBevestigd: Boolean = false
+    private var lastNieuweMaaltijdResetAt: DateTime? = null
+
     // ── Snelle-afremming guard ───────────────────────────────────────────
     // rapidDecelLocked/rapidDecelConfirm: bijgewerkt door
     // computeFastLaneDampening() (27/07/2026, Ecko — zie kdoc daar en bij de
@@ -4395,6 +4548,10 @@ class FCLvNext(
     // actuele BG, dus geen apart eenmalig-gebruikt-vlag meer nodig. Zie kdoc
     // bij de toepassing verderop en bij POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO.
     private var postHypoBrakeBg: Double = 0.0
+    // Tijdstip van wapenen — apart van postHypoBrakeBg (dat ratchet mee met
+    // elke vrijgave) — nodig voor de POST_HYPO_BRAKE_MIN_ARMED_MIN-grace-
+    // period van de auto-disarm hieronder.
+    private var postHypoBrakeArmedAt: DateTime? = null
 
     // ── Sustained Rise tracking ───────────────────────────────────────────
     // Telt hoeveel minuten de slope al aanhoudend boven de drempel is.
@@ -4595,11 +4752,18 @@ class FCLvNext(
             episodeHypoDebtU = 0.0
             postHypoBrakeActive = false
             postHypoBrakeBg = 0.0
+            postHypoBrakeArmedAt = null
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             plateauSinceVroegeStijging = false
+            // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
+            // dezelfde episode-levenscyclus als de twee velden hierboven.
+            declineStreakMinutes = 0.0
+            declineStreakPeakBg = null
+            nieuweMaaltijdTrogBevestigd = false
+            lastNieuweMaaltijdResetAt = null
         }
         if (peakEstimator.active && !episodeShouldBeActive) {
             // Originele exit: duidelijke daling of BG dicht bij target
@@ -5281,11 +5445,18 @@ class FCLvNext(
             episodeHypoDebtU = 0.0
             postHypoBrakeActive = false
             postHypoBrakeBg = 0.0
+            postHypoBrakeArmedAt = null
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             plateauSinceVroegeStijging = false
+            // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
+            // dezelfde episode-levenscyclus als de twee velden hierboven.
+            declineStreakMinutes = 0.0
+            declineStreakPeakBg = null
+            nieuweMaaltijdTrogBevestigd = false
+            lastNieuweMaaltijdResetAt = null
 
             status.append("MEAL EPISODE START id=$activeMealEpisodeId\n")
 
@@ -5321,11 +5492,18 @@ class FCLvNext(
             episodeHypoDebtU = 0.0
             postHypoBrakeActive = false
             postHypoBrakeBg = 0.0
+            postHypoBrakeArmedAt = null
             episodePeakRecentSlope = 0.0
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             plateauSinceVroegeStijging = false
+            // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
+            // dezelfde episode-levenscyclus als de twee velden hierboven.
+            declineStreakMinutes = 0.0
+            declineStreakPeakBg = null
+            nieuweMaaltijdTrogBevestigd = false
+            lastNieuweMaaltijdResetAt = null
         }
 
         // ── Maaltijdtype update (elke cyclus tijdens episode) ─────────────
@@ -5576,6 +5754,43 @@ class FCLvNext(
         if (ctx.iobRatio >= 0.40) {
             sustainedHighSlopeMinutes = 0.0
         }
+
+// ─────────────────────────────────────────────
+// 🍽️➡️🍽️ NIEUWE-MAALTIJD TROG-DETECTIE (RONDE 33, 03/08/2026)
+// Zie de uitgebreide kdoc bij declineStreakMinutes hierboven voor de
+// volledige aanleiding en kalibratie. Houdt bij hoelang BG al aaneengesloten
+// daalt sinds de laatste "nieuwe maaltijd"-reset — dit is de trog-helft van
+// de twee-fasen-check (trog ÉN daarna een aantoonbaar steile nieuwe
+// stijging) die verderop, vlak vóór "val commitNr = episodeCommitCount + 1",
+// een volle reset mag afdwingen ook als de officiële episode-grens niet is
+// gehaald.
+        val minutesSinceDeclineUpdate = minutesSince(declineStreakLastUpdateAt, now)
+            .coerceIn(0, 15).toDouble()
+        val decliningNow =
+            ctx.recentSlope <= NIEUWE_MAALTIJD_DECLINE_SLOPE_MAX ||
+                ctx.recentDelta5m <= NIEUWE_MAALTIJD_DECLINE_DELTA5M_MAX
+        if (decliningNow) {
+            declineStreakPeakBg = maxOf(declineStreakPeakBg ?: ctx.input.bgNow, ctx.input.bgNow)
+            declineStreakMinutes += minutesSinceDeclineUpdate
+            if (declineStreakMinutes >= NIEUWE_MAALTIJD_DECLINE_MIN_MINUTES &&
+                (declineStreakPeakBg ?: 0.0) - ctx.input.bgNow >= NIEUWE_MAALTIJD_DECLINE_MIN_DROP
+            ) {
+                if (!nieuweMaaltijdTrogBevestigd) {
+                    status.append(
+                        "NIEUWE-MAALTIJD TROG BEVESTIGD: ${declineStreakMinutes.toInt()}m dalend, " +
+                            "${"%.2f".format((declineStreakPeakBg ?: 0.0) - ctx.input.bgNow)} mmol vanaf lokaal hoogtepunt\n"
+                    )
+                }
+                nieuweMaaltijdTrogBevestigd = true
+            }
+        } else if (ctx.recentSlope > 0.3) {
+            // Duidelijk weer stijgend: streak-tellers resetten (ruis-tolerantie —
+            // een enkel vlak/licht-stijgend punt breekt de streak NIET, dat zou
+            // een normale, wat grillige daling te snel laten resetten).
+            declineStreakMinutes = 0.0
+            declineStreakPeakBg = null
+        }
+        declineStreakLastUpdateAt = now
 
 // ─────────────────────────────────────────────
 // 📉 ACCELERATIE-TREND (decelereert de stijging, of houdt ze aan?)
@@ -6604,6 +6819,62 @@ class FCLvNext(
                 //   effectiveDecay = 0.20 + 0.23/2.50 = 0.29
                 //   commit 2: ×0.71  commit 3: ×0.42
 
+                // ─────────────────────────────────────────────
+                // 🍽️➡️🍽️ NIEUWE-MAALTIJD RESET (RONDE 33, 03/08/2026, Ecko)
+                // Zie de uitgebreide kdoc bij declineStreakMinutes/
+                // nieuweMaaltijdTrogBevestigd (klasse-velden hierboven) voor de
+                // volledige aanleiding, kalibratie en de tegen 5 dagen echte
+                // data doorgerekende cijfers. MOET vóór "commitNr = episode
+                // CommitCount + 1" staan: het punt van deze reset is precies
+                // dat de eerstvolgende commit weer als commitNr=1 (volledig
+                // ongeplafonneerd, zie cappedFinalDose/firstUnanchoredCapFactor
+                // verderop) én met lateDecayMul=1.0 wordt behandeld — exact
+                // hetzelfde als een normale, verse episode-start, ook al is de
+                // officiële episode-grens (activeMealEpisodeId/episodeTrigger)
+                // niet gesloten geweest.
+                //
+                // Alleen relevant als het gewone eenmalige mechanisme
+                // (vroegeStijgingBevestigd) al aantoonbaar verbruikt is —
+                // vandaar de commitNr>NIEUWE_MAALTIJD_COMMIT_NR_MIN-eis: bij een
+                // lage commitNr doet de bestaande route dit al vanzelf, geen
+                // dubbele/overlappende reset nodig.
+                val nieuweMaaltijdCooldownOver =
+                    lastNieuweMaaltijdResetAt == null ||
+                        minutesSince(lastNieuweMaaltijdResetAt, now) >= NIEUWE_MAALTIJD_COOLDOWN_MIN
+                val nieuweMaaltijdHerkend =
+                    nieuweMaaltijdTrogBevestigd &&
+                        nieuweMaaltijdCooldownOver &&
+                        ctx.slope >= NIEUWE_MAALTIJD_SLOPE_MIN &&
+                        ctx.recentSlope >= NIEUWE_MAALTIJD_RECENT_SLOPE_MIN &&
+                        ctx.consistency >= config.episodeMinConsistency &&
+                        ctx.iobRatio <= NIEUWE_MAALTIJD_IOB_MAX &&
+                        episodeCommitCount + 1 > NIEUWE_MAALTIJD_COMMIT_NR_MIN
+                if (nieuweMaaltijdHerkend) {
+                    status.append(
+                        "NIEUWE MAALTIJD HERKEND (na trog): episodeCommitCount " +
+                            "${episodeCommitCount}→0, lateDecayMul→1.0 (was " +
+                            "${"%.2f".format(lastKnownLateDecayMul)}), slope=" +
+                            "${"%.2f".format(ctx.slope)} rSlope=${"%.2f".format(ctx.recentSlope)} " +
+                            "iobR=${"%.2f".format(ctx.iobRatio)}\n"
+                    )
+                    episodeCommitCount = 0
+                    episodePeakCommitU = 0.0
+                    lastKnownLateDecayMul = 1.0
+                    vroegeStijgingBevestigdUsedThisEpisode = false
+                    plateauSinceVroegeStijging = false
+                    nieuweMaaltijdTrogBevestigd = false
+                    lastNieuweMaaltijdResetAt = now
+                    // 03/08/2026 (Ecko): deze reset was bedoeld voor precies het
+                    // scenario "officiële episode-grens sluit niet" — maar liet
+                    // episodeHypoDebtU/postHypoBrakeActive/postHypoBrakeArmedAt
+                    // ongemoeid, zie kdoc bij POST_HYPO_BRAKE_DISARM_ABOVE_TARGET.
+                    // Nu consistent meegenomen.
+                    episodeHypoDebtU = 0.0
+                    postHypoBrakeActive = false
+                    postHypoBrakeBg = 0.0
+                    postHypoBrakeArmedAt = null
+                }
+
                 val commitNr = episodeCommitCount + 1
                 // Noemer verhoogd van maxSMB*2.0 naar maxSMB*4.0 (07/07/2026, Ecko):
                 // episodeBoostBudgetU telt nu de VOLLEDIGE toegediende dosis (zie
@@ -7005,7 +7276,36 @@ class FCLvNext(
                 val cappedFinalDose = if (commitNr <= 1) {
                     finalDose
                 } else if (!episodePeakAnchored) {
-                    val cap = config.maxSMB * firstUnanchoredCapFactor
+                    val baseCap = config.maxSMB * firstUnanchoredCapFactor
+                    // ── Omslag-rem ook zonder anker (04/08/2026, Ecko) ────────
+                    // AANLEIDING: 4/8 13:26 — bij een gemiddelde maaltijd (piek
+                    // 8,5, nooit >=75% van maxSMB in één commit) verankert
+                    // episodePeakCommitU nooit, dus loopt de HELE episode via
+                    // deze tak. Die kende curveConfirmtOmslag/omslagDiepte
+                    // (hierboven, ~regel 6972-6980/7080) tot nu toe niet — de
+                    // curve-fit had de omslag om 13:26 al bevestigd (r²=0,99,
+                    // curveAcceleration=-2,10) maar deze cap reageerde daar
+                    // niet op: nog 1,08U terwijl BG niet meer steeg.
+                    // Teruggerekend tegen alle 8 beschikbare dagen: 45 cycli
+                    // met een unanchored episode + bevestigde omslag +
+                    // commit_dose_final>0,3U — o.a. ook een deel van de 3/8-
+                    // avondmaaltijd (18:38-18:58) waar dit meespeelde naast de
+                    // in v53 al gefixte post-hypo-brake. Hergebruikt bewust
+                    // dezelfde, al elders beproefde omslagDiepte/
+                    // POST_OMSLAG_DIRECT_CUT_FRACTIE (0,60) als de anchored-
+                    // path's decayFloor hierboven — geen nieuw, ongetest
+                    // mechanisme, alleen hetzelfde signaal nu ook hier
+                    // toegepast. commitNr<=1 blijft bewust ongemoeid (idem
+                    // hierboven).
+                    val omslagCapCut = omslagDiepte * POST_OMSLAG_DIRECT_CUT_FRACTIE
+                    val cap = (baseCap * (1.0 - omslagCapCut))
+                        .coerceAtLeast(config.minCommitDose * 0.5)
+                    if (omslagCapCut > 0.001 && cap < baseCap - 1e-9) {
+                        status.append(
+                            "FIRST-ANCHOR CAP OMSLAG-REM: ${"%.2f".format(baseCap)}→${"%.2f".format(cap)}U " +
+                                "(diepte=${"%.2f".format(omslagDiepte)})\n"
+                        )
+                    }
                     if (finalDose > cap) {
                         status.append(
                             "FIRST-ANCHOR CAP: predictedPeak=${"%.1f".format(peak.predictedPeak)} " +
@@ -7492,12 +7792,33 @@ class FCLvNext(
         ) {
             postHypoBrakeActive = true
             postHypoBrakeBg = ctx.input.bgNow
+            postHypoBrakeArmedAt = now
             status.append(
                 "POST-HYPO BRAKE AAN: episodeHypoDebtU=${"%.2f".format(episodeHypoDebtU)}U, " +
                     "iobRatio=${"%.2f".format(ctx.iobRatio)} bij CONFIRMED stijging " +
                     "(bgNow=${"%.1f".format(ctx.input.bgNow)}) — mogelijk correctie-koolhydraten " +
                     "i.p.v. nieuwe maaltijd\n"
             )
+        }
+
+        // ── Auto-disarm (zie kdoc bij POST_HYPO_BRAKE_DISARM_ABOVE_TARGET/
+        // POST_HYPO_BRAKE_MIN_ARMED_MIN hierboven) ─────────────────────────
+        // Bewust VOOR de RATCHET hieronder: als hier disarmed wordt, telt
+        // dit cyclus meteen als normaal (geen clamping meer dit cyclus),
+        // i.p.v. pas de volgende cyclus.
+        if (postHypoBrakeActive && !logRow.hypoActive &&
+            minutesSince(postHypoBrakeArmedAt, now) >= POST_HYPO_BRAKE_MIN_ARMED_MIN &&
+            ctx.input.bgNow >= ctx.input.targetBG + POST_HYPO_BRAKE_DISARM_ABOVE_TARGET
+        ) {
+            status.append(
+                "POST-HYPO BRAKE AUTO-DISARM: bgNow=${"%.1f".format(ctx.input.bgNow)} " +
+                    "(target+${"%.1f".format(POST_HYPO_BRAKE_DISARM_ABOVE_TARGET)} of hoger), " +
+                    "${minutesSince(postHypoBrakeArmedAt, now)}m gewapend, geen actieve hypo-projectie " +
+                    "dit cyclus → rem los, episodeHypoDebtU gewist\n"
+            )
+            postHypoBrakeActive = false
+            episodeHypoDebtU = 0.0
+            postHypoBrakeArmedAt = null
         }
 
         // RATCHET (25/07/2026, Ecko): was een eenmalige catch-up ("1x los,

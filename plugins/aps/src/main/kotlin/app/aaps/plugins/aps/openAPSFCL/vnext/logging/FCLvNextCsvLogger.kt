@@ -243,6 +243,16 @@ data class FCLvNextCsvLogRow(
     var earlyResetThisCycle: Boolean = false,
     var downtrendLocked: Boolean = false,
     var sensorBlipActive: Boolean = false
+    // 03/08/2026 (Ecko): een CSV-kolom voor de nieuwe auto-disarm (post-hypo-
+    // brake) is BEWUST NIET toegevoegd — dit veld is al 155 constructor-
+    // parameters groot (allemaal met default-waarde), en het 156e veld
+    // veroorzaakte een VerifyError bij opstarten (invoke-direct/range over de
+    // DEX-verifier-grens, zelfde bugklasse als ooit bij FCLCycleLogEntity, zie
+    // de kdoc daar over @Embedded-groepering). Zichtbaar in de logs voorlopig
+    // alleen via de vrije-tekst status-regel "POST-HYPO BRAKE AUTO-DISARM: ...".
+    // Een eigen CSV-kolom vereist eerst dezelfde @Embedded-herstructurering
+    // hier als bij FCLCycleLogEntity — apart, zorgvuldig doorgerekend traject,
+    // geen los-eind-toevoeging.
 ) {
     // ── Diagnose-uitbreiding (16/07/2026, Ecko) — v8→v9 schema-bump ────────
     // BEWUST BUITEN de primaire constructor (i.t.t. alle velden hierboven):
