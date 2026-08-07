@@ -548,9 +548,21 @@ class DetermineBasalFCL @Inject constructor(
 
         //   val bgHistoryPoints = getHistoricalBGData(2)
 
+        // ✅ NIEUW (07/08/2026, Ecko-diagnose "timing-gaten") — registreer de
+        // actuele meting (die hierboven al gevalideerd is: bg/minAgo/noise-
+        // checks liggen allemaal VOOR dit punt, met early-return) in
+        // FCLvNextBgHistoryProvider's eigen fallback-buffer, onafhankelijk
+        // van AAPS's bucketed-data-cache. Zie de uitgebreide kdoc bij
+        // recordCurrentReading()/getLastHoursResilient() in
+        // FCLvNextBgHistoryProvider.kt voor de volledige analyse: AAPS's
+        // eigen cache gooit zichzelf soms leeg (isAbout5minData-omslag) en
+        // heeft dan ~25 minuten nodig om zich weer op te bouwen, óók als
+        // FCLGlucoLink gewoon elke 5 minuten een geldige meting aflevert.
+        bgHistoryProvider.recordCurrentReading(DateTime(bgTime), bg / 18.0)
+
         val bgHistoryPoints =
             bgHistoryProvider
-                .getLastHours(2)
+                .getLastHoursResilient(2)
                 .map {
                     BGDataPoint(
                         timestamp = it.time,
@@ -743,7 +755,7 @@ class DetermineBasalFCL @Inject constructor(
                 // 06/07/2026 (Ecko) — zelfde bron/pad als FCLvNext zelf gebruikt
                 // voor trends/slope (zie FCLvNextBgHistoryProvider.kt), dus dit
                 // toont daadwerkelijk wat FCLvNext ziet, niet een aparte/losse lookup.
-                last3DbPoints = bgHistoryProvider.getLastHours(1).takeLast(3),
+                last3DbPoints = bgHistoryProvider.getLastHoursResilient(1).takeLast(3),
                 // 22/07/2026 (Ecko) — leesbare pompnaam + werkelijke max-basaal
                 // (dezelfde, al bestaande pomptype-bewuste waarde als
                 // profile.max_basal, zie computeRealMaxBasalUh in

@@ -3270,7 +3270,40 @@ private fun computePeakBrake(
         return PeakBrakeResult(1.0, false, 0.0, slopeCeiling, recentSlopeDrop, "NONE", rawDecelSignal)
     }
 
-    val hardBrake = ctx.iobRatio >= lockoutThreshold
+    // ── Geen HARD_BRAKE tijdens ondubbelzinnig nog versnellende stijging
+    // (06/08/2026, Ecko) ──────────────────────────────────────────────────
+    // AANLEIDING: 6/8 19:00-19:05 avondmaaltijd — hardBrake vuurde puur op
+    // iobRatio(0,61)>=lockoutThreshold(0,55), terwijl curveAcceleration nog
+    // +6,67/+(-0,48) was (nog geen bevestigde omslag) EN recentSlope nog
+    // 4,70-5,04 mmol/u (overduidelijk nog stijgend) — géén van beide signalen
+    // wees op een naderende top. Gevolg: BG steeg ongeremd door van 8,5 naar
+    // 14,1 mmol terwijl de commit-formule twee cycli (10 min) volledig op 0
+    // stond. slopeCeiling hierboven schaalt mee omhoog met iobRatio, waardoor
+    // bij hoge IOB (die bij een grote maaltijd nu juist legitiem hoog oploopt
+    // door eerdere, correcte grote commits) een nog stevig stijgende slope
+    // toch als "vlak genoeg" telt.
+    //
+    // Backtest (3/8, 4/8, 6/8, 105 unieke PEAK_IOB_BRAKE lockout-momenten):
+    // de smalle combinatie curveAcceleration>0 (curve zelf nog versnellend,
+    // dus strenger dan "geen bevestigde omslag") ÉN recentSlope>2,0 mmol/u
+    // (ondubbelzinnig nog stijgend) selecteert 6 van de 105 momenten. Van de
+    // 5 met bruikbare vervolgdata bleef BG in 4 gevallen nog 0,9-5,5 mmol
+    // dóórstijgen in de eerstvolgende 20-40 min (incl. dit 6/8-moment zelf,
+    // en 3 momenten uit de al bekende 3/8-avondmaaltijd — dus mogelijk een
+    // derde, deels onafhankelijk meespelend mechanisme in diezelfde episode,
+    // naast de al gefixte post-hypo-brake (v53) en omslag-rem (v55)). Slechts
+    // 1 daalde alsnog. Laagste gemeten BG binnen 40 min ná zo'n moment, over
+    // alle 5: 6,9 mmol — geen enkel geval kwam ook maar in de buurt van hypo.
+    //
+    // Bewust een SMALLE gate (twee onafhankelijke, strenge voorwaarden) i.p.v.
+    // simpelweg "geen bevestigde omslag": een bredere toets (curveConfirmtOmslag
+    // alleen) raakte 28 van de 105 momenten, waarvan 81% van de analyseerbare
+    // gevallen BG binnen 40 min alsnog daalde — de hardBrake was daar dus
+    // vaker terecht vroeg dan te vroeg. Bij een treffer relaxeert dit alleen
+    // hardBrake naar softBrake (nog altijd tot -45% reductie via severity
+    // hieronder) — geen vrije, ongeremde dosis.
+    val stillClearlyAccelerating = ctx.curveAcceleration > 0.0 && ctx.recentSlope > 2.0
+    val hardBrake = ctx.iobRatio >= lockoutThreshold && !stillClearlyAccelerating
 
     val severity = smooth01(
         0.5 * ((ctx.iobRatio - suppressThreshold) / (lockoutThreshold - suppressThreshold)) +
@@ -3920,7 +3953,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v55-2026-08-04-2130"
+    private val FCL_CODE_VERSION = "v56-2026-08-06-2100"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -7298,7 +7331,21 @@ class FCLvNext(
                     // toegepast. commitNr<=1 blijft bewust ongemoeid (idem
                     // hierboven).
                     val omslagCapCut = omslagDiepte * POST_OMSLAG_DIRECT_CUT_FRACTIE
-                    val cap = (baseCap * (1.0 - omslagCapCut))
+                    // ── Koppel de unanchored-cap ook aan lateDecayMul (06/08/2026, Ecko) ──
+                    // AANLEIDING: 6/8 06:24 — ontbijt (piek 8,2, nooit verankerd). De
+                    // commit-tak zelf was al volledig afgebouwd (commitDoseRaw=0,00,
+                    // lateDecayMul=0,04 — 96% afbouw) ná een bevestigde omslag
+                    // (curveAcceleration=-6,18, r²=0,96), maar committedDose =
+                    // maxOf(cappedFinalDose, commitDose) liet de finalDose-tak alsnog
+                    // winnen: 0,79U, want déze cap kende alleen omslagCapCut (max -60%)
+                    // en negeerde lateDecayMul volledig — in tegenstelling tot de
+                    // ANCHORED tak hieronder, die finalDose al langer plafonneert op
+                    // 'episodePeakCommitU * lateDecayMul'. Dezelfde koppeling nu ook
+                    // hier, zodat een al bevestigd sterk-afgebouwd commit-signaal niet
+                    // meer via de andere tak wordt overruled. minCommitDose*0.5 blijft
+                    // de ondergrens (nooit volledig naar 0, zoals bij de eerdere
+                    // omslag-rem-fix).
+                    val cap = (baseCap * (1.0 - omslagCapCut) * lateDecayMul)
                         .coerceAtLeast(config.minCommitDose * 0.5)
                     if (omslagCapCut > 0.001 && cap < baseCap - 1e-9) {
                         status.append(

@@ -53,12 +53,14 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.NSAndroidClientImpl
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
+import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.remotemodel.LastModified
 import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.core.objects.extensions.freshness
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.AuthorizedClientsRepository
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
@@ -123,6 +125,7 @@ import java.security.InvalidParameterException
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.time.Duration.Companion.milliseconds
 
 @Singleton
 class NSClientV3Plugin @Inject constructor(
@@ -146,6 +149,7 @@ class NSClientV3Plugin @Inject constructor(
     private val clientControlReceiver: ClientControlReceiver,
     private val clientControlRoundTrip: ClientControlRoundTrip,
     private val orphanDetector: OrphanDetector,
+    private val authorizedClientsRepository: AuthorizedClientsRepository,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
     private val iobCobCalculator: IobCobCalculator,
@@ -182,6 +186,26 @@ class NSClientV3Plugin @Inject constructor(
         // Rate-limit for requestMasterProbe so screen recompositions / banner flaps / reconnect bursts
         // don't spam pings + settings re-fetches at the master.
         private val PROBE_MIN_INTERVAL_MS = T.secs(5).msecs()
+
+        // Calibrated-waarde NS-sync (zie findRecalculatedMgdl/scheduleRecalculatedCorrection):
+        // tolerantie tussen het CGM-meetmoment en de dichtstbijzijnde bucketed/recalculated
+        // waarde — UKF-smoothing/kalibratie loopt asynchroon ná de meting, dus dit dekt normale
+        // pipeline-jitter zonder een verkeerde/oude waarde te matchen.
+        private val ENTRY_RECALC_TOLERANCE_MS = T.secs(150).msecs()  // 2.5 min, dekt alle xDrip-intervals
+        // Alleen entries jonger dan dit komen in aanmerking voor de achtergrond-correctie
+        // hieronder. Historische/backfill-entries (bulk-resync) staan sowieso niet meer in de
+        // bucketed data (die houdt maar een rollend venster van enkele uren bij) — daar zou
+        // pollen alleen 90s lang zinloos werk zijn, per entry, tijdens een resync van mogelijk
+        // duizenden entries.
+        private val ENTRY_RECENT_MS = T.mins(5).msecs()
+        // Hoe lang de achtergrond-correctie blijft pollen voordat hij het stilzwijgend opgeeft.
+        // Ruimer dan de oude blokkerende wait (was 10s, hield de hele upload-queue op) omdat
+        // deze poll nu niet meer in de kritieke pad zit — een trage/drukke pipeline kost nu
+        // alleen tijd tot de correctie binnenkomt, niet tot de eerstvolgende NS-upload.
+        private val CORRECTION_MAX_WAIT_MS = T.secs(90).msecs()
+        private val CORRECTION_POLL_INTERVAL_MS = T.secs(2).msecs()
+        // Kleine afrondingsverschillen zijn geen reden voor een extra NS-call.
+        private const val CORRECTION_MIN_DELTA_MGDL = 0.5
     }
 
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -287,7 +311,7 @@ class NSClientV3Plugin @Inject constructor(
                             runCatching { clientControlReceiver.processPending() }
                                 .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl poll failed: ${it.message}", it) }
                         }
-                        delay(CLIENT_CONTROL_POLL_MS)
+                        delay(CLIENT_CONTROL_POLL_MS.milliseconds)
                     }
                 }
         }
@@ -598,6 +622,19 @@ class NSClientV3Plugin @Inject constructor(
         ) { paired, control -> !paired || control }
             .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), true)
 
+    // See [NsClient.pairedClientCountFlow]. Master-side count of ACTIVE paired clients (pending offers
+    // excluded), driven off the same roster the Authorized clients screen shows. Always 0 on a client.
+    // Seeded with the synchronous current count so the SetupWizard status line renders correctly on first frame.
+    // `by lazy` keeps that seed out of the constructor - plugins are built by Dagger inside
+    // MainApp.onCreate on the main thread, and the seed reads prefs and parses JSON. First access is the
+    // first composition of the status line, when the app is already running.
+    override val pairedClientCountFlow: StateFlow<Int> by lazy {
+        if (config.AAPSCLIENT) MutableStateFlow(0).asStateFlow()
+        else authorizedClientsRepository.observe()
+            .map { list -> list.count { it.state == ClientState.Active } }
+            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), authorizedClientsRepository.current(dateUtil.now()).count { it.state == ClientState.Active })
+    }
+
     private fun setClient() {
         if (nsAndroidClient == null)
             nsAndroidClient = NSAndroidClientImpl(
@@ -794,79 +831,63 @@ class NSClientV3Plugin @Inject constructor(
         return false
     }
 
+    /**
+     * Best-effort, non-blocking lookup van de gecalibreerde + UKF-gesmoothe waarde voor [ts] uit
+     * de in-memory bucketed data (InMemoryGlucoseValue.recalculated — dezelfde waarde die
+     * FCLvNext gebruikt om op te doseren). Geeft direct null terug als deze nog niet beschikbaar
+     * is; de aanroeper beslist of/hoe daarna nog geprobeerd wordt (zie [scheduleRecalculatedCorrection]).
+     */
+    private fun findRecalculatedMgdl(ts: Long, toleranceMs: Long = ENTRY_RECALC_TOLERANCE_MS): Double? {
+        val bucketed = iobCobCalculator.ads.getBucketedDataTableCopy()
+        if (bucketed.isNullOrEmpty()) return null
+        val best = bucketed.minByOrNull { kotlin.math.abs(it.timestamp - ts) } ?: return null
+        val delta = kotlin.math.abs(best.timestamp - ts)
+        return if (delta <= toleranceMs && best.recalculated > 39.0) best.recalculated else null
+    }
+
+    /**
+     * Fallback-pad: de entry is met de ruwe waarde verzonden omdat de gecalibreerde/gesmoothe
+     * waarde ([findRecalculatedMgdl]) op verzendmoment nog niet klaar was. In plaats van de
+     * upload-queue te blokkeren met een synchrone wait (de oude aanpak — tot 10s per entry, zonder
+     * garantie, en die tijd ging af van elke andere wachtende upload), pollt dit op de achtergrond
+     * en corrigeert de zojuist aangemaakte NS-entry via UPDATE zodra de gecalibreerde waarde alsnog
+     * verschijnt. Begrensd en zelf-beëindigend: geeft na [CORRECTION_MAX_WAIT_MS] stilzwijgend op —
+     * dit is een best-effort correctie, geen kritiek pad.
+     */
+    private fun scheduleRecalculatedCorrection(nightscoutId: String, ts: Long, sentSgv: Double, baseData: NSSgvV3) {
+        scope.launch {
+            var waited = 0L
+            while (waited <= CORRECTION_MAX_WAIT_MS) {
+                delay(CORRECTION_POLL_INTERVAL_MS)
+                waited += CORRECTION_POLL_INTERVAL_MS
+                val recalc = findRecalculatedMgdl(ts) ?: continue
+                if (kotlin.math.abs(recalc - sentSgv) < CORRECTION_MIN_DELTA_MGDL) return@launch
+                val client = nsAndroidClient ?: return@launch
+                val corrected = baseData.copy(sgv = recalc, identifier = nightscoutId)
+                runCatching { client.updateSvg(corrected) }
+                    .onSuccess { result ->
+                        if (result.response == 200) {
+                            nsClientRepository.addLog("◄ CORRECTED", "entries $nightscoutId raw=$sentSgv -> recalc=$recalc")
+                        } else {
+                            aapsLogger.debug(LTag.NSCLIENT, "Recalculated correction for $nightscoutId got response=${result.response}: ${result.errorResponse}")
+                        }
+                    }
+                    .onFailure { aapsLogger.error(LTag.NSCLIENT, "Recalculated correction failed for $nightscoutId", it) }
+                return@launch
+            }
+        }
+    }
+
     private suspend fun dbOperationEntries(collection: String = "entries", dataPair: DataSyncSelector.PairGlucoseValue, progress: String, operation: Operation): Boolean {
         val call = when (operation) {
             Operation.CREATE -> nsAndroidClient?.let { return@let it::createSgv }
             Operation.UPDATE -> nsAndroidClient?.let { return@let it::updateSvg }
         }
         try {
-            // Zoek de gecalibreerde + gesmoothe waarde op uit de in-memory bucketed data.
-            // getBucketedDataTableCopy() bevat InMemoryGlucoseValue met .recalculated
-            // (= na LinearCalibration + UKF smoothing) — dezelfde waarde die FCLvNext gebruikt.
-            // Als de waarde niet gevonden wordt (bijv. bij oudere entries) valt terug op GV.value.
-            // Probleem: NS-sync triggert direct op DB_CHANGED(GV), maar IobCobCalculator
-            // verwerkt de nieuwe GV asynchroon. Voor recente entries (< 300s oud) wachten
-            // we tot 10 seconden op de bucketed data — daarna fallback naar raw.
-            val recalculatedMgdl: Double = run {
-                val ts = dataPair.value.timestamp
-                val toleranceMs = 150_000L  // ±2.5 minuten: dekt alle xDrip-intervals
-                // BUGFIX (20/06/2026, Ecko): was 90_000L. Dat is de leeftijd van de
-                // METING zelf, niet van het moment waarop deze code daadwerkelijk
-                // draait — en daar zit het probleem. Bij drukte (WorkManager-keten
-                // LoadStatusWorker→...→DataSyncWorker bezig met andere taken, een
-                // net afgeronde sync, etc.) kan er ruim meer dan 90s zitten tussen
-                // het ontstaan van de meting en het moment dat dbOperationEntries()
-                // voor díe meting wordt uitgevoerd. Op dat moment was de meting dus
-                // allang "niet meer recent" volgens de oude grens — terwijl de
-                // herberekening (die door diezelfde drukke AAPS-instantie moet
-                // gebeuren) op dat moment evengoed nog bezig kan zijn. Resultaat:
-                // precies in de situaties waarin AAPS het drukst is, valt deze check
-                // het vaakst terug op de ruwe waarde — exact het patroon dat op de
-                // M5-stack zichtbaar werd.
-                // 300_000L (5 min = één volledige CGM-cyclus) geeft veel meer marge
-                // voor pipeline-vertraging, zonder de bulk/historische resync-
-                // prestaties te raken: entries uit een volledige hersync zijn typisch
-                // uren tot dagen oud, dus ruim boven deze nieuwe grens — die blijven
-                // gewoon zonder wachttijd verwerkt, zoals nu ook al het geval is.
-                val isRecentEntry = (System.currentTimeMillis() - ts) < 300_000L
-                val maxWaitMs = if (isRecentEntry) 10_000L else 0L
-                val pollIntervalMs = 500L
-                var waited = 0L
-                var result: Double? = null
-                while (result == null && waited <= maxWaitMs) {
-                    val bucketed = iobCobCalculator.ads.getBucketedDataTableCopy()
-                    if (!bucketed.isNullOrEmpty()) {
-                        val best = bucketed.minByOrNull { kotlin.math.abs(it.timestamp - ts) }
-                        val delta = if (best != null) kotlin.math.abs(best.timestamp - ts) else Long.MAX_VALUE
-                        if (best != null && delta <= toleranceMs && best.recalculated > 39.0) {
-                            aapsLogger.debug(LTag.NSCLIENT, "recalculated lookup: ts=$ts match=${best.timestamp} delta=${delta}ms recalc=${best.recalculated} waited=${waited}ms")
-                            result = best.recalculated
-                        }
-                    }
-                    if (result == null && waited < maxWaitMs) {
-                        kotlinx.coroutines.delay(pollIntervalMs)
-                        waited += pollIntervalMs
-                    } else break
-                }
-                if (result == null) {
-                    aapsLogger.debug(LTag.NSCLIENT, "recalculated lookup: geen match na ${waited}ms, fallback naar raw=${dataPair.value.value}")
-                }
-                result ?: dataPair.value.value
-            }
+            val ts = dataPair.value.timestamp
+            val recalculatedMgdl = findRecalculatedMgdl(ts)
             val baseData = dataPair.value.toNSSvgV3()
-            val data = NSSgvV3(
-                isValid    = baseData.isValid,
-                date       = baseData.date,
-                utcOffset  = baseData.utcOffset,
-                filtered   = baseData.filtered,
-                unfiltered = dataPair.value.value,   // ruwe sensorwaarde als unfiltered
-                sgv        = recalculatedMgdl,       // gecalibreerd + gesmooth
-                units      = baseData.units,
-                direction  = baseData.direction,
-                noise      = baseData.noise,
-                device     = baseData.device,
-                identifier = baseData.identifier
-            )
+            val data = baseData.copy(unfiltered = dataPair.value.value, sgv = recalculatedMgdl ?: baseData.sgv)
             val id = dataPair.value.ids.nightscoutId
             nsClientRepository.addLog(
                 when (operation) {
@@ -903,6 +924,11 @@ class NSClientV3Plugin @Inject constructor(
                 result.identifier?.let {
                     dataPair.value.ids.nightscoutId = it
                     storeDataForDb.addToNsIdGlucoseValues(dataPair.value)
+                    if (operation == Operation.CREATE && recalculatedMgdl == null &&
+                        (System.currentTimeMillis() - ts) < ENTRY_RECENT_MS
+                    ) {
+                        scheduleRecalculatedCorrection(nightscoutId = it, ts = ts, sentSgv = data.sgv, baseData = baseData)
+                    }
                 }
                 slowDown()
                 return true
