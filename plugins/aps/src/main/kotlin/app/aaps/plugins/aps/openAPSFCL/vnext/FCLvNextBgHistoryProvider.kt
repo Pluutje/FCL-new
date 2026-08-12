@@ -11,7 +11,7 @@ import kotlin.math.max
  * Single source of truth voor:
  * - determineBasal
  * - FCLvNext input
- * - observatie-learning
+ * - observatie-learning       random
  *
  * Alle waarden worden geleverd in mmol/L en gesorteerd (oudste → nieuwste).
  *

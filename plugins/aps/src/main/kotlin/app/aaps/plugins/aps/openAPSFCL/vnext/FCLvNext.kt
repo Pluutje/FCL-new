@@ -816,6 +816,34 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 // hier beschreven te-vroeg-plafonneren-probleem.
 private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
 
+// ── AIGF-B eigen freeze-drempel, losstaand van PEAK_ANCHOR_THRESHOLD_FRAC
+// (07/08/2026, Ecko) ──────────────────────────────────────────────────────
+// AANLEIDING: "Deze maaltijd: nog geen eerste bevestigd commit" bleef de
+// hele maaltijd staan — ook bij de 6/8-avondmaaltijd (13,48U cumulatief,
+// BG naar 14,1) haalde GEEN ENKELE losse commit ooit 75% van maxSMB (dat
+// is precies het "vaak-niet-verankert-bij-gemiddelde-maaltijden"-probleem
+// dat v55 al voor de dosis-cap vond — AIGF-B hergebruikte tot nu toe
+// dezelfde drempel als vrijstellings-anker). Gevolg: AIGF-B (en de historie
+// waarop de baseline is gebaseerd — zie de "Historie bijschrijven"-sectie
+// hieronder, die dezelfde gate deelt) kreeg bij vrijwel geen enkele
+// maaltijd ooit de kans om te bevriezen, ongeacht hoe groot de maaltijd
+// cumulatief was.
+// Backtest (11 dagen, 27/7-7/8): van de 44 momenten waarop een LOSSE
+// commit ooit >=75% van maxSMB haalde, vielen de meeste 's nachts/rond
+// kleine correcties; overdag, bij echte maaltijden, kwam vrijwel geen
+// enkele losse commit ooit in de buurt — ook niet bij de grootste
+// maaltijden van de set. Een aparte, lagere drempel specifiek voor AIGF-B
+// (dat alleen "was dit een reële maaltijd" hoeft vast te stellen, niet
+// "moet de dosis-cap hier al afbouwen") lost dit op zonder de dosis-
+// gerelateerde PEAK_ANCHOR_THRESHOLD_FRAC (die een andere, wél gevalideerde
+// functie heeft) aan te raken.
+// TUNING: te vroeg bevroren (op een kleine correctie, geen echte maaltijd)
+// → verhogen; nog steeds zelden/nooit bevroren → verder verlagen. Begin-
+// waarde (0.35) is een eerste inschatting, niet zelf tegen historische
+// AIGF-uitkomsten gevalideerd (die data bestaat niet — AIGF-B heeft tot nu
+// toe vrijwel nooit gevuurd).
+private const val AIGF_B_FREEZE_THRESHOLD_FRAC = 0.35
+
 // Zie kdoc bij de toepassing in hypoProtection() ("Hypo-recovery harde
 // vloer"). Los instelbaar gehouden: bij ongewenst gedrag eerst hier
 // bijstellen (hoger = voorzichtiger, meer situaties geblokkeerd; lager =
@@ -3953,7 +3981,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v56-2026-08-06-2100"
+    private val FCL_CODE_VERSION = "v57-2026-08-07-2230"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4043,6 +4071,10 @@ class FCLvNext(
     private var episodeAigfBPct: Double = 100.0
     private var episodeAigfBResult: FclActivitySensitivity.AigfResult? = null
     private var episodeAigfBWakeOverlapFrac: Double = 0.0
+    // Los van episodePeakCommitU (07/08/2026, Ecko) — AIGF-B heeft nu zijn eigen,
+    // lagere freeze-drempel (AIGF_B_FREEZE_THRESHOLD_FRAC), dus "al bevroren deze
+    // episode" kan niet langer via episodePeakCommitU<=1e-9 afgeleid worden.
+    private var episodeAigfBFrozen: Boolean = false
 
     private fun loadEpisodeCounter(): Long =
         context.getSharedPreferences(EPISODE_PREFS, android.content.Context.MODE_PRIVATE)
@@ -4780,6 +4812,7 @@ class FCLvNext(
             episodeAigfBPct = 100.0
             episodeAigfBResult = null
             episodeAigfBWakeOverlapFrac = 0.0
+            episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -5473,6 +5506,7 @@ class FCLvNext(
             episodeAigfBPct = 100.0
             episodeAigfBResult = null
             episodeAigfBWakeOverlapFrac = 0.0
+            episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -5520,6 +5554,7 @@ class FCLvNext(
             episodeAigfBPct = 100.0
             episodeAigfBResult = null
             episodeAigfBWakeOverlapFrac = 0.0
+            episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
             episodeHypoDebtU = 0.0
@@ -6892,6 +6927,17 @@ class FCLvNext(
                     )
                     episodeCommitCount = 0
                     episodePeakCommitU = 0.0
+                    // 07/08/2026 (Ecko): dit reset-punt miste de AIGF-B-resets die
+                    // de andere drie episode-grens-resets al wel hadden (zelfde
+                    // soort gemiste plek als postHypoBrake vóór de 03/08-fix) —
+                    // zonder deze regels kon een bevroren AIGF-B-percentage van
+                    // vóór de trog nog even doorwerken in de nieuw herkende
+                    // maaltijd totdat (als de nieuwe, lagere drempel dat al niet
+                    // meteen deed) een volgend "echt" commit opnieuw bevriest.
+                    episodeAigfBPct = 100.0
+                    episodeAigfBResult = null
+                    episodeAigfBWakeOverlapFrac = 0.0
+                    episodeAigfBFrozen = false
                     lastKnownLateDecayMul = 1.0
                     vroegeStijgingBevestigdUsedThisEpisode = false
                     plateauSinceVroegeStijging = false
@@ -7390,16 +7436,23 @@ class FCLvNext(
                         maxOf(cappedFinalDose, commitDose)
 
                 // ── AIGF component B: berekenen en bevriezen bij het eerste
-                // écht bevestigde commit van deze episode (28/07/2026, Ecko) ──
-                // Zie kdoc bij FclActivitySensitivity.kt. "Eerste écht bevestigde
-                // commit" = dezelfde drempel (PEAK_ANCHOR_THRESHOLD_FRAC) als het
-                // bestaande piek-anker hieronder al gebruikt — geen los, nieuw
-                // begrip, en het voorkomt dat een vroege, kleine, onzekere
-                // correctie de meting/historie al zou vastzetten.
+                // écht bevestigde commit van deze episode (28/07/2026, Ecko;
+                // drempel losgekoppeld van het dosis-anker 07/08/2026, Ecko) ──
+                // Zie kdoc bij FclActivitySensitivity.kt en bij
+                // AIGF_B_FREEZE_THRESHOLD_FRAC hierboven. Gebruikte tot 07/08 de
+                // PEAK_ANCHOR_THRESHOLD_FRAC (0,75) van het dosis-anker — bleek in
+                // de praktijk bij vrijwel geen enkele maaltijd ooit gehaald te
+                // worden (zie kdoc bij de constante), dus AIGF-B bevroor vrijwel
+                // nooit. Eigen, lagere drempel + eigen "al bevroren"-vlag
+                // (episodeAigfBFrozen, i.p.v. episodePeakCommitU<=1e-9 — die twee
+                // zijn nu bewust ontkoppeld). Gebruikt nog steeds bewust de
+                // ONGEBOOSTE waarde (preAigfCommittedDose) — voorkomt dat AIGF-B
+                // zelf meebepaalt of ze getriggerd wordt (kip-ei).
                 if (aigfEnabled &&
-                    episodePeakCommitU <= 1e-9 &&
-                    preAigfCommittedDose >= config.maxSMB * PEAK_ANCHOR_THRESHOLD_FRAC
+                    !episodeAigfBFrozen &&
+                    preAigfCommittedDose >= config.maxSMB * AIGF_B_FREEZE_THRESHOLD_FRAC
                 ) {
+                    episodeAigfBFrozen = true
                     val wakeOverlap = computeWakeOverlapFrac(
                         input.daystartTodayMs, now.millis, 4L * 60L * 60L * 1000L
                     )
