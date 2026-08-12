@@ -28,7 +28,18 @@ fun FclStatisticsScreen() {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val cutoff = System.currentTimeMillis() - 14L * 24 * 60 * 60 * 1000L
+            // 12/08/2026 (Ecko): was 14 dagen — TimeInRangeCard's "7/14/30 dagen"-
+            // knop (zie Timeinrangecard.kt, dayWindow) kan tot 30 dagen opvragen,
+            // maar deze query haalt maar één keer data op (LaunchedEffect(Unit),
+            // draait niet opnieuw als dayWindow wijzigt) en met een vaste grens van
+            // 14 dagen. Gevolg: bij "30 dagen" waren de oudste ~16 dagen altijd leeg,
+            // ongeacht hoeveel historie er in de database zit. buildDailyRangeStats()/
+            // computeAverageBg() in Timeinrangecard.kt filteren zelf al correct op
+            // dayWindow (rijen buiten het venster worden genegeerd) — dus meer rijen
+            // ophalen dan een kleiner venster nodig heeft is veilig, geen dubbeltelling.
+            // 30 dagen = het grootste venster dat de kaart kan tonen; als dat ooit
+            // wijzigt, hier meenemen.
+            val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000L
             val entities = db.cycleLogDao().getSince(cutoff)
             allRows = entities.map { it.toLogRow() }
             lastSyncTs = entities.lastOrNull()
