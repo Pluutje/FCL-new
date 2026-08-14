@@ -577,6 +577,16 @@ private const val FAST_MICRO_MAX_U = 0.15
 // bij bevestigde, veilige afvlakking). Zie FCLvNextTrends.kt voor de fit zelf.
 // ─────────────────────────────────────────────
 private const val CURVE_FIT_MIN_R2 = 0.90            // onder deze R² wordt de fit niet vertrouwd
+// 14/08/2026 (Ecko) — zie kdoc bij recentCurveFitR2History/de toepassing
+// bij episodeAnyRealDeliveryDone verderop: bewust een STUK losser dan
+// CURVE_FIT_MIN_R2 hierboven — dat is de drempel voor "vertrouw deze fit
+// als bevestiging van een omslag", dit hier is alleen "was er de laatste
+// ~20-25 minuten duidelijk sensorruis (compression-low-signatuur)". Bij
+// een compression-low + snap-back terug (14/8 04:48-analyse) zakte de fit
+// tot 0.25-0.57; bij alle 8 andere onderzochte, legitieme momenten bleef
+// de laagste waarde in dit venster >=0.70. 0.50 zit met ruime marge
+// daartussen.
+private const val EARLY_DELIVERY_MIN_RECENT_R2 = 0.50
 private const val CURVE_FIT_EARLY_TRIGGER_MMOL = 1.5 // max. vervroeging van de piekdruk-drempel
 private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit doel.txt
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
@@ -1049,6 +1059,12 @@ private fun saveSensorBlipStreakCount(context: android.content.Context, value: I
 
 // Ringebuffer: de laatste 3 ruwe BG-waarden voor de consistenticheck
 private val recentBgHistory: ArrayDeque<Double> = ArrayDeque(3)
+
+// Ringebuffer: laatste 5 curve_fit_r2-waarden (~20-25 min), gebruikt om
+// een recente compression-low/sensor-ruis-episode te herkennen vóór de
+// eerste-echte-commit-vrijstelling (episodeAnyRealDeliveryDone) verderop
+// wordt toegekend — zie kdoc bij EARLY_DELIVERY_MIN_RECENT_R2 hierboven.
+private val recentCurveFitR2History: ArrayDeque<Double> = ArrayDeque(5)
 
 // ── Peak-brake deceleratie-tracking ──────────────────────────────────────
 // recentSlope (fast lane) van de vórige cyclus, nodig om een knik/afvlakking
@@ -3733,6 +3749,7 @@ private fun maybeResetEarlyOnDecel(
     earlyConfirmDone = false
     sensorBlipStreakCount = 0
     recentBgHistory.clear()
+    recentCurveFitR2History.clear()
     peakBrakeWasActiveLastCycle = false
     prevRawDecelForBrake = false
 
@@ -3981,7 +3998,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v58-2026-08-12-2200"
+    private val FCL_CODE_VERSION = "v61-2026-08-14-2000"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4517,6 +4534,36 @@ class FCLvNext(
     // (oprecht nieuwe gang), daarvóór wordt hij gedempt (zelfde, doorlopende
     // stijging als de al-vervroegde commit).
     private var vroegeStijgingBevestigdUsedThisEpisode: Boolean = false
+
+    // ── Eerste-echte-aflevering vrijstelling van late-decay (14/08/2026, Ecko) ──
+    // AANLEIDING (maaltijd 14/8 13:00): "de maaltijd begon veel te rustig,
+    // precies op de top kwamen de 2 grootste doses van de episode overheen"
+    // (Ecko). Natrekken van FCLvNext_Log_v9 14-8 16.10.csv liet zien dat het
+    // EERSTE ECHTE commit van deze maaltijd (13:23:55, 0.93U) al met
+    // late_decay_mul=0.32 werd afgeleverd — terwijl commitNr>1's decay
+    // architecturaal bedoeld is voor de TWEEDE en latere commits (zie kdoc
+    // bij lateDecayActive: "commitNr > 1"). De reden: de EARLY FLOOR-tak
+    // hierboven (regel ~6155) telt zichzelf altijd als "commit 1" zodra
+    // finalDose intern stijgt — óók als die interne stijging later door een
+    // guard/suppressie alsnog tot 0 afgeleverde eenheden terugvalt (hier:
+    // 13:03 en 13:08, finalDose intern 0.38U, commanded_dose beide keren
+    // 0.00U). Gevolg: de decay-teller stond al op "commit 2" voordat er ook
+    // maar 1 eenheid daadwerkelijk was toegediend deze episode — precies het
+    // "rode draad"-patroon (een teller die meetelt op een ongeleverde
+    // tussenwaarde, niet op wat echt de deur uitging).
+    //
+    // OPLOSSING: apart van vroegeStijgingBevestigdUsedThisEpisode (die een
+    // aanhoudende stijging over meerdere cycli vereist, VROEGE_STIJGING_
+    // SUSTAIN_MIN) grijpt dit al bij de EERSTE cyclus die daadwerkelijk een
+    // commit aflevert (committedDose >= effectiveMinCommitDose, exact
+    // dezelfde drempel als de bestaande episodeCommitCount-increment) —
+    // ongeacht hoe vaak de teller intussen al door ongeleverde
+    // early-floor-pogingen is opgehoogd. Wordt op true gezet op precies het
+    // punt waar de bestaande code een commit al als "echt" beschouwt (zie
+    // didCommitThisCycle hieronder), dus geen nieuwe/afwijkende definitie
+    // van "een echte commit" — alleen het ONTBREKENDE gebruik ervan voor de
+    // decay-vrijstelling.
+    private var episodeAnyRealDeliveryDone: Boolean = false
     private var plateauSinceVroegeStijging: Boolean = false
 
     // ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ────────
@@ -4753,6 +4800,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            recentCurveFitR2History.clear()
             peakBrakeWasActiveLastCycle = false
             prevRawDecelForBrake = false
         }
@@ -4802,6 +4850,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            recentCurveFitR2History.clear()
             peakBrakeWasActiveLastCycle = false
             prevRawDecelForBrake = false
             activeMealEpisodeId = -1
@@ -4823,6 +4872,7 @@ class FCLvNext(
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
+            episodeAnyRealDeliveryDone = false
             plateauSinceVroegeStijging = false
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
@@ -4843,6 +4893,7 @@ class FCLvNext(
                 earlyConfirmDone = false
                 sensorBlipStreakCount = 0
                 recentBgHistory.clear()
+                recentCurveFitR2History.clear()
                 peakBrakeWasActiveLastCycle = false
                 prevRawDecelForBrake = false
             }
@@ -5517,6 +5568,7 @@ class FCLvNext(
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
+            episodeAnyRealDeliveryDone = false
             plateauSinceVroegeStijging = false
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
@@ -5565,6 +5617,7 @@ class FCLvNext(
             rapidDecelLocked = false
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
+            episodeAnyRealDeliveryDone = false
             plateauSinceVroegeStijging = false
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
@@ -5939,6 +5992,11 @@ class FCLvNext(
         // Ringebuffer: bewaar laatste 3 ruwe BG-waarden
         if (recentBgHistory.size >= 3) recentBgHistory.removeFirst()
         recentBgHistory.addLast(ctx.input.bgNow)
+
+        // Zie kdoc bij recentCurveFitR2History (declaratie hierboven).
+        if (recentCurveFitR2History.size >= 5) recentCurveFitR2History.removeFirst()
+        recentCurveFitR2History.addLast(ctx.curveFitR2)
+        val recentCurveFitR2Min = recentCurveFitR2History.minOrNull() ?: ctx.curveFitR2
 
         // bgRising3Cycles: alle 3 recentste delta's positief (elke meting hoger dan vorige)
         // Fallback: als de deque nog niet vol is (bijv. na sensor-gap of episode-reset),
@@ -6739,6 +6797,7 @@ class FCLvNext(
             earlyConfirmDone = false
             sensorBlipStreakCount = 0
             recentBgHistory.clear()
+            recentCurveFitR2History.clear()
             peakBrakeWasActiveLastCycle = false
             prevRawDecelForBrake = false
 
@@ -6940,6 +6999,7 @@ class FCLvNext(
                     episodeAigfBFrozen = false
                     lastKnownLateDecayMul = 1.0
                     vroegeStijgingBevestigdUsedThisEpisode = false
+                    episodeAnyRealDeliveryDone = false
                     plateauSinceVroegeStijging = false
                     nieuweMaaltijdTrogBevestigd = false
                     lastNieuweMaaltijdResetAt = now
@@ -7176,11 +7236,47 @@ class FCLvNext(
                 val decayFloor = (decayFloorNaCommits - postOmslagFloorCut)
                     .coerceAtLeast(POST_OMSLAG_ABSOLUTE_MIN_FLOOR)
 
-                lateDecayMul = if (vroegeStijgingNuVoorHetEerst) {
+                // 14/08/2026 (Ecko) — compression-low-vrijwaring: zie kdoc bij
+                // EARLY_DELIVERY_MIN_RECENT_R2 hierboven. Natrekken van de
+                // eerste v60-backtest liet zien dat 1 van de 9 gevonden
+                // momenten (14/8 04:48) een sensor-artefact-signatuur had
+                // (scherpe dip + snap-back terug, fit-R² kelderde tot 0.25-
+                // 0.57 in de 25 min ervoor, terwijl IOB nagenoeg 0 was — geen
+                // enkele insuline-verklaring voor een echte stijging). Zonder
+                // deze check zou de vrijstelling hieronder daar een 3× grotere
+                // dosis hebben gegeven op een stijging die zeer waarschijnlijk
+                // niet echt was — precies het risico dat Ecko aankaartte:
+                // "een te grote bolus zonder dat er koolhydraten tegenover
+                // staan". Bij alle 8 overige onderzochte momenten (inclusief
+                // de 13:00-maaltijd waar dit voorstel oorspronkelijk voor
+                // bedoeld is) bleef de laagste R² in dat venster >=0.70 — de
+                // vrijstelling blijft voor die gevallen dus onveranderd van
+                // kracht.
+                val recentSensorNoise = recentCurveFitR2Min < EARLY_DELIVERY_MIN_RECENT_R2
+                if (!episodeAnyRealDeliveryDone && recentSensorNoise) {
+                    status.append(
+                        "EERSTE-COMMIT-VRIJSTELLING GEBLOKKEERD: recente R²-dip " +
+                            "(min=${"%.2f".format(recentCurveFitR2Min)} < ${EARLY_DELIVERY_MIN_RECENT_R2}) " +
+                            "— mogelijk sensor-artefact, geen ongetemperde eerste commit\n"
+                    )
+                }
+                lateDecayMul = if (vroegeStijgingNuVoorHetEerst ||
+                    (!episodeAnyRealDeliveryDone && !recentSensorNoise)
+                ) {
                     // Eenmalige afbouw-reset: laat de commit-branch-formule (fraction,
                     // commitIobFactor, prePeakMul, ...) ongehinderd door de
                     // commit-teller-gebaseerde afbouw uitrekenen, precies zoals bij
                     // de allereerste commit van de episode.
+                    //
+                    // 14/08/2026 (Ecko) — !episodeAnyRealDeliveryDone toegevoegd:
+                    // zie kdoc bij de declaratie hierboven. commitNr kan door
+                    // ongeleverde early-floor-pogingen al opgehoogd zijn vóórdat
+                    // er ooit 1 eenheid daadwerkelijk is afgeleverd deze episode
+                    // — in dat geval mag de teller-gebaseerde afbouw net zomin
+                    // gelden als bij vroegeStijgingNuVoorHetEerst, om dezelfde
+                    // reden: dit IS in de praktijk de eerste echte commit, ook
+                    // al zegt commitNr iets anders. Alleen ZONDER recente
+                    // sensor-ruis (recentSensorNoise) — zie kdoc hierboven.
                     1.0
                 } else if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
@@ -7553,6 +7649,12 @@ class FCLvNext(
                     didCommitThisCycle = true
                     // Alleen tellen als early floor deze cyclus niet al telde
                     if (!earlyFiredThisCycle) episodeCommitCount++
+                    // 14/08/2026 (Ecko): zie kdoc bij episodeAnyRealDeliveryDone
+                    // hierboven — dit IS het punt waarop de bestaande code een
+                    // commit al als "echt" beschouwt (committedDose heeft
+                    // effectiveMinCommitDose gehaald), dus hier op true zetten
+                    // sluit exact aan bij die al bestaande definitie.
+                    episodeAnyRealDeliveryDone = true
 
                     if (reentry) {
                         lastReentryCommitAt = now
@@ -8072,7 +8174,8 @@ class FCLvNext(
 
 
 
-        // ── Universele taper-clamp (13/07/2026, Ecko) ────────────────────────
+        // ── Universele taper-clamp (13/07/2026, Ecko; uitgebreid naar unanchored
+        // 14/08/2026, Ecko) ──────────────────────────────────────────────────
         // Vangt het scenario "grote, late commit vlak op de piek" af, ongeacht
         // via welk pad commandedDose daar terechtkomt (finalDose-fallback of een
         // ongetemperd commit-pad). Werkt op episodePeakCommitU × lateDecayMul —
@@ -8083,12 +8186,56 @@ class FCLvNext(
         // commit-branch zelf al bewust heeft vastgesteld (die branch tempert al).
         // !lastBgStijgtNogFors: het escape-ventiel voor een echt nog-doorzettende
         // stijging blijft ongemoeid.
-        if (commandedDose > 0.0 && episodePeakCommitU > 0.0 && !lastBgStijgtNogFors && !commandedDoseIsFromCommit) {
-            val taperCeiling = (episodePeakCommitU * lateDecayMul).coerceAtLeast(config.minCommitDose * 0.5)
-            if (commandedDose > taperCeiling) {
+        //
+        // AANLEIDING UITBREIDING (14/8 13:53-13:58): deze clamp vereiste tot nu
+        // toe episodePeakCommitU>0.0 (verankerd) — precies de zeldzame situatie
+        // (zie v55/v56/v57-kdocs elders) die de meeste gewone maaltijden nooit
+        // bereiken. Bij een NIET-verankerde episode kwam een grote, late commit
+        // op de piek dus alsnog ongeremd door: committedDose was die cyclus al
+        // correct afgebouwd naar 0,15U (curveConfirmtOmslag bevestigde de
+        // omslag), maar omdat 0,15U onder effectiveMinCommitDose viel werd de
+        // commit "skipped" — en commandedDose bleef op de ONGETEMPERDE finalDose-
+        // fallback (1,53U) staan, want die skip-tak zet commandedDoseIsFromCommit
+        // nooit op true. Twee grote, ongeremde doses vlak op de piek was het
+        // gevolg. logRow.commitDoseFinal is deze cyclus al berekend (ongeacht of
+        // de drempel werd gehaald) en is exact de taper-aware referentie die hier
+        // ontbrak — bevat zelf al alle relevante afbouw (lateDecayMul, omslag-
+        // rem, AIGF), dus GEEN nogmaals × lateDecayMul hier (dat zou dubbelop
+        // afbouwen). episodeCommitCount>1: de allereerste commit van een episode
+        // blijft bewust vrij, zelfde uitzondering als elders (cappedFinalDose's
+        // commitNr<=1) — voorkomt dat een vroege, legitieme front-load-impuls
+        // hierdoor alsnog wordt afgeknepen voordat de commit-tak zelf goed op
+        // gang is.
+        // Backtest (27/7-14/8, 4959 unieke cycli): 121 momenten waar dit exact
+        // speelde (episode_commit_nr>1, verschil commandedDose-commitDoseFinal
+        // >=0,30U), gemiddeld 0,75U te veel per moment, tot 3,24U op één moment,
+        // 91,0U bij elkaar over de hele periode. Eerlijkheidshalve: het is geen
+        // eenduidig "kleiner is altijd beter" — bij de 12 grootste momenten steeg
+        // BG in 6 van de 12 gevallen daarna nog altijd door (tot +4,6 mmol/40min),
+        // en daalde in 5 van de 12. Laagste BG binnen 40 min ná zo'n moment over
+        // alle 12: 5,3 mmol — geen hypo-risico in geen van de gevallen. Dit is dus
+        // met zekerheid een architecturale inconsistentie (bevestigd door de
+        // eigen kdoc van de bestaande clamp en het feit dat hij precies voor dit
+        // scenario gebouwd is) — geen garantie dat de getemperde waarde altijd de
+        // optimale dosis is. Zie "als dit ongewenst gedrag geeft" in de
+        // leveringsbeschrijving.
+        if (commandedDose > 0.0 && !lastBgStijgtNogFors && !commandedDoseIsFromCommit) {
+            val taperCeiling = when {
+                episodePeakCommitU > 0.0 ->
+                    (episodePeakCommitU * lateDecayMul).coerceAtLeast(config.minCommitDose * 0.5)
+                episodeCommitCount > 1 ->
+                    logRow.commitDoseFinal.coerceAtLeast(config.minCommitDose * 0.5)
+                else -> null
+            }
+            if (taperCeiling != null && commandedDose > taperCeiling) {
                 val before = commandedDose
                 commandedDose = taperCeiling
-                status.append("TAPER CLAMP: ${"%.2f".format(before)}->${"%.2f".format(commandedDose)}U (episodePeakCommitU=${"%.2f".format(episodePeakCommitU)} xlateDecayMul=${"%.2f".format(lateDecayMul)})\n")
+                status.append(
+                    "TAPER CLAMP: ${"%.2f".format(before)}->${"%.2f".format(commandedDose)}U " +
+                        "(episodePeakCommitU=${"%.2f".format(episodePeakCommitU)} " +
+                        "commitDoseFinal=${"%.2f".format(logRow.commitDoseFinal)} " +
+                        "xlateDecayMul=${"%.2f".format(lateDecayMul)})\n"
+                )
             }
         }
 
