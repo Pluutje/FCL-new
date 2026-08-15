@@ -93,14 +93,24 @@ class FCLvNextDayNightHelper(
         // modules (FclMealTimeAnticipation.kt) exact dezelfde weekend-definitie
         // kunnen hergebruiken zonder een eigen Preferences-afhankelijkheid nodig
         // te hebben en zonder de dag-afkortingen-mapping te dupliceren.
+        // BUGFIX (15/08/2026, Ecko): vergeleek voorheen een Nederlandse
+        // dag-afkorting ("ma".."zo") tegen weekendDagenCsv — maar
+        // FCLSettingsScreen.kt slaat WeekendDagen op als CSV van CIJFERS
+        // (boolArrayToWeekendDagen: "arr.indices.filter{arr[it]}.map{it+1}",
+        // dus bijv. "5,6,7" voor vr/za/zo), niet als dag-afkortingen. Een
+        // cijfer-string is nooit gelijk aan "za", dus isWeekendDay() gaf
+        // ALTIJD false terug — ongeacht welke dagen waren geselecteerd.
+        // Gevolg: isNightNow() gebruikte in het weekend nooit OchtendStart-
+        // Weekend, en ochtendStartFallbackDeadlineMs() in
+        // DetermineBasalFCL.kt (dezelfde companion-functie) had hetzelfde
+        // probleem — de nachtinstellingen (en de AIGF-B wake-fallback)
+        // eindigden in het weekend dus stelselmatig te vroeg (bijv. 06:15
+        // i.p.v. de ingestelde 08:30). Fix: cijfers rechtstreeks vergelijken
+        // met dayOfWeek (dat gebruikt al dezelfde 1=maandag..7=zondag-
+        // telling als de opgeslagen waarden), geen tekst-mapping meer nodig.
         fun isWeekendDay(dayOfWeek: Int, weekendDagenCsv: String): Boolean {
-            val dayMapping = mapOf(
-                1 to "ma", 2 to "di", 3 to "wo", 4 to "do",
-                5 to "vr", 6 to "za", 7 to "zo"
-            )
-            val currentDayAbbr = dayMapping[dayOfWeek] ?: return false
             return weekendDagenCsv.split(",").any {
-                it.trim().equals(currentDayAbbr, ignoreCase = true)
+                it.trim().toIntOrNull() == dayOfWeek
             }
         }
     }

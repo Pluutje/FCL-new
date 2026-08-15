@@ -587,6 +587,113 @@ private const val CURVE_FIT_MIN_R2 = 0.90            // onder deze R² wordt de 
 // de laagste waarde in dit venster >=0.70. 0.50 zit met ruime marge
 // daartussen.
 private const val EARLY_DELIVERY_MIN_RECENT_R2 = 0.50
+// 15/08/2026 (Ecko) — zie kdoc bij lastHypoActiveAt/de reentry-
+// vrijstelling: backtest tegen 41 reentry-momenten (alle logs) vond 1
+// geval (6/8 10:17) dat eigenlijk een post-hypo-koolhydraatrebound was
+// (hypo_active=True t/m 10:02, BG steeg daarna snel, reentry vuurde om
+// 10:17) — de bestaande postHypoBrake vereist episodeHypoDebtU>0, wat
+// hier 0 bleef (er werd nl. niets afgeknepen tijdens de hypo zelf, dus
+// geen 'schuld' opgebouwd), dus dat mechanisme greep hier niet in. Een
+// ongetemperde commit zo kort na een hypo is te riskant (diezelfde
+// episode eindigde alsnog met BG 3,4 kort erna) — vandaar deze
+// aparte, eenvoudige tijd-gebaseerde grens.
+private const val POST_HYPO_REENTRY_GUARD_MINUTES = 30
+
+// 15/08/2026 (Ecko) — koekje-episode (15/8 17:03-19:31): vroegeStijging en de
+// reentry-vrijstelling gaven kort na elkaar (17:48 en 18:18) allebei een
+// volledig ongetemperde reset, terwijl de daadwerkelijk waargenomen stijging
+// (delta_target) nooit boven 2,26 kwam. Losstaand van de vroegeStijging-
+// timing-fix hieronder (VROEGE_STIJGING_ACCEL_DECLINE_FRACTION) — dit vangt
+// het STAPELEN van meerdere volledige resets op een bescheiden, uitgetopte
+// stijging, ongeacht welk mechanisme de reset geeft.
+//
+// Uitgebreid tegen de hele historie (27/7-15/8, alle vergelijkbare momenten)
+// getest: een variant die AL bij het eerste teken van een verhoogde
+// dosis/stijging-verhouding ingrijpt (of die op alle commits toepast, niet
+// alleen resets) blijkt niet te onderscheiden tussen dit koekje en de
+// legitieme, eerder bevestigde pizza-episode (14/8) — beide hebben op hun
+// eigen piekmoment een vergelijkbare verhouding. Pas als die verhouding
+// MINSTENS 15 minuten ononderbroken verhoogd heeft gestaan vóórdat een
+// volgende volledige reset vuurt, is het onderscheid met de pizza-episode
+// (waar resets elkaar te snel opvolgen om die 15 minuten op te bouwen)
+// betrouwbaar. Resultaat: raakt bij het koekje alleen de reentry-reset om
+// 18:18 (0,30U→0,12U); pizza- en 31/7-episode blijven in de backtest
+// volledig ongemoeid (0,00U verschil).
+private const val DOSE_RATIO_FLOOR_DELTA = 1.5     // ondergrens voor de noemer (mmol), voorkomt deling door bijna-nul
+private const val DOSE_RATIO_THRESHOLD = 1.5       // vanaf deze verhouding (cumulatieve dosis / grootste tot-nu-toe-waargenomen delta_target) telt de tijd mee
+private const val DOSE_RATIO_SUSTAIN_MIN = 15.0     // minuten die de verhouding ononderbroken boven de drempel moet hebben gestaan
+private const val DOSE_RATIO_DAMPING = 0.4          // resterende factor op een reset die deze eis niet haalt (dus 60% gedempt)
+
+// 15/08/2026 (Ecko) — apart, tweede incident dezelfde avond (20:33-21:04):
+// vroegeStijging vuurde om 20:44 (sustainedHighSlopeMinutes net over de
+// 15-minutendrempel) met een volledige reset (3,36U) — maar op dat moment
+// was de stijging zelf AL aan het uittoppen: ctx.acceleration daalde die
+// cyclus al van een piek van 0,65 naar 0,33 (BG 8,2→8,3, vrijwel vlak; de
+// eerstvolgende cyclus daalde BG alweer). De bestaande !curveConfirmtOmslag-
+// check (20/07/2026) greep hier niet op tijd in, omdat curveAcceleration
+// (de gefitte, dus vertraagde variant) pas 1-2 cycli later negatief werd
+// (curve_fit_r2 bleef intussen prima, 0.92-0.98 — geen ruis, puur een
+// vertragingseffect van de curve-fit zelf). Gevolg: IOB liep op tot 6,5U
+// en PEAK_IOB_BRAKE moest hard ingrijpen.
+//
+// Nieuw, onafhankelijk signaal — ctx.acceleration zelf, vergeleken met zijn
+// EIGEN meest recente piek binnen de huidige aanhoudende stijging
+// (recentAccelPeakInRise, zie declaratie/bijhouden bij sustainedHighSlopeMinutes)
+// — reageert per definitie niet vertraagd, want het is de ruwe cyclus-op-
+// cyclus versnelling zelf, niet een gefitte afgeleide daarvan. Tegen de
+// volledige historie doorgerekend (29 vergelijkbare vroegeStijging-momenten,
+// 27/7-15/8): blokkeert 4 momenten (incl. dit incident), en bij alle 4 was
+// BG binnen 1-2 cycli daarna al aantoonbaar aan het dalen — dus telkens
+// terecht. De eerder bevestigde, legitieme momenten (pizza-golf 2 14/8
+// 20:48, 31/7 19:28, en het koekje's eigen 17:48-trigger, die via het
+// aparte DOSE_RATIO-mechanisme hierboven wordt afgehandeld) blijven allemaal
+// ongemoeid — daar lag ctx.acceleration op het triggermoment nog op of
+// vlakbij zijn eigen recente piek.
+private const val VROEGE_STIJGING_ACCEL_DECLINE_FRACTION = 0.55  // acceleratie mag tot deze fractie van zijn recente piek zakken
+private const val VROEGE_STIJGING_ACCEL_PEAK_MIN = 0.30           // alleen toetsen als de piek zelf betekenisvol hoog was (voorkomt ruis-triggers bij zwakke stijgingen)
+
+// ── Gedeelde, geleidelijke "commit-urgentie" (15/08/2026, Ecko) ──────────
+// AANLEIDING: golf 3 van de pizza-episode (14/8 22:53) miste isReentrySignal()
+// se vaste drempels op een haar na (slope=0.55 vs eis 1.0, accel=0.09 vs eis
+// 0.10) — terwijl BG toen al 13,3 mmol was, ruim boven Ecko's eigen "liever
+// niet boven 12"-grens. Ecko's verzoek: de meeste drempels die bepalen of een
+// redelijk grote commit gegeven wordt, moeten GELEIDELIJK versoepelen
+// naarmate BG verder boven target komt — geen klif op één cyclus/honderdste
+// afstand — én de drempel moet met het ingestelde target meeschuiven (dus
+// niet op een vaste BG-waarde, maar op deltaToTarget: dat is al automatisch
+// target-relatief, of target nu 5,0 of 6,5 is).
+//
+// Anker: Ecko's eigen streefbeeld (BG<10 normaal, tot 11 kort acceptabel,
+// liever niet boven 12 — behalve bij een enkele grote/vette maaltijd, dan
+// is tot 12 acceptabel). Bij zijn eigen target (5,4 overdag) komt dat neer
+// op delta≈4,6/5,6/6,6. COMMIT_URGENCY_DELTA_HIGH=6,6 is dus bewust gekozen
+// als "vanaf hier volledig versoepeld" — bij een ander target schuift dit
+// automatisch mee, want het is een delta, geen absolute BG-waarde.
+private const val COMMIT_URGENCY_DELTA_LOW = 3.0   // hieronder: 0% urgentie, volle voorzichtigheid
+private const val COMMIT_URGENCY_DELTA_HIGH = 6.6  // hierboven: 100% urgentie (~BG 12 bij target 5,4)
+
+private fun commitUrgency(deltaToTarget: Double): Double =
+    smooth01(
+        (deltaToTarget - COMMIT_URGENCY_DELTA_LOW) /
+            (COMMIT_URGENCY_DELTA_HIGH - COMMIT_URGENCY_DELTA_LOW)
+    )
+
+// (A) Reentry-detectie: bij volle urgentie versoepelen, nooit tot nul —
+// er moet altijd nog EEN reële, niet-dalende stijging blijven (dit is en
+// blijft "is dit een echte hernieuwde stijging", geen vrijbrief).
+private const val REENTRY_SLOPE_MIN_FLOOR = 0.35
+private const val REENTRY_ACCEL_MIN_FLOOR = 0.02
+// Ook de "moet minstens X minuten sinds de laatste commit"-cooldown mag
+// bij hoge urgentie korter — dit was letterlijk wat golf 3 om 22:58 blokkeerde
+// (slope/accel waren toen al ruim over zelfs de STATISCHE eisen).
+private const val REENTRY_MIN_MINUTES_SINCE_COMMIT_FLOOR = 10
+
+// (B) Decay-vloer: bij volle urgentie mag de vloer bijna (niet volledig)
+// naar geen afbouw meer — een kleine marge (0.85 i.p.v. 1.0) blijft bewust
+// staan, dit is een DOORLOPEND mechanisme (elke commit, niet eenmalig zoals
+// de vrijstellingen in v60-v63), dus iets terughoudender dan die eenmalige
+// vrijstellingen.
+private const val COMMIT_URGENCY_MAX_DECAY_FLOOR = 0.85
 private const val CURVE_FIT_EARLY_TRIGGER_MMOL = 1.5 // max. vervroeging van de piekdruk-drempel
 private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit doel.txt
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
@@ -1017,6 +1124,11 @@ private var lastSmallCorrectionAt: DateTime? = null
 
 private var earlyConfirmDone: Boolean = false
 private var lastEpisodeExitAt: org.joda.time.DateTime? = null  // voor grace-period herstart
+
+// Zie kdoc bij POST_HYPO_REENTRY_GUARD_MINUTES hierboven. Bewust NIET
+// episode-gebonden (geen reset bij episode-grenzen) — een hypo kan net
+// vóór een nieuwe episode vallen en blijft dan alsnog relevant.
+private var lastHypoActiveAt: org.joda.time.DateTime? = null
 
 // ── SensorBlip persistentie-teller ───────────────────────────────────────
 // Telt hoeveel opeenvolgende cycli de blip-conditie (slowFalling+fastRising)
@@ -3948,14 +4060,28 @@ private fun isReentrySignal(
     now: DateTime,
     config: FCLvNextConfig
 ): Boolean {
+    // 15/08/2026 (Ecko) — zie kdoc bij commitUrgency()/COMMIT_URGENCY_DELTA_LOW
+    // hierboven. Hoe verder bgNow al boven target zit, hoe minder streng de
+    // eisen hieronder — geleidelijk, geen harde knip, en automatisch
+    // target-relatief (deltaToTarget, geen vaste BG-waarde).
+    val urgency = commitUrgency(ctx.deltaToTarget)
+
+    val effectiveMinMinutesSinceCommit = lerp(
+        config.reentryMinMinutesSinceCommit.toDouble(),
+        REENTRY_MIN_MINUTES_SINCE_COMMIT_FLOOR.toDouble(),
+        urgency
+    )
     val sinceCommit = minutesSince(lastCommitAt, now)
-    if (sinceCommit < config.reentryMinMinutesSinceCommit) return false
+    if (sinceCommit < effectiveMinMinutesSinceCommit) return false
 
     val sinceReentry = minutesSince(lastReentryCommitAt, now)
     if (sinceReentry < config.reentryCooldownMinutes) return false
 
-    val rising = ctx.slope >= config.reentrySlopeMin
-    val accelerating = ctx.acceleration >= config.reentryAccelMin
+    val effectiveSlopeMin = lerp(config.reentrySlopeMin, REENTRY_SLOPE_MIN_FLOOR, urgency)
+    val effectiveAccelMin = lerp(config.reentryAccelMin, REENTRY_ACCEL_MIN_FLOOR, urgency)
+
+    val rising = ctx.slope >= effectiveSlopeMin
+    val accelerating = ctx.acceleration >= effectiveAccelMin
     val aboveTarget = ctx.deltaToTarget >= config.reentryDeltaMin
     val reliable = ctx.consistency >= config.minConsistency
 
@@ -3998,7 +4124,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v61-2026-08-14-2000"
+    private val FCL_CODE_VERSION = "v65-2026-08-15-2115"
 
     // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4564,7 +4690,36 @@ class FCLvNext(
     // van "een echte commit" — alleen het ONTBREKENDE gebruik ervan voor de
     // decay-vrijstelling.
     private var episodeAnyRealDeliveryDone: Boolean = false
+
+    // ── Zelfde principe, maar per re-entry-segment (15/08/2026, Ecko) ────────
+    // AANLEIDING (14/8 pizza-episode, golf 2 om 21:28-21:33): isReentrySignal()
+    // is een streng, meervoudig gecorroboreerd signaal (reliable, aboveTarget,
+    // rising, accelerating) dat een ECHT nieuwe stijging detecteert — en mag
+    // (net als bij een gewone re-entry) de suppress/lockout van de vorige golf
+    // al opzij zetten. Maar de late-commit-decay (episodeCommitCount-gebaseerd,
+    // NIET gereset bij re-entry — bewust, zie kdoc bij de reentry-blok
+    // hieronder) bleef gewoon doortellen vanaf de vorige golf: bij de pizza-
+    // episode was late_decay_mul bij golf 2's eerste commits nog maar 0,04-
+    // 0,13× — een golf die zijn eigen, strenge bevestigingseisen had gehaald,
+    // kreeg zo alsnog een bijna volledig afgeknepen dosis, puur omdat de
+    // teller nog "heet" stond van golf 1. Dit veld geeft — analoog aan
+    // episodeAnyRealDeliveryDone — precies de EERSTE commit van een nieuw
+    // re-entry-segment dezelfde vrijstelling, ook weer alleen zonder recente
+    // sensor-ruis (recentSensorNoise, zie EARLY_DELIVERY_MIN_RECENT_R2).
+    private var episodeAnyRealDeliverySinceReentry: Boolean = true
     private var plateauSinceVroegeStijging: Boolean = false
+
+    // ── Cumulatieve-dosis-vs-waargenomen-stijging (15/08/2026, Ecko) ────────
+    // Zie de uitgebreide kdoc bij DOSE_RATIO_THRESHOLD hierboven (koekje-
+    // episode). episodeCumulativeCommandedU/episodeMaxDeltaTargetSoFar volgen
+    // dezelfde episode-levenscyclus als episodeAnyRealDeliveryDone hierboven
+    // (reset op precies dezelfde 4 episode-grensmomenten). doseRatioElevatedSinceAt
+    // is NIET episode-gebonden qua reset-timing — die veert vanzelf terug naar
+    // null zodra de verhouding weer onder de drempel zakt (zie bijwerken
+    // verderop, net vóór de lateDecayMul-berekening).
+    private var episodeCumulativeCommandedU: Double = 0.0
+    private var episodeMaxDeltaTargetSoFar: Double = 0.0
+    private var doseRatioElevatedSinceAt: DateTime? = null
 
     // ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ────────
     // AANLEIDING: incident 3/8 12:18-15:28 — ontbijt (piek 11:03, BG 10,6)
@@ -4671,6 +4826,13 @@ class FCLvNext(
     // Reset naar 0 zodra slope onder de drempel zakt.
     private var sustainedHighSlopeMinutes: Double = 0.0
     private var sustainedLastUpdateAt: DateTime? = null
+
+    // 15/08/2026 (Ecko) — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION
+    // hierboven. Houdt, onafhankelijk van sustainedHighSlopeMinutes zelf, de
+    // hoogste ctx.acceleration bij die is gezien SINDS de huidige aanhoudende
+    // stijging begon (dezelfde levenscyclus/reset-momenten als
+    // sustainedHighSlopeMinutes hieronder, zie SUSTAINED RISE TRACKING).
+    private var recentAccelPeakInRise: Double = 0.0
 
     // ── Persistentie van een stijging (deceleratie-detectie) ───────────────
     // sustainedHighSlopeMinutes meet alleen HOELANG slope al hoog is — niet
@@ -4873,7 +5035,11 @@ class FCLvNext(
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             episodeAnyRealDeliveryDone = false
+            episodeAnyRealDeliverySinceReentry = true
             plateauSinceVroegeStijging = false
+            episodeCumulativeCommandedU = 0.0
+            episodeMaxDeltaTargetSoFar = 0.0
+            doseRatioElevatedSinceAt = null
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
             declineStreakMinutes = 0.0
@@ -5569,7 +5735,11 @@ class FCLvNext(
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             episodeAnyRealDeliveryDone = false
+            episodeAnyRealDeliverySinceReentry = true
             plateauSinceVroegeStijging = false
+            episodeCumulativeCommandedU = 0.0
+            episodeMaxDeltaTargetSoFar = 0.0
+            doseRatioElevatedSinceAt = null
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
             declineStreakMinutes = 0.0
@@ -5618,7 +5788,11 @@ class FCLvNext(
             rapidDecelConfirm = 0
             vroegeStijgingBevestigdUsedThisEpisode = false
             episodeAnyRealDeliveryDone = false
+            episodeAnyRealDeliverySinceReentry = true
             plateauSinceVroegeStijging = false
+            episodeCumulativeCommandedU = 0.0
+            episodeMaxDeltaTargetSoFar = 0.0
+            doseRatioElevatedSinceAt = null
             // RONDE 33 (03/08/2026) — nieuwe-maaltijd trog-detectie hoort bij
             // dezelfde episode-levenscyclus als de twee velden hierboven.
             declineStreakMinutes = 0.0
@@ -5864,9 +6038,13 @@ class FCLvNext(
         if (ctx.slope >= sustainSlopeMin && ctx.slope > 0.0) {
             // Slope boven drempel: tel op hoeveel tijd is verstreken
             sustainedHighSlopeMinutes += minutesSinceSustainUpdate
+            // 15/08/2026 (Ecko) — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION.
+            // Dezelfde levenscyclus als sustainedHighSlopeMinutes hierboven.
+            recentAccelPeakInRise = maxOf(recentAccelPeakInRise, ctx.acceleration)
         } else {
             // Slope gedaald onder drempel: reset teller
             sustainedHighSlopeMinutes = 0.0
+            recentAccelPeakInRise = 0.0
         }
         sustainedLastUpdateAt = now
 
@@ -5874,6 +6052,7 @@ class FCLvNext(
         // al gecompenseerd → sustained trigger niet meer zinvol
         if (ctx.iobRatio >= 0.40) {
             sustainedHighSlopeMinutes = 0.0
+            recentAccelPeakInRise = 0.0
         }
 
 // ─────────────────────────────────────────────
@@ -6791,6 +6970,13 @@ class FCLvNext(
             // dezelfde maaltijdepisode, eerdere boosts tellen nog steeds mee.
             prePeakImpulseDone = false
             lastSegmentAt = now
+            // 15/08/2026 (Ecko): zie kdoc bij de declaratie hierboven. Onschadelijk
+            // om dit elke cyclus te herhalen zolang reentry=true blijft — zodra de
+            // eerste echte commit van dit segment daadwerkelijk vuurt, wordt dit
+            // verderop op true gezet EN triggert dat via lastReentryCommitAt de
+            // cooldown in isReentrySignal(), waarna reentry vanzelf weer false
+            // wordt (dus geen herhaald "gratis" commit binnen hetzelfde segment).
+            episodeAnyRealDeliverySinceReentry = false
             val savedBoostCountReentry = earlyDose.boostCommitCount
             earlyDose = EarlyDoseContext()
             earlyDose.boostCommitCount = savedBoostCountReentry
@@ -7000,7 +7186,11 @@ class FCLvNext(
                     lastKnownLateDecayMul = 1.0
                     vroegeStijgingBevestigdUsedThisEpisode = false
                     episodeAnyRealDeliveryDone = false
+                    episodeAnyRealDeliverySinceReentry = true
                     plateauSinceVroegeStijging = false
+                    episodeCumulativeCommandedU = 0.0
+                    episodeMaxDeltaTargetSoFar = 0.0
+                    doseRatioElevatedSinceAt = null
                     nieuweMaaltijdTrogBevestigd = false
                     lastNieuweMaaltijdResetAt = now
                     // 03/08/2026 (Ecko): deze reset was bedoeld voor precies het
@@ -7167,11 +7357,63 @@ class FCLvNext(
                 // uiteenlopen; zonder deze check kon de volledige reset
                 // (lateDecayMul=1.0) vuren terwijl de meer vertrouwde curve-fit-
                 // basis al een omslag had bevestigd.
+                // 15/08/2026 (Ecko) — compression-low-vrijwaring, zie kdoc bij
+                // EARLY_DELIVERY_MIN_RECENT_R2 hierboven. Verplaatst naar hier
+                // (was pas berekend bij de episodeAnyRealDeliveryDone-vrijstelling
+                // verderop) zodat vroegeStijgingBevestigd hieronder dezelfde
+                // bescherming krijgt. AANLEIDING (15/8 05:48-06:33): een
+                // compression-low-dip/snap-back (fit-R² kelderde tot 0.49) werd om
+                // 06:23:58 correct geblokkeerd door de episodeAnyRealDeliveryDone-
+                // vrijstelling — maar 5 minuten later, om 06:28:58, gaf
+                // vroegeStijgingNuVoorHetEerst (sustainedHighSlopeMinutes had
+                // net de 15m-drempel gehaald) alsnog een ongetemperde dosis
+                // (2,93U raw, 1,55U afgeleverd) op exact dezelfde vermoedelijk-
+                // artefactuele stijging. Twee onafhankelijke mechanismen met
+                // hetzelfde effect (lateDecayMul=1.0) hadden hetzelfde vangnet
+                // nodig — dit was het ontbrekende stuk.
+                val recentSensorNoise = recentCurveFitR2Min < EARLY_DELIVERY_MIN_RECENT_R2
+
+                // 15/08/2026 (Ecko) — zie uitgebreide kdoc bij
+                // VROEGE_STIJGING_ACCEL_DECLINE_FRACTION hierboven (incident
+                // 20:44, IOB liep op tot 6,5U). recentAccelPeakInRise wordt
+                // bijgehouden in de SUSTAINED RISE TRACKING-sectie hierboven.
+                val accelDecliningFromRisePeak = recentAccelPeakInRise >= VROEGE_STIJGING_ACCEL_PEAK_MIN &&
+                    ctx.acceleration < recentAccelPeakInRise * VROEGE_STIJGING_ACCEL_DECLINE_FRACTION
+
                 val vroegeStijgingBevestigd = sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
                     ctx.consistency >= config.episodeMinConsistency &&
                     ctx.acceleration > 0.0 &&
-                    !curveConfirmtOmslag
+                    !curveConfirmtOmslag &&
+                    !recentSensorNoise &&
+                    !accelDecliningFromRisePeak
                 val vroegeStijgingNuVoorHetEerst = vroegeStijgingBevestigd && !vroegeStijgingBevestigdUsedThisEpisode
+                if (sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
+                    ctx.consistency >= config.episodeMinConsistency &&
+                    ctx.acceleration > 0.0 &&
+                    !curveConfirmtOmslag &&
+                    recentSensorNoise &&
+                    !vroegeStijgingBevestigdUsedThisEpisode
+                ) {
+                    status.append(
+                        "VROEGE STIJGING GEBLOKKEERD: recente R²-dip " +
+                            "(min=${"%.2f".format(recentCurveFitR2Min)} < ${EARLY_DELIVERY_MIN_RECENT_R2}) " +
+                            "— mogelijk sensor-artefact, afbouw-reset niet toegekend\n"
+                    )
+                }
+                if (sustainedHighSlopeMinutes >= VROEGE_STIJGING_SUSTAIN_MIN &&
+                    ctx.consistency >= config.episodeMinConsistency &&
+                    ctx.acceleration > 0.0 &&
+                    !curveConfirmtOmslag &&
+                    !recentSensorNoise &&
+                    accelDecliningFromRisePeak &&
+                    !vroegeStijgingBevestigdUsedThisEpisode
+                ) {
+                    status.append(
+                        "VROEGE STIJGING GEBLOKKEERD: acceleratie al gedaald vanaf eigen piek " +
+                            "(nu=${"%.2f".format(ctx.acceleration)} piek=${"%.2f".format(recentAccelPeakInRise)}) " +
+                            "— stijging topt vermoedelijk al uit, afbouw-reset niet toegekend\n"
+                    )
+                }
                 if (vroegeStijgingNuVoorHetEerst) {
                     vroegeStijgingBevestigdUsedThisEpisode = true
                     status.append(
@@ -7191,13 +7433,27 @@ class FCLvNext(
                     status.append("PLATEAU gedetecteerd na vroege-stijging-commit: bgStijgtNogFors terug op volle sterkte\n")
                 }
 
-                val decayFloorBase = if (bgStijgtNogFors) {
+                val decayFloorBaseRaw = if (bgStijgtNogFors) {
                     // Stijgende BG ver boven target: hogere vloer
                     // iobRatio=0.55 → 0.225, iobRatio=0.65 → 0.175, nooit onder 0.18
                     (0.45 * (1.0 - ctx.iobRatio * 1.0)).coerceIn(0.18, 0.40)
                 } else {
                     // Normaal: IOB-afhankelijke vloer
                     (0.35 * (1.0 - ctx.iobRatio * 1.2)).coerceIn(0.10, 0.35)
+                }
+                // 15/08/2026 (Ecko) — zie kdoc bij commitUrgency() hierboven. Bewust
+                // ADDITIEF op de bestaande bgStijgtNogFors-vloer (die blijft
+                // ongewijzigd, andere code-pad/cappedFinalDose) — dit is de vloer
+                // die specifiek lateDecayMul/commitDose raakt. Geleidelijk richting
+                // COMMIT_URGENCY_MAX_DECAY_FLOOR naarmate BG verder boven target
+                // uitkomt, i.p.v. de harde bgStijgtNogFors-knip op delta>3.0.
+                val commitUrgencyForFloor = commitUrgency(ctx.deltaToTarget)
+                val decayFloorBase = lerp(decayFloorBaseRaw, COMMIT_URGENCY_MAX_DECAY_FLOOR, commitUrgencyForFloor)
+                if (commitUrgencyForFloor > 0.01) {
+                    status.append(
+                        "COMMIT-URGENTIE ${"%.0f".format(commitUrgencyForFloor * 100)}%: vloer " +
+                            "${"%.2f".format(decayFloorBaseRaw)}->${"%.2f".format(decayFloorBase)}\n"
+                    )
                 }
                 // Vloer blijft meebewegen met het aantal commits (07/07/2026, Ecko).
                 // BEVINDING: de vloer hierboven hangt alleen af van iobRatio, niet van
@@ -7252,7 +7508,6 @@ class FCLvNext(
                 // bedoeld is) bleef de laagste R² in dat venster >=0.70 — de
                 // vrijstelling blijft voor die gevallen dus onveranderd van
                 // kracht.
-                val recentSensorNoise = recentCurveFitR2Min < EARLY_DELIVERY_MIN_RECENT_R2
                 if (!episodeAnyRealDeliveryDone && recentSensorNoise) {
                     status.append(
                         "EERSTE-COMMIT-VRIJSTELLING GEBLOKKEERD: recente R²-dip " +
@@ -7260,8 +7515,34 @@ class FCLvNext(
                             "— mogelijk sensor-artefact, geen ongetemperde eerste commit\n"
                     )
                 }
+
+                // 15/08/2026 (Ecko) — zie uitgebreide kdoc bij DOSE_RATIO_THRESHOLD
+                // hierboven (koekje-episode). Gebruikt uitsluitend de dosis/stijging
+                // die AL bekend was VOOR deze cyclus (episodeCumulativeCommandedU/
+                // episodeMaxDeltaTargetSoFar worden pas NA de hypo-rechttrekking
+                // verderop in deze cyclus bijgewerkt) — dus geen invloed van de
+                // commit die hieronder nog moet worden bepaald.
+                val doseToRiseRatio = episodeCumulativeCommandedU /
+                    maxOf(episodeMaxDeltaTargetSoFar, DOSE_RATIO_FLOOR_DELTA)
+                if (doseToRiseRatio > DOSE_RATIO_THRESHOLD) {
+                    if (doseRatioElevatedSinceAt == null) doseRatioElevatedSinceAt = now
+                } else {
+                    doseRatioElevatedSinceAt = null
+                }
+                val doseRatioSustainedMin = doseRatioElevatedSinceAt?.let { minutesSince(it, now).toDouble() } ?: 0.0
+                val doseRatioDampingActive = doseRatioSustainedMin >= DOSE_RATIO_SUSTAIN_MIN
+                if (doseRatioDampingActive) {
+                    status.append(
+                        "DOSIS/STIJGING-VERHOUDING VERHOOGD (${"%.2f".format(doseToRiseRatio)}, " +
+                            "${doseRatioSustainedMin.toInt()}m aanhoudend): volgende volledige reset gedempt naar " +
+                            "${DOSE_RATIO_DAMPING}x\n"
+                    )
+                }
                 lateDecayMul = if (vroegeStijgingNuVoorHetEerst ||
-                    (!episodeAnyRealDeliveryDone && !recentSensorNoise)
+                    (!episodeAnyRealDeliveryDone && !recentSensorNoise) ||
+                    (reentry && !episodeAnyRealDeliverySinceReentry && !recentSensorNoise &&
+                        (lastHypoActiveAt == null ||
+                            minutesSince(lastHypoActiveAt, now) >= POST_HYPO_REENTRY_GUARD_MINUTES))
                 ) {
                     // Eenmalige afbouw-reset: laat de commit-branch-formule (fraction,
                     // commitIobFactor, prePeakMul, ...) ongehinderd door de
@@ -7277,7 +7558,23 @@ class FCLvNext(
                     // reden: dit IS in de praktijk de eerste echte commit, ook
                     // al zegt commitNr iets anders. Alleen ZONDER recente
                     // sensor-ruis (recentSensorNoise) — zie kdoc hierboven.
-                    1.0
+                    //
+                    // 15/08/2026 (Ecko) — reentry-tak toegevoegd: zie kdoc bij
+                    // episodeAnyRealDeliverySinceReentry hierboven (pizza-episode,
+                    // golf 2). isReentrySignal() is zelf al streng gecorroboreerd
+                    // (reliable/aboveTarget/rising/accelerating) — dit voorkomt
+                    // alleen dat een net zo'n bevestigde nieuwe golf alsnog wordt
+                    // platgeslagen door decay die aan de VORIGE golf toebehoort.
+                    // computePeakBrake()/hypoProtection() blijven ongewijzigd — als
+                    // de actuele IOB/curve een reële hypo-projectie geeft, knipt
+                    // hypoProtection() de dosis alsnog terug, ongeacht deze tak.
+                    //
+                    // 15/08/2026 (Ecko) — doseRatioDampingActive toegevoegd: zie kdoc
+                    // bij DOSE_RATIO_THRESHOLD hierboven (koekje-episode). Alleen als
+                    // de dosis/stijging-verhouding al minstens DOSE_RATIO_SUSTAIN_MIN
+                    // minuten ononderbroken verhoogd stond, wordt deze reset gedempt
+                    // i.p.v. volledig vrijgesteld.
+                    if (doseRatioDampingActive) DOSE_RATIO_DAMPING else 1.0
                 } else if (lateDecayActive) {
                     (1.0 - effectiveDecay * (commitNr - 1).toDouble())
                         .coerceIn(decayFloor, 1.0)
@@ -7655,6 +7952,7 @@ class FCLvNext(
                     // effectiveMinCommitDose gehaald), dus hier op true zetten
                     // sluit exact aan bij die al bestaande definitie.
                     episodeAnyRealDeliveryDone = true
+                    episodeAnyRealDeliverySinceReentry = true
 
                     if (reentry) {
                         lastReentryCommitAt = now
@@ -7955,6 +8253,13 @@ class FCLvNext(
                         "${"%.2f".format(doseBefore)}→${"%.2f".format(commandedDose)}U (right-sized)\n"
                 )
             }
+        }
+
+        // 15/08/2026 (Ecko): zie kdoc bij lastHypoActiveAt (declaratie) — beide
+        // hypo-checks hierboven hebben nu hun kans gehad, logRow.hypoActive
+        // geeft dus de definitieve stand van deze cyclus.
+        if (logRow.hypoActive) {
+            lastHypoActiveAt = now
         }
 
         if (postPeak.lockout) {
@@ -8786,6 +9091,12 @@ class FCLvNext(
 
         logRow.finalDose = finalDose
         logRow.commandedDose = commandedDose
+        // 15/08/2026 (Ecko) — zie kdoc bij DOSE_RATIO_THRESHOLD/episodeCumulativeCommandedU
+        // hierboven. Bewust hier, ná alle guards (hypo-rechttrekking, topGuard,
+        // postpeak lockout, post-hypo-brake) die commandedDose nog konden
+        // wijzigen — dit IS de daadwerkelijk afgeleverde hoeveelheid deze cyclus.
+        episodeCumulativeCommandedU += commandedDose
+        episodeMaxDeltaTargetSoFar = maxOf(episodeMaxDeltaTargetSoFar, ctx.deltaToTarget)
         logRow.deliveredTotal = effectiveDeliveredNow
         logRow.externalBolusU = input.externalBolusU
         // Update prevFclDose voor externe bolus detectie volgende cyclus
