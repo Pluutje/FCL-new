@@ -80,6 +80,25 @@ object FclIsfAutoAdjuster {
     const val MANUAL_MAX_WINDOW_DAYS = 10
     const val AUTO_COOLDOWN_DAYS = 5
 
+    // ── Interpolatie voor structureel maaltijd-geblokkeerde uren (16/08/2026) ──
+    // Aanleiding: een terechte vraag — bepaalde uren (bijv. 13-14u, 21u bij
+    // een eigen datacheck) zijn 88-94% van de tijd binnen een maaltijd-
+    // episode, dus die krijgen nooit of nauwelijks een DIRECTE meting via
+    // IsfLearner (zie de meal-uitsluiting daar). Zonder interpolatie blijven
+    // zulke uren stilzwijgend op 0%-wijziging staan — dat oogt als "hier is
+    // niets mis", terwijl het gewoon "hier is nooit gemeten" betekent.
+    // In plaats daarvan: lineair interpoleren tussen de dichtstbijzijnde
+    // uren mét een directe meting (cyclisch over 24 uur), MAAR gedempt in
+    // sterkte — dit is een inschatting, geen meting. Bewust GEEN
+    // parametrische dagcurve (bijv. een cosinor-fit met één vast piek/dal)
+    // over het hele etmaal: dat legt een vorm op die niet per se bij ieders
+    // patroon past (bijv. een aparte lunch- én avondpiek in plaats van één
+    // gladde curve) — interpoleren tussen ECHTE metingen maakt de minste
+    // aannames en blijft voor de gebruiker te herleiden naar concrete data.
+    const val INTERPOLATION_MAX_GAP_HOURS = 4     // groter gat dan dit = te onzeker, blijft op 0%
+    const val INTERPOLATION_SHIFT_DAMPING = 0.6   // geïnterpoleerde shift telt voor 60% mee t.o.v. een echte meting
+    const val INTERPOLATION_CONFIDENCE_DAMPING = 0.7
+
     suspend fun daysSinceLastChange(context: Context, db: FCLAnalyzerDatabase): Int {
         val baselineSetAt = FclIsfAutoAdjustStore.getBaselineSetAt(context)
         val lastAppliedAt = db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
@@ -142,6 +161,53 @@ object FclIsfAutoAdjuster {
         return result
     }
 
+    /** Unie van alle uren die in minstens één dag in [days] een ECHTE,
+     *  directe meting hadden (dus als key voorkwamen in dat dag's eigen,
+     *  sparse shiftByHour-JSON) — nodig om "0% want nooit gemeten" te
+     *  kunnen onderscheiden van "0% want gemeten en geen wijziging nodig"
+     *  vóórdat weightedAverageShift() alles al tot een dichte 0..23-map
+     *  heeft platgeslagen. */
+    private fun touchedHoursOf(days: List<DailyShift>): Set<Int> {
+        val touched = mutableSetOf<Int>()
+        days.forEach { touched.addAll(it.shiftByHour.keys) }
+        return touched
+    }
+
+    /** Vult uren zonder directe meting (zie [touchedHoursOf]) in door
+     *  lineair te interpoleren tussen de dichtstbijzijnde WEL-gemeten
+     *  buur-uren, cyclisch over de 24-uursklok — zie de uitgebreide kdoc
+     *  bij INTERPOLATION_MAX_GAP_HOURS hierboven voor de onderbouwing.
+     *  Uren waarvan beide buren verder dan INTERPOLATION_MAX_GAP_HOURS weg
+     *  liggen (of waarvoor helemaal geen enkele meting bestaat) blijven op
+     *  hun oorspronkelijke waarde (normaliter 0%) staan — bij te weinig
+     *  houvast liever geen uitspraak dan een te ver doorgetrokken gok. */
+    private fun interpolateGaps(
+        directShift: Map<Int, Double>,
+        touchedHours: Set<Int>
+    ): Pair<Map<Int, Double>, Set<Int>> {
+        if (touchedHours.isEmpty()) return directShift to emptySet()
+        val result = HashMap<Int, Double>(directShift)
+        val interpolated = mutableSetOf<Int>()
+        val sortedTouched = touchedHours.sorted()
+        for (h in 0..23) {
+            if (h in touchedHours) continue
+            val before = sortedTouched.filter { it < h }.maxOrNull() ?: (sortedTouched.last() - 24)
+            val after = sortedTouched.filter { it > h }.minOrNull() ?: (sortedTouched.first() + 24)
+            val gapBefore = h - before
+            val gapAfter = after - h
+            if (gapBefore > INTERPOLATION_MAX_GAP_HOURS || gapAfter > INTERPOLATION_MAX_GAP_HOURS) continue
+            val beforeHour = ((before % 24) + 24) % 24
+            val afterHour = ((after % 24) + 24) % 24
+            val beforeVal = directShift[beforeHour] ?: 0.0
+            val afterVal = directShift[afterHour] ?: 0.0
+            val frac = gapBefore.toDouble() / (gapBefore + gapAfter)
+            val interpolatedVal = (beforeVal + (afterVal - beforeVal) * frac) * INTERPOLATION_SHIFT_DAMPING
+            result[h] = interpolatedVal
+            interpolated.add(h)
+        }
+        return result to interpolated
+    }
+
     private fun jsonToHourlyMap(json: String): Map<Int, Double> {
         val map = HashMap<Int, Double>()
         return try {
@@ -159,7 +225,18 @@ object FclIsfAutoAdjuster {
         val oldHourly: Map<Int, Double>,
         val newHourly: Map<Int, Double>,
         val shiftByHour: Map<Int, Double>,
-        val hoursAtCap: Set<Int>
+        val hoursAtCap: Set<Int>,
+        // 16/08/2026 — uren waarvan de shift NIET uit een directe meting
+        // komt maar via interpolateGaps() is afgeleid van de dichtstbijzijnde
+        // gemeten buur-uren (zie kdoc bij INTERPOLATION_MAX_GAP_HOURS). Puur
+        // voor UI-weergave ("afgeleid" i.p.v. "gemeten") — telt verder gewoon
+        // mee in newHourly/shiftByHour en dezelfde caps als elk ander uur.
+        val interpolatedHours: Set<Int> = emptySet(),
+        // 16/08/2026 — uren met minstens één ECHTE directe meting in het
+        // venster (ongeacht of die meting toevallig 0% shift opleverde) —
+        // puur voor UI: onderscheidt "gemeten, geen wijziging nodig" van
+        // "nooit gemeten en ook niet interpoleerbaar" (gat > MAX_GAP_HOURS).
+        val touchedHours: Set<Int> = emptySet()
     )
 
     suspend fun computeCurrentProposal(context: Context, maxDays: Int = MANUAL_MAX_WINDOW_DAYS): DailyProposal? {
@@ -168,11 +245,13 @@ object FclIsfAutoAdjuster {
         val since = lastChangeDate(context, lastAppliedAt)
         val days = collectRecentDailyShifts(db, since, maxDays)
         if (days.isEmpty()) return null
-        val avgShift = weightedAverageShift(days)
+        val directShift = weightedAverageShift(days)
+        val touchedHours = touchedHoursOf(days)
+        val (avgShift, interpolatedHours) = interpolateGaps(directShift, touchedHours)
         val oldHourly = days.last().oldHourly
         val baseline = FclIsfAutoAdjustStore.getBaseline(context) ?: oldHourly
         val (newHourly, hoursAtCap) = computeNewHourly(oldHourly, avgShift, baseline)
-        return DailyProposal(days.size, days.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap)
+        return DailyProposal(days.size, days.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap, interpolatedHours, touchedHours)
     }
 
     /**
@@ -319,7 +398,8 @@ object FclIsfAutoAdjuster {
         if (daysSince < AUTO_COOLDOWN_DAYS) return
         val window = collectRecentDailyShifts(db, lastChangeDate(context, db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L), AUTO_COOLDOWN_DAYS)
         if (window.size < AUTO_COOLDOWN_DAYS) return
-        val avgShift = weightedAverageShift(window)
+        val directAvgShift = weightedAverageShift(window)
+        val (avgShift, _) = interpolateGaps(directAvgShift, touchedHoursOf(window))
         val (avgNewHourly, avgHoursAtCap) = computeNewHourly(currentHourly, avgShift, baseline)
         FclIsfAutoAdjustStore.updateCapHitCounters(context, avgHoursAtCap, avgShift.keys)
         val avgOldJson = oldJson
@@ -399,7 +479,8 @@ object FclIsfAutoAdjuster {
         val since = lastChangeDate(context, lastAppliedAt)
         val window = collectRecentDailyShifts(db, since, MANUAL_MAX_WINDOW_DAYS)
         if (window.size < MANUAL_COOLDOWN_DAYS) return false
-        val shiftByHour = weightedAverageShift(window)
+        val directShift = weightedAverageShift(window)
+        val (shiftByHour, _) = interpolateGaps(directShift, touchedHoursOf(window))
         val newest = window.last()
 
         val effectiveProfile = profileFunction.getProfile() ?: return false

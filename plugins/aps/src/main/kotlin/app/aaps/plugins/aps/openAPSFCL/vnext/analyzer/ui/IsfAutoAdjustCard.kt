@@ -1,6 +1,9 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -26,7 +32,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.aaps.plugins.aps.openAPSFCL.vnext.BgUnits
@@ -112,13 +124,18 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                 if (mode == FclSystemMode.AUTO)
                     "Past het gemiddelde ISF-voorstel automatisch toe op het echte pompprofiel, " +
                         "in kleine stapjes met een harde grens en een terugvalmogelijkheid. Leert " +
-                        "uit zuivere correctiemomenten (geen actieve maaltijd) — zie de Learner-tab " +
-                        "voor de onderliggende metingen."
+                        "uit zuivere correctiemomenten (geen actieve maaltijd). Uren die vrijwel " +
+                        "altijd door een maaltijd bezet zijn (bijv. rond lunch of avondeten) krijgen " +
+                        "geen eigen meting maar een voorzichtige, gedempte schatting op basis van de " +
+                        "dichtstbijzijnde wél-gemeten uren — hieronder gemarkeerd als \"afgeleid\"."
                 else
                     "Berekent elke dag een voorstel op basis van zuivere correctiemomenten (geen " +
-                        "actieve maaltijd) — zie de Learner-tab voor de onderliggende metingen. Na " +
-                        "acceptatie wordt dat toegepast op het echte pompprofiel — er wordt nooit " +
-                        "automatisch iets doorgevoerd.",
+                        "actieve maaltijd). Uren die vrijwel altijd door een maaltijd bezet zijn " +
+                        "(bijv. rond lunch of avondeten) krijgen geen eigen meting maar een " +
+                        "voorzichtige, gedempte schatting op basis van de dichtstbijzijnde wél-" +
+                        "gemeten uren — hieronder gemarkeerd als \"afgeleid\". Na acceptatie wordt " +
+                        "dat toegepast op het echte pompprofiel — er wordt nooit automatisch iets " +
+                        "doorgevoerd.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -168,7 +185,16 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                         shiftByHour = p.shiftByHour,
                         hoursAtCap = p.hoursAtCap,
                         capHits = capHits,
+                        interpolatedHours = p.interpolatedHours,
+                        touchedHours = p.touchedHours,
                         mgdl = mgdl
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+                    IsfProfileChart(
+                        oldHourly = p.oldHourly,
+                        newHourly = p.newHourly,
+                        interpolatedHours = p.interpolatedHours
                     )
 
                     if (mode == FclSystemMode.MANUAL && p.daysUsed >= Adjuster.MANUAL_COOLDOWN_DAYS) {
@@ -286,7 +312,16 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                             shiftByHour = pendingProposal.shiftByHour,
                             hoursAtCap = pendingProposal.hoursAtCap,
                             capHits = capHits,
+                            interpolatedHours = pendingProposal.interpolatedHours,
+                            touchedHours = pendingProposal.touchedHours,
                             mgdl = mgdl
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        IsfProfileChart(
+                            oldHourly = pendingProposal.oldHourly,
+                            newHourly = pendingProposal.newHourly,
+                            interpolatedHours = pendingProposal.interpolatedHours,
+                            heightDp = 100
                         )
                     }
                 }
@@ -336,6 +371,8 @@ private fun IsfAutoAdjustTable(
     shiftByHour: Map<Int, Double>,
     hoursAtCap: Set<Int>,
     capHits: Map<Int, Int>,
+    interpolatedHours: Set<Int>,
+    touchedHours: Set<Int>,
     mgdl: Boolean
 ) {
     val unit = BgUnits.unitShort(mgdl)
@@ -353,7 +390,22 @@ private fun IsfAutoAdjustTable(
             val voorstelValMgdl = (oldValMgdl * (1.0 + shiftPct / 100.0)).coerceAtLeast(0.0)
             val atCap = hour in hoursAtCap
             val hitCount = capHits[hour] ?: 0
-            val status = if (atCap) "tegen grens" + (if (hitCount > 0) " (${hitCount}d)" else "") else "voorstel"
+            val isInterpolated = hour in interpolatedHours
+            val hasDirectData = hour in touchedHours
+            // 16/08/2026 — drie statussen i.p.v. twee: "afgeleid" (geen
+            // eigen meting, wel dicht genoeg bij gemeten buren om te
+            // interpoleren) gaat vóór "tegen grens" — het belangrijkste om
+            // hier te laten zien is dat dit uur geen eigen meting heeft, de
+            // grens-status blijft af te lezen aan de tabel-waarde zelf. Een
+            // uur dat NOCH gemeten NOCH interpoleerbaar is (buiten bereik,
+            // zie INTERPOLATION_MAX_GAP_HOURS) krijgt "geen data" i.p.v.
+            // stilzwijgend "voorstel" te tonen bij een ongewijzigde 0%.
+            val status = when {
+                isInterpolated -> "afgeleid" + (if (atCap) " (tegen grens)" else "")
+                !hasDirectData -> "geen data"
+                atCap -> "tegen grens" + (if (hitCount > 0) " (${hitCount}d)" else "")
+                else -> "voorstel"
+            }
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                 Text("%02d:00".format(hour), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.8f))
                 Text(
@@ -364,8 +416,135 @@ private fun IsfAutoAdjustTable(
                     "%.2f (%+.0f%%)".format(mgdlPerUToDisplay(voorstelValMgdl, mgdl), shiftPct),
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
                 )
-                Text(status, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isInterpolated) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 }
+
+/**
+ * IsfProfileChart (16/08/2026) — 24-uurs trapvormige grafiek, zelfde
+ * opzet als BasalProfileChart (Advisorscreen.kt): Voorstel als brede,
+ * effen band, Huidig eroverheen als smallere gestreepte lijn in een vaste,
+ * thema-onafhankelijke kleur. Extra t.o.v. de basaal-variant: uren in
+ * [interpolatedHours] worden in de Voorstel-band met een lagere dekking
+ * (alpha) getekend, zodat in één oogopslag te zien is welk deel van de
+ * curve op een ECHTE meting berust en welk deel een afgeleide schatting is
+ * (zie kdoc bij FclIsfAutoAdjuster.INTERPOLATION_MAX_GAP_HOURS).
+ */
+@Composable
+private fun IsfProfileChart(
+    oldHourly: Map<Int, Double>,
+    newHourly: Map<Int, Double>,
+    interpolatedHours: Set<Int>,
+    heightDp: Int = 140
+) {
+    val oldColor = ISF_CHART_HUIDIG_COLOR
+    val newColor = MaterialTheme.colorScheme.primary
+    val newColorInterpolated = newColor.copy(alpha = 0.45f)
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val dashEffect = remember { PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Canvas(modifier = Modifier.size(width = 18.dp, height = 10.dp)) {
+                drawLine(
+                    oldColor,
+                    Offset(0f, size.height / 2f),
+                    Offset(size.width, size.height / 2f),
+                    strokeWidth = 3.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = dashEffect
+                )
+            }
+            Text("Huidig", style = MaterialTheme.typography.labelSmall, color = labelColor)
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(newColor)
+            )
+            Text("Voorstel (gemeten)", style = MaterialTheme.typography.labelSmall, color = labelColor)
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(newColorInterpolated)
+            )
+            Text("Voorstel (afgeleid)", style = MaterialTheme.typography.labelSmall, color = labelColor)
+        }
+        Spacer(Modifier.height(4.dp))
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(heightDp.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+            val maxVal = (oldHourly.values + newHourly.values).filter { it.isFinite() }
+                .maxOrNull()?.let { it * 1.15 } ?: 1.0
+            val safeMax = if (maxVal <= 0.0) 1.0 else maxVal
+
+            fun x(hour: Int): Float = w * (hour / 24f)
+            fun y(v: Double): Float = h - (h * (v / safeMax)).toFloat()
+
+            listOf(0, 6, 12, 18, 24).forEach { hr ->
+                val xg = x(hr)
+                drawLine(gridColor, Offset(xg, 0f), Offset(xg, h), strokeWidth = 1.5f)
+            }
+            drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
+
+            // Voorstel-band per uur apart getekend (i.p.v. één doorlopende
+            // trap zoals bij Huidig) — nodig om per uur een andere kleur/
+            // dekking te kunnen geven al naar gelang interpolatedHours.
+            // Geen cyclische verbinding tussen uur 23 en uur 0 (zelfde
+            // gedrag als drawStairs() in BasalProfileChart) — de linkerrand
+            // van de grafiek begint altijd "vers".
+            var prevNewY: Float? = null
+            for (hour in 0..23) {
+                val v = newHourly[hour] ?: continue
+                val x0 = x(hour)
+                val x1 = x(hour + 1)
+                val yv = y(v)
+                val color = if (hour in interpolatedHours) newColorInterpolated else newColor
+                if (prevNewY != null && prevNewY != yv) {
+                    drawLine(color, Offset(x0, prevNewY), Offset(x0, yv), strokeWidth = 7f, cap = StrokeCap.Round)
+                }
+                drawLine(color, Offset(x0, yv), Offset(x1, yv), strokeWidth = 7f, cap = StrokeCap.Round)
+                prevNewY = yv
+            }
+
+            var prevY: Float? = null
+            for (hour in 0..23) {
+                val v = oldHourly[hour] ?: continue
+                val x0 = x(hour)
+                val x1 = x(hour + 1)
+                val yv = y(v)
+                if (prevY != null && prevY != yv) {
+                    drawLine(oldColor, Offset(x0, prevY), Offset(x0, yv), strokeWidth = 3.5f, cap = StrokeCap.Round, pathEffect = dashEffect)
+                }
+                drawLine(oldColor, Offset(x0, yv), Offset(x1, yv), strokeWidth = 3.5f, cap = StrokeCap.Round, pathEffect = dashEffect)
+                prevY = yv
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(0, 6, 12, 18, 24).forEach { hr ->
+                Text("%02d".format(hr % 24), style = MaterialTheme.typography.labelSmall, color = labelColor)
+            }
+        }
+    }
+}
+
+// Zelfde vaste, thema-onafhankelijke amberkleur als FCL_CHART_HUIDIG_COLOR
+// in Advisorscreen.kt (BasalProfileChart) — hier onder een eigen naam,
+// bewust niet hergebruikt (private in dat bestand, en losse eenheden/
+// schaal rechtvaardigen een eigen definitie i.p.v. een gedeelde constante).
+private val ISF_CHART_HUIDIG_COLOR = Color(0xFFFFA000)
