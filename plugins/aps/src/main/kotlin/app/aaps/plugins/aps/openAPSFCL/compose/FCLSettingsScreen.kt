@@ -69,7 +69,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var expertPinDialogOpen by remember { mutableStateOf(false) }
     val EXPERT_PIN = "0000"
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie FclNachtOvergangSettings.kt.
+    // Geleidelijke nacht-overgang (17/07/2026) — zie FclNachtOvergangSettings.kt.
     // BUGFIX (17/07/2026): moet NA de ctx-declaratie hierboven staan — ctx
     // bestond nog niet toen deze regel eerder (per abuis) bij nachtStart stond.
     var nachtOvergangMinuten by remember {
@@ -84,8 +84,8 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     var showOchtendWeekendPicker by remember { mutableStateOf(false) }
     var showNachtPicker          by remember { mutableStateOf(false) }
 
-    // ── AIGF-state (14/07/2026, Ecko) ───────────────────────────────────────
-    // BUGFIX (14/07/2026, Ecko): stond eerst genest in de FCLSection("Activiteit")
+    // ── AIGF-state (14/07/2026) ───────────────────────────────────────
+    // BUGFIX (14/07/2026): stond eerst genest in de FCLSection("Activiteit")
     // lambda hieronder — daardoor "Unresolved reference" op de picker-dialogen
     // verderop in dit bestand, die buiten die lambda staan (zelfde patroon als
     // showOchtendPicker/showNachtPicker hierboven: top-niveau state, overal in
@@ -126,7 +126,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
     }
 
     val doseOptions = listOf(
-        // 22/07/2026 (Ecko) — nieuwe trap boven VERY_SMOOTH, zie FCLvNextConfig.kt
+        // 22/07/2026 — nieuwe trap boven VERY_SMOOTH, zie FCLvNextConfig.kt
         "SUPER_SMOOTH" to s.doseStyleLabel("SUPER_SMOOTH"),
         "VERY_SMOOTH" to s.doseStyleLabel("VERY_SMOOTH"),
         "SMOOTH"      to s.doseStyleLabel("SMOOTH"),
@@ -276,14 +276,14 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             expanded = expandedAnalyserAutomaat,
             onToggle = { expandedAnalyserAutomaat = !expandedAnalyserAutomaat }
         ) {
-            // 10/07/2026 (Ecko) — beide aan/uit + automatisch/handmatig-
+            // 10/07/2026 — beide aan/uit + automatisch/handmatig-
             // schakelaars samengevoegd op één plek. Voorheen stond hier alleen
             // de oude "Automaat leert"-knop (nu vervangen door de Learner-kaart
             // hieronder), en stonden de nieuwe kaarten los in het Learner- resp.
             // AI-tabblad zelf — daar staat nu alleen nog de inhoud (het
             // openstaande voorstel), de bediening staat hier bij elkaar.
             //
-            // DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko; herzien n.a.v. Ecko's
+            // DAG/NACHT-HERSTRUCTURERING (26/07/2026, de gebruiker; herzien n.a.v. de gebruikers
             // terugkoppeling): "dat moet maar 1 keer voor de analyzer en 1 keer
             // voor de AI zijn. Als ik hem uit wil zetten dan geldt dat zowel
             // voor dag als nacht en als ik dag wel automatisch zou willen maar
@@ -319,6 +319,19 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                     nightManualDescription = "Genereert elk nachtrapport; basaal-aanpassing pas na jouw Accepteren op het Nacht-tabblad",
                     onDayModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiAdvisorSettingsStore.setMode(ctx, it) },
                     onNightModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightBasalAutoAdjustStore.setMode(ctx, it) }
+                )
+                // 16/08/2026 — ISF-auto-adjust: geen dag/nacht-as (ISF-metingen
+                // zijn niet aan nacht gebonden zoals de basaal-variant), dus de
+                // gewone, enkelvoudige FclModeSelectorCard i.p.v. de Dag/Nacht-
+                // variant hierboven. Kaartje zelf staat in de Learner-tab
+                // (IsfAutoAdjustCard, Dfcontroltab.kt) — hier alleen de bediening,
+                // zelfde plaatsingsprincipe als Learner/AI-adviseur hierboven.
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeSelectorCard(
+                    title = "ISF-auto-adjust",
+                    initialMode = app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf.FclIsfAutoAdjustStore.getMode(ctx),
+                    autoDescription = "Past het gemiddelde ISF-voorstel automatisch toe op het pompprofiel, in kleine stapjes met een harde grens",
+                    manualDescription = "Berekent een ISF-voorstel uit zuivere correctiemomenten, past pas toe na jouw goedkeuring",
+                    onModeChange = { app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf.FclIsfAutoAdjustStore.setMode(ctx, it) }
                 )
             }
         }
@@ -399,7 +412,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // Geleidelijke nacht-overgang (17/07/2026, Ecko): i.p.v. dat alle
+            // Geleidelijke nacht-overgang (17/07/2026): i.p.v. dat alle
             // nacht-instellingen in één cyclus omklappen zodra Nachtstart
             // passeert, lopen ze lineair over gedurende deze duur. 0 minuten
             // = oude harde gedrag (direct omklappen).
@@ -449,7 +462,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             // Vereenvoudigd van 4 standen (UIT/LICHT/NORMAAL/STERK) naar AAN/UIT
             // (29/06/2026): intensiteitsdetectie op basis van stappenaantal regelt
             // het effect automatisch — aparte standen voegden geen meerwaarde toe.
-            // 14/07/2026 (Ecko) — hernoemd naar "Kortetermijn activiteit (stappen)"
+            // 14/07/2026 — hernoemd naar "Kortetermijn activiteit (stappen)"
             // om deze duidelijk te onderscheiden van de nieuwe AIGF hieronder: dit
             // blok reageert op stappen NU (real-time, FCLActivityModule), AIGF
             // kijkt naar het 8-uurs-calorieniveau t.o.v. een glijdend 7-daags
@@ -487,7 +500,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
             androidx.compose.material3.HorizontalDivider()
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko) ──
+            // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026) ──
             // Bewust EIGEN, niet-expert SharedPreferences-bestand ("fcl_activity_
             // sensitivity_settings", zie FCLvNext.kt isAigfActive()/getAigfMinPct()/
             // getAigfMaxPct()) — raw SharedPreferences i.p.v. een officiële AAPS-
@@ -634,7 +647,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                 if (expertModeActive) {
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // ── T1-versterking (13/07/2026, Ecko) ────────────────────
+                    // ── T1-versterking (13/07/2026) ────────────────────
                     // Losse, uitzetbare feature-toggle onder Expert modus. Direct
                     // gelezen door FCLvNext.kt (zelfde "fcl_expert_prefs"-bestand,
                     // zie isSustainT1BoostActive() aldaar) — geen herstart nodig,
@@ -750,7 +763,7 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
         )
     }
 
-    // ── AIGF min/max %-pickers (14/07/2026, Ecko) ──────────────────────────
+    // ── AIGF min/max %-pickers (14/07/2026) ──────────────────────────
     // Zelfde "buiten de Column, want Popup"-plaatsing als de tijd-pickers
     // hierboven. Min% begrensd 75-100, Max% begrensd 100-125 — symmetrisch
     // rond het neutrale punt 100 (zie FclActivitySensitivity.kt).
@@ -1041,11 +1054,11 @@ private fun FCLTimeRow(
     }
 }
 
-// ── styleNumberPickerText (15/07/2026, Ecko; bijgewerkt 15/07/2026 na
+// ── styleNumberPickerText (15/07/2026, de gebruiker; bijgewerkt 15/07/2026 na
 // Android Studio-waarschuwing over reflectie op API 29+) ────────────────────
 // Bugfix: android.widget.NumberPicker erft zijn tekstkleur van het GLOBALE
 // Activity-thema (light/dark), niet van de Compose MaterialTheme die de
-// omliggende Dialog/Surface hierboven kleurt. Bij Ecko bleek dat op een licht
+// omliggende Dialog/Surface hierboven kleurt. Bij de gebruiker bleek dat op een licht
 // scherm de Surface wit is, maar de NumberPicker-cijfers ook (bijna) wit
 // waren -> onzichtbaar. Twee tekst-bronnen binnen NumberPicker moeten apart
 // gekleurd worden:
@@ -1083,7 +1096,7 @@ private fun styleNumberPickerText(picker: android.widget.NumberPicker, colorArgb
     }
 }
 
-// ── PercentWheelPicker (14/07/2026, Ecko) ──────────────────────────────────
+// ── PercentWheelPicker (14/07/2026) ──────────────────────────────────
 // Scrollbare heel-getal-kiezer voor de AIGF min/max%-instellingen, analoog
 // aan TimeWheelPicker hierboven maar zelfstandig (geen afhankelijkheid van
 // dat bestand — TimeWheelPicker's implementatie zit elders in het project
@@ -1098,7 +1111,7 @@ private fun PercentWheelPicker(
     minValue: Int,
     maxValue: Int,
     title: String,
-    // 17/07/2026 (Ecko, nacht-overgang-picker): optionele custom labels per
+    // 17/07/2026 (nacht-overgang-picker): optionele custom labels per
     // stap (bijv. "0","10","20",...) i.p.v. de kale index — de NumberPicker
     // zelf blijft intern op index werken (minValue..maxValue), de aanroeper
     // rekent de index terug naar de echte waarde. null = ongewijzigd oud

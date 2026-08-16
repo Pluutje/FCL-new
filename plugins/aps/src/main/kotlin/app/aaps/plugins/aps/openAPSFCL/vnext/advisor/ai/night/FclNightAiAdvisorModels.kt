@@ -5,7 +5,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night
  * FCL Nacht-AI-Adviseur — datamodellen
  * ============================================================================
  *
- * 23/07/2026 (Ecko) — VOLLEDIG ONAFHANKELIJK van vnext/advisor/ai (de
+ * 23/07/2026 — VOLLEDIG ONAFHANKELIJK van vnext/advisor/ai (de
  * bestaande dag/maaltijd-parameteradviseur). Andere trigger (1x per nacht,
  * bij het einde van de nacht — niet elke ~8u tijdens de dag), ander domein
  * (basaalprofiel-uren, niet FCLvNext's eigen dosis-parameters), en

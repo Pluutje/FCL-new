@@ -8,7 +8,7 @@ object EpisodeMetricsBuilder {
     // de bestaande rescue-ARM/CONFIRM-constanten in FCLvNext.kt, zodat
     // beide mechanismen consistent dezelfde situatie als "verdacht" zien.
     private const val NEAR_HYPO_THRESH        = 4.8   // mmol/L — waarschuwingsdrempel, boven de harde hypo-grens (3.9)
-    // Projectie-drempel voor projectedSevereLowAverted (19/07/2026, Ecko) —
+    // Projectie-drempel voor projectedSevereLowAverted (19/07/2026) —
     // "ruim onder de 4": lager dan NEAR_HYPO_THRESH, want dit is een
     // PROJECTIE (hypoProjectedBg), geen gemeten waarde — een projectie mag
     // een grotere marge onder de harde hypo-grens hebben voor het als
@@ -19,7 +19,7 @@ object EpisodeMetricsBuilder {
 
     // Gedeelde maat voor "is dit een betekenisvolle hoeveelheid insuline voor
     // déze patiënt" — RELATIEF aan maxSMB, niet absoluut (zie controlevraag
-    // Ecko 20/06/2026: bij 3× zo'n grote maxSMB is een vast getal in U niet
+    // de gebruiker 20/06/2026: bij 3× zo'n grote maxSMB is een vast getal in U niet
     // meer betekenisvol — wat voor de ene patiënt "significant" is, is voor
     // een ander ruis, en omgekeerd). Hergebruikt voor zowel "nog actieve IOB
     // op het dieptepunt" (NEAR_HYPO) als "was deze commit significant"
@@ -61,7 +61,7 @@ object EpisodeMetricsBuilder {
             val avgBg = if (rows.isNotEmpty()) rows.map { it.bg }.average() else episode.startBg
             val endBg = rows.lastOrNull()?.bg ?: episode.startBg
 
-            // (13/07/2026, Ecko) Hergebruik van de Veiligheidscontrole
+            // (13/07/2026) Hergebruik van de Veiligheidscontrole
             // (SafetyInvariantChecker, Analyzer-UI 12/07/2026) als extra
             // leersignaal voor FrontloadLearner — zie kdoc bij
             // hasLateCommitViolation in EpisodeMetrics.kt.
@@ -98,7 +98,7 @@ object EpisodeMetricsBuilder {
 
             // followUpCommitCount: commits die LATER komen dan de grootste
             // commit, en zelf nog substantieel waren (RELATIEF aan maxSMB —
-            // was voorheen een vaste 0,10U, zie controlevraag Ecko 20/06/2026:
+            // was voorheen een vaste 0,10U, zie controlevraag de gebruiker 20/06/2026:
             // bij een patiënt met 3× zo'n grote maxSMB zou 0,10U verwaarloosbaar
             // ruis zijn i.p.v. een echte vervolgcommit).
             val followUpThresholdU = (FOLLOWUP_COMMIT_FRAC_OF_MAXSMB * manualMaxSmb).coerceAtLeast(0.03)
@@ -233,7 +233,7 @@ object EpisodeMetricsBuilder {
                         it.slope >= REBOUND_SLOPE_MIN
                 }
 
-            // ── projectedSevereLowAverted (19/07/2026, Ecko) ────────────────
+            // ── projectedSevereLowAverted (19/07/2026) ────────────────
             // Zie kdoc bij EpisodeMetrics.projectedSevereLowAverted. Twee stappen:
             // 1. was er, terwijl BG zelf nog geen alarmerende waarde had maar er
             //    wel significante IOB actief was, een moment waarop de PROJECTIE
@@ -255,7 +255,7 @@ object EpisodeMetricsBuilder {
                         it.slope >= -0.10
                 }
 
-            // 26/07/2026 (Ecko) — zie kdoc bij EpisodeMetrics.isNight.
+            // 26/07/2026 — zie kdoc bij EpisodeMetrics.isNight.
             val isNight = rows.firstOrNull()?.isNight ?: false
 
             EpisodeMetrics(

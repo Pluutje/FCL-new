@@ -127,9 +127,9 @@ class FCLCycleLogRepository @Inject constructor(
         // Verwijder de eerste (mogelijk onvolledige) episode en filter
         // episodes die geen significante dosis bevatten — identiek aan de UI.
         val manualMaxSmb = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
-        // 12/07/2026 (Ecko) — zie kdoc bij Fclactiveconfigbridge.Snapshot.manualMaxIob.
+        // 12/07/2026 — zie kdoc bij Fclactiveconfigbridge.Snapshot.manualMaxIob.
         val manualMaxIob = FclActiveConfigBridge.get()?.manualMaxIob ?: 10.0
-        // 12/07/2026 (Ecko) — zie kdoc bij Fclactiveconfigbridge.Snapshot.effectiveIsfMmol.
+        // 12/07/2026 — zie kdoc bij Fclactiveconfigbridge.Snapshot.effectiveIsfMmol.
         val effectiveIsfMmol = FclActiveConfigBridge.get()?.effectiveIsfMmol ?: 4.0
         val significantDoseThreshold = manualMaxSmb * 0.80
 
@@ -167,16 +167,16 @@ class FCLCycleLogRepository @Inject constructor(
         // evaluate() logt altijd (ook bij AUTO_DISABLED/COOLDOWN/etc) via
         // FclLearnerLogger, en past D/F alleen toe als isAutoEnabled=true.
         val latestMetrics = episodeMetrics.lastOrNull()
-        // 10/07/2026 (Ecko) — OFF-modus: evaluate() zelf overslaan, niet alleen
+        // 10/07/2026 — OFF-modus: evaluate() zelf overslaan, niet alleen
         // het toepassen. Voorheen rekende/logde evaluate() altijd, ook bij
         // isAutoEnabled=false — dat voldeed niet meer aan "doet dan echt niks
         // meer" zodra er een expliciete OFF-stand bijkomt naast AUTO/MANUAL.
         //
-        // HERZIEN (10/07/2026, Ecko) — de return-waarde (LearningStep?) werd
+        // HERZIEN (10/07/2026) — de return-waarde (LearningStep?) werd
         // hier altijd genegeerd. Die bevat de diagnose-code en oude D/F-
         // waarden, nodig voor een leesbare uitleg bij het MANUAL-voorstel
         // (zie FclLearnerUitleg.kt) — vastgelegd in learningStep hieronder.
-        // 26/07/2026 (Ecko) — dag/nacht-splitsing: welke as geldt hangt af van
+        // 26/07/2026 — dag/nacht-splitsing: welke as geldt hangt af van
         // de episode zelf (latestMetrics.isNight), niet van "is het nu nacht".
         var learningStep: DFLearner.LearningStep? = null
         if (latestMetrics != null && DFLearner.isEvaluationEnabled(context, latestMetrics.isNight)) {
@@ -210,13 +210,13 @@ class FCLCycleLogRepository @Inject constructor(
         // terechtkwam. De "Toepassen in AAPS"-knop blijft alleen voor
         // de agressiviteits-override.
         //
-        // HERZIEN (10/07/2026, Ecko — Fase 2, Learner MANUAL-modus): de
+        // HERZIEN (10/07/2026, de gebruiker — Fase 2, Learner MANUAL-modus): de
         // getters hieronder lopen nu buiten de mode-check, want ze zijn
         // hoe dan ook nodig (ook om een voorstel te bouwen bij MANUAL).
         // Alleen het TOEPASSEN (AUTO) vs. VOORSTELLEN (MANUAL) vertakt.
         // OFF: evaluate() zelf draaide al niet (zie isEvaluationEnabled
         // hierboven), dus hier is dan simpelweg niets te doen.
-        // 26/07/2026 (Ecko) — zelfde as als Stap 4 hierboven: welke episode
+        // 26/07/2026 — zelfde as als Stap 4 hierboven: welke episode
         // net beoordeeld is (latestMetrics?.isNight) bepaalt welke modus
         // hier geldt. Geen latestMetrics (geen episodes deze cyclus) → val
         // terug op de DAG-as, puur zodat er iets zinnigs gebeurt; er is dan
@@ -261,7 +261,7 @@ class FCLCycleLogRepository @Inject constructor(
                         episodeCount   = episodeMetrics.size
                     )
 
-                // 27/07/2026 (Ecko) — ook hier de "laatst toegepast"-snapshot
+                // 27/07/2026 — ook hier de "laatst toegepast"-snapshot
                 // bijwerken (zie FclLearnerPendingProposal.isMeaningfullyDifferent()
                 // / Stap 7's MANUAL-tak hieronder): schakel je later van
                 // Automatisch naar Handmatig, dan wordt het eerstvolgende
@@ -279,7 +279,7 @@ class FCLCycleLogRepository @Inject constructor(
                     )
                 )
 
-                // 10/07/2026 (Ecko) — zachte convergentie voor de 7 AI-aanpasbare
+                // 10/07/2026 — zachte convergentie voor de 7 AI-aanpasbare
                 // parameters zonder eigen dedicated evaluator (zie kdoc bij
                 // DFLearner.convergeTrackedParams). Hergebruikt de po die hierboven
                 // toch al vers is berekend — geen dubbele DFMapping-aanroep nodig.
@@ -297,11 +297,11 @@ class FCLCycleLogRepository @Inject constructor(
                     isNight = learnerModeIsNight
                 )
             } else {
-                // MANUAL (10/07/2026, Ecko — Fase 2): voorstel opslaan i.p.v.
+                // MANUAL (10/07/2026, de gebruiker — Fase 2): voorstel opslaan i.p.v.
                 // direct toepassen, en de gebruiker via dezelfde native-
                 // notificatie-methode als de AI-adviseur op de hoogte stellen.
                 //
-                // BUGFIX (27/07/2026, Ecko): dit draaide voorheen ONVOORWAARDELIJK
+                // BUGFIX (27/07/2026): dit draaide voorheen ONVOORWAARDELIJK
                 // bij elke episode — ook vlak na een Goedkeuring, wanneer d/f/etc.
                 // nog nauwelijks van de zojuist toegepaste waarde waren afgeweken.
                 // Gevolg: "die bleef een paar keer komen met hetzelfde advies ook
@@ -325,7 +325,7 @@ class FCLCycleLogRepository @Inject constructor(
                             refPeakBias = refPeakBias, refLcd = refLcd,
                             agg = agg, episodeCount = episodeMetrics.size,
                             reason = reason,
-                            // 10/07/2026 (Ecko) — voor de leesbare uitleg in de kaart
+                            // 10/07/2026 — voor de leesbare uitleg in de kaart
                             // (FclLearnerUitleg). learningStep is null als evaluate()
                             // deze cyclus geblokkeerd werd (cooldown/manual-correction/
                             // te weinig episodes) — dan vallen oldD/oldF terug op de
@@ -491,10 +491,10 @@ class FCLCycleLogRepository @Inject constructor(
             "Documents/AAPS/ANALYSE"
         )
         dir.mkdirs()
-        // 11/07/2026 (Ecko): +2 kolommen (bg_stijgt_nog_fors, commit_nr_used).
-        // HERZIEN (12/07/2026, Ecko): eerder hier hernoemd naar v9, zoals de
+        // 11/07/2026: +2 kolommen (bg_stijgt_nog_fors, commit_nr_used).
+        // HERZIEN (12/07/2026): eerder hier hernoemd naar v9, zoals de
         // vaste discipline bij een schema-wijziging voorschrijft (zie
-        // FCLvNext_ActivityLog_v1→v2). Op Ecko's toestel bleek de daadwerkelijk
+        // FCLvNext_ActivityLog_v1→v2). Op de gebruikers toestel bleek de daadwerkelijk
         // geïnstalleerde app echter gewoon op v8 te zijn blijven schrijven —
         // waarschijnlijk doordat niet elke gewijzigde bestand uit die levering
         // is toegepast, of een eerdere build actief bleef. Op uitdrukkelijk
@@ -503,10 +503,17 @@ class FCLCycleLogRepository @Inject constructor(
         // versnipperen over een derde bestand. De twee nieuwe kolommen hierboven
         // blijven wel gewoon actief in de v8-header — alleen de bestandsnaam zelf
         // is niet meegegaan.
-        val file = File(dir, "FCLvNext_Log_v9.csv")
+        // v9->v10 (16/08/2026) — 3 nieuwe kolommen (aigf_b_pct/
+        // aigf_b_active/aigf_b_reason, zie csvHeader() hieronder) bij het
+        // HERONTWERP van AIGF component B (dosis-drempel-freeze -> live).
+        // LET OP (zie kdoc iets hierboven, 12/07/2026-incident): bij een
+        // eerdere v8->v9-hernoeming bleek de daadwerkelijk geinstalleerde
+        // app soms toch op de oude bestandsnaam te blijven schrijven — hou
+        // hier rekening mee bij het verifieren dat deze build ook echt actief is.
+        val file = File(dir, "FCLvNext_Log_v10.csv")
 
         val sep = ";"
-        // 23/07/2026 (Ecko) — ts_utc blijft de bron van waarheid (ondubbelzinnig,
+        // 23/07/2026 — ts_utc blijft de bron van waarheid (ondubbelzinnig,
         // geen zomer/wintertijd-verwarring in de data zelf); ts_local is puur een
         // extra, leesbare kolom ernaast. Europe/Amsterdam schakelt automatisch
         // CET/CEST — geen handmatige +1/+2-aanpassing nodig.
@@ -531,7 +538,7 @@ class FCLCycleLogRepository @Inject constructor(
 }
 
 // ── CSV header — exact gelijk aan FCLvNextCsvLogger ──────────────────────
-// 05/07/2026 (Ecko): FCLCycleLogEntity is herstructureerd in @Embedded-
+// 05/07/2026: FCLCycleLogEntity is herstructureerd in @Embedded-
 // groepen (zie doc-comment bij FCLCycleLogEntity.kt) — de kolomnamen in de
 // CSV blijven ONGEWIJZIGD (Room "plat" de groepen terug uit tot dezelfde
 // kolommen), alleen de Kotlin-veldtoegang hieronder gaat nu via de
@@ -548,6 +555,7 @@ private fun csvHeader(sep: String): String = listOf(
     "real_delivered_basal_u", "real_delivered_bolus_u", "profile_basal_u_h",
     "activity_active", "activity_insulin_pct", "activity_target_adjust", "aaps_multiplier",
     "aigf_pct", "aigf_active", "aigf_reason",
+    "aigf_b_pct", "aigf_b_active", "aigf_b_reason",
     "nf_level_geleerd", "nf_level_effectief", "nacht_aggressiviteit",
     "night_stagnation_delta_min", "night_stagnation_energy_boost", "night_persistent_aggression_mul",
     "night_cooldown_min", "night_correction_hold_delta_max", "night_absorption_dose_factor",
@@ -624,6 +632,7 @@ private fun FCLCycleLogEntity.toCsvLine(
         d2(delivery.realDeliveredBasalU), d2(delivery.realDeliveredBolusU), d2(delivery.profileBasalUH),
         bool(delivery.activityActive), d2(delivery.activityInsulinPct), d2(delivery.activityTargetAdjust), d2(delivery.aapsMultiplier),
         d2(delivery.aigfPct), bool(delivery.aigfActive), delivery.aigfReason,
+        d2(delivery.aigfBPct), bool(delivery.aigfBActive), delivery.aigfBReason,
         d2(delivery.nfLevelGeleerd), d2(delivery.nfLevelEffectief), delivery.nachtAggressiviteit,
         d3(delivery.nightStagnationDeltaMin), d3(delivery.nightStagnationEnergyBoost), d3(delivery.nightPersistentAggressionMul),
         delivery.nightCooldownMinutes, d2(delivery.nightCorrectionHoldDeltaMax), d3(delivery.nightAbsorptionDoseFactor),

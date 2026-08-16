@@ -44,7 +44,7 @@ class FclBasalProfileNightLogger(
         currentTimeMillis: Long,
         isNight: Boolean
     ) {
-        // BUGFIX (23/07/2026, Ecko): deze logger schreef altijd al naar de CSV,
+        // BUGFIX (23/07/2026): deze logger schreef altijd al naar de CSV,
         // maar de Room-tabel basal_profile_history (waar Nightwindowanalyzer.kt
         // zijn activeProfileBasalUph vandaan haalt) werd NERGENS in de codebase
         // ooit gevuld — vandaar de aanhoudende "nu 0.00 U/h". Eenmalige backfill
@@ -144,7 +144,7 @@ class FclBasalProfileNightLogger(
     }
 
 
-    // ── DB-synchronisatie (23/07/2026, Ecko) ────────────────────────────────
+    // ── DB-synchronisatie (23/07/2026) ────────────────────────────────
     // Zie kdoc bij onFiveMinuteTick: schrijft dezelfde snapshot die ook naar
     // de CSV gaat, aanvullend naar de Room-tabel basal_profile_history — dat
     // is de tabel waar Nightwindowanalyzer.kt zijn activeProfileBasalUph uit
@@ -203,7 +203,7 @@ class FclBasalProfileNightLogger(
         }
     }
 
-    // Eenmalige backfill (23/07/2026, Ecko): leest de al bestaande CSV-historie
+    // Eenmalige backfill (23/07/2026): leest de al bestaande CSV-historie
     // in en vult de tot nu toe altijd lege DB-tabel in één keer met alle
     // eerder gelogde profiel-snapshots, zodat ook oudere nachtvensters direct
     // (i.p.v. pas na de eerstvolgende profielwijziging) een kloppende

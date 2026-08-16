@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext
 import android.content.Context
 
 /**
- * FclNachtOvergangSettings (17/07/2026, Ecko) — lichte, kale opslag (geen
+ * FclNachtOvergangSettings (17/07/2026) — lichte, kale opslag (geen
  * officiële AAPS-preference/Room, zelfde patroon als de AIGF min/max %-
  * instellingen in FCLSettingsScreen.kt, "fcl_activity_sensitivity_settings")
  * voor de duur van de geleidelijke dag→nacht-overgang.
@@ -19,10 +19,10 @@ import android.content.Context
  * BEWUST GEEN officiële AAPS-key: de enum-registraties (IntKey/DoubleKey/
  * StringKey) leven in AAPS-core, niet in deze plugin-map, en een nieuwe
  * corekey toevoegen zou een wijziging in code buiten dit project vereisen —
- * exact wat Ecko eerder al uitsloot voor vergelijkbare, puur-plugin-interne
+ * exact wat de gebruiker eerder al uitsloot voor vergelijkbare, puur-plugin-interne
  * instellingen (zie FclActivityTypeCache.kt).
  *
- * BEWUST GEEN 0 als default: Ecko's eigen inschatting ("2 uur een mooi
+ * BEWUST GEEN 0 als default: de gebruikers eigen inschatting ("2 uur een mooi
  * uitgangspunt") is de default. Bij 0 minuten is het gedrag identiek aan
  * de oude harde dag/nacht-knip (nightTransitionFraction springt direct
  * naar 1.0 zodra isNightNow()=true) — dus wie de oude situatie terug wil,

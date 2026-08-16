@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 import android.content.Context
 
 /**
- * FclLearnerAdvies (10/07/2026, Ecko) — puur informatief, niets wordt hier
+ * FclLearnerAdvies (10/07/2026) — puur informatief, niets wordt hier
  * automatisch toegepast. Onderdeel van de "F eerst, D als vluchtoptie"-
  * hiërarchie: als F structureel tegen zijn plafond (DFMapping.F_MAX) aan
  * zit terwijl er nog steeds meer potentie nodig is, is dat het signaal dat
@@ -13,7 +13,7 @@ import android.content.Context
  * geen instelling) — dit logt alleen WANNEER en HOE VAAK dit voorkomt, zodat
  * duidelijk wordt of het incidenteel is of structureel. Komt dit regelmatig
  * voor, dan is dat de aanleiding om er later een echte, handmatige
- * Expert-modus-knop voor te bouwen (Ecko's expliciete voorkeur: niet direct
+ * Expert-modus-knop voor te bouwen (de gebruikers expliciete voorkeur: niet direct
  * automatiseren, wel zichtbaar maken).
  */
 object FclLearnerAdvies {

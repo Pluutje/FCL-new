@@ -19,7 +19,7 @@ import java.time.format.DateTimeFormatter
  * Bewust los van FCLvNext_LearnerLog_v1.csv — als het onderzoek geen
  * bruikbaar verband aantoont, kan deze log zonder gevolgen worden verwijderd.
  *
- * Schema v1 (02/07/2026, Ecko — activiteitsonderzoek fase 1):
+ * Schema v1 (02/07/2026, de gebruiker — activiteitsonderzoek fase 1):
  *
  * Elke rij = één episodestart-snapshot. Velden:
  *
@@ -60,7 +60,7 @@ import java.time.format.DateTimeFormatter
  *   stap_piek_waarde    — aantal stappen in het drukste uur
  *   laatste_actief_uur  — hoeveelste uur geleden was het laatste uur met >300 stappen (0=geen)
  *
- * [Calorieën-historie 8 uur terug] (06/07/2026, Ecko — activiteitsonderzoek fase 2)
+ * [Calorieën-historie 8 uur terug] (06/07/2026, de gebruiker — activiteitsonderzoek fase 2)
  * Zelfde uurindeling als stappen, maar als SCHATTING via EstimatedCaloriesCalculator.kt
  * (HR-gebaseerde MET-schatting waar hartslagdata beschikbaar is, anders terugval op
  * een kcal-per-stap-vuistregel) — niet via Health Connect (bleek voor dit toestel
@@ -70,7 +70,7 @@ import java.time.format.DateTimeFormatter
  *   cal_totaal_4h       — som cal_h1..cal_h4
  *   cal_totaal_8h       — som cal_h1..cal_h8
  *
- * [Hartslag-historie 8 uur terug] (06/07/2026, Ecko)
+ * [Hartslag-historie 8 uur terug] (06/07/2026)
  * Gemiddelde hartslag per uur-venster, zelfde grenzen als stap_h1..stap_h8 —
  * de ruwe meting zelf, los van de calorie-schatting die 'm intern ook gebruikt.
  * -1.0 als er geen hartslagdata in dat uur-venster was (horloge niet gedragen,
@@ -90,7 +90,7 @@ import java.time.format.DateTimeFormatter
  */
 object FclActivityLogger {
 
-    // 06/07/2026 (Ecko): v1 → v2. v1 had een header met 26 kolommen (vóór de
+    // 06/07/2026: v1 → v2. v1 had een header met 26 kolommen (vóór de
     // calorie-toevoeging); doordat het bestand al bestond, schreef de bestaande
     // append-only logica géén nieuwe header toen de cal_*-kolommen erbij kwamen
     // — vanaf dat punt hadden nieuwe rijen 36 velden onder een header van 26.
@@ -146,7 +146,7 @@ object FclActivityLogger {
      * @param activityInsulinPct  insulinepercentage uit ActivityModule
      * @param persistenceLayer    voor stap- én hartslag-opvraag (per uur-venster)
      * @param context             nodig voor EstimatedCaloriesCalculator (fiets-
-     *                            correctie via FclActivityTypeCache, 06/07/2026, Ecko)
+     *                            correctie via FclActivityTypeCache, 06/07/2026, de gebruiker)
      */
     fun logEpisodeStart(
         episodeId:              Long,
@@ -173,7 +173,7 @@ object FclActivityLogger {
             //
             // Aanpak: per uur-grens de meest recente record VÓÓR dat tijdstip opvragen
             // en steps60min direct aflezen. Dat geeft de uuractiviteit zonder
-            // optelling of dubbeltelling. (04/07/2026, Ecko — fix voor >100k-bug)
+            // optelling of dubbeltelling. (04/07/2026, de gebruiker — fix voor >100k-bug)
             //
             // h1 = steps60min van de laatste record vóór nowMs         (= afgelopen uur)
             // h2 = steps60min van de laatste record vóór nowMs - 1u    (= uur daarvoor)
@@ -205,7 +205,7 @@ object FclActivityLogger {
                 .indexOfFirst { it >= ACTIEF_DREMPEL }
                 .let { if (it == -1) 0 else it + 1 }
 
-            // ── Calorieën schatten per uur-venster (06/07/2026, Ecko) ────────
+            // ── Calorieën schatten per uur-venster (06/07/2026) ────────
             // Zelfde uurgrenzen als stappen hierboven. Zie EstimatedCaloriesCalculator.kt
             // voor de methode (HR-gebaseerde MET-schatting, terugval op stappen).
             val caloriesPerHour = (1..8).map { h ->
@@ -223,7 +223,7 @@ object FclActivityLogger {
             val calTotaal4h = caloriesPerHour.take(4).filter { it >= 0.0 }.sum()
             val calTotaal8h = caloriesPerHour.filter { it >= 0.0 }.sum()
 
-            // ── Ruwe hartslag per uur-venster (06/07/2026, Ecko) ──────────────
+            // ── Ruwe hartslag per uur-venster (06/07/2026) ──────────────
             // Los van de calorie-schatting: de gemiddelde hartslag zelf is ook
             // gewoon nuttige ruwe data om te hebben, niet alleen een tussenstap
             // richting kcal. Zelfde uurgrenzen als stappen/calorieën. Bewust een
@@ -241,7 +241,7 @@ object FclActivityLogger {
                 } catch (_: Exception) { -1.0 }
             }
 
-            // ── Gedetecteerd activiteitstype per uur-venster (06/07/2026, Ecko) ──
+            // ── Gedetecteerd activiteitstype per uur-venster (06/07/2026) ──
             // Zelfde bron als EstimatedCaloriesCalculator gebruikt voor de MET-keuze
             // (FclActivityTypeCache.dominantInWindow) — dus het gelogde type en het
             // kcal-getal kunnen nooit uit de pas lopen. "" (leeg) als er in dat uur

@@ -66,7 +66,7 @@ fun EpisodeChart(
     val hasPredPeak = sorted.any { it.predictedPeak != null && it.predictedPeak > 0.0 }
 
     val rawMaxIob = sorted.maxOf { it.iob }
-    // BUGFIX (09/07/2026, Ecko): was it.finalDose — de RUWE, niet-geplafonneerde
+    // BUGFIX (09/07/2026): was it.finalDose — de RUWE, niet-geplafonneerde
     // waarde vóór de maxOf(finalDose,commitDose)-afbouwlogica (zie FCLvNext.kt).
     // deliveredTotal is de daadwerkelijk afgegeven/gecommandeerde dosis. Beide
     // waren vroeger meestal gelijk (finalDose won de maxOf() bijna altijd), dus
@@ -181,7 +181,7 @@ fun EpisodeChart(
         // rechter-as-labels hieronder, zodat de absolute hoogte klopt met
         // wat er op de as staat (was voorheen los geschaald op maxDose,
         // zie bugfix-comment bij maxIob hierboven).
-        // BUGFIX (09/07/2026, Ecko): finalDose → deliveredTotal, zie toelichting
+        // BUGFIX (09/07/2026): finalDose → deliveredTotal, zie toelichting
         // bij rawMaxDose hierboven.
         sorted.filter { it.shouldDeliver && it.deliveredTotal > 0.0 }.forEach { row ->
             val x = xOf(row.timestamp)

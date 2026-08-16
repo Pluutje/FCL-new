@@ -236,7 +236,7 @@ fun CgpScoreKaart(context: Context) {
                      style = MaterialTheme.typography.labelSmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                // 20/07/2026 (Ecko): BUGFIX — MaterialTheme.colorScheme.primary.copy(
+                // 20/07/2026: BUGFIX — MaterialTheme.colorScheme.primary.copy(
                 // green = 0.7f) forceerde alleen het groen-kanaal en liet rood/blauw
                 // van de actieve primary-kleur ongemoeid. De primary van deze app is
                 // paars/lavendel (hoog rood EN hoog blauw) — in het donkere thema
@@ -288,7 +288,7 @@ fun CgpScoreKaart(context: Context) {
             // ── PGR trendlijn: dagpunten + 14-daags voortschrijdend gemiddelde ──
             if (scores14d.size >= 2) {
                 Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                // ── HbA1c-trendlijn (20/07/2026, Ecko) ──────────────────────────
+                // ── HbA1c-trendlijn (20/07/2026) ──────────────────────────
                 // Zelfde dagpunten+voortschrijdend-gemiddelde-patroon als de PGR-
                 // trendlijn hieronder, maar dan op het geschatte HbA1c. Bewust
                 // HIERBOVEN geplaatst (i.p.v. bovenin bij de losse "Geschat HbA1c"-
@@ -571,7 +571,7 @@ private fun PgrTrendlijn(
 
 
 // ── HbA1c-trendlijn: dagpunten + 14-daags voortschrijdend gemiddelde ───────
-// (20/07/2026, Ecko) — zelfde patroon als PgrTrendlijn hierboven, maar dan
+// (20/07/2026) — zelfde patroon als PgrTrendlijn hierboven, maar dan
 // op basis van het geschatte HbA1c (mmol/mol) per dag i.p.v. de PGR-score.
 // Geen nieuwe databron nodig: scores24h bevat al meanMgdl/meanMmol per dag
 // (zie CgpScore), dus de dagpunten en de voortschrijdend-gemiddelde-lijn

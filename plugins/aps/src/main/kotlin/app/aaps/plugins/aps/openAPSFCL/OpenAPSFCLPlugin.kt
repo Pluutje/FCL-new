@@ -131,7 +131,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         // (dat zelf geen constructor-injectie heeft, zie FclNotificationManagerBridge.kt).
         app.aaps.plugins.aps.openAPSFCL.vnext.FclNotificationManagerBridge.set(notificationManager)
 
-        // 08/07/2026 (Ecko) — waarborgt dat Documents/AAPS/ANALYSE bestaat, vóórdat
+        // 08/07/2026 — waarborgt dat Documents/AAPS/ANALYSE bestaat, vóórdat
         // welke van de acht onafhankelijke schrijvers/lezers dan ook (FCLCycleLogRepository,
         // FclActivityLogger, FCLvNextParameterLogger, FclLearnerLogger,
         // FCLvNextActiveParamsWriter, FCLvNextConfigOverride, FclAiAdvisorDataCollector,
@@ -156,7 +156,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
     override val algorithm = APSResult.Algorithm.FCL
     override var lastAPSResult: APSResult? = null
 
-    // 08/07/2026 (Ecko) — zie invoke(): bij het EERSTE cyclus zonder glucosedata
+    // 08/07/2026 — zie invoke(): bij het EERSTE cyclus zonder glucosedata
     // (glucoseStatus == null) wordt de lopende tijdelijke basaal eenmalig
     // veiliggesteld (neutraal/nul); volgende, aaneengesloten cycli zonder
     // glucosedata worden overgeslagen (geen herhaalde ingreep nodig/gewenst).
@@ -198,7 +198,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             return
         }
 
-        // 08/07/2026 (Ecko) — naar voren gehaald: hangt alleen af van profile
+        // 08/07/2026 — naar voren gehaald: hangt alleen af van profile
         // (hierboven al non-null gecontroleerd) en dateUtil/processedTbrEbData,
         // niet van glucoseStatus. Nodig vóór de glucose-null-check hieronder,
         // om bij ontbrekende glucosedata alsnog een lopende hoge tijdelijke
@@ -215,7 +215,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
             rxBus.send(EventResetOpenAPSGui(rh.gs(R.string.openapsma_no_glucose_data)))
             aapsLogger.debug(LTag.APS, rh.gs(R.string.openapsma_no_glucose_data))
 
-            // 08/07/2026 (Ecko) — veiligheidsfix: zonder glucosedata deed deze
+            // 08/07/2026 — veiligheidsfix: zonder glucosedata deed deze
             // functie voorheen NIETS behalve loggen en returnen — een op dat
             // moment lopende tijdelijke basaal (bijv. een hoge WatchingFrontload-
             // temp) bleef dan ongewijzigd doorlopen, mogelijk een half uur of
@@ -270,7 +270,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         if (!hardLimits.checkHardLimits(profile.getMaxDailyBasal(), app.aaps.core.ui.R.string.profile_max_daily_basal_value, 0.02, hardLimits.maxBasal())) return
         if (!hardLimits.checkHardLimits(pump.baseBasalRate.cU, app.aaps.core.ui.R.string.current_basal_value, 0.01, hardLimits.maxBasal())) return
 
-        // now/tb/currentTemp: zie hierboven, vóór de glucose-null-check verplaatst (08/07/2026, Ecko)
+        // now/tb/currentTemp: zie hierboven, vóór de glucose-null-check verplaatst (08/07/2026)
         var minBg = hardLimits.verifyHardLimits(Round.roundTo(profile.getTargetLowMgdl(), 0.1), app.aaps.core.ui.R.string.profile_low_target, HardLimits.LIMIT_MIN_BG)
         var maxBg = hardLimits.verifyHardLimits(Round.roundTo(profile.getTargetHighMgdl(), 0.1), app.aaps.core.ui.R.string.profile_high_target, HardLimits.LIMIT_MAX_BG)
         var targetBg = hardLimits.verifyHardLimits(profile.getTargetMgdl(), app.aaps.core.ui.R.string.temp_target_value, HardLimits.LIMIT_TARGET_BG)
@@ -335,7 +335,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         val flatBGsDetected = bgQualityCheck.state == BgQualityCheck.State.FLAT
 
         // Upstream veiligheidsfix overgenomen van OpenAPSSMBPlugin (23/07/2026,
-        // Ecko, na een dev-update van die plugin). Reden identiek aan de
+        // de gebruiker, na een dev-update van die plugin). Reden identiek aan de
         // toelichting daar: carb_ratio voedt csf (sens/carb_ratio) in
         // DetermineBasalFCL.kt's carbsReq-berekening (het legacy oref0-
         // vangnetpad dat nog elke cyclus meedraait naast FCLvNext's eigen
@@ -455,7 +455,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         return maxIob
     }
 
-    // ── Werkelijke pomp-max-basaal, pomptype-onafhankelijk (22/07/2026, Ecko) ──
+    // ── Werkelijke pomp-max-basaal, pomptype-onafhankelijk (22/07/2026) ──
     // Sommige pompen (bijv. Metrum) hanteren een vaste ABSOLUTE E/u-grens
     // (pumpDescription.maxTempAbsolute). Andere (bijv. Dana) hanteren een
     // PERCENTAGE van de huidige profiel-basaalstand (bijv. 500% — dus bij
@@ -490,7 +490,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
 
     override fun applyBasalConstraints(absoluteRate: Constraint<Double>, profile: Profile): Constraint<Double> {
         if (isEnabled()) {
-            // 22/07/2026 (Ecko) OPGELOST: de 50 E/u bleek GEEN bug — sinds AAPS'
+            // 22/07/2026 OPGELOST: de 50 E/u bleek GEEN bug — sinds AAPS'
             // U200-ondersteuning toont de pomp-max in echte eenheden. Deze Medtrum
             // kan mechanisch 0,25 mL/u; bij U200-insuline is dat 50E/u (bij U100
             // zou het 25E/u zijn geweest). computeRealMaxBasalUh() gaf dus gewoon

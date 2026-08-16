@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 
 /**
- * FclLearnerPendingProposal (10/07/2026, Ecko) — lichte, kale opslag (zelfde
+ * FclLearnerPendingProposal (10/07/2026) — lichte, kale opslag (zelfde
  * SharedPreferences-stijl als FclMealTimeAnticipation/FclActivityTypeCache)
  * voor het OPENSTAANDE learner-voorstel bij MANUAL-modus.
  *
@@ -25,7 +25,7 @@ object FclLearnerPendingProposal {
 
     private const val PREFS = "fcl_learner_pending_proposal"
     private const val KEY = "proposal_json"
-    // 27/07/2026 (Ecko) — laatst TOEGEPASTE snapshot (na Goedkeuren), los van
+    // 27/07/2026 — laatst TOEGEPASTE snapshot (na Goedkeuren), los van
     // het openstaande voorstel hierboven. Zie isMeaningfullyDifferent()/
     // FCLCycleLogRepository.kt Stap 7 voor waarom dit nodig is.
     private const val KEY_LAST_APPLIED = "last_applied_json"
@@ -43,7 +43,7 @@ object FclLearnerPendingProposal {
         val agg: Int,
         val episodeCount: Int,
         val reason: String,
-        // 10/07/2026 (Ecko) — voor de leesbare uitleg (FclLearnerUitleg):
+        // 10/07/2026 — voor de leesbare uitleg (FclLearnerUitleg):
         // de diagnose-code van evaluate() en de D/F-waarden van vóór deze
         // stap, zodat de kaart kan tonen "wat verandert er" i.p.v. alleen
         // de nieuwe absolute getallen.
@@ -113,7 +113,7 @@ object FclLearnerPendingProposal {
     fun hasPending(context: Context): Boolean = load(context) != null
 
     /**
-     * 27/07/2026 (Ecko) — snapshot van het laatst TOEGEPASTE voorstel
+     * 27/07/2026 — snapshot van het laatst TOEGEPASTE voorstel
      * (aangeroepen door FclLearnerApplier.approve() bij succes). Los van de
      * pending-opslag hierboven: deze overleeft juist het wissen daarvan.
      */
@@ -130,7 +130,7 @@ object FclLearnerPendingProposal {
     }
 
     /**
-     * 27/07/2026 (Ecko) — anti-spam-check voor Stap 7 in
+     * 27/07/2026 — anti-spam-check voor Stap 7 in
      * FCLCycleLogRepository.kt: "die bleef een paar keer komen met hetzelfde
      * advies ook nadat ik het had geaccepteerd". evaluate() draait bij elke
      * episode, ook in MANUAL, en Stap 7 sloeg tot nu toe zonder check een

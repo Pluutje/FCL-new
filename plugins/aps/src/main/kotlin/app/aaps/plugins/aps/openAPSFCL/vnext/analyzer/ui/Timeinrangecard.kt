@@ -94,7 +94,7 @@ fun TimeInRangeCard(
         summarize(dailyStats)
     }
 
-    // 16/07/2026 (Ecko) — geschat HbA1c o.b.v. het gemiddelde van de ruwe
+    // 16/07/2026 — geschat HbA1c o.b.v. het gemiddelde van de ruwe
     // bg-waarden in HETZELFDE venster (dayWindow) als de TBR/TIR/TAR-balk
     // hierboven, zodat "7/14/30 dagen" overal in deze kaart hetzelfde
     // betekent. Zie computeAverageBg/estimateHba1cPct hieronder voor de
@@ -151,7 +151,7 @@ fun TimeInRangeCard(
                 }
             }
 
-            // 16/07/2026 (Ecko) — geschat HbA1c, direct boven de TBR/TIR/TAR-balk,
+            // 16/07/2026 — geschat HbA1c, direct boven de TBR/TIR/TAR-balk,
             // zelfde "ⓘ tap for info"-patroon als de CGP-Scorekaart hieronder
             // in het scherm. Alleen tonen als er data in het venster is —
             // anders geen zinvol gemiddelde om op te baseren.
@@ -611,7 +611,7 @@ private fun minInstant(a: Instant, b: Instant): Instant =
 private fun maxInstant(a: Instant, b: Instant): Instant =
     if (a.isAfter(b)) a else b
 
-// ── Geschat HbA1c (16/07/2026, Ecko) ────────────────────────────────────────
+// ── Geschat HbA1c (16/07/2026) ────────────────────────────────────────
 // BEWUST simpele, veelgebruikte formules (geen personalisatie, geen
 // labwaarde) — zie Hba1cInfoDialog hieronder voor de toelichting die de
 // gebruiker ook te zien krijgt.
@@ -639,7 +639,7 @@ private fun computeAverageBg(rows: List<LogRow>, dayWindow: Int): Double? {
     return inWindow.sumOf { it.bg } / inWindow.size
 }
 
-// 20/07/2026 (Ecko): internal i.p.v. private — de nieuwe HbA1c-trendlijn
+// 20/07/2026: internal i.p.v. private — de nieuwe HbA1c-trendlijn
 // in CgpScoreKaart.kt hergebruikt deze exacte formule (zelfde package,
 // zelfde module), zodat beide plekken in de app altijd dezelfde uitkomst
 // tonen. Geen gedragswijziging.
@@ -653,7 +653,7 @@ internal fun pctToMmolMol(pct: Double): Double = (pct - 2.15) * 10.929
 /**
  * Informatieve popup over de eA1c-schatting. Bewust in het Engels en op
  * hetzelfde wetenschappelijke niveau als PgrInfoDialog hierboven (16/07/2026,
- * Ecko, na feedback dat de eerdere NL-versie te informeel was en onnodig naar
+ * de gebruiker, na feedback dat de eerdere NL-versie te informeel was en onnodig naar
  * Nightscout/CGM-apps verwees i.p.v. naar de onderliggende methode/bron).
  */
 @Composable

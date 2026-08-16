@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
  * Bewust GEEN WorkManager-scaffolding: dat vereist AndroidManifest- en
  * DI-wiring die buiten de geüploade bestanden valt. In plaats daarvan een
  * simpele "is het >=20u geleden" check die vanuit FCLvNext.getAdvice() wordt
- * aangeroepen (30/06/2026, Ecko: "in mijn cycles roept determineBasal
+ * aangeroepen (30/06/2026, de gebruiker: "in mijn cycles roept determineBasal
  * fclvnext aan en de rest loopt vanuit daar").
  *
  * KRITIEK: runIfDue() voert zelf nooit de HTTP-call synchroon uit op de
@@ -34,11 +34,11 @@ object FclAiAdvisorScheduler {
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val LAST_RUN_MARKER = "FCLvNext_AiAdvisorLastRun.txt"
     private const val LAST_SUCCESS_MARKER = "FCLvNext_AiAdvisorLastSuccess.txt"
-    private val MIN_INTERVAL = Duration.ofHours(8)  // Productie (08/07/2026, Ecko): max. 3×/dag — was 12u na de 4 uur testfase
+    private val MIN_INTERVAL = Duration.ofHours(8)  // Productie (08/07/2026): max. 3×/dag — was 12u na de 4 uur testfase
     // Bij een tijdelijke fout (timeout, 503) wordt de run opnieuw geprobeerd
     // elke RETRY_INTERVAL, totdat er een succesvol rapport is of MIN_INTERVAL
     // verstreken is voor de volgende dag-run.
-    // 10 → 30 min (28/07/2026, Ecko): bij aanhoudende 503's ("te veel demand")
+    // 10 → 30 min (28/07/2026): bij aanhoudende 503's ("te veel demand")
     // stapelden retries elke 10 min op — samen met de per-poging 2 keys
     // (zie FclAiAdvisorService.callAdvisor, dat nu bij een 503 overigens niet
     // meer naar de 2e key doorschakelt) kon dat bij een langere periode van
@@ -100,7 +100,7 @@ object FclAiAdvisorScheduler {
      *    >= RETRY_INTERVAL geleden: opnieuw proberen (elke 15 min bij timeout/503).
      */
     fun runIfDue(context: Context, metrics: List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetrics> = emptyList()) {
-        // 10/07/2026 (Ecko) — AI-adviseur volledig uit: geen nieuwe runs, geen
+        // 10/07/2026 — AI-adviseur volledig uit: geen nieuwe runs, geen
         // sticky-herinnering meer voor nog-openstaande voorstellen (die
         // beslissing doet er niet meer toe zolang AI niet meer meebeslist —
         // zie de kdoc bij FclAiAdvisorSettingsStore.isEnabled voor wat "uit"
@@ -109,7 +109,7 @@ object FclAiAdvisorScheduler {
 
         val now = Instant.now()
 
-        // ── Sticky pending-melding (05/07/2026, Ecko) ───────────────────────
+        // ── Sticky pending-melding (05/07/2026) ───────────────────────
         // Onafhankelijk van of er nu een NIEUWE AI-run aan de beurt is: zolang
         // er uit het LAATSTE rapport nog onbeoordeelde voorstellen openstaan,
         // wordt de melding elke cyclus (~5 min, dus elke keer dat getAdvice()
@@ -117,7 +117,7 @@ object FclAiAdvisorScheduler {
         // zonder dat hij stilletjes verdwijnt — pas als elk voorstel is goed-
         // of afgekeurd (stillPendingCount == 0) stopt dit vanzelf, want
         // showPendingAdvice(0) dismisst 'm dan juist (zie FclAiNotificationHelper).
-        // 14/07/2026 (Ecko) — bugfix: automatisch door de validatie afgewezen
+        // 14/07/2026 — bugfix: automatisch door de validatie afgewezen
         // voorstellen (suggestion.rejected == true, zie "Automatisch verworpen"
         // in FclAiAdvisorScreen.kt) worden NOOIT naar FclAiAdvisorHistoryRepository
         // geschreven — er is geen Goedkeuren/Afwijzen-knop voor, de gebruiker kan
@@ -155,7 +155,7 @@ object FclAiAdvisorScheduler {
                 if (result.parseError == null) {
                     markSuccessNow()
 
-                    // 10/07/2026 (Ecko) — AUTO-modus: elk niet-door-veiligheids-
+                    // 10/07/2026 — AUTO-modus: elk niet-door-veiligheids-
                     // checks afgewezen voorstel wordt meteen toegepast, geen
                     // goedkeuring nodig. "Wat en wanneer" blijft zichtbaar via
                     // de bestaande geschiedenis (FclAiAdvisorApplier.approve()
@@ -171,7 +171,7 @@ object FclAiAdvisorScheduler {
                     } else {
                         // MANUAL-modus (bestaand gedrag): sticky check bovenaan
                         // runIfDue() herbevestigt de melding daarna elke volgende
-                        // cyclus zolang er nog iets onbeoordeeld is (05/07/2026, Ecko).
+                        // cyclus zolang er nog iets onbeoordeeld is (05/07/2026).
                         // Zelfde bugfix als de sticky-check bovenaan: automatisch
                         // afgewezen voorstellen (rejected == true) uitsluiten — die zijn
                         // nooit "af te handelen" en horen dus nooit mee te tellen.
@@ -202,7 +202,7 @@ object FclAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, metrics, provider)
                 cachedResult.set(result)
-                // Notificatie ook bij handmatige run (04/07/2026, Ecko)
+                // Notificatie ook bij handmatige run (04/07/2026)
                 val pendingCount = result.suggestions.count { !it.rejected }
                 FclAiNotificationHelper.showPendingAdvice(context, pendingCount)
                 onDone(result)

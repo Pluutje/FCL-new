@@ -8,10 +8,10 @@ import org.json.JSONObject
  * FclActivitySensitivity — Activiteits Insuline Gevoeligheids Factor (AIGF)
  * ============================================================================
  *
- * Ontwerp overeengekomen met Ecko, 14/07/2026 — HERONTWORPEN 28/07/2026 na
+ * Ontwerp overeengekomen met de gebruiker, 14/07/2026 — HERONTWORPEN 28/07/2026 na
  * een gesprek over een structurele ochtendbias (zie hieronder).
  *
- * ── HERONTWERP 28/07/2026 (Ecko) — waarom ────────────────────────────────
+ * ── HERONTWERP 28/07/2026 — waarom ────────────────────────────────
  * De oorspronkelijke versie vergeleek één rollend 8-uursvenster (gemeten bij
  * elke maaltijd) tegen een 7-daagse mediaan die ALLE momenten van de dag
  * door elkaar mengde (ontbijt- én lunch- én dinermetingen samen). Bij het
@@ -59,7 +59,7 @@ import org.json.JSONObject
  *
  * BEWUST GEEN vaste referentieperiode voor beide componenten: het gemiddelde
  * waartegen vergeleken wordt schuift continu mee (rolling window,
- * WINDOW_DAYS). Reden (Ecko, 14/07/2026, nog steeds geldig): een
+ * WINDOW_DAYS). Reden (de gebruiker, 14/07/2026, nog steeds geldig): een
  * structurele verandering hoort via de bestaande Learner/AI-adviseur te
  * lopen, niet een tweede keer via deze factor.
  *
@@ -82,7 +82,7 @@ object FclActivitySensitivity {
     /** Minstens dit veel eerdere metingen nodig voor een betrouwbare mediaan. */
     private const val MIN_HISTORY_FOR_BASELINE = 5
 
-    // ── Opbouw-vertrouwen o.b.v. gevulde historie (16/07/2026, Ecko) ────────
+    // ── Opbouw-vertrouwen o.b.v. gevulde historie (16/07/2026) ────────
     // Zie de oorspronkelijke kdoc-uitleg (ongewijzigd, geldt voor beide
     // componenten): de afwijking t.o.v. 100 wordt lineair gedempt met hoeveel
     // dagen de OUDSTE bruikbare meting in het venster al terug ligt.
@@ -90,11 +90,11 @@ object FclActivitySensitivity {
     private const val MS_PER_DAY = 24L * 60L * 60L * 1000L
 
     // Vaste referentie voor ruwe ratio → interne score -1..+1 (14/07/2026,
-    // Ecko: bewust NIET instelbaar).
+    // de gebruiker: bewust NIET instelbaar).
     private const val RATIO_REF_LOW = 0.4
     private const val RATIO_REF_HIGH = 2.5
 
-    // ── Component B: wakker-weging (28/07/2026, Ecko) ──────────────────────
+    // ── Component B: wakker-weging (28/07/2026) ──────────────────────
     // Een meting wordt alleen in de HISTORIE van component B opgenomen als
     // minstens dit aandeel van het 4-uursvenster binnen wakkere uren viel —
     // anders raakt de "typisch wakker"-baseline zelf vervuild met slaapuren.

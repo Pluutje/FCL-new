@@ -5,7 +5,7 @@ import java.time.Instant
 data class EpisodeMetrics(
     val id: Int,
 
-    // 26/07/2026 (Ecko) — dag/nacht-splitsing Learner/AI-adviseur. Bepaald
+    // 26/07/2026 — dag/nacht-splitsing Learner/AI-adviseur. Bepaald
     // door EpisodeMetricsBuilder uit de eerste rij van de episode (een
     // episode wisselt zelden binnen zijn eigen duur van dag naar nacht of
     // omgekeerd; de EERSTE rij is bepalend voor "welk regime hoorde hierbij").
@@ -135,7 +135,7 @@ data class EpisodeMetrics(
     val nearHypoAverted: Boolean = false,
 
     // ── Geprojecteerde ernstige daling, afgewend zonder harde hypo ────────
-    // (19/07/2026, Ecko) AANLEIDING: nearHypoAverted hierboven vereist dat de
+    // (19/07/2026) AANLEIDING: nearHypoAverted hierboven vereist dat de
     // WERKELIJK GEMETEN BG ooit onder NEAR_HYPO_THRESH (4,8) kwam. Dat mist
     // precies de gevallen waar de dosering te vroeg te veel gaf, maar de BG
     // dankzij een tijdige interventie (of gewoon de eigen fysiologie) nooit
@@ -150,7 +150,7 @@ data class EpisodeMetrics(
     val projectedSevereLowAverted: Boolean = false,
 
     // ── Veiligheidscontrole: late/te grote afsluitende commit ────────────
-    // (13/07/2026, Ecko) Herbruikt SafetyInvariantChecker (Analyzer-UI,
+    // (13/07/2026) Herbruikt SafetyInvariantChecker (Analyzer-UI,
     // 12/07/2026) als extra, complementair leersignaal voor FrontloadLearner.
     // firstBigCommitFrac zegt iets over de EERSTE commit; dit zegt iets over
     // de LAATSTE — een episode kan een prima fbc hebben en alsnog een te

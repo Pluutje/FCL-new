@@ -4,7 +4,7 @@ import java.time.Instant
 
 data class LogRow(
     val timestamp: Instant,
-    // 26/07/2026 (Ecko) — dag/nacht-splitsing Learner/AI-adviseur: bestond al
+    // 26/07/2026 — dag/nacht-splitsing Learner/AI-adviseur: bestond al
     // op DB-niveau (FCLCycleLogEntity.context.isNight) maar was nooit
     // doorgeklopt naar dit domeinmodel. Zie Entitytologrowmapper.kt.
     val isNight: Boolean = false,
@@ -91,7 +91,7 @@ data class LogRow(
     val earlyBoostFactor: Double = 1.0,
     val guardMaxSmbLimited: Boolean = false,
     val episodeCommitNr: Int = 0,
-    // 11/07/2026 (Ecko) — puur diagnostisch, zie kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
+    // 11/07/2026 — puur diagnostisch, zie kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
     val bgStijgtNogFors: Boolean = false,
     val commitNrUsed: Int = 0
 )

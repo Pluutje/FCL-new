@@ -5,20 +5,20 @@ import org.joda.time.DateTimeZone
 
 /**
  * ============================================================================
- * FclWakeDetector — "dag begint bij eerste stappen" (28/07/2026, Ecko)
+ * FclWakeDetector — "dag begint bij eerste stappen" (28/07/2026)
  * ============================================================================
  *
  * AANLEIDING: component B van de AIGF (zie FclActivitySensitivity.kt) moet
  * weten hoeveel van de laatste 4 uur vóór een maaltijd daadwerkelijk binnen
  * wakkere uren viel. Een vaste kloktijd (bijv. de bestaande `ochtend_start`-
- * instelling) is daarvoor niet geschikt — Ecko's eigen dagritme doordeweeks
+ * instelling) is daarvoor niet geschikt — de gebruikers eigen dagritme doordeweeks
  * vs. weekend wisselt te veel, en een ochtendwandeling met de hond kan al
  * vóór die vaste grens beginnen.
  *
  * GEKOZEN SIGNAAL: de eerste keer per kalenderdag dat de ruwe stappenteller
  * (via PersistenceLayer, hetzelfde pad als EstimatedCaloriesCalculator al
  * gebruikt) STEP_THRESHOLD stappen optekent binnen een glijdend venster van
- * STEP_WINDOW_MIN minuten. Gecalibreerd door Ecko op zijn eigen looptempo
+ * STEP_WINDOW_MIN minuten. Gecalibreerd door de gebruiker op zijn eigen looptempo
  * (~1200-1400 stappen/10 min): 150 stappen binnen 10 minuten is met dat
  * tempo al binnen ~1-1,5 minuut lopen bereikt, ruim boven wat een
  * nachtelijk toiletbezoek aan stappen oplevert (enkele tientallen), dus een
@@ -38,7 +38,7 @@ import org.joda.time.DateTimeZone
  * uitschieter). Bij een nieuwe kalenderdag (lokale tijdzone) begint de
  * detectie vanzelf opnieuw.
  *
- * FALLBACK (28/07/2026, Ecko): op een dag met beduidend minder stappen (geen
+ * FALLBACK (28/07/2026): op een dag met beduidend minder stappen (geen
  * hondenwandeling, ziek, etc.) zou de stappen-trigger de hele dag nooit
  * afgaan en zou component B tot middernacht op "onbekend" (wakeOverlapFrac
  * =0, dus AIGF-B altijd neutraal) blijven staan. Daarom accepteert

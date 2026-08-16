@@ -43,7 +43,7 @@ private enum class Screen { DASHBOARD, ANALYZE, ADVISOR, AI_ADVISOR, RESET, SAFE
 fun FclAnalyzerScreen(
     onDismiss: () -> Unit,
     startOnAiAdvisor: Boolean = false,
-    // 10/07/2026 (Ecko) — zelfde patroon als startOnAiAdvisor, nu voor de
+    // 10/07/2026 — zelfde patroon als startOnAiAdvisor, nu voor de
     // Learner's MANUAL-melding (FclLearnerNotificationHelper). Ook dit vlag
     // wordt één keer, hogerop in FCLComposeContent.kt, gelezen en hier
     // doorgegeven — zie de toelichting bij startOnAiAdvisor hieronder.
@@ -57,7 +57,7 @@ fun FclAnalyzerScreen(
     // Android terugknop sluit de analyzer
     BackHandler { onDismiss() }
 
-    // 05/07/2026 (Ecko): als de gebruiker via de actieknop van de native AAPS-
+    // 05/07/2026: als de gebruiker via de actieknop van de native AAPS-
     // notificatie hierheen kwam, direct op het AI Advisor-tabblad openen i.p.v.
     // het dashboard. HERZIEN (05/07/2026): het one-shot vlag zelf wordt nu
     // ÉÉN keer, hogerop, in FCLComposeContent.kt gelezen (dat bepaalt ook al
@@ -66,7 +66,7 @@ fun FclAnalyzerScreen(
     // aanroepen zou het vlag al verbruikt hebben gevonden (false), omdat het
     // een get-and-reset is — vandaar geen eigen aanroep meer hier.
     //
-    // BUGFIX (10/07/2026, Ecko): startOnLearner sprong voorheen DIRECT naar
+    // BUGFIX (10/07/2026): startOnLearner sprong voorheen DIRECT naar
     // Screen.ADVISOR — maar dat scherm rendert uitsluitend als
     // advisorResultState.value niet-null is (advisorResultState.value?.let{}),
     // en die waarde wordt normaal ALLEEN gezet via de Dashboard-knop
@@ -96,7 +96,7 @@ fun FclAnalyzerScreen(
     val advisorResultState = remember { mutableStateOf<FclAdvisorRecommendation?>(null) }
     var episodeEntities by remember { mutableStateOf<List<app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity>>(emptyList()) }
 
-    // Klikbare kruisverwijzing tussen Automaat en AI Advisor (24/07/2026, Ecko)
+    // Klikbare kruisverwijzing tussen Automaat en AI Advisor (24/07/2026)
     // — zie de "Zie ook: ..."-tekst in Advisorscreen.kt (NachtControlTab) en
     // FclAiAdvisorScreen.kt (Nacht-tabblad). Los van startOnAiAdvisor/
     // startOnLearner hierboven: die zijn one-shot vlaggen van BUITEN de app
@@ -149,7 +149,7 @@ fun FclAnalyzerScreen(
             // de gebruiker in de episode viewer.
             // De meest recente (nog actieve) episode wordt altijd getoond.
             //
-            // HERZIEN 07/07/2026 (Ecko): was uitsluitend een piek-eis (>= 80%
+            // HERZIEN 07/07/2026: was uitsluitend een piek-eis (>= 80%
             // van maxSMB in ÉÉN cyclus). Naarmate FCLvNext geleidelijker is
             // gaan doseren (curve-fit-confidence-gates, de WatchingFrontload-
             // ease-in-curve — zie FCLvNext.kt), bereikt een cyclus die piek
@@ -333,7 +333,7 @@ fun FclAnalyzerScreen(
                 val recentEpisodes = db.episodeDao().getAllEpisodes()
                 val profiles = db.basalProfileHistoryDao().getAll()
                 if (recentEntities.isNotEmpty()) {
-                    // 30/07/2026 (Ecko) — zelfde basalShiftMinutes-fix als in
+                    // 30/07/2026 — zelfde basalShiftMinutes-fix als in
                     // FclNightAiAdvisorScheduler.rebuildNightWindows(): eigen
                     // ingestelde piektijd (ICfg.peak) i.p.v. de vaste 75-min-
                     // aanname, zie de kdoc bij DEFAULT_BASAL_SHIFT_MINUTES in
@@ -358,7 +358,7 @@ fun FclAnalyzerScreen(
 
     LaunchedEffect(Unit) { refreshData() }
 
-    // BUGFIX (10/07/2026, Ecko) — zie kdoc bij currentScreen hierboven: dit
+    // BUGFIX (10/07/2026) — zie kdoc bij currentScreen hierboven: dit
     // repliceert exact dezelfde pijplijn als de Dashboard-knop "onOpenAdvisor"
     // (regel ~356 verderop), alleen getriggerd door startOnLearner i.p.v. een
     // klik. Draait één keer; als startOnLearner false is, gebeurt er niets.
@@ -459,7 +459,7 @@ fun FclAnalyzerScreen(
                     )
                 },
                 startOnNacht = jumpToAiAdvisorNacht,
-                // Klikbare kruisverwijzing (24/07/2026, Ecko): repliceert exact
+                // Klikbare kruisverwijzing (24/07/2026): repliceert exact
                 // dezelfde pijplijn als de Dashboard-knop "onOpenAdvisor" hieronder
                 // (en LaunchedEffect(startOnLearner) hierboven) — Screen.ADVISOR
                 // rendert alleen als advisorResultState.value niet-null is, dus een
@@ -586,7 +586,7 @@ fun FclAnalyzerScreen(
                         },
                         onApplyParams = null,
                         startOnNacht = jumpToAdvisorNacht,
-                        // Klikbare kruisverwijzing (24/07/2026, Ecko): AI_ADVISOR is,
+                        // Klikbare kruisverwijzing (24/07/2026): AI_ADVISOR is,
                         // anders dan ADVISOR, een simpele directe toestandswissel — geen
                         // refreshData/runAdvisorFlow-pijplijn nodig (zie ook
                         // onOpenAiAdvisor hierboven, dat hetzelfde al deed).
@@ -626,8 +626,8 @@ private fun DashboardScreen(
     val advisorEnabled = episodes?.isNotEmpty() == true && metrics?.isNotEmpty() == true
     val hasData2 = hasData && (allRows?.isNotEmpty() == true)
 
-    // ✅ Openstaande AI-voorstellen tellen voor badge/notificatie (02/07/2026, Ecko)
-    // 05/07/2026, Ecko — bugfix: readPendingFromLastRun() gaf altijd 0 (zie
+    // ✅ Openstaande AI-voorstellen tellen voor badge/notificatie (02/07/2026)
+    // 05/07/2026, de gebruiker — bugfix: readPendingFromLastRun() gaf altijd 0 (zie
     // toelichting in FclAiAdvisorHistoryRepository.kt). Nu via de daadwerkelijke
     // laatste run + isStillPending() per suggestie.
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -708,7 +708,7 @@ private fun DashboardScreen(
             )
 
             // ✅ Veiligheidscontrole: aantal episodes met een late, te grote
-            // commit vlak op de piek (SafetyInvariantChecker, 12/07/2026, Ecko —
+            // commit vlak op de piek (SafetyInvariantChecker, 12/07/2026, de gebruiker —
             // zie kdoc daar voor de exacte regel). Puur informatief, geen
             // effect op het doseeralgoritme zelf.
             val safetyViolationCount = remember(episodes) {
@@ -1015,7 +1015,7 @@ private suspend fun runAdvisorFlow(
     // maar de leerdata is nog steeds geldig voor D/F optimalisatie.
     // Als we alleen filteredMetrics gebruiken stopt het leren zodra de automaat
     // een aanpassing heeft gedaan (want dan worden alle vorige episodes CONSUMED).
-    // 26/07/2026 (Ecko) — dag/nacht-splitsing: latestMetrics moet EERST bekend
+    // 26/07/2026 — dag/nacht-splitsing: latestMetrics moet EERST bekend
     // zijn voordat de modus-gate kan bepalen welke as (dag/nacht) geldt —
     // was voorheen een vaste DFLearner.isAutoEnabled(context) zonder as.
     val allCompletedMetrics = episodeMetrics.filterIndexed { i, _ ->
@@ -1034,7 +1034,7 @@ private suspend fun runAdvisorFlow(
         if (latestMetrics != null) {
             // Type-specifieke leer-stap
             // manualMaxSmb hier opnieuw opgehaald (niet in scope vanuit de
-            // LaunchedEffect hierboven) — zie controlevraag Ecko 20/06/2026.
+            // LaunchedEffect hierboven) — zie controlevraag de gebruiker 20/06/2026.
             val manualMaxSmbForEval = FclActiveConfigBridge.get()?.manualMaxBolus ?: 1.25
             val step = DFLearner.evaluate(context, latestMetrics, manualMaxSmb = manualMaxSmbForEval)
             // MaxSmbLearner.evaluate verwijderd — maxSMB volgt S%

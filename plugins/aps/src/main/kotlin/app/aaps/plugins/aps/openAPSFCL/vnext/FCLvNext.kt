@@ -30,7 +30,7 @@ data class FCLvNextInput(
     val effectiveISF: Double,                   // mmol/L per U
     val targetBG: Double,                       // mmol/L
     val isNight: Boolean,
-    // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0..1.0, hoeveel van
+    // Geleidelijke nacht-overgang (17/07/2026): 0.0..1.0, hoeveel van
     // de nacht-instellingen al "ingeschoven" zijn t.o.v. de dag-instellingen.
     // Default gekoppeld aan isNight zodat oudere/andere call sites zonder
     // wijziging het oude harde dag/nacht-gedrag behouden.
@@ -58,7 +58,7 @@ data class FCLvNextInput(
     val activityTargetAdjust: Double = 0.0,     // mmol/L
     // Schaalt alleen de oref0/SMB-fallback-laag (Laag 2), niet FCLvNext zelf.
     val aapsMultiplier: Double = 1.0,
-    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko,
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, 
     // herontworpen 28/07/2026 — zie kdoc bij FclActivitySensitivity.kt) ─────
     // Twee losse vensters i.p.v. het oude, structureel ochtend-bevooroordeelde
     // 8-uursvenster: activityCal24h voor component A (vorige dag/naijling,
@@ -77,7 +77,7 @@ data class FCLvNextInput(
     // nog niet is vastgesteld. Bepaalt hoeveel van de laatste 4 uur vóór een
     // maaltijd binnen wakkere uren viel (component B's wake-weging).
     val daystartTodayMs: Long? = null,
-    // ── Werkelijke pomp-max-basaal, E/u (22/07/2026, Ecko) ─────────────────
+    // ── Werkelijke pomp-max-basaal, E/u (22/07/2026) ─────────────────
     // Door DetermineBasalFCL.kt doorgegeven vanuit profile.max_basal, die op
     // zijn beurt door OpenAPSFCLPlugin.kt pomptype-bewust wordt berekend
     // (absoluut voor bijv. Metrum, %-van-profiel-basaal voor bijv. Dana).
@@ -98,7 +98,7 @@ data class FCLvNextContext(
     val recentSlope: Double,     // mmol/L per uur (laatste segment)
     val recentDelta5m: Double,   // mmol/L per 5 min
 
-    // ✅ NEW curve-fit confidence (04/07/2026, Ecko) — zie FCLvNextTrends.kt
+    // ✅ NEW curve-fit confidence (04/07/2026) — zie FCLvNextTrends.kt
     // voor de uitleg waarom dit apart staat van `consistency`.
     val curveFitR2: Double,          // 0..1
     val curveAcceleration: Double,   // mmol/L per uur²
@@ -128,7 +128,7 @@ data class FCLvNextAdvice(
     // debug / UI
     val statusText: String,
 
-    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, Ecko,
+    // ── AIGF: Activiteits Insuline Gevoeligheids Factor (14/07/2026, 
     // herontworpen 28/07/2026 in twee losse componenten — zie kdoc bij
     // FclActivitySensitivity.kt en bij de AIGF-sectie verderop in dit
     // bestand) ──────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ private fun classifyTrendState(
     ctx: FCLvNextContext,
     config: FCLvNextConfig,
     sustainedHighSlopeMinutes: Double = 0.0,
-    // predictedPeak: huidige piekvoorspelling (19/07/2026, Ecko) — zie kdoc bij
+    // predictedPeak: huidige piekvoorspelling (19/07/2026) — zie kdoc bij
     // dynamicConfDeltaMin hieronder. 0.0 = geen voorspelling beschikbaar (val
     // terug op het vaste, oorspronkelijke gedrag).
     predictedPeak: Double = 0.0
@@ -241,7 +241,7 @@ private fun classifyTrendState(
     }
     val confAccelMin = 0.18
 
-    // ── Piek-relatieve delta-drempel (19/07/2026, Ecko) ───────────────────
+    // ── Piek-relatieve delta-drempel (19/07/2026) ───────────────────
     // AANLEIDING: confDeltaMinFixed hierboven eist altijd dezelfde absolute
     // afstand tot target (1.8 mmol, resp. 1.2 in AGGRESSIVE), ongeacht hoe
     // hoog de maaltijd uiteindelijk gaat pieken. Bij een gematigde maaltijd
@@ -316,7 +316,7 @@ private fun classifyTrendState(
         slopeEff >= weakSlopeMin &&
             accelEff >= weakAccelMin
 
-    // ── Sustained-rise promotie (17/07/2026, Ecko) ──────────────────────────
+    // ── Sustained-rise promotie (17/07/2026) ──────────────────────────
     // De CONFIRMED-eis hierboven vereist ALTIJD accelEff >= confAccelMin (0.18),
     // ook via het strongAcceleration-pad. Een gestage ("Type B") stijging —
     // brood, rijst, een langzaam verterende maaltijd — kan aanhoudend en
@@ -464,7 +464,7 @@ private fun computeDoseAccessLevel(
             // Dit geeft de commit-pad toegang tot smallCap (i.p.v. microCap) en laat
             // de watching-frontload via Fix C de volledige target leveren.
             //
-            // 29/06/2026 (Ecko): bij 10:41 UTC was BG=6.7 mmol (IN_RANGE),
+            // 29/06/2026: bij 10:41 UTC was BG=6.7 mmol (IN_RANGE),
             // slope=3.41, maar commit werd gecapped op microCap=0.12U terwijl
             // commit-pad correct 1.31U berekende. Multi-meting eis was al voldaan
             // maar access bleef MICRO_ONLY → watchingFrontload kon niet overrijden.
@@ -571,13 +571,13 @@ private const val FAST_MICRO_MIN_U = 0.08
 private const val FAST_MICRO_MAX_U = 0.15
 
 // ─────────────────────────────────────────────
-// Curve-fit confidence (04/07/2026, Ecko)
+// Curve-fit confidence (04/07/2026)
 // Gebruikt door computeEarlyBoostFactor() (peakPressureBonus, eerder/sterker
 // bij bevestigde stijging) en de late-commit-decay (eerder/steiler afbouwen
 // bij bevestigde, veilige afvlakking). Zie FCLvNextTrends.kt voor de fit zelf.
 // ─────────────────────────────────────────────
 private const val CURVE_FIT_MIN_R2 = 0.90            // onder deze R² wordt de fit niet vertrouwd
-// 14/08/2026 (Ecko) — zie kdoc bij recentCurveFitR2History/de toepassing
+// 14/08/2026 — zie kdoc bij recentCurveFitR2History/de toepassing
 // bij episodeAnyRealDeliveryDone verderop: bewust een STUK losser dan
 // CURVE_FIT_MIN_R2 hierboven — dat is de drempel voor "vertrouw deze fit
 // als bevestiging van een omslag", dit hier is alleen "was er de laatste
@@ -587,7 +587,7 @@ private const val CURVE_FIT_MIN_R2 = 0.90            // onder deze R² wordt de 
 // de laagste waarde in dit venster >=0.70. 0.50 zit met ruime marge
 // daartussen.
 private const val EARLY_DELIVERY_MIN_RECENT_R2 = 0.50
-// 15/08/2026 (Ecko) — zie kdoc bij lastHypoActiveAt/de reentry-
+// 15/08/2026 — zie kdoc bij lastHypoActiveAt/de reentry-
 // vrijstelling: backtest tegen 41 reentry-momenten (alle logs) vond 1
 // geval (6/8 10:17) dat eigenlijk een post-hypo-koolhydraatrebound was
 // (hypo_active=True t/m 10:02, BG steeg daarna snel, reentry vuurde om
@@ -599,7 +599,7 @@ private const val EARLY_DELIVERY_MIN_RECENT_R2 = 0.50
 // aparte, eenvoudige tijd-gebaseerde grens.
 private const val POST_HYPO_REENTRY_GUARD_MINUTES = 30
 
-// 15/08/2026 (Ecko) — koekje-episode (15/8 17:03-19:31): vroegeStijging en de
+// 15/08/2026 — koekje-episode (15/8 17:03-19:31): vroegeStijging en de
 // reentry-vrijstelling gaven kort na elkaar (17:48 en 18:18) allebei een
 // volledig ongetemperde reset, terwijl de daadwerkelijk waargenomen stijging
 // (delta_target) nooit boven 2,26 kwam. Losstaand van de vroegeStijging-
@@ -624,7 +624,7 @@ private const val DOSE_RATIO_THRESHOLD = 1.5       // vanaf deze verhouding (cum
 private const val DOSE_RATIO_SUSTAIN_MIN = 15.0     // minuten die de verhouding ononderbroken boven de drempel moet hebben gestaan
 private const val DOSE_RATIO_DAMPING = 0.4          // resterende factor op een reset die deze eis niet haalt (dus 60% gedempt)
 
-// 15/08/2026 (Ecko) — apart, tweede incident dezelfde avond (20:33-21:04):
+// 15/08/2026 — apart, tweede incident dezelfde avond (20:33-21:04):
 // vroegeStijging vuurde om 20:44 (sustainedHighSlopeMinutes net over de
 // 15-minutendrempel) met een volledige reset (3,36U) — maar op dat moment
 // was de stijging zelf AL aan het uittoppen: ctx.acceleration daalde die
@@ -652,18 +652,18 @@ private const val DOSE_RATIO_DAMPING = 0.4          // resterende factor op een 
 private const val VROEGE_STIJGING_ACCEL_DECLINE_FRACTION = 0.55  // acceleratie mag tot deze fractie van zijn recente piek zakken
 private const val VROEGE_STIJGING_ACCEL_PEAK_MIN = 0.30           // alleen toetsen als de piek zelf betekenisvol hoog was (voorkomt ruis-triggers bij zwakke stijgingen)
 
-// ── Gedeelde, geleidelijke "commit-urgentie" (15/08/2026, Ecko) ──────────
+// ── Gedeelde, geleidelijke "commit-urgentie" (15/08/2026) ──────────
 // AANLEIDING: golf 3 van de pizza-episode (14/8 22:53) miste isReentrySignal()
 // se vaste drempels op een haar na (slope=0.55 vs eis 1.0, accel=0.09 vs eis
-// 0.10) — terwijl BG toen al 13,3 mmol was, ruim boven Ecko's eigen "liever
-// niet boven 12"-grens. Ecko's verzoek: de meeste drempels die bepalen of een
+// 0.10) — terwijl BG toen al 13,3 mmol was, ruim boven de gebruikers eigen "liever
+// niet boven 12"-grens. de gebruikers verzoek: de meeste drempels die bepalen of een
 // redelijk grote commit gegeven wordt, moeten GELEIDELIJK versoepelen
 // naarmate BG verder boven target komt — geen klif op één cyclus/honderdste
 // afstand — én de drempel moet met het ingestelde target meeschuiven (dus
 // niet op een vaste BG-waarde, maar op deltaToTarget: dat is al automatisch
 // target-relatief, of target nu 5,0 of 6,5 is).
 //
-// Anker: Ecko's eigen streefbeeld (BG<10 normaal, tot 11 kort acceptabel,
+// Anker: de gebruikers eigen streefbeeld (BG<10 normaal, tot 11 kort acceptabel,
 // liever niet boven 12 — behalve bij een enkele grote/vette maaltijd, dan
 // is tot 12 acceptabel). Bij zijn eigen target (5,4 overdag) komt dat neer
 // op delta≈4,6/5,6/6,6. COMMIT_URGENCY_DELTA_HIGH=6,6 is dus bewust gekozen
@@ -699,7 +699,7 @@ private const val TOPPING_OUT_HYPER_REF_MMOL = 10.0  // primaire streefgrens uit
 private const val TOPPING_OUT_MARGIN_MMOL = 1.5      // marge die "ruim onder" definieert
 private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op effectiveDecay
 
-// ── Leeftijd-gedempte horizon voor de piekvoorspelling (20/07/2026, Ecko) ──
+// ── Leeftijd-gedempte horizon voor de piekvoorspelling (20/07/2026) ──
 // AANLEIDING: incident 20/07 08:52-09:12, 1 beker chocomel. riseFrac
 // (hieronder bij hEff) bereikt zijn maximum zodra riseSinceStart 2,0 mmol
 // haalt — bij een snelle-suiker-stijging (chocomel) gebeurt dat al binnen
@@ -738,7 +738,7 @@ private const val TOPPING_OUT_MAX_DECAY_BOOST = 0.25 // max. extra steilheid op 
 private const val AGE_FULL_TRUST_MIN = 40.0   // minuten tot hEff volledig vertrouwd wordt
 private const val AGE_FRAC_FLOOR = 0.40       // nooit verder inkrimpen dan dit
 
-// ── Post-omslag vloer-verlaging (20/07/2026, Ecko) ──────────────────────
+// ── Post-omslag vloer-verlaging (20/07/2026) ──────────────────────
 // AANLEIDING: toppingOutBoost hierboven verhoogt effectiveDecay (de
 // STEILHEID van de afbouw per commit), maar de daadwerkelijke ondergrens
 // (decayFloor, zie hieronder bij lateDecayMul) reageert daar NIET op — die
@@ -762,7 +762,7 @@ private const val AGE_FRAC_FLOOR = 0.40       // nooit verder inkrimpen dan dit
 private const val OMSLAG_DIEPTE_REF_MMOL = 3.0        // |curveAcceleration| voor volle verlaging
 private const val POST_OMSLAG_MAX_FLOOR_CUT = 0.28    // max. verlaging van decayFloor
 private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 0
-// 20/07/2026 (Ecko): gedeeltelijke, vroegere versie van de post-omslag
+// 20/07/2026: gedeeltelijke, vroegere versie van de post-omslag
 // verlaging — al actief zodra omslagBijnaBevestigd waar is (curve-
 // versnelling minstens 45% afgenomen, nog wel positief), niet pas bij
 // de volledige bevestiging. Bewust een vaste, bescheiden fractie i.p.v.
@@ -774,7 +774,7 @@ private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 
 // koolhydraten-blinde-vlek-probleem (zie kdoc bij bgStijgtNogFors) dan
 // een projectie zou zijn.
 private const val OMSLAG_BIJNA_PARTIAL_FRACTIE = 0.28  // 28% van het volle effect
-// 20/07/2026 (Ecko): AANLEIDING — echte episode 19/07 15:17-16:32:
+// 20/07/2026: AANLEIDING — echte episode 19/07 15:17-16:32:
 // curveAcceleration werd tijdelijk sterk negatief (tot -17,41) tijdens een
 // gewone vertraging BINNEN een doorlopende stijging (een tussenstap in de
 // absorptie, geen echte piek — de BG bleef de hele tijd stijgen, van 8,0
@@ -789,7 +789,7 @@ private const val OMSLAG_BIJNA_PARTIAL_FRACTIE = 0.28  // 28% van het volle effe
 // toe") filtert normale ruis tussen twee opeenvolgende cycli uit.
 private const val CURVE_ACCEL_HERSTEL_MARGIN = 2.0
 
-// ── Directe omslag-rem, vloer-onafhankelijk (20/07/2026, Ecko) ──────────────
+// ── Directe omslag-rem, vloer-onafhankelijk (20/07/2026) ──────────────
 // AANLEIDING: audit-vraag "reageert het algoritme hard genoeg zodra er
 // harde aanwijzingen zijn (herstel vs. echte daling)". Twee gaten
 // gevonden in echte logdata (20/07, 20-7 14.40-csv, week 13-20/07):
@@ -832,7 +832,7 @@ private const val CURVE_ACCEL_HERSTEL_MARGIN = 2.0
 private const val POST_OMSLAG_DIRECT_CUT_FRACTIE = 0.60  // max. extra vermenigvuldigende rem bij volle omslagDiepte
 
 // ── Zacht bijstel-mechanisme: vroege schatting van totale episode-
-// behoefte (21/07/2026, Ecko) ────────────────────────────────────────
+// behoefte (21/07/2026) ────────────────────────────────────────
 // AANLEIDING: onderzoeksvraag of curve-vorm vroeg in een episode iets kan
 // zeggen over hoeveel insuline de HELE maaltijd uiteindelijk nodig heeft —
 // niet om harder/vroeger te doseren (dat doet earlyBoostFactor al), maar
@@ -859,7 +859,7 @@ private const val TOTAL_NEED_SLOPE_LOW_REF = 0.5       // p10 van slope@25min in
 private const val TOTAL_NEED_SLOPE_HIGH_REF = 4.9      // p90 van slope@25min in grote episodes
 private const val TOTAL_NEED_MAX_EXTRA_DECAY = 0.12    // max. extra effectiveDecay bij een kleine-episode-schatting
 
-// ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────────────────
+// ── Vroege-stijging-bevestiging (14/07/2026) ──────────────────────────
 // Los van bgStijgtNogFors (die is en blijft bedoeld voor hernieuwde stijging
 // NA een afvlakking, bijv. een 2e gang — zie kdoc bij vroegeStijgingBevestigd
 // verderop). Dit mechanisme lost een ander, veelvoorkomender probleem op:
@@ -872,7 +872,7 @@ private const val TOTAL_NEED_MAX_EXTRA_DECAY = 0.12    // max. extra effectiveDe
 private const val VROEGE_STIJGING_SUSTAIN_MIN = 15.0      // min. aanhoudend hoge slope vereist (sustainedHighSlopeMinutes)
 private const val VROEGE_STIJGING_PLATEAU_SLOPE = 1.0     // mmol/u — onder deze ctx.slope geldt de stijging als afgevlakt; opent de deur weer voor een eventuele 2e gang
 
-// ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ──────────────
+// ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, de gebruiker) ──────────────
 // Zie de uitgebreide kdoc bij declineStreakMinutes/nieuweMaaltijdTrogBevestigd
 // hieronder voor de volledige aanleiding (3/8 12:18-15:28-incident) en de
 // tegen 5 dagen echte data (30/07-3/08, code-versie v51) doorgerekende
@@ -899,11 +899,11 @@ private const val NIEUWE_MAALTIJD_COOLDOWN_MIN = 30             // min. minuten 
 // TUNING: dit is de knop om aan te draaien als de gedempte vervolgcommit in
 // de praktijk nog te groot (verhogen richting 1.0) of te klein (verlagen
 // richting 0.0) blijkt. Startwaarde 0.30 gekozen op basis van doorrekening
-// van de 05:37-commit in de maaltijd van 14/07/2026 (Ecko, akkoord gegeven
+// van de 05:37-commit in de maaltijd van 14/07/2026 (akkoord gegeven
 // op 30% i.p.v. de eerder doorgerekende 50%).
 private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 
-// ── Piek-anker-drempel (15/07/2026, Ecko) ───────────────────────────────────
+// ── Piek-anker-drempel (15/07/2026) ───────────────────────────────────
 // PROBLEEM (ontdekt op de maaltijd van 14/07/2026, 18:32-19:02): episodePeakCommitU
 // — het referentiepunt waar de taper-clamp hieronder (cappedFinalDose) alle
 // latere commits aan afmeet — werd bijgewerkt door ELKE commit, ook de
@@ -913,7 +913,7 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 // (finalDose) 2,74U geven, maar werden geplafonneerd op ~episodePeakCommitU
 // × lateDecayMul — een kelder in plaats van een plafond op de juiste hoogte.
 //
-// OPLOSSING (Ecko, akkoord 15/07/2026): een commit telt pas als "de piek die
+// OPLOSSING (de gebruiker, akkoord 15/07/2026): een commit telt pas als "de piek die
 // de rest afkapt" als hij minstens PEAK_ANCHOR_THRESHOLD_FRAC van maxSMB is —
 // bewust een PERCENTAGE i.p.v. een vast aantal U, zodat dit voor elke
 // gebruiker (elke maxSMB-schaal) hetzelfde betekent. Zolang er nog geen
@@ -924,7 +924,7 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 // Pas zodra een commit ≥ 75% van maxSMB daadwerkelijk gebeurt, wordt DIE het
 // nieuwe anker en gaat de afbouw (lateDecayMul) vanaf dát punt werken.
 //
-// TUNING (Ecko's eigen aantekening, 15/07/2026): als in de praktijk blijkt
+// TUNING (de gebruikers eigen aantekening, 15/07/2026): als in de praktijk blijkt
 // dat er ná het buigpunt (omslag/piek) nog te veel insuline binnenkomt — dus
 // deze drempel laat de "echte" piek te makkelijk aanwijzen — dan eerst hier
 // verlagen (bijv. naar 0.60-0.65), en/of lateDecayMul (effectiveDecay) na
@@ -934,7 +934,7 @@ private const val VROEGE_STIJGING_BGSTIJGT_DEMPING = 0.30
 private const val PEAK_ANCHOR_THRESHOLD_FRAC = 0.75
 
 // ── AIGF-B eigen freeze-drempel, losstaand van PEAK_ANCHOR_THRESHOLD_FRAC
-// (07/08/2026, Ecko) ──────────────────────────────────────────────────────
+// (07/08/2026) ──────────────────────────────────────────────────────
 // AANLEIDING: "Deze maaltijd: nog geen eerste bevestigd commit" bleef de
 // hele maaltijd staan — ook bij de 6/8-avondmaaltijd (13,48U cumulatief,
 // BG naar 14,1) haalde GEEN ENKELE losse commit ooit 75% van maxSMB (dat
@@ -967,7 +967,7 @@ private const val AIGF_B_FREEZE_THRESHOLD_FRAC = 0.35
 // dichter bij het oude gedrag, alleen blockThreshold zelf als vloer).
 private const val HYPO_CURRENT_BG_HARD_FLOOR = 4.9  // mmol/L
 
-// ── Post-hypo-rebound rem (24/07/2026, Ecko) ────────────────────────────
+// ── Post-hypo-rebound rem (24/07/2026) ────────────────────────────
 // AANLEIDING: 24/07 17:08-17:13 en 18:13-18:23 — een BG-stijging die volgde
 // op een net afgelopen hypo-risico (episodeHypoDebtU>0: er is al minstens
 // één keer deze episode een dosis teruggeknepen wegens hypoProtection) werd
@@ -981,7 +981,7 @@ private const val HYPO_CURRENT_BG_HARD_FLOOR = 4.9  // mmol/L
 //
 // Dit patroon is uit BG-vorm en IOB alleen niet betrouwbaar te onderscheiden
 // van een gewone maaltijd die toevallig al een paar commits verder is (zie
-// doorrekening 24/07, Ecko akkoord): op weekbasis (17-24/07) raakte een
+// doorrekening 24/07, de gebruiker akkoord): op weekbasis (17-24/07) raakte een
 // strengere aanpak ook 80-130 ogenschijnlijk normale commits. Vandaar:
 // altijd afremmen zodra episodeHypoDebtU>0 bij een CONFIRMED stijging, MAAR
 // met een vangnet — als de BG ondanks de rem alsnog voldoende doorstijgt
@@ -995,7 +995,7 @@ private const val HYPO_CURRENT_BG_HARD_FLOOR = 4.9  // mmol/L
 // duidelijk echte maaltijden te lang onterecht onderdrukt.
 private const val POST_HYPO_BRAKE_CATCHUP_RISE = 1.0   // mmol/L sinds rem-activatie
 private const val POST_HYPO_BRAKE_CATCHUP_SLOPE = 2.0  // recentSlope, zelfde drempel als "bevestigd stijgend" elders
-// TOEVOEGING (24/07/2026, Ecko): de twee incidenten die tot deze rem leidden
+// TOEVOEGING (24/07/2026): de twee incidenten die tot deze rem leidden
 // vielen allebei op een relatief lage BG (7,1-7,2 mmol/L) — weinig marge als
 // het toch omslaat. Een vangnet dat alleen op "genoeg gestegen" let, kan in
 // theorie nog steeds een volle dosis vrijgeven terwijl de BG nog in dat
@@ -1004,10 +1004,10 @@ private const val POST_HYPO_BRAKE_CATCHUP_SLOPE = 2.0  // recentSlope, zelfde dr
 // maaltijden gered (BG bij het daadwerkelijke vangnet-moment lag daar in de
 // testweek altijd al ruim boven) — pas vanaf 7.5+ ging dat ten koste van een
 // eerste, kleinere maaltijd. 7.0 kost dus niets aantoonbaars en dekt precies
-// het scenario af dat Ecko signaleerde.
+// het scenario af dat de gebruiker signaleerde.
 private const val POST_HYPO_BRAKE_CATCHUP_MIN_BG = 7.0 // mmol/L, ondergrens voor het vangnet
 
-// AANSCHERPING (25/07/2026, Ecko) — twee nieuwe, structurele valse triggers
+// AANSCHERPING (25/07/2026) — twee nieuwe, structurele valse triggers
 // gevonden binnen 24 uur na livegang (24/07 20:38-22:28 en 25/07 13:58-lunch,
 // kibbeling met patat): allebei een doodgewone maaltijd, GEEN voorafgaande
 // hypo — episodeHypoDebtU>0 ontstond simpelweg omdat hypoProtection() aan het
@@ -1025,7 +1025,7 @@ private const val POST_HYPO_BRAKE_CATCHUP_MIN_BG = 7.0 // mmol/L, ondergrens voo
 // verderop voor waarom dát de eigenlijke fix is.
 private const val POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO = 0.25
 
-// ── Auto-disarm voor de post-hypo-brake (03/08/2026, Ecko) ──────────────
+// ── Auto-disarm voor de post-hypo-brake (03/08/2026) ──────────────
 // AANLEIDING: de rem hierboven heeft geen eigen expiry — alleen een volledige
 // episode-reset (episodeCommitCount etc.) zet 'm terug, en die bleef tijdens
 // de maaltijd van 3/8 (18:03-21:03+) de hele tijd uit omdat de officiële
@@ -1050,7 +1050,7 @@ private const val POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO = 0.25
 // dalend beloop nadien, laagste ooit 4,1-4,2 mmol/L) blijven onaangeroerd —
 // de regel is zelf-begrenzend.
 //
-// Grenzen expliciet los instelbaar gehouden (zie kdoc-eis Ecko): mocht dit
+// Grenzen expliciet los instelbaar gehouden (zie kdoc-eis de gebruiker): mocht dit
 // in de praktijk toch een keer te vroeg loslaten, eerst
 // POST_HYPO_BRAKE_DISARM_ABOVE_TARGET verhogen (minder ver van hypo-zorg af
 // nodig) en/of POST_HYPO_BRAKE_MIN_ARMED_MIN verhogen (langer gewapend
@@ -1060,14 +1060,14 @@ private const val POST_HYPO_BRAKE_DISARM_ABOVE_TARGET = 3.0  // mmol/L boven tar
 private const val POST_HYPO_BRAKE_MIN_ARMED_MIN = 15         // min. minuten gewapend voordat auto-disarm mag
 
 // ─────────────────────────────────────────────
-// WatchingFrontload delta-to-target ramp (05/07/2026, Ecko)
+// WatchingFrontload delta-to-target ramp (05/07/2026)
 // Vervangt de harde aan/uit-drempel op deltaToTarget door een kwadratische
 // ease-in-opbouw, zodat de dosis vlak over de drempel laag begint en pas
 // verderop (over WATCHING_DELTA_RAMP_WIDTH mmol) naar 100% doorgroeit.
 // ─────────────────────────────────────────────
 private const val WATCHING_DELTA_RAMP_WIDTH = 0.60 // mmol vanaf de drempel tot volle 100%
 
-// ── Geleidelijke naderings-ramp vóór bgStijgtNogFors (22/07/2026, Ecko) ──
+// ── Geleidelijke naderings-ramp vóór bgStijgtNogFors (22/07/2026) ──
 // AANLEIDING (maaltijd 22/07 11:07, zelfde patroon als 22/07 05:07 een dag
 // eerder): bgStijgtNogFors is een harde knip op bgNow > target+3.0. Zodra
 // die drempel valt, springt cappedFinalDose in ÉÉN cyclus van het normale
@@ -1075,7 +1075,7 @@ private const val WATCHING_DELTA_RAMP_WIDTH = 0.60 // mmol vanaf de drempel tot 
 // ongeplafonneerd (vaak 3+U) — terwijl slope vaak al 15-20+ minuten
 // onafgebroken boven 1,5 zat en duidelijk versnelde. Concreet 22/07 11:07:
 // 0,43U om 11:02 (delta=2,58, slope=3,63) → 3,10U om 11:07 (delta=3,01).
-// Ecko's verzoek: niet kleiner, maar eerder — een geleidelijke opbouw
+// de gebruikers verzoek: niet kleiner, maar eerder — een geleidelijke opbouw
 // i.p.v. een klif, analoog aan hoe WATCHING_DELTA_RAMP_WIDTH hierboven een
 // harde aan/uit-drempel al vervangt door een ease-in.
 //
@@ -1134,7 +1134,7 @@ private var lastHypoActiveAt: org.joda.time.DateTime? = null
 // Telt hoeveel opeenvolgende cycli de blip-conditie (slowFalling+fastRising)
 // aanhoudt. Een echte sensorblip is 1-2 cycli; EWMA-naloop na echte stijging
 // houdt tientallen cycli aan. Na 2 cycli beschouwen we het als echte stijging.
-// BLIJFT bewust top-level (22/07/2026, Ecko: eerste poging verplaatste dit
+// BLIJFT bewust top-level (22/07/2026, de gebruiker: eerste poging verplaatste dit
 // naar een klasse-veld voor persistentie, maar `maybeResetEarlyOnDecel`
 // hierboven is een top-level functie die deze teller rechtstreeks reset —
 // die kan een klasse-veld niet bereiken. Persistentie is daarom apart
@@ -1181,11 +1181,11 @@ private val recentCurveFitR2History: ArrayDeque<Double> = ArrayDeque(5)
 // ── Peak-brake deceleratie-tracking ──────────────────────────────────────
 // recentSlope (fast lane) van de vórige cyclus, nodig om een knik/afvlakking
 // te detecteren vóórdat ctx.slope (trage lane) zelf al gedaald is.
-// Gebruikt door computePeakBrake() (30/06/2026, Ecko: consolidatie van
+// Gebruikt door computePeakBrake() (30/06/2026, de gebruiker: consolidatie van
 // peakIobBrake/watchingSlopeOk/peakApproachFactor naar één gedeelde rem).
 private var prevRecentSlopeForBrake: Double? = null
 
-// ── Peak-brake persistentie-tracking (01/08/2026, Ecko) ──────────────────
+// ── Peak-brake persistentie-tracking (01/08/2026) ──────────────────
 // Incident 31/07 19:00 maaltijd: het ruwe deceleratiesignaal in
 // computePeakBrake() (curveFit-bevestigde recentSlope-knik) sloeg meerdere
 // keren vals aan tijdens een feitelijk nog stevig doorgaande stijging
@@ -1195,7 +1195,7 @@ private var prevRecentSlopeForBrake: Double? = null
 // sensorBlip-streak-guard elders in dit bestand.
 private var prevRawDecelForBrake: Boolean = false
 
-// ── Peak-brake hysterese-tracking (17/07/2026, Ecko) ──────────────────────────────────────────────
+// ── Peak-brake hysterese-tracking (17/07/2026) ──────────────────────────────────────────────
 // Incident 17/07 13:12 UTC: iobRatio flipperde cyclus-op-cyclus rond de
 // suppressThreshold (0,45→0,56→0,58→0,49→0,60) — deels doordat blokkeren zelf de
 // IOB laat wegzakken en vrijgeven zelf de IOB weer laat stijgen (een
@@ -1208,7 +1208,7 @@ private var prevRawDecelForBrake: Boolean = false
 // cyclus onder de vaste drempel meteen volledig los te laten.
 private var peakBrakeWasActiveLastCycle: Boolean = false
 
-// ── Graduele omslag-detectie (13/07/2026, Ecko) ──────────────────────────
+// ── Graduele omslag-detectie (13/07/2026) ──────────────────────────
 // Vult curveConfirmtOmslag aan: die vereist curveAcceleration <= 0.0 (al
 // negatief). Bij een net-beginnende omslag is curveAcceleration nog positief
 // maar duidelijk aan het afnemen — dit signaal vangt dat eerdere moment op
@@ -1272,7 +1272,7 @@ private fun calculateEnergy(
     return EnergyResult(total = total, delta = delta, slope = slope, accel = accel)
 }
 
-// ── Snelle-afremming demping (27/07/2026, Ecko) — zie kdoc bij de aanroep
+// ── Snelle-afremming demping (27/07/2026) — zie kdoc bij de aanroep
 // in FCLvNext.buildAdvice()/de hoofdcyclus voor de volledige aanleiding
 // (maaltijd 27/07, cyclus 19:18: ctx.slope liep nog voor op een al
 // ingestorte ctx.recentSlope). FAST_LANE_MIN_MUL is een BODEM, geen extra
@@ -1280,7 +1280,7 @@ private fun calculateEnergy(
 // naast deze factor werken.
 private const val FAST_LANE_MIN_SLOPE = 1.5          // mmol/L/h — alleen relevant bij echte druk
 private const val FAST_LANE_RATIO_THRESHOLD = 0.35   // recentSlope/slope onder deze grens = "gat"
-// 27/07/2026 (Ecko) — bewust GEEN meercyclus-bevestiging (i.t.t. de meeste
+// 27/07/2026 — bewust GEEN meercyclus-bevestiging (i.t.t. de meeste
 // andere confirm-cycles in dit bestand): backtest tegen de 27/07-log liet
 // zien dat het "gat" tussen slope en recentSlope hier typisch maar 1 cyclus
 // breed is — bij de volgende cyclus is slope zelf al meegezakt (of de trend
@@ -1886,7 +1886,7 @@ private data class HypoProtection(
     // Grootste dosis die op alle horizons (30/60/90 min) nog boven
     // blockThreshold blijft — 0.0 als zelfs 0U al onveilig projecteert
     // (projectedMinNoInsulin < blockThreshold, dan kan geen dosis helpen),
-    // anders plannedDoseU zelf bij een bypass (17/07/2026, Ecko: right-sizing
+    // anders plannedDoseU zelf bij een bypass (17/07/2026, de gebruiker: right-sizing
     // i.p.v. alles-of-niets, zie kdoc bij de aanroep in de hoofdlus).
     val maxSafeDoseU: Double = 0.0
 )
@@ -1930,7 +1930,7 @@ private fun hypoProtection(
     // compenseert glucoseabsorptie ~45% van de insulinewerking in 90 min.
     // Zonder compensatie blokkeert de hypo-guard stage2 bij BG=9.2 stijgend.
     //
-    // UITBREIDING (23/07/2026, Ecko) — bgNow>=7.0 miste stelselmatig de EERSTE,
+    // UITBREIDING (23/07/2026) — bgNow>=7.0 miste stelselmatig de EERSTE,
     // grootste commit van een maaltijd: die valt vrijwel altijd bij bgNow 6-6.5
     // (het moment waarop CONFIRMED net vaststaat), dus zonder compensatie werd
     // precies de belangrijkste dosis het zwaarst geclipt. Nagerekend tegen de
@@ -1977,7 +1977,7 @@ private fun hypoProtection(
     // Safety threshold: iets hoger dan 4.4 om "net-niet" hypos te voorkomen.
     val blockThreshold = config.hypoBlockThreshold
 
-    // ── Maximaal veilige dosis (17/07/2026, Ecko) ────────────────────────
+    // ── Maximaal veilige dosis (17/07/2026) ────────────────────────
     // Vervangt straks bij de aanroep het alles-of-niets-gedrag: i.p.v. de
     // volledige plannedDoseU naar 0 te klappen zodra ÉÉN horizon de drempel
     // overschrijdt, berekenen we hier de grootste dosis die op ALLE
@@ -2020,7 +2020,7 @@ private fun hypoProtection(
         return (kotlin.math.floor(capped / step) * step).coerceIn(0.0, plannedU)
     }
 
-    // ── Hypo-recovery harde vloer (04/08/2026, Ecko) ─────────────────────
+    // ── Hypo-recovery harde vloer (04/08/2026) ─────────────────────
     // AANLEIDING: 4/8 17:29-17:40 — drie doses (0,09+0,38+0,38=0,85U)
     // gegeven terwijl bgNow nog maar 4,5/4,7/4,8 was, middenin een
     // urenlange, nog niet afgeronde ernstige low (dieptepunt 2,8 om 18:35,
@@ -2611,7 +2611,7 @@ private fun lerp(a: Double, b: Double, t: Double): Double =
     a + (b - a) * t.coerceIn(0.0, 1.0)
 
 // ── AIGF component B: wakker-aandeel van een terugkijkvenster (28/07/2026,
-// Ecko) ──────────────────────────────────────────────────────────────────
+// de gebruiker) ──────────────────────────────────────────────────────────────────
 // Hoeveel van [nowMs - windowMs, nowMs] viel binnen wakkere uren, gegeven
 // het door FclWakeDetector.kt vastgestelde "dag begon om"-moment van
 // VANDAAG (null = nog niet vastgesteld, bijv. vóór de eerste ~150
@@ -2727,7 +2727,7 @@ private fun computeEarlyDoseDecision(
     // Opgebouwde hypo-schuld in huidige episode (achtergehouden insuline door hypo-rem).
     // Wordt als parameter meegegeven omdat deze functie buiten de klasse staat.
     episodeHypoDebtU: Double = 0.0,
-    // ── Sustain-based T1-versterking (13/07/2026, Ecko) — EXPERT MODE, default UIT ──
+    // ── Sustain-based T1-versterking (13/07/2026) — EXPERT MODE, default UIT ──
     // Optionele, uitzetbare mechaniek: geeft een bescheiden bonus op de vroege
     // dosis, maar UITSLUITEND als de stijging al meerdere cycli aanhoudt
     // (zie sustainT1Confirmed hieronder) — nooit op stage 1 en nooit op een
@@ -2846,7 +2846,7 @@ private fun computeEarlyDoseDecision(
     }
 
     // ── Stage2 eerder bij bevestigde directe stijging (kip-ei-fix) ────────────
-    // Probleem (30/06/2026, Ecko): predictedPeak is een ballistische extrapolatie
+    // Probleem (30/06/2026): predictedPeak is een ballistische extrapolatie
     // van de HUIDIGE snelheid (bgNow + v×hEff). Aan het begin van een stijging is
     // v per definitie nog laag, ook al gaat de stijging straks doorzetten — de
     // extrapolatie kan de toekomstige versnelling niet kennen. Hierdoor blijft
@@ -2871,7 +2871,7 @@ private fun computeEarlyDoseDecision(
     //   recentSlope >= 2.5 mmol/h  → duidelijke, actuele stijging
     //   acceleration >= 0.20       → stijging neemt nog toe, geen afvlakking
     //   consistency >= minConsistency → geen ruisartefact, sensordata betrouwbaar
-    // Drempel verlaagd 0.20→0.15 (12/07/2026, Ecko): bij een reële, snelle
+    // Drempel verlaagd 0.20→0.15 (12/07/2026): bij een reële, snelle
     // stijging (recentSlope 3,5-5,4 mmol/u, ruim boven de 2.5-eis hierboven)
     // bungelde accel structureel net onder 0.20 (0,15-0,19) — de "kip-ei"-fix
     // ontgrendelde daardoor niet, en stage2Min bleef vasthangen op de hogere,
@@ -2987,7 +2987,7 @@ private fun computeEarlyDoseDecision(
         // 10.5 mmol en stijgend: +1 commit
         // 12.5 mmol en stijgend: +2 commits
         // 14.5 mmol en stijgend: +3 commits (max)
-        // Achtergrond 28/06/2026 (Ecko): drempel was 12.0 en recentSlope 4.0.
+        // Achtergrond 28/06/2026: drempel was 12.0 en recentSlope 4.0.
         // Bij de episoden van 27 juni (piek 11.5) en 28 juni ochtend (piek 13.9)
         // was BG al 10-11 mmol met slope 6-8 mmol/h maar kreeg de EarlyBoost
         // geen extra commits omdat de drempel te hoog lag. De IOB-gate (iobRatio
@@ -3038,7 +3038,7 @@ private fun computeEarlyDoseDecision(
     // Stage 3 wachttijd ongewijzigd op 5 min: stage 3 volgt na stage 2 die
     // al groot is — hier is haast minder geboden dan bij de stage 1→2 overgang.
     //
-    // Achtergrond 28/06/2026 (Ecko): analyse toont dat stage 2 (de grootste
+    // Achtergrond 28/06/2026: analyse toont dat stage 2 (de grootste
     // commit) typisch op t+20 min zit na begin BG-stijging, terwijl het ideaal
     // t+10 min zou zijn. Stage 1 vuurt op t+10-15, dan wacht het systeem 5 min
     // waardoor stage 2 op t+15-20 valt. Bij snelle stijging (slope >3, conf >0.9)
@@ -3114,7 +3114,7 @@ private fun computeEarlyDoseDecision(
             //   - EarlyBoost mag nog één cyclus langer doorgaan (tot ~0.50) zodat
             //     er één afnemende vervolgdosis volgt op de grote frontload, in
             //     plaats van de sprong direct naar de kleine, gedecayede normale
-            //     commits. Achtergrond 24/06/2026 (Ecko): met exacte suppress-drempel
+            //     commits. Achtergrond 24/06/2026: met exacte suppress-drempel
             //     gaf dit 3,98 → 0,12 → 0,09U (te abrupt); met +0.08 marge wordt
             //     het 3,98 → 1,06 → 0,09U (geleidelijk aflopend zoals gewenst).
             ctx.iobRatio < (config.peakIobBrakeSuppressThreshold + 0.08).coerceAtMost(0.55)
@@ -3123,7 +3123,7 @@ private fun computeEarlyDoseDecision(
         1.0
     } else {
         // ── Afnemende boost over opeenvolgende EarlyBoost-commits ──────────
-        // Ontwerp 26/06/2026 (Ecko): elke volgende commit wordt bewust kleiner.
+        // Ontwerp 26/06/2026: elke volgende commit wordt bewust kleiner.
         //
         // Redenering: bij commit 1 is de IOB nog minimaal en is alle urgentie
         // aanwezig ("geef nu alles vroeg"). Bij commit 2 is de frontload al
@@ -3159,7 +3159,7 @@ private fun computeEarlyDoseDecision(
         // en piekdruk = max: 0.75 + 0.35 = 1.10 extra boven 1.0 → totaal 2.10).
         // Gekoppeld aan dezelfde IOB-ceiling als heightEscalation had (0.35).
         //
-        // ── Curve-fit confidence-boost (04/07/2026, Ecko) ──────────────────
+        // ── Curve-fit confidence-boost (04/07/2026) ──────────────────
         // Bij een overtuigend schone, bevestigd VERSNELLENDE curve (hoge
         // curveFitR2 én curveAcceleration > 0) mag de piekdrukbonus eerder
         // aanslaan — dus bij een lagere predictedPeak dan de vaste 11.0 mmol
@@ -3215,7 +3215,7 @@ private fun computeEarlyDoseDecision(
     //
     // Voorbeeld: schuld=0.40U, basis=0.80U → bonus = min(0.50*0.80, 0.40) = 0.40U
     //            effectieve dosis = 0.80 + 0.40 = 1.20U (nog steeds ≤ 1.5×maxSMB cap)
-    // UITGEZET (24/07/2026, Ecko): deze bonus probeerde eerder teruggehouden
+    // UITGEZET (24/07/2026): deze bonus probeerde eerder teruggehouden
     // insuline actief "in te halen" zodra er weer een CONFIRMED stijging was —
     // precies de verkeerde kant op als die stijging zelf een reactie is op het
     // hypo-risico dat de terughouding veroorzaakte (correctie-koolhydraten
@@ -3228,13 +3228,13 @@ private fun computeEarlyDoseDecision(
     val debtCompensationU = 0.0
 
     // ── Sustain-based T1-versterking: toepassing ──────────────────────────
-    // Achtergrond (13/07/2026, Ecko): analyse van 905503de + Ecko-datasets toont
+    // Achtergrond (13/07/2026): analyse van 905503de + de gebruiker-datasets toont
     // dat episodes die later een lage BG geven, gemiddeld een KLEINER eerste
     // derde deel (T1) en GROTER middelste derde deel (T2) van de insuline-
     // verdeling hebben dan episodes zonder dat gevolg — het middelste deel
     // "vangt" insuline op die eigenlijk eerder had gemogen.
     //
-    // Risico expliciet benoemd door Ecko: een relatief kleine hoeveelheid zeer
+    // Risico expliciet benoemd door de gebruiker: een relatief kleine hoeveelheid zeer
     // snelle koolhydraten kan in de EERSTE cyclus identiek "snel stijgend" ogen
     // als het begin van een echte, substantiële maaltijd — pas na een paar
     // cycli wordt het verschil zichtbaar (een snack-piek vlakt af, een echte
@@ -3306,7 +3306,7 @@ private data class PostPeakSummary(
 )
 
 // ── Gedeelde piek-naderingsrem (vlak vóór/op de piek geen insuline meer) ──
-// Consolidatie (30/06/2026, Ecko): vervangt drie losse implementaties die
+// Consolidatie (30/06/2026): vervangt drie losse implementaties die
 // allemaal dezelfde zwakte hadden — ze vereisten ctx.slope <= 0.50 vóórdat
 // ze konden ingrijpen, ook bij al torenhoge IOB. Incident 30/06 14:15 UTC:
 // iobRatio=0.57, ctx.slope=3.92 (ver boven 0.50) → geen van de drie remmen
@@ -3340,7 +3340,7 @@ private data class PeakBrakeResult(
     val slopeCeiling: Double,      // voor logging/debug
     val recentSlopeDrop: Double,   // voor logging/debug
     val reason: String,
-    // 01/08/2026 (Ecko, na analyse incident 31/07 19:00 maaltijd): het RUWE
+    // 01/08/2026 (na analyse incident 31/07 19:00 maaltijd): het RUWE
     // (nog niet 2-cycli-bevestigde) deceleratiesignaal van DEZE cyclus — zie
     // prevRawDecel's kdoc bij computePeakBrake(). De aanroeper bewaart dit
     // voor de volgende cyclus, net als recentSlopeDrop/wasActiveLastCycle.
@@ -3353,7 +3353,7 @@ private fun computePeakBrake(
     config: FCLvNextConfig,
     prevRecentSlope: Double?,
     wasActiveLastCycle: Boolean = false,
-    // 01/08/2026 (Ecko, na analyse incident 31/07 19:00 maaltijd — zie
+    // 01/08/2026 (na analyse incident 31/07 19:00 maaltijd — zie
     // decelTriggered hieronder): of het RUWE deceleratiesignaal (vóór de
     // 2-cyclus-bevestiging) ook al in de VORIGE cyclus aanwezig was.
     prevRawDecel: Boolean = false
@@ -3368,7 +3368,7 @@ private fun computePeakBrake(
 
     val recentSlopeDrop = (prevRecentSlope ?: ctx.recentSlope) - ctx.recentSlope
 
-    // BUGFIX (10/07/2026, Ecko): recentSlope is een kort/ruizig signaal — een
+    // BUGFIX (10/07/2026): recentSlope is een kort/ruizig signaal — een
     // tijdelijke knik daarin (bijv. één cyclus lager door meetruis) werd tot nu
     // toe zonder tegencontrole als "aan het afvlakken" behandeld, ook als de
     // BG (en het gladdere slope-veld) gewoon stevig bleef doorstijgen. Concreet
@@ -3382,7 +3382,7 @@ private fun computePeakBrake(
     val rawDecelSignal = recentSlopeDrop >= dropMin && ctx.iobRatio >= suppressThreshold &&
         curveConfirmtOmslag
 
-    // PERSISTENTIE-EIS (01/08/2026, Ecko): incident 31/07 19:00 maaltijd —
+    // PERSISTENTIE-EIS (01/08/2026): incident 31/07 19:00 maaltijd —
     // curveConfirmtOmslag hierboven filtert al ÉÉN soort ruis (een enkele
     // rare recentSlope-waarde terwijl de curve-fit nog gewoon versnelt), maar
     // niet het geval waarin de curve-fit ZELF een paar cycli wiebelt binnen
@@ -3400,7 +3400,7 @@ private fun computePeakBrake(
     // activering exact 5 minuten op (de 2e cyclus remt alsnog), nooit langer.
     val decelTriggered = rawDecelSignal && prevRawDecel
 
-    // HYSTERESE (17/07/2026, Ecko): incident 13:12 UTC — iobRatio flipperde
+    // HYSTERESE (17/07/2026): incident 13:12 UTC — iobRatio flipperde
     // cyclus-op-cyclus net rond suppressThreshold (0,45→0,56→0,58→0,49→0,60),
     // deels zelf-veroorzaakt (blokkeren laat IOB wegzakken, vrijgeven laat IOB
     // weer stijgen). Als de rem de vorige cyclus al actief was, moet iobRatio
@@ -3427,7 +3427,7 @@ private fun computePeakBrake(
     }
 
     // ── Geen HARD_BRAKE tijdens ondubbelzinnig nog versnellende stijging
-    // (06/08/2026, Ecko) ──────────────────────────────────────────────────
+    // (06/08/2026) ──────────────────────────────────────────────────
     // AANLEIDING: 6/8 19:00-19:05 avondmaaltijd — hardBrake vuurde puur op
     // iobRatio(0,61)>=lockoutThreshold(0,55), terwijl curveAcceleration nog
     // +6,67/+(-0,48) was (nog geen bevestigde omslag) EN recentSlope nog
@@ -4060,7 +4060,7 @@ private fun isReentrySignal(
     now: DateTime,
     config: FCLvNextConfig
 ): Boolean {
-    // 15/08/2026 (Ecko) — zie kdoc bij commitUrgency()/COMMIT_URGENCY_DELTA_LOW
+    // 15/08/2026 — zie kdoc bij commitUrgency()/COMMIT_URGENCY_DELTA_LOW
     // hierboven. Hoe verder bgNow al boven target zit, hoe minder streng de
     // eisen hieronder — geleidelijk, geen harde knip, en automatisch
     // target-relatief (deltaToTarget, geen vaste BG-waarde).
@@ -4106,13 +4106,13 @@ class FCLvNext(
      * Geregistreerd door DetermineBasalFCL zodat FCLvNext zelf geen
      * dependency op PersistenceLayer nodig heeft.
      * Gebruik: onEpisodeStarted = { params -> FclActivityLogger.logEpisodeStart(...) }
-     * (02/07/2026, Ecko — activiteitslogger fase 1)
+     * (02/07/2026, de gebruiker — activiteitslogger fase 1)
      */
     var onEpisodeStarted: ((episodeId: Long, bgMmol: Double, targetMmol: Double,
                             iobRatio: Double, iobAbsU: Double, isNight: Boolean,
                             externalBolusU: Double) -> Unit)? = null
 
-    // ── Code-versie voor CSV/Room-diagnose (16/07/2026, Ecko) ───────────────
+    // ── Code-versie voor CSV/Room-diagnose (16/07/2026) ───────────────
     // BELANGRIJK — BIJWERKEN BIJ ELKE INHOUDELIJKE WIJZIGING aan dit bestand
     // (of een ander bestand dat dosering beïnvloedt). Aanleiding: herhaalde
     // onzekerheid tijdens analyse welke versie van de code een bepaalde CSV/
@@ -4120,13 +4120,13 @@ class FCLvNext(
     // enige aanwijzing). Dit is iets ANDERS dan schemaVersion verderop in de
     // Room-laag: schemaVersion volgt de KOLOM-lay-out van CSV/Room, deze
     // constante volgt de DOSIS-LOGICA.
-    // 19/07/2026 (Ecko): formaat aangepast op verzoek — voortaan
+    // 19/07/2026: formaat aangepast op verzoek — voortaan
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v65-2026-08-15-2115"
+    private val FCL_CODE_VERSION = "v68-2026-08-16-1445"
 
-    // ── Restart-detectie (16/07/2026, Ecko) ─────────────────────────────────
+    // ── Restart-detectie (16/07/2026) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
     // instance — dus na elke bewuste code-deploy én na elke onvrijwillige
     // OS-herstart. Aanleiding: de 14/07 20:07- en 15/07 19:42-incidenten,
@@ -4136,7 +4136,7 @@ class FCLvNext(
     // Nu direct zichtbaar via appRestartThisCycle in de CSV/Room-rij.
     private var isFirstCycleSinceInit: Boolean = true
 
-    // ── Episode-teller (04/07/2026, Ecko) ──────────────────────────────────
+    // ── Episode-teller (04/07/2026) ──────────────────────────────────
     // Was: private var mealEpisodeCounter: Long = 0
     // Probleem: elke AAPS-herstart reset de teller → duplicate episode_ids
     // in de ActivityLogger → koppeling aan LearnerLog onmogelijk.
@@ -4145,7 +4145,7 @@ class FCLvNext(
     private val EPISODE_PREFS = "fcl_episode_counter"
     private val EPISODE_KEY   = "meal_episode_counter"
 
-    // ── Expert-modus feature-toggles (13/07/2026, Ecko) ────────────────────
+    // ── Expert-modus feature-toggles (13/07/2026) ────────────────────
     // Zelfde SharedPreferences-bestand/sleutel als de Expert-modus aan/uit-
     // schakelaar in FCLSettingsScreen.kt ("fcl_expert_prefs"/"expert_mode_active"),
     // plus een nieuwe eigen sleutel voor de sustain-T1-versterking. Rechtstreeks
@@ -4158,7 +4158,7 @@ class FCLvNext(
         context.getSharedPreferences(EXPERT_PREFS, android.content.Context.MODE_PRIVATE)
             .getBoolean(SUSTAIN_T1_BOOST_KEY, false)
 
-    // ── AIGF-instellingen (14/07/2026, Ecko) ────────────────────────────────
+    // ── AIGF-instellingen (14/07/2026) ────────────────────────────────
     // Bewust EIGEN, niet-expert SharedPreferences-bestand (i.t.t. de
     // EXPERT_PREFS hierboven): de AIGF-instellingen horen thuis in de
     // gewone "🚶 Activiteit"-tab in Settings, niet achter de expert-modus
@@ -4184,7 +4184,7 @@ class FCLvNext(
         context.getSharedPreferences(AIGF_PREFS, android.content.Context.MODE_PRIVATE)
             .getFloat(AIGF_MAX_PCT_KEY, AIGF_DEFAULT_MAX_PCT).toDouble()
 
-    // ── AIGF: vloeiende overgang, component A (14/07/2026, Ecko — na live-
+    // ── AIGF: vloeiende overgang, component A (14/07/2026, de gebruiker — na live-
     // observatie dat een ruwe, direct-berekende AIGF van cyclus op cyclus
     // fors kan springen). lastSmoothedAigfAPct is de daadwerkelijk GEBRUIKTE
     // waarde van component A (vorige dag/naijling — continu, stuurt de
@@ -4194,29 +4194,55 @@ class FCLvNext(
     // Bewust in-memory (niet gepersisteerd): bij een herstart is 100 (neutraal)
     // een veilig startpunt.
     //
-    // Component B (28/07/2026, Ecko — herontwerp) krijgt GEEN doorlopende
-    // gladstrijking: die wordt precies éénmaal per maaltijd-episode berekend
-    // (bij het eerste écht bevestigde commit, zie episodeAigfBPct hieronder)
-    // en blijft daarna voor de rest van die episode ongewijzigd staan — een
-    // sprong bij een nieuwe episode is hier juist correct (het is een nieuwe
-    // maaltijd met een eigen "recente uren"-context), geen ruis om glad te
-    // strijken.
+    // 16/08/2026 — HERONTWERP component B: was tot nu toe precies
+    // éénmaal per maaltijd-episode berekend en daarna de rest van de episode
+    // bevroren (bij het bereiken van AIGF_B_FREEZE_THRESHOLD_FRAC van
+    // maxSMB). Doorgerekend tegen de volledige historie (129 episodes,
+    // 27/7-15/8): gemiddeld 2-3 commits (mediaan 2), goed voor gemiddeld
+    // 37-41% van de totale episode-dosis (mediaan 19-24%), gingen de deur
+    // uit VOORDAT er ooit een AIGF-B-waarde bestond — en bij 22-24% van alle
+    // episodes werd de drempel nooit gehaald, dus daar had AIGF-B de HELE
+    // episode geen effect. Fysiologisch klopt het bevriezen bovendien niet
+    // goed: hoe effectief een specifieke eenheid insuline werkt hangt af van
+    // de sensitiviteitstoestand OP HET MOMENT van die commit, niet van een
+    // momentopname bij de allereerste hap — bij een lange episode (bijv. de
+    // pizza-episode, meerdere golven over uren) verdient een latere commit
+    // zijn eigen, actuele inschatting.
+    //
+    // Nieuw: component B krijgt nu DEZELFDE continue gladstrijking als
+    // component A (eigen stapgrootte, AIGF_B_MAX_STEP_PER_CYCLE_PCT) en
+    // wordt elke cyclus opnieuw berekend — niet meer gebonden aan een
+    // maaltijd-episode (episodeAigfBPct/episodeAigfBResult/
+    // episodeAigfBWakeOverlapFrac hieronder zijn dus, ondanks de naam, geen
+    // "per-episode"-state meer maar gewoon de laatst berekende/gladgestreken
+    // waarde — namen bewust ongewijzigd gelaten om de bestaande status-/
+    // logging-code hieronder ongemoeid te laten). computeComponentB() zelf
+    // (FclActivitySensitivity.kt) en de onderliggende input.activityCal4h
+    // waren toch al elke cyclus vers beschikbaar (zie DetermineBasalFCL.kt)
+    // — alleen de TOEPASSING in FCLvNext.kt wachtte tot nu toe onnodig op
+    // een dosis-drempel.
+    //
+    // Het wegschrijven naar de 7-daagse baseline-HISTORIE (record()/save(),
+    // verderop bij AIGF_B_FREEZE_THRESHOLD_FRAC) blijft WEL gated op die
+    // drempel — dat blijft een zinvol, apart doel (voorkomen dat elke
+    // kleine correctie als "maaltijd" in de baseline terechtkomt), los van
+    // de live TOEPASSING hier.
     private val AIGF_MAX_STEP_PER_CYCLE_PCT = 2.0
+    private val AIGF_B_MAX_STEP_PER_CYCLE_PCT = 2.0
     private var lastSmoothedAigfAPct: Double = 100.0
+    private var lastSmoothedAigfBPct: Double = 100.0
 
-    // Component B, bevroren per episode — zie kdoc hierboven. Reset naar 100
-    // (neutraal) op de 3 episode-grens-plekken verderop, net als
-    // episodeCommitCount/episodeBoostBudgetU e.d. Bewust in-memory: bij een
-    // herstart mid-episode is "nog geen component-B-berekening deze episode"
-    // (dus neutraal 100 tot het volgende commit) veiliger dan een oude,
-    // mogelijk sterk afwijkende waarde te herstellen zonder de onderliggende
-    // meting nog te kunnen verifiëren.
+    // Laatst berekende/gladgestreken component-B-waarde — zie HERONTWERP-kdoc
+    // hierboven (16/08/2026). NIET meer gereset op episode-grenzen (verwijderd
+    // bij de 4 reset-plekken verderop): component B is nu net als component A
+    // een doorlopend signaal, geen per-maaltijd-momentopname meer.
     private var episodeAigfBPct: Double = 100.0
     private var episodeAigfBResult: FclActivitySensitivity.AigfResult? = null
     private var episodeAigfBWakeOverlapFrac: Double = 0.0
-    // Los van episodePeakCommitU (07/08/2026, Ecko) — AIGF-B heeft nu zijn eigen,
-    // lagere freeze-drempel (AIGF_B_FREEZE_THRESHOLD_FRAC), dus "al bevroren deze
-    // episode" kan niet langer via episodePeakCommitU<=1e-9 afgeleid worden.
+    // episodeAigfBFrozen behoudt zijn ORIGINELE doel: gate op het wegschrijven
+    // van één historie-sample per episode (zie AIGF_B_FREEZE_THRESHOLD_FRAC
+    // verderop) — dat blijft bewust per-episode, alleen de LIVE toepassing
+    // hierboven niet meer.
     private var episodeAigfBFrozen: Boolean = false
 
     private fun loadEpisodeCounter(): Long =
@@ -4229,7 +4255,7 @@ class FCLvNext(
 
     private var mealEpisodeCounter: Long = loadEpisodeCounter()
 
-    // ── Episode-anker persistent over herstarts heen (27/07/2026, Ecko) ─────
+    // ── Episode-anker persistent over herstarts heen (27/07/2026) ─────
     // AANLEIDING: maaltijd 27/07 18:44-20:33 — een onvrijwillige herstart om
     // 19:14 (24 min in de maaltijd, IOB al 7,29U) zette activeMealEpisodeId
     // terug naar -1 (was nooit gepersisteerd, in tegenstelling tot
@@ -4298,7 +4324,7 @@ class FCLvNext(
             saveEpisodeAnchor(activeMealEpisodeId, value, mealEpisodeStartBg)
         }
 
-    // ── Maaltijd-anticipatie geschiedenis — VERWIJDERD (29/07/2026, Ecko) ───
+    // ── Maaltijd-anticipatie geschiedenis — VERWIJDERD (29/07/2026) ───
     // Het hele FclMealTimeAnticipation-mechanisme (05/07/2026) is verwijderd:
     // in de praktijk (week 22-29/7) bleek het ~10-13x per dag te vuren, dag
     // én nacht, veel vaker dan er daadwerkelijk maaltijden zijn — vermoedelijk
@@ -4308,7 +4334,7 @@ class FCLvNext(
     // maaltijd, stapelde de extra target-verlaging bovenop de toch al lopende
     // eerste volle commit — concreet aangetoond bij de 3,01U-bolus om
     // 29/07 11:03 (WFF-doel 0,33→3,10U) en twee vergelijkbare, kleinere
-    // gevallen (24/07 15:54, 28/07 13:48). Ecko's conclusie: de kans dat dit
+    // gevallen (24/07 15:54, 28/07 13:48). de gebruikers conclusie: de kans dat dit
     // een te hoge dosis veroorzaakt bij iets dat geen echte maaltijd is (een
     // koekje bij de koffie) woog zwaarder dan de bedoelde marginale
     // voorsprong bij een echte maaltijd. Zie DetermineBasalFCL.kt voor de
@@ -4321,7 +4347,7 @@ class FCLvNext(
             saveEpisodeAnchor(activeMealEpisodeId, mealEpisodeStartTime, value)
         }
     // Frontload-shift tracking: bijgehouden per episode
-    // ── Taper-clamp-status persistent (15/07/2026, Ecko) ───────────────────
+    // ── Taper-clamp-status persistent (15/07/2026) ───────────────────
     // Aanleiding: maaltijd 15/07 19:07-19:42 — een onvrijwillige Android-herstart
     // (OS-update) midden in een lopende episode zette episodeCommitCount/
     // episodePeakCommitU terug naar 0, waardoor het eerstvolgende commit
@@ -4342,7 +4368,7 @@ class FCLvNext(
     private val TAPER_STATE_PREFS = "fcl_taper_state"
     private val TAPER_STATE_PEAK_COMMIT_U_KEY = "episode_peak_commit_u"
     private val TAPER_STATE_COMMIT_COUNT_KEY = "episode_commit_count"
-    // 29/07/2026 (Ecko) — vier nieuwe sleutels, zie kdoc's verderop bij elk
+    // 29/07/2026 — vier nieuwe sleutels, zie kdoc's verderop bij elk
     // veld voor de aanleiding (18:53-incident: app-herstart midden in een
     // episode van 7 commits "vergat" precies de remmen die op dat moment het
     // hardst aan het knijpen waren).
@@ -4445,7 +4471,7 @@ class FCLvNext(
             if (field != value) saveEpisodeCommitCount(value)
             field = value
         }
-    // LET OP (28/07/2026, Ecko — zie hieronder): dit veld wordt UITSLUITEND
+    // LET OP (28/07/2026, de gebruiker — zie hieronder): dit veld wordt UITSLUITEND
     // bijgewerkt binnen het early.active-blok verderop (dus niet bij een
     // WFF- of commit-only cyclus) — dat is bewust, want dit budget stuurt
     // ook budgetDecay/de langlopende late-commit-afbouw over véél commits
@@ -4453,7 +4479,7 @@ class FCLvNext(
     // grote frontload-mechanismen die elkaar niet vlak na elkaar onbeperkt
     // mogen verrassen) is er een APART, kort-lopend signaal:
     // recentFrontloadDoseU/recentFrontloadAt, direct hieronder.
-    // 29/07/2026 (Ecko) — nu persistent, zelfde reden en zelfde set()-patroon
+    // 29/07/2026 — nu persistent, zelfde reden en zelfde set()-patroon
     // als episodeCommitCount hierboven. AANLEIDING: incident 29/07 18:53 — een
     // app-herstart om 18:47 (7 commits in, IOB 3,3U) zette episodeBoostBudgetU
     // terug naar 0, waardoor budgetDecay (die hierop leunt) weer op vol vermogen
@@ -4465,7 +4491,7 @@ class FCLvNext(
             field = value
         }
 
-    // ── Kort-lopend frontload-signaal (28/07/2026, Ecko) ────────────────────
+    // ── Kort-lopend frontload-signaal (28/07/2026) ────────────────────
     // AANLEIDING: episodeBoostBudgetU (hierboven) een tijdje breder gemaakt
     // (elke dosis, ongeacht mechanisme) om te voorkomen dat WFF en EarlyBoost
     // elkaar kort na elkaar allebei onbeperkt konden verrassen (incident 28/07
@@ -4488,10 +4514,10 @@ class FCLvNext(
     // (10 min) dat het vanzelf vervalt, en een nieuwe episode die binnen dat
     // venster van een vorige start (bijv. een tweede hap vlak na een grote
     // maaltijd) mag de net gegeven frontload nog steeds meewegen.
-    // 29/07/2026 (Ecko) — nu tóch gepersisteerd, ondanks de kdoc hierboven die
+    // 29/07/2026 — nu tóch gepersisteerd, ondanks de kdoc hierboven die
     // dit bewust in-memory hield. Reden voor de omkeer: het 10-min venster is
     // kort, dus het exposure-venster bij een herstart was al klein — maar
-    // Ecko's expliciete instructie na het 18:53-incident was om ook de kans op
+    // de gebruikers expliciete instructie na het 18:53-incident was om ook de kans op
     // een edge-case die hier tóch last van krijgt weg te nemen, ook al is die
     // kans klein. recordRecentFrontload() hieronder is de enige plek die deze
     // twee velden zet (verving de eerdere directe toekenning verderop in de
@@ -4512,7 +4538,7 @@ class FCLvNext(
         return if (ageMin in 0..RECENT_FRONTLOAD_WINDOW_MIN) recentFrontloadDoseU else 0.0
     }
 
-    // ── Budget-nasleep tussen opeenvolgende episodes (29/07/2026, Ecko) ─────
+    // ── Budget-nasleep tussen opeenvolgende episodes (29/07/2026) ─────
     // AANLEIDING: 3,01U-bolus 29/07 11:03 (AIGF/anticipatie-onderzoek) leidde
     // tot de vraag of een vroege, grote dosis daarna consequent wordt
     // "teruggepakt", en of dat ooit misgaat bij een 2e, snel-opeenvolgende
@@ -4523,7 +4549,7 @@ class FCLvNext(
     // staande maaltijd was. 0,65 × [ongedempt vers-maaltijd-doel] leverde alsnog
     // 2,34U (geplafonneerd door guardMaxSmbLimited — de onderliggende wens was
     // nóg groter), gevolgd door een derde episode om 20:43-20:53 en uiteindelijk
-    // een dieptepunt van 2,9 mmol om 22:53. Ecko's conclusie (29/07): de generieke
+    // een dieptepunt van 2,9 mmol om 22:53. de gebruikers conclusie (29/07): de generieke
     // IOB-rem ving dit dus AL gedeeltelijk op, maar niet genoeg — een gerichte,
     // aparte correctie op de WFF/EarlyBoost-DOELGROOTTE zelf (niet nog een
     // algemene IOB-vermenigvuldiger, dat zou dubbelop zijn) is gerechtvaardigd.
@@ -4540,8 +4566,8 @@ class FCLvNext(
     // recentFrontloadDoseU (10 min), maar met een iets groter (geaccepteerd)
     // blootstellingsvenster gezien de langere duur.
     //
-    // HERZIEN (29/07/2026, Ecko, na 18:53-incident): tóch gepersisteerd, om
-    // dezelfde reden als recentFrontloadDoseU/At hierboven — Ecko's expliciete
+    // HERZIEN (29/07/2026, na 18:53-incident): tóch gepersisteerd, om
+    // dezelfde reden als recentFrontloadDoseU/At hierboven — de gebruikers expliciete
     // voorkeur om ook kleine, resterende edge-case-kansen weg te nemen.
     // loadRecentEpisodeCommits()/saveRecentEpisodeCommits() staan hierboven bij
     // de overige TAPER_STATE-functies.
@@ -4559,12 +4585,12 @@ class FCLvNext(
         val cutoff = now.minusMinutes(RECENT_EPISODE_BUDGET_WINDOW_MIN)
         return recentEpisodeCommits.filter { !it.first.isBefore(cutoff) }.sumOf { it.second }
     }
-    // 08/07/2026 (Ecko) — hoogst gecommitteerde dosis deze episode, referentiepunt
+    // 08/07/2026 — hoogst gecommitteerde dosis deze episode, referentiepunt
     // voor de afbouw van finalDose (zie de maxOf(finalDose, commitDose)-fix hieronder).
     // Mag GROEIEN als een latere commit terecht groter is (echte, doorzettende
     // versnelling — bgStijgtNogFors) — de afbouw daarna gaat dan vanaf dát nieuwe,
     // hogere punt verder, niet vanaf de oorspronkelijke eerste commit.
-    // BUGFIX (29/07/2026, Ecko): dit veld had tot nu toe GEEN eigen setter —
+    // BUGFIX (29/07/2026): dit veld had tot nu toe GEEN eigen setter —
     // loadEpisodePeakCommitU() werd wél bij init gelezen, maar elke latere
     // toekenning (episodePeakCommitU = 0.0 op episode-einde,
     // episodePeakCommitU = maxOf(episodePeakCommitU, committedDose) bij een
@@ -4581,13 +4607,13 @@ class FCLvNext(
             field = value
         }
 
-    // ── Herstart-blokkade, optie 2 (29/07/2026, Ecko) ───────────────────────
+    // ── Herstart-blokkade, optie 2 (29/07/2026) ───────────────────────
     // AANLEIDING: 18:53-incident — een app-herstart om 18:47 zat middenin een
     // episode van 7 commits (episodeCommitCount=7, episodePeakCommitU>0 op dat
     // moment) en "vergat" precies de remmen (episodeBoostBudgetU/
     // episodeHypoDebtU/lastKnownLateDecayMul) die op dat moment het hardst aan
     // het knijpen waren, ondanks de fixes hierboven bij episodeCommitCount/
-    // episodePeakCommitU (die WEL al persisteerden, sinds 15/07). Ecko wilde
+    // episodePeakCommitU (die WEL al persisteerden, sinds 15/07). de gebruiker wilde
     // niet alleen "reken met de herstart" (optie 1, hierboven/hieronder al
     // opgelost door alsnog alles te persisteren) maar OOK, als extra, 100%
     // veilige vangrail: de eerste commit-cyclus na een herstart die middenin
@@ -4602,14 +4628,14 @@ class FCLvNext(
     private val hadOngoingEpisodeAtRestart: Boolean =
         (episodeCommitCount > 0 || episodePeakCommitU > 1e-9)
 
-    // ── SensorBlip-teller: seed bij opstart (22/07/2026, Ecko) ──────────────
+    // ── SensorBlip-teller: seed bij opstart (22/07/2026) ──────────────
     // De teller zelf blijft top-level (zie kdoc daar voor waarom), maar het
     // laden van de gepersisteerde waarde kan alleen hier, waar `context`
     // beschikbaar is — vandaar deze init-regel meteen bij object-constructie.
     init {
         sensorBlipStreakCount = loadSensorBlipStreakCount(context)
     }
-    // ── Persistente lateDecayMul over cycli heen (22/07/2026, Ecko) ──────
+    // ── Persistente lateDecayMul over cycli heen (22/07/2026) ──────
     // AANLEIDING (maaltijd 22/07 05:07): de taper-clamp verderop
     // ("episodePeakCommitU * lateDecayMul", bedoeld als vangnet precies
     // wanneer commandedDose van het kale energiemodel komt i.p.v. van een
@@ -4629,7 +4655,7 @@ class FCLvNext(
     // het commit-pad niet mag draaien, erft zo de LAATST bekende, echte
     // afbouwstand i.p.v. terug te vallen op "geen afbouw".
     //
-    // BUGFIX (29/07/2026, Ecko): "overleeft nu de cyclus" hierboven klopte dus
+    // BUGFIX (29/07/2026): "overleeft nu de cyclus" hierboven klopte dus
     // NIET over een app-herstart heen — de init-waarde stond hard op 1.0
     // (nooit geladen uit SharedPreferences) en de setter riep per ongeluk
     // saveEpisodePeakCommitU(value) aan, wat bij elke wijziging van dit veld
@@ -4644,14 +4670,14 @@ class FCLvNext(
             if (field != value) saveLateDecayMul(value)
             field = value
         }
-    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Vastgelegd
+    // 11/07/2026 — puur diagnostisch, geen invloed op dosering. Vastgelegd
     // zodat een volgend "laat commit slaat de afbouw over"-incident (zoals
     // 11/07 06:42-07:12) exact te herleiden is uit de CSV, i.p.v. te moeten
     // reconstrueren uit indirecte signalen. Gezet in het cappedFinalDose-blok,
     // gelezen bij het wegschrijven van logRow verderop.
     private var lastBgStijgtNogFors: Boolean = false
     private var lastCommitNrUsed: Int = 0
-    // 14/07/2026 (Ecko) — vroege-stijging-bevestiging, zie kdoc bij
+    // 14/07/2026 — vroege-stijging-bevestiging, zie kdoc bij
     // VROEGE_STIJGING_SUSTAIN_MIN hierboven. vroegeStijgingBevestigdUsedThisEpisode:
     // zorgt dat de afbouw-reset maar ÉÉN keer per episode vuurt (niet elke
     // cyclus opnieuw zolang de stijging aanhoudt). plateauSinceVroegeStijging:
@@ -4661,10 +4687,10 @@ class FCLvNext(
     // stijging als de al-vervroegde commit).
     private var vroegeStijgingBevestigdUsedThisEpisode: Boolean = false
 
-    // ── Eerste-echte-aflevering vrijstelling van late-decay (14/08/2026, Ecko) ──
+    // ── Eerste-echte-aflevering vrijstelling van late-decay (14/08/2026) ──
     // AANLEIDING (maaltijd 14/8 13:00): "de maaltijd begon veel te rustig,
     // precies op de top kwamen de 2 grootste doses van de episode overheen"
-    // (Ecko). Natrekken van FCLvNext_Log_v9 14-8 16.10.csv liet zien dat het
+    // (de gebruiker). Natrekken van FCLvNext_Log_v9 14-8 16.10.csv liet zien dat het
     // EERSTE ECHTE commit van deze maaltijd (13:23:55, 0.93U) al met
     // late_decay_mul=0.32 werd afgeleverd — terwijl commitNr>1's decay
     // architecturaal bedoeld is voor de TWEEDE en latere commits (zie kdoc
@@ -4691,7 +4717,7 @@ class FCLvNext(
     // decay-vrijstelling.
     private var episodeAnyRealDeliveryDone: Boolean = false
 
-    // ── Zelfde principe, maar per re-entry-segment (15/08/2026, Ecko) ────────
+    // ── Zelfde principe, maar per re-entry-segment (15/08/2026) ────────
     // AANLEIDING (14/8 pizza-episode, golf 2 om 21:28-21:33): isReentrySignal()
     // is een streng, meervoudig gecorroboreerd signaal (reliable, aboveTarget,
     // rising, accelerating) dat een ECHT nieuwe stijging detecteert — en mag
@@ -4709,7 +4735,7 @@ class FCLvNext(
     private var episodeAnyRealDeliverySinceReentry: Boolean = true
     private var plateauSinceVroegeStijging: Boolean = false
 
-    // ── Cumulatieve-dosis-vs-waargenomen-stijging (15/08/2026, Ecko) ────────
+    // ── Cumulatieve-dosis-vs-waargenomen-stijging (15/08/2026) ────────
     // Zie de uitgebreide kdoc bij DOSE_RATIO_THRESHOLD hierboven (koekje-
     // episode). episodeCumulativeCommandedU/episodeMaxDeltaTargetSoFar volgen
     // dezelfde episode-levenscyclus als episodeAnyRealDeliveryDone hierboven
@@ -4721,7 +4747,7 @@ class FCLvNext(
     private var episodeMaxDeltaTargetSoFar: Double = 0.0
     private var doseRatioElevatedSinceAt: DateTime? = null
 
-    // ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, Ecko) ────────
+    // ── Nieuwe-maaltijd trog-detectie (RONDE 33, 03/08/2026, de gebruiker) ────────
     // AANLEIDING: incident 3/8 12:18-15:28 — ontbijt (piek 11:03, BG 10,6)
     // en lunch (12:18-14:13, BG 6,3→10,5) vielen samen tot ÉÉN doorlopende
     // episode omdat BG tussen beide maaltijden nooit dicht genoeg bij target
@@ -4777,7 +4803,7 @@ class FCLvNext(
 
     // ── Snelle-afremming guard ───────────────────────────────────────────
     // rapidDecelLocked/rapidDecelConfirm: bijgewerkt door
-    // computeFastLaneDampening() (27/07/2026, Ecko — zie kdoc daar en bij de
+    // computeFastLaneDampening() (27/07/2026, de gebruiker — zie kdoc daar en bij de
     // aanroep in de hoofdcyclus) — dempt de energy-berekening zodra
     // ctx.recentSlope al ver is weggezakt terwijl het tragere ctx.slope dat
     // nog niet heeft bijgebeend. episodePeakRecentSlope wordt momenteel niet
@@ -4798,7 +4824,7 @@ class FCLvNext(
     //   - Veiligheidsgrens: maximale compensatie = 1× de normale dosis
     //   - Reset bij episode-start en episode-einde
     //
-    // 29/07/2026 (Ecko) — nu persistent, zelfde reden/patroon als
+    // 29/07/2026 — nu persistent, zelfde reden/patroon als
     // episodeBoostBudgetU hierboven (18:53-incident: dit veld reset ten
     // onrechte naar 0 bij een herstart mid-episode).
     private var episodeHypoDebtU: Double = loadEpisodeHypoDebtU()  // achtergehouden insuline door hypo-rem
@@ -4807,7 +4833,7 @@ class FCLvNext(
             field = value
         }
 
-    // ── Post-hypo-rebound rem (24/07/2026, Ecko) — zie kdoc bij
+    // ── Post-hypo-rebound rem (24/07/2026) — zie kdoc bij
     // POST_HYPO_BRAKE_CATCHUP_RISE hierboven en bij de toepassing verderop.
     private var postHypoBrakeActive: Boolean = false
     // postHypoBrakeCatchUpUsed bestaat niet meer (25/07/2026) — vervangen door
@@ -4827,7 +4853,7 @@ class FCLvNext(
     private var sustainedHighSlopeMinutes: Double = 0.0
     private var sustainedLastUpdateAt: DateTime? = null
 
-    // 15/08/2026 (Ecko) — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION
+    // 15/08/2026 — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION
     // hierboven. Houdt, onafhankelijk van sustainedHighSlopeMinutes zelf, de
     // hoogste ctx.acceleration bij die is gezien SINDS de huidige aanhoudende
     // stijging begon (dezelfde levenscyclus/reset-momenten als
@@ -5020,9 +5046,9 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
-            episodeAigfBPct = 100.0
-            episodeAigfBResult = null
-            episodeAigfBWakeOverlapFrac = 0.0
+            // 16/08/2026: episodeAigfBPct/Result/WakeOverlapFrac NIET meer
+            // hier resetten — component B is nu continu, zie HERONTWERP-kdoc
+            // bij lastSmoothedAigfBPct.
             episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
@@ -5316,7 +5342,7 @@ class FCLvNext(
         // Dit is nauwkeuriger dan FCLvNext's interne deliveryHistory die alleen
         // FCL-eigen doses bijhoudt (max 7 entries, geen oref0-fallback).
         //
-        // Analyse 29/06/2026 (Ecko): bij 17:00 UTC was iobRatio=0.21 terwijl
+        // Analyse 29/06/2026: bij 17:00 UTC was iobRatio=0.21 terwijl
         // al 5.70U was gegeven. Met pendingBolusU10min=2.62U → effectiveIobRatio=0.46
         // → commit werd sterk geremd. Zie ook Fix 1 (wffHypoBlokkade).
         val pendingIob = input.pendingBolusU10min
@@ -5427,7 +5453,7 @@ class FCLvNext(
         lastActiveConfig = config
 
         // ─────────────────────────────────────────────
-        // 🍽️⏰ Maaltijd-tijd-anticipatie — VERWIJDERD (29/07/2026, Ecko)
+        // 🍽️⏰ Maaltijd-tijd-anticipatie — VERWIJDERD (29/07/2026)
         // Zie de kdoc bij mealEpisodeStartBg hierboven voor de reden. Zowel
         // deze `isWeekendNow`-berekening (die alleen voor de nu-verwijderde
         // opname-hook bestond) als de hook zelf verderop zijn weg.
@@ -5438,7 +5464,7 @@ class FCLvNext(
 
         val zoneEnum = computeBgZone(ctx)
 
-        // ── AIGF component A: vorige dag/naijling (14/07/2026, Ecko,
+        // ── AIGF component A: vorige dag/naijling (14/07/2026, 
         // herontworpen 28/07/2026 — zie kdoc bij FclActivitySensitivity.kt) ──
         // Eén berekening per cyclus, hier al vroeg zodat de afterload-reductie
         // (verderop, bij afterloadScale) 'm kan gebruiken. Continu venster
@@ -5461,7 +5487,7 @@ class FCLvNext(
                 reasonNl = "AIGF staat uit in Settings"
             )
         }
-        // ── Vloeiende overgang, component A (14/07/2026, Ecko) ─────────────
+        // ── Vloeiende overgang, component A (14/07/2026) ─────────────
         // lastSmoothedAigfAPct is de waarde die ECHT gebruikt wordt (afterload +
         // status), nooit de ruwe aigfARawResult.aigf rechtstreeks. Bij geen
         // geldige berekening deze cyclus blijft de vorige gladde waarde staan.
@@ -5471,6 +5497,43 @@ class FCLvNext(
             lastSmoothedAigfAPct += delta
         }
         val aigfSmoothedAPct = lastSmoothedAigfAPct
+
+        // ── AIGF component B: recente uren, LIVE (16/08/2026, de gebruiker —
+        // HERONTWERP, zie uitgebreide kdoc bij lastSmoothedAigfBPct
+        // hierboven). Elke cyclus opnieuw berekend en gladgestreken, net als
+        // component A hierboven — niet langer gebonden aan het bereiken van
+        // AIGF_B_FREEZE_THRESHOLD_FRAC. computeWakeOverlapFrac() hier al
+        // live opgevraagd (was voorheen alleen berekend bij het bevriezen
+        // verderop) zodat de eerste commit van een episode al een actuele
+        // waarde ziet in plaats van de neutrale 100 die tot nu toe gold
+        // totdat de dosis-drempel werd gehaald.
+        val aigfBWakeOverlapLive = computeWakeOverlapFrac(
+            input.daystartTodayMs, now.millis, 4L * 60L * 60L * 1000L
+        )
+        val aigfBRawResult = if (aigfEnabled) {
+            FclActivitySensitivity.computeComponentB(
+                history = FclActivitySensitivity.loadHistoryB(context),
+                currentCal4h = input.activityCal4h,
+                wakeOverlapFrac = aigfBWakeOverlapLive,
+                minPct = getAigfMinPct(),
+                maxPct = getAigfMaxPct(),
+                nowMs = now.millis
+            )
+        } else {
+            FclActivitySensitivity.AigfResult(
+                active = false, aigf = 100.0, rawRatio = 1.0, baselineMedian = 0.0, sampleCount = 0,
+                reasonNl = "AIGF staat uit in Settings"
+            )
+        }
+        if (aigfBRawResult.active) {
+            val delta = (aigfBRawResult.aigf - lastSmoothedAigfBPct)
+                .coerceIn(-AIGF_B_MAX_STEP_PER_CYCLE_PCT, AIGF_B_MAX_STEP_PER_CYCLE_PCT)
+            lastSmoothedAigfBPct += delta
+        }
+        episodeAigfBPct = lastSmoothedAigfBPct
+        episodeAigfBResult = aigfBRawResult
+        episodeAigfBWakeOverlapFrac = aigfBWakeOverlapLive
+
         if (aigfEnabled) {
             if (aigfARawResult.active) {
                 status.append(
@@ -5483,15 +5546,16 @@ class FCLvNext(
             } else {
                 status.append("AIGF-A AAN maar geen verse berekening: ${aigfARawResult.reasonNl} (huidig=${"%.1f".format(aigfSmoothedAPct)})\n")
             }
-            // Component B: puur de laatst bevroren waarde tonen (zie de
-            // eigenlijke berekening/bevriezing verderop, bij het eerste
-            // écht bevestigde commit van deze episode).
-            status.append(
-                "AIGF-B (recente uren, bevroren per maaltijd)=${"%.1f".format(episodeAigfBPct)}" +
-                    (if (episodeAigfBResult?.active == true)
-                        " (wakker-aandeel=${"%.0f".format(episodeAigfBWakeOverlapFrac * 100.0)}%)"
-                    else " (nog geen commit deze episode)") + "\n"
-            )
+            if (aigfBRawResult.active) {
+                status.append(
+                    "AIGF-B (recente uren, live)=${"%.1f".format(episodeAigfBPct)} (ruw=${"%.1f".format(aigfBRawResult.aigf)} " +
+                        "ratio=${"%.2f".format(aigfBRawResult.rawRatio)} " +
+                        "baseline=${"%.0f".format(aigfBRawResult.baselineMedian)}kcal/4u " +
+                        "wakker-aandeel=${"%.0f".format(aigfBWakeOverlapLive * 100.0)}%)\n"
+                )
+            } else {
+                status.append("AIGF-B AAN maar geen verse berekening: ${aigfBRawResult.reasonNl} (huidig=${"%.1f".format(episodeAigfBPct)})\n")
+            }
         }
 
         logRow.guardIobLimited = false
@@ -5579,7 +5643,7 @@ class FCLvNext(
         var energy = energyResult.total
 
         // ─────────────────────────────────────────────
-        // 🐌 SNELLE-AFREMMING DEMPING (27/07/2026, Ecko)
+        // 🐌 SNELLE-AFREMMING DEMPING (27/07/2026)
         // ─────────────────────────────────────────────
         // AANLEIDING: maaltijd 27/07 18:44-20:33, cyclus 19:18. calculateEnergy()
         // hierboven gebruikt ctx.slope — het gladde/tragere signaal — voor de
@@ -5720,9 +5784,9 @@ class FCLvNext(
             mealEpisodeStartBg = ctx.input.bgNow
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
-            episodeAigfBPct = 100.0
-            episodeAigfBResult = null
-            episodeAigfBWakeOverlapFrac = 0.0
+            // 16/08/2026: episodeAigfBPct/Result/WakeOverlapFrac NIET meer
+            // hier resetten — component B is nu continu, zie HERONTWERP-kdoc
+            // bij lastSmoothedAigfBPct.
             episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
@@ -5773,9 +5837,9 @@ class FCLvNext(
             mealEpisodeStartBg = null
             episodeCommitCount = 0
             episodeBoostBudgetU = 0.0
-            episodeAigfBPct = 100.0
-            episodeAigfBResult = null
-            episodeAigfBWakeOverlapFrac = 0.0
+            // 16/08/2026: episodeAigfBPct/Result/WakeOverlapFrac NIET meer
+            // hier resetten — component B is nu continu, zie HERONTWERP-kdoc
+            // bij lastSmoothedAigfBPct.
             episodeAigfBFrozen = false
             episodePeakCommitU = 0.0
             lastKnownLateDecayMul = 1.0
@@ -5944,7 +6008,7 @@ class FCLvNext(
         val boostedIobRatio =
             (ctx.iobRatio / peakIobBoost).coerceAtLeast(0.0)
 
-        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip —
+        // 17/07/2026: lineair gemengd i.p.v. harde dag/nacht-knip —
         // zie kdoc bij FCLvNextInput.nightTransitionFraction.
         val iobPower = config.iobPowerDay + input.nightTransitionFraction * (config.iobPowerNight - config.iobPowerDay)
         val iobFactor = iobDampingFactor(
@@ -6038,7 +6102,7 @@ class FCLvNext(
         if (ctx.slope >= sustainSlopeMin && ctx.slope > 0.0) {
             // Slope boven drempel: tel op hoeveel tijd is verstreken
             sustainedHighSlopeMinutes += minutesSinceSustainUpdate
-            // 15/08/2026 (Ecko) — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION.
+            // 15/08/2026 — zie kdoc bij VROEGE_STIJGING_ACCEL_DECLINE_FRACTION.
             // Dezelfde levenscyclus als sustainedHighSlopeMinutes hierboven.
             recentAccelPeakInRise = maxOf(recentAccelPeakInRise, ctx.acceleration)
         } else {
@@ -6334,7 +6398,7 @@ class FCLvNext(
         // maxSMB-cap hieronder moet reageren op wat er AL was gegeven door
         // eerdere fires (elk mechanisme, laatste RECENT_FRONTLOAD_WINDOW_MIN
         // minuten), niet op de fire die nu net wordt berekend (kip-ei).
-        // 28/07/2026 (Ecko, herzien): was episodeBoostBudgetU (alleen
+        // 28/07/2026 (herzien): was episodeBoostBudgetU (alleen
         // EarlyBoost-fires) — nu recentFrontloadBudget() (elk mechanisme,
         // kort-lopend), zie kdoc bij recentFrontloadDoseU hierboven.
         val recentFrontloadSnapshot = recentFrontloadBudget(now)
@@ -6367,7 +6431,7 @@ class FCLvNext(
                 early.confidence >= config.earlyBoostMinConfidence) {
                 earlyDose.boostCommitCount++
             }
-            // Budget bijhouden voor de late-commit-decay (07/07/2026, Ecko — herzien).
+            // Budget bijhouden voor de late-commit-decay (07/07/2026, de gebruiker — herzien).
             //
             // WAS: alleen het EarlyBoost-toeschrijfbare deel (boostExtraU) telde mee.
             // Zodra EarlyBoost zelf stopte met bijdragen (bijv. earlyBoostMaxCommits
@@ -6412,7 +6476,7 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 🟥 HEIGHT ESCALATION (single, smooth factor)
         // ─────────────────────────────────────────────
-        // heightEscalationFactor is verwijderd (26/06/2026, Ecko): de piekdruk-
+        // heightEscalationFactor is verwijderd (26/06/2026): de piekdruk-
         // en momentum-logica is geabsorbeerd in effectiveBoostFactor binnen
         // computeEarlyDoseDecision() — zie commentaar aldaar. Eén mechanisme
         // per scenario is beter te onderhouden dan twee ongecoördineerde.
@@ -6421,7 +6485,7 @@ class FCLvNext(
         // ─────────────────────────────────────────────
         // 🟦 PERSISTENT CORRECTION LOOP (dag + nacht)
         // ─────────────────────────────────────────────
-        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip —
+        // 17/07/2026: lineair gemengd i.p.v. harde dag/nacht-knip —
         // zie kdoc bij FCLvNextInput.nightTransitionFraction. Dag=1.7, nacht=1.5.
         val baseMinDelta =
             1.7 + ctx.input.nightTransitionFraction * (1.5 - 1.7)
@@ -6569,7 +6633,7 @@ class FCLvNext(
         // Divisor 0.5× (i.p.v. een agressievere 0.3×) is bewust gekozen om
         // de impact op de eerste 1-2 vervolgfires te beperken; de eerste
         // fire in elke episode blijft altijd volledig ongewijzigd.
-        // 28/07/2026 (Ecko, herzien): gebruikt nu recentFrontloadSnapshot
+        // 28/07/2026 (herzien): gebruikt nu recentFrontloadSnapshot
         // (kort-lopend, elk mechanisme) i.p.v. episodeBoostBudgetUSnapshot
         // (cumulatief, alleen EarlyBoost) — zie kdoc bij recentFrontloadDoseU.
         val boostBudgetTaper =
@@ -6633,7 +6697,7 @@ class FCLvNext(
         // geen geplande dosis). Bij een actieve hypo-dreiging is elke extra insuline
         // gevaarlijk, ook als de BG tijdelijk stijgt door snoep of maaltijd.
         //
-        // Analyse 29/06/2026 (Ecko): WFF vuurde om 17:25 en 17:50 UTC met
+        // Analyse 29/06/2026: WFF vuurde om 17:25 en 17:50 UTC met
         // hypo_active=True en IOB 4.35-5.93U. De HypoProtection zette commitDose=0
         // maar watchingTarget=2.39U won via max() — de WFF bypaste de hypo-rem.
         // Totaal 3.86U extra insuline bij een al hyperinsulinemische situatie →
@@ -6670,7 +6734,7 @@ class FCLvNext(
             peak.predictedPeak >= 11.0 -> 0.65
             else                       -> 0.50
         }
-        // 28/07/2026 (Ecko, herzien): gebruikt nu recentFrontloadBudget(now)
+        // 28/07/2026 (herzien): gebruikt nu recentFrontloadBudget(now)
         // (kort-lopend, elk mechanisme) i.p.v. episodeBoostBudgetU (cumulatief,
         // alleen EarlyBoost) — zie kdoc bij recentFrontloadDoseU hierboven.
         // Was episodeBoostBudgetU: dat liet bij een lange maaltijd met veel
@@ -6681,7 +6745,7 @@ class FCLvNext(
             (1.0 - recentFrontload / (config.maxSMB * 2.0)).coerceIn(wffScalingMin, 1.0)
         } else 1.0
 
-        // ── Budget-nasleep tussen episodes (29/07/2026, Ecko) ───────────────
+        // ── Budget-nasleep tussen episodes (29/07/2026) ───────────────
         // Zie kdoc bij recentEpisodeCommits/recentEpisodeBudget() hierboven —
         // dempt WFF's DOELGROOTTE zelf naar rato van wat er in de laatste
         // RECENT_EPISODE_BUDGET_WINDOW_MIN (90) minuten al is gegeven, ook als
@@ -6714,7 +6778,7 @@ class FCLvNext(
         //   - Insuline werkt eerder op de BG-stijging
         //   - Lagere IOB op de piek → minder hypo-staartrisico
         //
-        // VEREENVOUDIGING 26/06/2026 (Ecko, architectuurreview):
+        // VEREENVOUDIGING 26/06/2026 (architectuurreview):
         // wffIobPenalty (was: extra IOB-rem specifiek voor watching-frontload)
         // is verwijderd. commitIobFactor verderop in de commit-formule dempt
         // al op basis van IOB — een tweede IOB-penalty hier is overtollig en
@@ -6764,7 +6828,7 @@ class FCLvNext(
                 * recentEpisodeScaling * watchingConsolidationFactor)
                 .coerceAtMost(config.maxSMB)
 
-        // ── Delta-to-target ramp (05/07/2026, Ecko) ──────────────────────
+        // ── Delta-to-target ramp (05/07/2026) ──────────────────────
         // WatchingFrontload sprong voorheen in één cyclus van 0 naar de volle
         // watchingFrontloadTargetU zodra deltaToTarget de drempel passeerde —
         // een harde aan/uit-drempel. Vervangen door een kwadratische ease-in-
@@ -6841,7 +6905,7 @@ class FCLvNext(
         val firstCommitBypass =
             lastCommitAt == null && mealSignal.state == MealState.CONFIRMED
 
-        // ── Cooldown-bypass bij bevestigde aanhoudende stijging (22/07/2026, Ecko) ──
+        // ── Cooldown-bypass bij bevestigde aanhoudende stijging (22/07/2026) ──
         // AANLEIDING (maaltijd 22/07 05:07): sustainedHighSlopeMinutes haalde de
         // VROEGE_STIJGING_SUSTAIN_MIN-drempel (15m) al om 04:47 (msms=9), maar
         // ctx.consistency bleef tot 05:07 (msms=29) onder episodeMinConsistency
@@ -6910,7 +6974,7 @@ class FCLvNext(
         val aggrMul = lerp(0.85, 1.25, aggr.a)
         logRow.mealAggressionA = aggr.a
         logRow.mealAggressionMul = aggrMul
-        // 22/07/2026 (Ecko): reason ook gestructureerd loggen i.p.v. alleen in
+        // 22/07/2026: reason ook gestructureerd loggen i.p.v. alleen in
         // de vrije status-tekst — makkelijker filteren/analyseren achteraf.
         // ";" vervangen als vangnet tegen CSV-delimiter-breuk (dit format
         // bevat er in de praktijk geen, maar geen aanname hierop laten steunen).
@@ -6925,13 +6989,13 @@ class FCLvNext(
         status.append("CommitAllowed=${if (commitAllowed) "YES" else "NO"}\n")
 
         var commandedDose = finalDose
-        // 13/07/2026 (Ecko) — zie taper-clamp hieronder: onderscheidt een dosis die
+        // 13/07/2026 — zie taper-clamp hieronder: onderscheidt een dosis die
         // de taper-aware commit-branch zelf al bewust heeft berekend van de
         // ongetemperde finalDose-fallback, zodat de universele clamp alleen die
         // laatste raakt en legitieme vroege ramp-up-commits niet onderdrukt.
         var commandedDoseIsFromCommit = false
 
-        // 22/07/2026 (Ecko): erft lastKnownLateDecayMul i.p.v. een neutrale
+        // 22/07/2026: erft lastKnownLateDecayMul i.p.v. een neutrale
         // 1.0 — zie kdoc bij de declaratie hierboven. Wordt hieronder in het
         // commit-blok overschreven zodra dat blok wél draait; anders blijft
         // de laatst bekende, echte afbouwstand van kracht voor de taper-clamp.
@@ -6970,7 +7034,7 @@ class FCLvNext(
             // dezelfde maaltijdepisode, eerdere boosts tellen nog steeds mee.
             prePeakImpulseDone = false
             lastSegmentAt = now
-            // 15/08/2026 (Ecko): zie kdoc bij de declaratie hierboven. Onschadelijk
+            // 15/08/2026: zie kdoc bij de declaratie hierboven. Onschadelijk
             // om dit elke cyclus te herhalen zolang reentry=true blijft — zodra de
             // eerste echte commit van dit segment daadwerkelijk vuurt, wordt dit
             // verderop op true gezet EN triggert dat via lastReentryCommitAt de
@@ -7088,11 +7152,11 @@ class FCLvNext(
 
                 // commitAggressionMul: schaalt de commit op/neer op basis van de
                 // agressiviteitsinstelling. Maximaal 1.20 (meest agressief).
-                // BUGFIX 23/06/2026 (Ecko): bij hoge IOB terwijl BG al dicht bij
+                // BUGFIX 23/06/2026: bij hoge IOB terwijl BG al dicht bij
                 // de voorspelde piek zit (bijv. BG=9.1, pred_peak=10.3, iob=7.5)
                 // stond commitAggressionMul nog steeds op 1.20 — precies het
                 // tegenovergestelde van wat gewenst is. Als er al veel insuline
-                // Bevinding 25/06/2026 (Ecko diner): de voorspelling onderschatte
+                // Bevinding 25/06/2026 (de gebruiker diner): de voorspelling onderschatte
                 // de piek met ~2 mmol/L bij een sterke stijging (slope ≥ 6 mmol/h).
                 // Bij bg/pred_peak=0.85 remde de aggressiviteit al af op ~73% van
                 // de werkelijke piek (0.85 × 11.4 = 9.7 mmol, terwijl de echte
@@ -7100,7 +7164,7 @@ class FCLvNext(
                 // de rem treedt nu pas in als de BG minimaal 92% van de voorspelde
                 // piek heeft bereikt, wat bij de typische onderschatting neerkomt
                 // op ±80% van de werkelijke piek — een betere veiligheidsmarge.
-                // VEREENVOUDIGING 26/06/2026 (Ecko, architectuurreview):
+                // VEREENVOUDIGING 26/06/2026 (architectuurreview):
                 // commitAggressionMul was lerp(0.90, 1.20, aggr.a) — maar aggrMul
                 // in de fraction-berekening (lerp 0.85-1.25) past aggressiviteit
                 // al toe. De combinatie gaf bij sterkte=81% een factor ×1.19 en
@@ -7133,7 +7197,7 @@ class FCLvNext(
                 //   commit 2: ×0.71  commit 3: ×0.42
 
                 // ─────────────────────────────────────────────
-                // 🍽️➡️🍽️ NIEUWE-MAALTIJD RESET (RONDE 33, 03/08/2026, Ecko)
+                // 🍽️➡️🍽️ NIEUWE-MAALTIJD RESET (RONDE 33, 03/08/2026, de gebruiker)
                 // Zie de uitgebreide kdoc bij declineStreakMinutes/
                 // nieuweMaaltijdTrogBevestigd (klasse-velden hierboven) voor de
                 // volledige aanleiding, kalibratie en de tegen 5 dagen echte
@@ -7172,16 +7236,14 @@ class FCLvNext(
                     )
                     episodeCommitCount = 0
                     episodePeakCommitU = 0.0
-                    // 07/08/2026 (Ecko): dit reset-punt miste de AIGF-B-resets die
+                    // 07/08/2026: dit reset-punt miste de AIGF-B-resets die
                     // de andere drie episode-grens-resets al wel hadden (zelfde
                     // soort gemiste plek als postHypoBrake vóór de 03/08-fix) —
                     // zonder deze regels kon een bevroren AIGF-B-percentage van
                     // vóór de trog nog even doorwerken in de nieuw herkende
                     // maaltijd totdat (als de nieuwe, lagere drempel dat al niet
                     // meteen deed) een volgend "echt" commit opnieuw bevriest.
-                    episodeAigfBPct = 100.0
-                    episodeAigfBResult = null
-                    episodeAigfBWakeOverlapFrac = 0.0
+                    // 16/08/2026: zie kdoc hierboven — niet meer resetten, B is continu.
                     episodeAigfBFrozen = false
                     lastKnownLateDecayMul = 1.0
                     vroegeStijgingBevestigdUsedThisEpisode = false
@@ -7193,7 +7255,7 @@ class FCLvNext(
                     doseRatioElevatedSinceAt = null
                     nieuweMaaltijdTrogBevestigd = false
                     lastNieuweMaaltijdResetAt = now
-                    // 03/08/2026 (Ecko): deze reset was bedoeld voor precies het
+                    // 03/08/2026: deze reset was bedoeld voor precies het
                     // scenario "officiële episode-grens sluit niet" — maar liet
                     // episodeHypoDebtU/postHypoBrakeActive/postHypoBrakeArmedAt
                     // ongemoeid, zie kdoc bij POST_HYPO_BRAKE_DISARM_ABOVE_TARGET.
@@ -7205,7 +7267,7 @@ class FCLvNext(
                 }
 
                 val commitNr = episodeCommitCount + 1
-                // Noemer verhoogd van maxSMB*2.0 naar maxSMB*4.0 (07/07/2026, Ecko):
+                // Noemer verhoogd van maxSMB*2.0 naar maxSMB*4.0 (07/07/2026):
                 // episodeBoostBudgetU telt nu de VOLLEDIGE toegediende dosis (zie
                 // hierboven), niet meer alleen het kleine EarlyBoost-extra-deel — een
                 // grote maaltijd kan makkelijk 5-10U cumulatief bereiken. Zonder deze
@@ -7213,7 +7275,7 @@ class FCLvNext(
                 val budgetDecay = (episodeBoostBudgetU / (config.maxSMB * 4.0))
                     .coerceIn(0.0, 0.50)
 
-                // ── Curve-fit "topping out"-bonus (04/07/2026, Ecko) ─────────
+                // ── Curve-fit "topping out"-bonus (04/07/2026) ─────────
                 // Spiegelbeeld van de fitConfidenceBoost in computeEarlyBoostFactor:
                 // waar die de VROEGE dosis eerder/harder maakt bij een bevestigde
                 // stijging, maakt dit de AFBOUW eerder/steiler bij een bevestigde,
@@ -7268,7 +7330,7 @@ class FCLvNext(
                 val lateDecayActive = effectiveDecay > 0.01 && commitNr > 1
 
                 // ── IOB-afhankelijke vloer voor lateDecayMul ──────────────────
-                // Bevinding 23/06/2026 (Ecko): bij grote maaltijden botste de
+                // Bevinding 23/06/2026: bij grote maaltijden botste de
                 // vloer van 0.35 al bij commit 3-4 waarna ELKE volgende commit
                 // nog 35% van maxSMB leverde, ook als IOB al zeer hoog was en
                 // de BG dicht bij de voorspelde piek zat. De vaste vloer van
@@ -7279,7 +7341,7 @@ class FCLvNext(
                 // al actief is, hoe lager de minimaal nog toegestane factor.
                 // coerceAtLeast(0.10): nooit volledig naar nul.
                 //
-                // Aanvulling 28/06/2026 (Ecko): als BG nog substantieel stijgt
+                // Aanvulling 28/06/2026: als BG nog substantieel stijgt
                 // (slope >= 1.5) én significant boven target zit (> target + 3),
                 // is de commit-teller géén goed criterium om te stoppen met geven.
                 // De vloer wordt dan hoger zodat commits bij 0.20-0.45 blijven
@@ -7287,7 +7349,7 @@ class FCLvNext(
                 // De IOB-rem (commitIobFactor) en de afterload remmen het totaal
                 // al voldoende; de decayFloor mag hier niet de bottleneck zijn.
                 //
-                // BUGFIX (09/07/2026, Ecko): ctx.slope is een traag/gemiddeld
+                // BUGFIX (09/07/2026): ctx.slope is een traag/gemiddeld
                 // signaal — bij een omslag (piek net gepasseerd) kan het nog 1-2
                 // cycli "nog stijgend" blijven aangeven terwijl de BG zelf al
                 // daalt. Concreet voorbeeld: bij een BG-piek gaf slope=4.37 (ruim
@@ -7300,7 +7362,7 @@ class FCLvNext(
                 // peakPressureBonus/de topping-out-boost, geen nieuw mechanisme.
                 val curveConfirmtOmslag = ctx.curveFitR2 >= CURVE_FIT_MIN_R2 &&
                     ctx.curveAcceleration <= 0.0
-                // Graduele omslag-detectie (13/07/2026, Ecko): curveAcceleration
+                // Graduele omslag-detectie (13/07/2026): curveAcceleration
                 // duidelijk aan het afnemen t.o.v. vorige cyclus (>=45% afname,
                 // nog altijd positief, r² betrouwbaar) telt als "omslag bijna
                 // bevestigd" — voorkomt dat bgStijgtNogFors nog een hele cyclus
@@ -7337,12 +7399,12 @@ class FCLvNext(
                             BGSTIJGT_NOG_FORS_RAMP_WIDTH
                     )
                 } else 0.0
-                // 11/07/2026 (Ecko) — diagnostisch vastleggen, zie kdoc bij
+                // 11/07/2026 — diagnostisch vastleggen, zie kdoc bij
                 // lastBgStijgtNogFors hierboven.
                 lastBgStijgtNogFors = bgStijgtNogFors
                 lastCommitNrUsed = commitNr
 
-                // ── Vroege-stijging-bevestiging (14/07/2026, Ecko) ──────────────
+                // ── Vroege-stijging-bevestiging (14/07/2026) ──────────────
                 // Los van bgStijgtNogFors (die blijft ongewijzigd, bedoeld voor een
                 // hernieuwde stijging NA een afvlakking — bijv. een 2e gang, zie
                 // kdoc bij VROEGE_STIJGING_SUSTAIN_MIN hierboven). Dit signaal
@@ -7351,13 +7413,13 @@ class FCLvNext(
                 // koolhydraten zou dat niet volhouden), i.p.v. een absoluut
                 // BG-niveau. Vuurt maximaal éénmaal per episode (zie
                 // vroegeStijgingBevestigdUsedThisEpisode).
-                // 20/07/2026 (Ecko): !curveConfirmtOmslag toegevoegd — zie kdoc bij
+                // 20/07/2026: !curveConfirmtOmslag toegevoegd — zie kdoc bij
                 // POST_OMSLAG_DIRECT_CUT_FRACTIE (GAT 1). ctx.acceleration en
                 // ctx.curveAcceleration zijn twee verschillende signalen die kunnen
                 // uiteenlopen; zonder deze check kon de volledige reset
                 // (lateDecayMul=1.0) vuren terwijl de meer vertrouwde curve-fit-
                 // basis al een omslag had bevestigd.
-                // 15/08/2026 (Ecko) — compression-low-vrijwaring, zie kdoc bij
+                // 15/08/2026 — compression-low-vrijwaring, zie kdoc bij
                 // EARLY_DELIVERY_MIN_RECENT_R2 hierboven. Verplaatst naar hier
                 // (was pas berekend bij de episodeAnyRealDeliveryDone-vrijstelling
                 // verderop) zodat vroegeStijgingBevestigd hieronder dezelfde
@@ -7373,7 +7435,7 @@ class FCLvNext(
                 // nodig — dit was het ontbrekende stuk.
                 val recentSensorNoise = recentCurveFitR2Min < EARLY_DELIVERY_MIN_RECENT_R2
 
-                // 15/08/2026 (Ecko) — zie uitgebreide kdoc bij
+                // 15/08/2026 — zie uitgebreide kdoc bij
                 // VROEGE_STIJGING_ACCEL_DECLINE_FRACTION hierboven (incident
                 // 20:44, IOB liep op tot 6,5U). recentAccelPeakInRise wordt
                 // bijgehouden in de SUSTAINED RISE TRACKING-sectie hierboven.
@@ -7441,7 +7503,7 @@ class FCLvNext(
                     // Normaal: IOB-afhankelijke vloer
                     (0.35 * (1.0 - ctx.iobRatio * 1.2)).coerceIn(0.10, 0.35)
                 }
-                // 15/08/2026 (Ecko) — zie kdoc bij commitUrgency() hierboven. Bewust
+                // 15/08/2026 — zie kdoc bij commitUrgency() hierboven. Bewust
                 // ADDITIEF op de bestaande bgStijgtNogFors-vloer (die blijft
                 // ongewijzigd, andere code-pad/cappedFinalDose) — dit is de vloer
                 // die specifiek lateDecayMul/commitDose raakt. Geleidelijk richting
@@ -7455,7 +7517,7 @@ class FCLvNext(
                             "${"%.2f".format(decayFloorBaseRaw)}->${"%.2f".format(decayFloorBase)}\n"
                     )
                 }
-                // Vloer blijft meebewegen met het aantal commits (07/07/2026, Ecko).
+                // Vloer blijft meebewegen met het aantal commits (07/07/2026).
                 // BEVINDING: de vloer hierboven hangt alleen af van iobRatio, niet van
                 // commitNr. Zodra de berekende decay (1 - effectiveDecay*(commitNr-1))
                 // onder deze vloer zakt — vaak al bij commit 2-3 — kregen ALLE
@@ -7465,7 +7527,7 @@ class FCLvNext(
                 // dat er ook ná het bereiken van de vloer nog een geleidelijke afbouw
                 // blijft plaatsvinden, zonder de vloer als veiligheidsgrens los te laten.
                 val decayFloorNaCommits = decayFloorBase - (commitNr - 1).coerceAtMost(5) * 0.02
-                // ── Post-omslag verlaging (20/07/2026, Ecko) ──────────────────
+                // ── Post-omslag verlaging (20/07/2026) ──────────────────
                 // Zie kdoc bij OMSLAG_DIEPTE_REF_MMOL hierboven. Alleen actief als
                 // curveConfirmtOmslag TRUE is (dus nooit tegelijk met
                 // bgStijgtNogFors); schaalt met hoe diep de omslag al is, niet een
@@ -7473,7 +7535,7 @@ class FCLvNext(
                 // vóór deze stap — de nieuwe, lagere POST_OMSLAG_ABSOLUTE_MIN_FLOOR
                 // geldt hierna in plaats daarvan.
                 val omslagDiepte = when {
-                    // 20/07/2026 (Ecko): herstel wint altijd — zie kdoc bij
+                    // 20/07/2026: herstel wint altijd — zie kdoc bij
                     // CURVE_ACCEL_HERSTEL_MARGIN hierboven. Voorkomt dat een
                     // tijdelijke vertraging binnen een doorlopende stijging als een
                     // echte piek wordt behandeld.
@@ -7492,7 +7554,7 @@ class FCLvNext(
                 val decayFloor = (decayFloorNaCommits - postOmslagFloorCut)
                     .coerceAtLeast(POST_OMSLAG_ABSOLUTE_MIN_FLOOR)
 
-                // 14/08/2026 (Ecko) — compression-low-vrijwaring: zie kdoc bij
+                // 14/08/2026 — compression-low-vrijwaring: zie kdoc bij
                 // EARLY_DELIVERY_MIN_RECENT_R2 hierboven. Natrekken van de
                 // eerste v60-backtest liet zien dat 1 van de 9 gevonden
                 // momenten (14/8 04:48) een sensor-artefact-signatuur had
@@ -7501,7 +7563,7 @@ class FCLvNext(
                 // enkele insuline-verklaring voor een echte stijging). Zonder
                 // deze check zou de vrijstelling hieronder daar een 3× grotere
                 // dosis hebben gegeven op een stijging die zeer waarschijnlijk
-                // niet echt was — precies het risico dat Ecko aankaartte:
+                // niet echt was — precies het risico dat de gebruiker aankaartte:
                 // "een te grote bolus zonder dat er koolhydraten tegenover
                 // staan". Bij alle 8 overige onderzochte momenten (inclusief
                 // de 13:00-maaltijd waar dit voorstel oorspronkelijk voor
@@ -7516,7 +7578,7 @@ class FCLvNext(
                     )
                 }
 
-                // 15/08/2026 (Ecko) — zie uitgebreide kdoc bij DOSE_RATIO_THRESHOLD
+                // 15/08/2026 — zie uitgebreide kdoc bij DOSE_RATIO_THRESHOLD
                 // hierboven (koekje-episode). Gebruikt uitsluitend de dosis/stijging
                 // die AL bekend was VOOR deze cyclus (episodeCumulativeCommandedU/
                 // episodeMaxDeltaTargetSoFar worden pas NA de hypo-rechttrekking
@@ -7549,7 +7611,7 @@ class FCLvNext(
                     // commit-teller-gebaseerde afbouw uitrekenen, precies zoals bij
                     // de allereerste commit van de episode.
                     //
-                    // 14/08/2026 (Ecko) — !episodeAnyRealDeliveryDone toegevoegd:
+                    // 14/08/2026 — !episodeAnyRealDeliveryDone toegevoegd:
                     // zie kdoc bij de declaratie hierboven. commitNr kan door
                     // ongeleverde early-floor-pogingen al opgehoogd zijn vóórdat
                     // er ooit 1 eenheid daadwerkelijk is afgeleverd deze episode
@@ -7559,7 +7621,7 @@ class FCLvNext(
                     // al zegt commitNr iets anders. Alleen ZONDER recente
                     // sensor-ruis (recentSensorNoise) — zie kdoc hierboven.
                     //
-                    // 15/08/2026 (Ecko) — reentry-tak toegevoegd: zie kdoc bij
+                    // 15/08/2026 — reentry-tak toegevoegd: zie kdoc bij
                     // episodeAnyRealDeliverySinceReentry hierboven (pizza-episode,
                     // golf 2). isReentrySignal() is zelf al streng gecorroboreerd
                     // (reliable/aboveTarget/rising/accelerating) — dit voorkomt
@@ -7569,7 +7631,7 @@ class FCLvNext(
                     // de actuele IOB/curve een reële hypo-projectie geeft, knipt
                     // hypoProtection() de dosis alsnog terug, ongeacht deze tak.
                     //
-                    // 15/08/2026 (Ecko) — doseRatioDampingActive toegevoegd: zie kdoc
+                    // 15/08/2026 — doseRatioDampingActive toegevoegd: zie kdoc
                     // bij DOSE_RATIO_THRESHOLD hierboven (koekje-episode). Alleen als
                     // de dosis/stijging-verhouding al minstens DOSE_RATIO_SUSTAIN_MIN
                     // minuten ononderbroken verhoogd stond, wordt deze reset gedempt
@@ -7625,7 +7687,7 @@ class FCLvNext(
                     else 0.0
                 logRow.commitDoseRaw = commitDose
 
-                // ── Voorkom dat finalDose de late-commit-afbouw omzeilt (08/07/2026, Ecko) ──
+                // ── Voorkom dat finalDose de late-commit-afbouw omzeilt (08/07/2026) ──
                 // PROBLEEM: committedDose = maxOf(finalDose, commitDose) liet finalDose
                 // (het basis-energiemodel — weet niets van commit-nummer of afbouw)
                 // altijd winnen zodra de BG genoeg was gestegen, wat bij een echte
@@ -7633,7 +7695,7 @@ class FCLvNext(
                 // (zichtbaar in de logs), maar had in de praktijk geen effect omdat
                 // finalDose het gewoon overnam — de afbouw was daardoor decoratief.
                 //
-                // OPLOSSING, met Ecko's kanttekening verwerkt: alleen als de stijging
+                // OPLOSSING, met de gebruikers kanttekening verwerkt: alleen als de stijging
                 // daadwerkelijk nog doorzet (bgStijgtNogFors — dezelfde voorwaarde die
                 // decayFloor hierboven al verhoogt) mag finalDose een NIEUW, hoger
                 // piekpunt zetten. Commit 2 mag dus best groter zijn dan commit 1 als
@@ -7645,7 +7707,7 @@ class FCLvNext(
                 // verder vanaf dát nieuwe, hogere punt — niet vanaf de oorspronkelijke
                 // eerste commit. De eerste commit zelf (commitNr <= 1) wordt nooit
                 // begrensd door deze regel.
-                // ── bgStijgtNogFors-demping ná een vervroegde commit (14/07/2026, Ecko) ──
+                // ── bgStijgtNogFors-demping ná een vervroegde commit (14/07/2026) ──
                 // Zie kdoc bij VROEGE_STIJGING_BGSTIJGT_DEMPING. Zonder deze demping
                 // kon bgStijgtNogFors kort ná een net-al-vervroegde grote commit
                 // (zelfde, doorlopende stijging) opnieuw een volledig ongeplafonneerde
@@ -7660,7 +7722,7 @@ class FCLvNext(
                     plateauSinceVroegeStijging -> 1.0
                     else -> VROEGE_STIJGING_BGSTIJGT_DEMPING
                 }
-                // ── Piek nog niet verankerd (15/07/2026, Ecko) ──────────────────
+                // ── Piek nog niet verankerd (15/07/2026) ──────────────────
                 // Zie kdoc bij PEAK_ANCHOR_THRESHOLD_FRAC hierboven. Zolang geen
                 // enkele commit deze episode ≥75% van maxSMB heeft gehaald, is
                 // episodePeakCommitU nog 0 — dan NOOIT plafonneren op basis daarvan
@@ -7669,7 +7731,7 @@ class FCLvNext(
                 val episodePeakAnchored = episodePeakCommitU > 1e-9
 
                 // ── Piek-nabijheid voor het EERSTE, nog niet verankerde anker
-                // (18/07/2026, Ecko) ─────────────────────────────────────────
+                // (18/07/2026) ─────────────────────────────────────────
                 // Incident 18/07 08:27: episodePeakCommitU stond nog op 0 (geen enkele
                 // commit had ooit >=75% van maxSMB gehaald), dus gold de bypass
                 // hieronder (commitNr<=1 || !episodePeakAnchored) onbeperkt — finalDose
@@ -7692,7 +7754,7 @@ class FCLvNext(
                 val firstUnanchoredProgress =
                     (ctx.deltaToTarget / firstUnanchoredPeakRoom).coerceIn(0.0, 1.0)
 
-                // ── Vroeg-in-episode uitzondering (21/07/2026, Ecko) ─────────────
+                // ── Vroeg-in-episode uitzondering (21/07/2026) ─────────────
                 // AANLEIDING (maaltijd 21/07 18:32-19:32): predictedPeak wordt drie
                 // regels hierboven altijd minimaal op bgNow gevloerd. Vroeg in een
                 // episode heeft het ballistische model (momentum/posSlopeArea) nog
@@ -7749,7 +7811,7 @@ class FCLvNext(
                     finalDose
                 } else if (!episodePeakAnchored) {
                     val baseCap = config.maxSMB * firstUnanchoredCapFactor
-                    // ── Omslag-rem ook zonder anker (04/08/2026, Ecko) ────────
+                    // ── Omslag-rem ook zonder anker (04/08/2026) ────────
                     // AANLEIDING: 4/8 13:26 — bij een gemiddelde maaltijd (piek
                     // 8,5, nooit >=75% van maxSMB in één commit) verankert
                     // episodePeakCommitU nooit, dus loopt de HELE episode via
@@ -7770,7 +7832,7 @@ class FCLvNext(
                     // toegepast. commitNr<=1 blijft bewust ongemoeid (idem
                     // hierboven).
                     val omslagCapCut = omslagDiepte * POST_OMSLAG_DIRECT_CUT_FRACTIE
-                    // ── Koppel de unanchored-cap ook aan lateDecayMul (06/08/2026, Ecko) ──
+                    // ── Koppel de unanchored-cap ook aan lateDecayMul (06/08/2026) ──
                     // AANLEIDING: 6/8 06:24 — ontbijt (piek 8,2, nooit verankerd). De
                     // commit-tak zelf was al volledig afgebouwd (commitDoseRaw=0,00,
                     // lateDecayMul=0,04 — 96% afbouw) ná een bevestigde omslag
@@ -7828,42 +7890,28 @@ class FCLvNext(
                     else
                         maxOf(cappedFinalDose, commitDose)
 
-                // ── AIGF component B: berekenen en bevriezen bij het eerste
-                // écht bevestigde commit van deze episode (28/07/2026, Ecko;
-                // drempel losgekoppeld van het dosis-anker 07/08/2026, Ecko) ──
+                // ── AIGF: historie-sample wegschrijven bij het eerste écht
+                // bevestigde commit van deze episode (28/07/2026, de gebruiker; drempel
+                // losgekoppeld van het dosis-anker 07/08/2026, de gebruiker; HERONTWERP
+                // 16/08/2026 — de LIVE berekening/toepassing van component B
+                // gebeurt nu vroeg in de cyclus, zie kdoc bij lastSmoothedAigfBPct;
+                // dit blok doet alleen nog het wegschrijven naar de 7-daagse
+                // baseline-historie, met dezelfde dosis-drempel als voorheen om
+                // te voorkomen dat elke kleine correctie als "maaltijd" in de
+                // baseline terechtkomt) ──────────────────────────────────────
                 // Zie kdoc bij FclActivitySensitivity.kt en bij
-                // AIGF_B_FREEZE_THRESHOLD_FRAC hierboven. Gebruikte tot 07/08 de
-                // PEAK_ANCHOR_THRESHOLD_FRAC (0,75) van het dosis-anker — bleek in
-                // de praktijk bij vrijwel geen enkele maaltijd ooit gehaald te
-                // worden (zie kdoc bij de constante), dus AIGF-B bevroor vrijwel
-                // nooit. Eigen, lagere drempel + eigen "al bevroren"-vlag
-                // (episodeAigfBFrozen, i.p.v. episodePeakCommitU<=1e-9 — die twee
-                // zijn nu bewust ontkoppeld). Gebruikt nog steeds bewust de
+                // AIGF_B_FREEZE_THRESHOLD_FRAC hierboven. Gebruikt bewust de
                 // ONGEBOOSTE waarde (preAigfCommittedDose) — voorkomt dat AIGF-B
-                // zelf meebepaalt of ze getriggerd wordt (kip-ei).
+                // zelf meebepaalt of dit als "echte maaltijd" telt (kip-ei).
+                // episodeAigfBWakeOverlapFrac is hier de LIVE waarde van eerder
+                // deze cyclus (zie hierboven) — geen aparte herberekening meer nodig.
                 if (aigfEnabled &&
                     !episodeAigfBFrozen &&
                     preAigfCommittedDose >= config.maxSMB * AIGF_B_FREEZE_THRESHOLD_FRAC
                 ) {
                     episodeAigfBFrozen = true
-                    val wakeOverlap = computeWakeOverlapFrac(
-                        input.daystartTodayMs, now.millis, 4L * 60L * 60L * 1000L
-                    )
-                    val bResult = FclActivitySensitivity.computeComponentB(
-                        history = FclActivitySensitivity.loadHistoryB(context),
-                        currentCal4h = input.activityCal4h,
-                        wakeOverlapFrac = wakeOverlap,
-                        minPct = getAigfMinPct(),
-                        maxPct = getAigfMaxPct(),
-                        nowMs = now.millis
-                    )
-                    episodeAigfBPct = if (bResult.active) bResult.aigf else 100.0
-                    episodeAigfBResult = bResult
-                    episodeAigfBWakeOverlapFrac = wakeOverlap
                     status.append(
-                        "AIGF-B BEVROREN voor deze episode: ${"%.1f".format(episodeAigfBPct)}% " +
-                            "(wakker-aandeel=${"%.0f".format(wakeOverlap * 100.0)}%" +
-                            (if (!bResult.active) ", ${bResult.reasonNl}" else "") + ")\n"
+                        "AIGF-B HISTORIE-SAMPLE (echte maaltijd bevestigd, live waarde nu ${"%.1f".format(episodeAigfBPct)}%)\n"
                     )
                     // Historie bijschrijven — component A altijd (continu, geen
                     // wakker-eis), component B alleen als dit venster overtuigend
@@ -7875,7 +7923,7 @@ class FCLvNext(
                         )
                         FclActivitySensitivity.saveHistoryA(context, ha)
                     }
-                    if (wakeOverlap >= FclActivitySensitivity.WAKE_OVERLAP_MIN_FOR_HISTORY && input.activityCal4h >= 0.0) {
+                    if (episodeAigfBWakeOverlapFrac >= FclActivitySensitivity.WAKE_OVERLAP_MIN_FOR_HISTORY && input.activityCal4h >= 0.0) {
                         val hb = FclActivitySensitivity.record(
                             FclActivitySensitivity.loadHistoryB(context), now.millis, input.activityCal4h
                         )
@@ -7883,15 +7931,18 @@ class FCLvNext(
                     }
                 }
 
-                // ── AIGF-verhoging op de grote commit(s) (14/07/2026, Ecko,
-                // herzien 28/07/2026) ────────────────────────────────────────
+                // ── AIGF-verhoging op de grote commit(s) (14/07/2026, 
+                // herzien 28/07/2026, HERONTWERP 16/08/2026) ─────────────────
                 // Toegepast op het commit-resultaat zelf (niet op finalDose of
                 // andere doses elders) — dit IS "de grote commit(s)" waar de
-                // gebruiker het over had. Gebruikt nu component B (bevroren per
-                // episode, hierboven) i.p.v. de oude, ongesplitste waarde. Alleen
-                // actief als AIGF-B<100 (minder gevoelig, meer insuline nodig);
-                // AIGF-A>100 werkt uitsluitend via de afterload-reductie
-                // hieronder (zie aigfAfterloadScale).
+                // gebruiker het over had. Gebruikt component B, sinds 16/08/2026
+                // een LIVE, elke cyclus gladgestreken waarde (zie kdoc bij
+                // lastSmoothedAigfBPct) i.p.v. een per-episode bevroren
+                // momentopname — elke commit krijgt zo zijn eigen, actuele
+                // inschatting i.p.v. de inschatting van de eerste commit van de
+                // episode. Alleen actief als AIGF-B<100 (minder gevoelig, meer
+                // insuline nodig); AIGF-A>100 werkt uitsluitend via de
+                // afterload-reductie hieronder (zie aigfAfterloadScale).
                 val aigfCommitBoost = if (aigfEnabled && episodeAigfBPct < 100.0 - 1e-9)
                     (100.0 / episodeAigfBPct)
                 else 1.0
@@ -7900,7 +7951,7 @@ class FCLvNext(
                     status.append("AIGF-B COMMIT BOOST ×${"%.2f".format(aigfCommitBoost)} (aigf-b=${"%.1f".format(episodeAigfBPct)})\n")
                 }
                 logRow.commitDoseFinal = committedDose
-                // ── Piek-anker alleen bij een "echte" commit (15/07/2026, Ecko) ──
+                // ── Piek-anker alleen bij een "echte" commit (15/07/2026) ──
                 // Zie kdoc bij PEAK_ANCHOR_THRESHOLD_FRAC hierboven — een kleine
                 // correctie (bijv. 20% van maxSMB) mag het referentiepunt voor de
                 // taper-clamp niet meer vastzetten. Zolang de drempel niet gehaald
@@ -7946,7 +7997,7 @@ class FCLvNext(
                     didCommitThisCycle = true
                     // Alleen tellen als early floor deze cyclus niet al telde
                     if (!earlyFiredThisCycle) episodeCommitCount++
-                    // 14/08/2026 (Ecko): zie kdoc bij episodeAnyRealDeliveryDone
+                    // 14/08/2026: zie kdoc bij episodeAnyRealDeliveryDone
                     // hierboven — dit IS het punt waarop de bestaande code een
                     // commit al als "echt" beschouwt (committedDose heeft
                     // effectiveMinCommitDose gehaald), dus hier op true zetten
@@ -8001,7 +8052,7 @@ class FCLvNext(
         val reserveReleaseBlocked = hypoProj.active
 
         if (hypoProj.active) {
-            // RIGHT-SIZING (17/07/2026, Ecko): i.p.v. commandedDose altijd naar 0
+            // RIGHT-SIZING (17/07/2026): i.p.v. commandedDose altijd naar 0
             // te klappen zodra één horizon de drempel raakt, alleen het stuk
             // weerhouden dat echt onveilig is (zie maxSafeDoseU bij hypoProtection()).
             // Incident 16:47 (snack): een 4,39U-doel werd volledig geveto'd terwijl
@@ -8242,7 +8293,7 @@ class FCLvNext(
             )
             logRow.hypoActive = hypoFinal.active
             if (hypoFinal.active) {
-                // RIGHT-SIZING (17/07/2026, Ecko) — zelfde aanpak als bij de eerste
+                // RIGHT-SIZING (17/07/2026) — zelfde aanpak als bij de eerste
                 // hypo-check hierboven: alleen het onveilige deel weerhouden i.p.v.
                 // alles-of-niets. Geen aparte hypo-debt-boeking hier (dat gebeurt
                 // al bij de eerste check verderop in de cyclus).
@@ -8255,7 +8306,7 @@ class FCLvNext(
             }
         }
 
-        // 15/08/2026 (Ecko): zie kdoc bij lastHypoActiveAt (declaratie) — beide
+        // 15/08/2026: zie kdoc bij lastHypoActiveAt (declaratie) — beide
         // hypo-checks hierboven hebben nu hun kans gehad, logRow.hypoActive
         // geeft dus de definitieve stand van deze cyclus.
         if (logRow.hypoActive) {
@@ -8282,8 +8333,8 @@ class FCLvNext(
             logRow.guardPeakLimited = true
         }
 
-        // ── Post-hypo-rebound rem: activeren + toepassen (24/07/2026, Ecko;
-        // aangescherpt + ratchet 25/07/2026, Ecko) ──────────────────────────
+        // ── Post-hypo-rebound rem: activeren + toepassen (24/07/2026, de gebruiker;
+        // aangescherpt + ratchet 25/07/2026, de gebruiker) ──────────────────────────
         // Zie kdoc bij POST_HYPO_BRAKE_CATCHUP_RISE en
         // POST_HYPO_BRAKE_ARM_MIN_IOB_RATIO hierboven. Bewust hier, ná beide
         // hypo-checks en topGuard, als allerlaatste stap vóór de resterende
@@ -8328,7 +8379,7 @@ class FCLvNext(
             postHypoBrakeArmedAt = null
         }
 
-        // RATCHET (25/07/2026, Ecko): was een eenmalige catch-up ("1x los,
+        // RATCHET (25/07/2026): was een eenmalige catch-up ("1x los,
         // daarna voorgoed weer dicht"). Backtest tegen de lunch van 25/07
         // (kibbeling met patat, BG bleef na de ene catch-up gewoon doorstijgen
         // van 8,0 naar 19,2 mmol terwijl de rem 90+ minuten potdicht bleef)
@@ -8479,8 +8530,8 @@ class FCLvNext(
 
 
 
-        // ── Universele taper-clamp (13/07/2026, Ecko; uitgebreid naar unanchored
-        // 14/08/2026, Ecko) ──────────────────────────────────────────────────
+        // ── Universele taper-clamp (13/07/2026, de gebruiker; uitgebreid naar unanchored
+        // 14/08/2026, de gebruiker) ──────────────────────────────────────────────────
         // Vangt het scenario "grote, late commit vlak op de piek" af, ongeacht
         // via welk pad commandedDose daar terechtkomt (finalDose-fallback of een
         // ongetemperd commit-pad). Werkt op episodePeakCommitU × lateDecayMul —
@@ -8658,7 +8709,7 @@ class FCLvNext(
             //   slope >= 2.0 mmol/h → guard op 55%
             //   slope >= 1.0 mmol/h → guard op 80%
             //   slope < 1.0         → guard volledig actief (BG stabiel/dalend)
-            // Achtergrond 28/06/2026 (Ecko): bij de maaltijden van 25–28 juni remde
+            // Achtergrond 28/06/2026: bij de maaltijden van 25–28 juni remde
             // de guard al op 0.43–0.65 terwijl BG met 5–8 mmol/h steeg naar 12–14 mmol.
             // De guard combineert dan met late_decay_mul=0.10 en commitIobFactor=0.22 tot
             // een effectieve dosis van <0.05U op het commit-pad — de EarlyBoost is dan
@@ -8756,7 +8807,7 @@ class FCLvNext(
                 1.0 - frac * 0.60
             } else 1.0
 
-            // ── AIGF-reductie als extra afterload-laag (14/07/2026, Ecko) ──────
+            // ── AIGF-reductie als extra afterload-laag (14/07/2026) ──────
             // Alleen actief als AIGF>100 (gevoeliger, minder insuline nodig).
             // Bewust in DEZE laag (i.p.v. rechtstreeks op committedDose): de
             // afterload-groep is per definitie de "afbouw ná de grote commit"-
@@ -8765,7 +8816,7 @@ class FCLvNext(
             // "getallen boven de 100 als extra afbouw nadat de eerste echt
             // grotere commit is geweest". AIGF-B<100 heeft hier bewust GEEN
             // effect (dat loopt uitsluitend via aigfCommitBoost hierboven).
-            // 28/07/2026 (Ecko, herzien): gebruikt nu component A (continu,
+            // 28/07/2026 (herzien): gebruikt nu component A (continu,
             // vorige-dag-naijling) i.p.v. de oude, ongesplitste waarde — dit is
             // precies het "gehele volgende 24 uur"-effect dat A moet dekken.
             val aigfAfterloadScale = if (aigfEnabled && aigfSmoothedAPct > 100.0 + 1e-9)
@@ -8808,7 +8859,7 @@ class FCLvNext(
 
 
 
-        // ── Absolute veiligheidsvangrail (22/07/2026, Ecko) ──────────────────
+        // ── Absolute veiligheidsvangrail (22/07/2026) ──────────────────
         // Pure laatste-linie-check, vlak vóór executeDelivery — geen van de
         // vele mechanismen hierboven zou dit ooit mogen laten gebeuren (er zit
         // al een aparte, eerdere absoluteUcap=maxSMB*1.5 op een specifiek
@@ -8826,7 +8877,7 @@ class FCLvNext(
             commandedDose = absoluteVeiligheidsCap
         }
 
-        // ── Herstart-blokkade, optie 2 (29/07/2026, Ecko) ────────────────────
+        // ── Herstart-blokkade, optie 2 (29/07/2026) ────────────────────
         // Zie de uitgebreide kdoc bij hadOngoingEpisodeAtRestart (bij de
         // episodePeakCommitU-declaratie hierboven) voor de volledige aanleiding
         // (18:53-incident) en de afweging tussen optie 1 (reken met de
@@ -8834,7 +8885,7 @@ class FCLvNext(
         // persisteren, zie de fixes bij episodeBoostBudgetU/episodeHypoDebtU/
         // lastKnownLateDecayMul/recentFrontloadDoseU/recentEpisodeCommits
         // hierboven) en optie 2 (blunt, 100% veilig tegen hypo's: blokkeer de
-        // eerste commit na een herstart per definitie). Ecko's instructie:
+        // eerste commit na een herstart per definitie). de gebruikers instructie:
         // "Bouw maar 1 en 2 samen" — dus dit blok is een EXTRA, onvoorwaardelijke
         // vangrail bovenop de nu-complete persistentie, niet een vervanging
         // ervoor. Bewust helemaal aan het eind, na de generieke
@@ -8879,7 +8930,7 @@ class FCLvNext(
         val effectiveDeliveredNow =
             if (deliveredNow >= minDeliveryU) deliveredNow else 0.0
 
-        // ── RECENT FRONTLOAD TRACKING (28/07/2026, Ecko, herzien) ────────────
+        // ── RECENT FRONTLOAD TRACKING (28/07/2026, herzien) ────────────
         // Zie kdoc bij recentFrontloadDoseU/recentFrontloadAt hierboven. Los van
         // episodeBoostBudgetU (dat de langlopende afbouw aanstuurt en dus alleen
         // via het early.active-blok bijwerkt, ongewijzigd) — dit is puur het
@@ -8888,7 +8939,7 @@ class FCLvNext(
         if (effectiveDeliveredNow > 0.01) {
             recordRecentFrontload(now, effectiveDeliveredNow)
         }
-        // Budget-nasleep (29/07/2026, Ecko) — zie kdoc bij recentEpisodeCommits
+        // Budget-nasleep (29/07/2026) — zie kdoc bij recentEpisodeCommits
         // hierboven. Zelfde onvoorwaardelijke update-voorwaarde als hierboven
         // (elke daadwerkelijk afgeleverde dosis, ongeacht mechanisme), maar dan
         // in de rollende 90-minuten-som i.p.v. alleen de laatste dosis.
@@ -9032,7 +9083,7 @@ class FCLvNext(
         logRow.peakEpisodeActive = peakEstimator.active
 
         logRow.lateDecayMul = lateDecayMul
-        // BUGFIX (11/07/2026, Ecko): stond hier als episodeCommitCount (zonder
+        // BUGFIX (11/07/2026): stond hier als episodeCommitCount (zonder
         // +1), terwijl de beslissing zelf (cappedFinalDose, decayFloor) intern
         // commitNr = episodeCommitCount + 1 gebruikt. Het gelogde getal liep
         // dus structureel 1 achter op wat er echt gebeurde — verwarrend bij
@@ -9091,7 +9142,7 @@ class FCLvNext(
 
         logRow.finalDose = finalDose
         logRow.commandedDose = commandedDose
-        // 15/08/2026 (Ecko) — zie kdoc bij DOSE_RATIO_THRESHOLD/episodeCumulativeCommandedU
+        // 15/08/2026 — zie kdoc bij DOSE_RATIO_THRESHOLD/episodeCumulativeCommandedU
         // hierboven. Bewust hier, ná alle guards (hypo-rechttrekking, topGuard,
         // postpeak lockout, post-hypo-brake) die commandedDose nog konden
         // wijzigen — dit IS de daadwerkelijk afgeleverde hoeveelheid deze cyclus.
@@ -9114,12 +9165,12 @@ class FCLvNext(
 
         logRow.shouldDeliver = shouldDeliver
 
-        // Diagnose-uitbreiding (16/07/2026, Ecko) — zie FCL_CODE_VERSION/
+        // Diagnose-uitbreiding (16/07/2026) — zie FCL_CODE_VERSION/
         // isFirstCycleSinceInit hierboven, en de kdoc bij AIGF/
         // episodePeakCommitU elders in dit bestand. aigfPct is bewust de
         // TOEGEPASTE (gladgestreken) waarde, niet aigfARawResult.aigf — dat is
         // ook wat dosering/status daadwerkelijk gebruiken.
-        // 28/07/2026 (Ecko, herzien): logRow/CSV heeft nog maar één AIGF-kolom
+        // 28/07/2026 (herzien): logRow/CSV heeft nog maar één AIGF-kolom
         // (geen DB-migratie voor dit onderzoek) — die toont component A
         // (continu, elke cyclus vers). Component B's bevroren waarde en de
         // wakker-weging staan bij elk commit al volledig uitgeschreven in de
@@ -9128,6 +9179,11 @@ class FCLvNext(
         logRow.aigfPct = aigfSmoothedAPct
         logRow.aigfActive = aigfEnabled
         logRow.aigfReason = if (aigfARawResult.active) "" else aigfARawResult.reasonNl
+        // 16/08/2026: component B nu ook apart loggen — zie kdoc bij
+        // lastSmoothedAigfBPct/FCLvNextCsvLogRow.aigfBPct.
+        logRow.aigfBPct = episodeAigfBPct
+        logRow.aigfBActive = aigfEnabled
+        logRow.aigfBReason = if (aigfBRawResult.active) "" else aigfBRawResult.reasonNl
         logRow.episodePeakCommitU = episodePeakCommitU
 
         cycleLogRepository.insert(logRow.toEntity())
@@ -9157,7 +9213,10 @@ class FCLvNext(
             aigfABaselineCal24h = aigfARawResult.baselineMedian,
             aigfADaysOfHistory = aigfARawResult.daysOfHistory,
             aigfBPct = episodeAigfBPct,
-            aigfBReasonNl = episodeAigfBResult?.let { if (it.active) "" else it.reasonNl } ?: "nog geen commit deze episode",
+            // 16/08/2026: episodeAigfBResult is nu elke cyclus vers gezet
+            // (zie kdoc bij lastSmoothedAigfBPct) — de oude "nog geen commit deze
+            // episode"-fallback was voor de vorige, per-episode-bevroren opzet.
+            aigfBReasonNl = episodeAigfBResult?.let { if (it.active) "" else it.reasonNl } ?: "",
             aigfBCurrentCal4h = input.activityCal4h,
             aigfBBaselineCal4h = episodeAigfBResult?.baselineMedian ?: 0.0,
             aigfBDaysOfHistory = episodeAigfBResult?.daysOfHistory ?: 0.0,

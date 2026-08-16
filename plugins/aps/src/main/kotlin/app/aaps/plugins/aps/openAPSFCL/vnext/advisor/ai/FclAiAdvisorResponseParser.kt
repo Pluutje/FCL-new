@@ -57,7 +57,7 @@ object FclAiAdvisorResponseParser {
             results += validateOne(obj, payload)
         }
 
-        // 21/07/2026 (Ecko) — zie kdoc bij AiAdvisorRunResult.advisoryNoteNl:
+        // 21/07/2026 — zie kdoc bij AiAdvisorRunResult.advisoryNoteNl:
         // puur informatief, geen voorstel, dus geen validatie tegen
         // FclAiAdvisorRanges nodig — alleen leeg/blank normaliseren naar null.
         val advisoryNote = json.optString("advisoryNoteNl", "").trim().ifBlank { null }
@@ -93,7 +93,7 @@ object FclAiAdvisorResponseParser {
 
         if (spec == null) return rejected("Onbekende parameter '$param' — niet in toegestane lijst")
         if (proposedValue.isNaN()) return rejected("Ontbrekende of ongeldige proposedValue")
-        // Confidence-vloer (18/07/2026, Ecko): voorstellen onder deze drempel worden
+        // Confidence-vloer (18/07/2026): voorstellen onder deze drempel worden
         // nooit als actionable kaart getoond, ongeacht hoe goed de rest van de
         // validatie eruitziet — een correct-onderbouwd voorstel met lage confidence
         // is nog steeds een voorstel waar het model zelf niet zeker van is.

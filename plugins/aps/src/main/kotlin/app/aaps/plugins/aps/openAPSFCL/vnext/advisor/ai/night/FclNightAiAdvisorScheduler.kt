@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * FCL Nacht-AI-Adviseur — Scheduler
  * ============================================================================
  *
- * 23/07/2026 (Ecko): "volledig onafhankelijk van de andere ai adviezen 1 keer
+ * 23/07/2026: "volledig onafhankelijk van de andere ai adviezen 1 keer
  * draait bv als 'is nacht' weer false wordt".
  *
  * Onafhankelijk van FclAiAdvisorScheduler (de dag-adviseur) op elk vlak dat
@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * DetermineBasalFCL.determine_basal(), en dat pad mag nooit op een
  * netwerkaanroep wachten.
  *
- * MODUS (26/07/2026, Ecko — dag/nacht-herstructurering AI-adviseur/Learner):
+ * MODUS (26/07/2026, de gebruiker — dag/nacht-herstructurering AI-adviseur/Learner):
  * FclNightBasalAutoAdjustStore's FclSystemMode is niet langer alleen de
  * schakelaar voor het automatisch profiel-bijstellen, maar de modus van de
  * VOLLEDIGE Nacht-AI-adviseur ("AI-adviseur — Nacht" in Instellingen).
@@ -97,7 +97,7 @@ object FclNightAiAdvisorScheduler {
         profileFunction: ProfileFunction,
         profileRepository: ProfileRepository
     ) {
-        // 26/07/2026 (Ecko) — OFF: helemaal geen nacht-AI-advies meer, zie kdoc
+        // 26/07/2026 — OFF: helemaal geen nacht-AI-advies meer, zie kdoc
         // bovenaan dit object.
         if (FclNightBasalAutoAdjustStore.getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
         val today = LocalDate.now(AMSTERDAM).toString()
@@ -109,9 +109,9 @@ object FclNightAiAdvisorScheduler {
 
     /** Voor een handmatige "Nu vernieuwen"-knop op het Nacht-tabblad, negeert de dagelijkse dedup.
      *
-     *  26/07/2026 (Ecko, herzien): gebruikte eerder GEEN profileFunction/profileRepository, met als
+     *  26/07/2026 (herzien): gebruikte eerder GEEN profileFunction/profileRepository, met als
      *  reden "een handmatige 'Nu vernieuwen' ververst alleen het advies, past nooit iets automatisch
-     *  toe". Ecko's terugkoppeling: bij Handmatig verscheen na "Nu vernieuwen" geen Accepteren/
+     *  toe". de gebruikers terugkoppeling: bij Handmatig verscheen na "Nu vernieuwen" geen Accepteren/
      *  Afwijzen — logisch, want er werd door dit ontbreken helemaal geen voorstel berekend/gelogd.
      *  Nu WEL via FclProfileBridge (dezelfde brug die de Accepteren-knop zelf ook gebruikt), zodat
      *  Handmatig na een handmatige verversing ook een vers voorstel krijgt. De oorspronkelijke
@@ -137,7 +137,7 @@ object FclNightAiAdvisorScheduler {
         onDone: (NightAiAdvisorRunResult) -> Unit = {},
         profileFunction: ProfileFunction? = null,
         profileRepository: ProfileRepository? = null,
-        // 26/07/2026 (Ecko) — true voor "Nu vernieuwen", false voor de dagelijkse
+        // 26/07/2026 — true voor "Nu vernieuwen", false voor de dagelijkse
         // nacht-rand-route. Zie kdoc bij forceRunNow() hierboven en bij
         // FclNightBasalAutoAdjuster.applyInternal()'s AUTO+isManualTrigger-kortsluiting.
         isManualTrigger: Boolean = false
@@ -149,7 +149,7 @@ object FclNightAiAdvisorScheduler {
             try {
                 val result = executePipeline(context, apiKeys, model, provider)
                 FclNightAiAdvisorStore.saveResult(context, result)
-                // Automatisch profiel-bijstellen (24/07/2026, Ecko; herzien 26/07/2026).
+                // Automatisch profiel-bijstellen (24/07/2026, de gebruiker; herzien 26/07/2026).
                 // Best-effort: een fout hier mag het AI-rapport zelf nooit blokkeren of
                 // ongedaan maken — vandaar los van de try/finally hierboven, met zijn
                 // eigen try/catch binnen de adjuster zelf.
@@ -184,7 +184,7 @@ object FclNightAiAdvisorScheduler {
         model: String,
         provider: FclAiAdvisorSettingsStore.Provider
     ): NightAiAdvisorRunResult {
-        // Nachtvensters herbouwen vóór het verzamelen (24/07/2026, Ecko) — zie
+        // Nachtvensters herbouwen vóór het verzamelen (24/07/2026) — zie
         // kdoc bij rebuildNightWindows() hieronder: zonder deze stap bleef een
         // net gewijzigd basaalprofiel onnodig lang "onzichtbaar" voor dit
         // rapport, zowel bij de dagelijkse automatische run als bij "Nu
@@ -230,7 +230,7 @@ object FclNightAiAdvisorScheduler {
                 if (entities.isEmpty()) return@runBlocking
                 val episodes = db.episodeDao().getAllEpisodes()
                 val profiles = db.basalProfileHistoryDao().getAll()
-                // 30/07/2026 (Ecko) — basalShiftMinutes voortaan uit de eigen
+                // 30/07/2026 — basalShiftMinutes voortaan uit de eigen
                 // ingestelde piektijd (ICfg.peak) i.p.v. de vaste 75-min-aanname
                 // in NightWindowAnalyzer zelf; zie de uitgebreide kdoc daar.
                 // Zelfde FclProfileBridge-toegang als forceRunNow() hierboven

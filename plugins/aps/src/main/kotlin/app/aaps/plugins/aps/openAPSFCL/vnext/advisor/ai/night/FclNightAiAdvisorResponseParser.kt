@@ -39,7 +39,7 @@ object FclNightAiAdvisorResponseParser {
         val summary = json.optString("summaryNl", "").trim().ifBlank { null }
         val suggestionsArr = json.optJSONArray("suggestions")
 
-        // BUGFIX (23/07/2026, Ecko): effectHourLabel is een BEREIK-notatie
+        // BUGFIX (23/07/2026): effectHourLabel is een BEREIK-notatie
         // ("00:00–01:00", zie Nightwindowanalyzer.kt), maar de AI levert
         // hourLabel als kaal "00:00" (zie het schema in PromptBuilder). Die
         // twee matchten dus NOOIT — elk AI-voorstel viel terug op de 0.0-default
@@ -71,7 +71,7 @@ object FclNightAiAdvisorResponseParser {
                 val currentBasal = hourInt?.let { hourlyByHour[it]?.currentBasalUph }
                     ?: obj.optDouble("currentBasalUph", 0.0)
 
-                // Teken normaliseren op basis van direction (23/07/2026, Ecko) —
+                // Teken normaliseren op basis van direction (23/07/2026) —
                 // i.p.v. het teken van suggestedShiftPct zelf te vertrouwen. Het
                 // model kan in theorie een positief getal geven bij LOWER (als
                 // "percentage" i.p.v. "signed shift" geïnterpreteerd) — direction
@@ -79,7 +79,7 @@ object FclNightAiAdvisorResponseParser {
                 // bron. Nodig geworden nu suggestedShiftPct ook als spreidingsinput
                 // voor buururen dient (zie applySpread hieronder): een inconsistent
                 // teken zou daar een verkeerde kant op spreiden.
-                // Geleidelijke-opbouw-fix (23/07/2026, Ecko): de AI kreeg al de
+                // Geleidelijke-opbouw-fix (23/07/2026): de AI kreeg al de
                 // instructie om een bescheiden EERSTE STAP te geven i.p.v. de volledige
                 // geschatte correctie in één keer, maar dat is promptgedrag — geen garantie.
                 // Harde klem hier als vangnet, zodat de kaart nooit een sprong als -10%
@@ -112,7 +112,7 @@ object FclNightAiAdvisorResponseParser {
         )
     }
 
-    // ── Geleidelijke opbouw/afbouw rondom het probleempunt (23/07/2026, Ecko) ──
+    // ── Geleidelijke opbouw/afbouw rondom het probleempunt (23/07/2026) ──
     // De AI beoordeelt elk uur onafhankelijk, wat een grillige sprong tussen
     // buururen kan geven (bv. wel -15% om 00:00, niets om 01:00, dan weer -8%
     // om 02:00). Zelfde probleem, zelfde oplossing als de bestaande
@@ -120,7 +120,7 @@ object FclNightAiAdvisorResponseParser {
     // Advisorscreen.kt): een Gauss-gewicht vult uren aan die het model zelf niet
     // beoordeeld heeft.
     //
-    // HERZIEN (30/07/2026, Ecko, op verzoek — "de sprong tussen 23:00 en 00:00
+    // HERZIEN (30/07/2026, op verzoek — "de sprong tussen 23:00 en 00:00
     // is er nog steeds"): de kdoc hierboven beloofde "vloeiend", maar de
     // implementatie vulde tot nu toe UITSLUITEND uren aan waar de AI zelf geen
     // oordeel over gaf — twee buururen die de AI allebei ONAFHANKELIJK van
@@ -136,7 +136,7 @@ object FclNightAiAdvisorResponseParser {
     // "afgezwakt door een buurvenster" hieronder klopt dus niet meer letterlijk
     // en is bijgewerkt.
     //
-    // TWEEDE HERZIENING (30/07/2026, Ecko, op verzoek — "de eerste verlaging
+    // TWEEDE HERZIENING (30/07/2026, op verzoek — "de eerste verlaging
     // mag best wat eerder beginnen, gekoppeld aan mijn DIA van 10 uur"): het
     // gewicht is bewust ASYMMETRISCH gemaakt. Vooruit in de tijd (een kern-uur
     // heeft nog een NASLEEP in het uur erna) blijft het bestaande, kortere
@@ -170,7 +170,7 @@ object FclNightAiAdvisorResponseParser {
         val label: String
     )
 
-    // 30/07/2026 (Ecko) — hoeveel gewicht een eigen AI-oordeel behoudt bij het
+    // 30/07/2026 — hoeveel gewicht een eigen AI-oordeel behoudt bij het
     // blenden met de buururen hieronder. Bewust ruim aan de kant van "het
     // eigen oordeel telt het meest" (70/30) — dit mag nooit een uur dat de AI
     // zelf sterk en met citaten onderbouwde laten verdwijnen in het gemiddelde
@@ -196,7 +196,7 @@ object FclNightAiAdvisorResponseParser {
         if (cores.isEmpty()) return rawSuggestions
 
         // ── Stap 1: eigen AI-oordelen licht blenden met hun buururen ────────
-        // (30/07/2026, Ecko) — zie de herziene kdoc bij gaussWeight() hierboven.
+        // (30/07/2026) — zie de herziene kdoc bij gaussWeight() hierboven.
         // Alleen toegepast als er daadwerkelijk buur-kernen binnen bereik zijn
         // (weightSum>0); anders blijft het oorspronkelijke, ongewijzigde
         // voorstel gewoon staan.
@@ -261,7 +261,7 @@ object FclNightAiAdvisorResponseParser {
             }
             if (weightSum <= 0.0) continue
 
-            // Taper-fix (24/07/2026, Ecko): delen door weightSum (een GEMIDDELDE
+            // Taper-fix (24/07/2026): delen door weightSum (een GEMIDDELDE
             // van de omliggende kernen) bleek geen taper op te leveren — die
             // genormaliseerde waarde bleef altijd rond dezelfde orde van grootte
             // als de kernen zelf, ongeacht de afstand (dus bv. -5% op zowel 1 als
@@ -301,7 +301,7 @@ object FclNightAiAdvisorResponseParser {
             )
         }
 
-        // Nacht-volgorde i.p.v. kale numerieke sort (23/07/2026, Ecko) — zelfde
+        // Nacht-volgorde i.p.v. kale numerieke sort (23/07/2026) — zelfde
         // reden/aanpak als de rule-based lijst in Advisorscreen.kt: een
         // nachtvenster loopt over middernacht heen, dus 22:00/23:00 horen vóór
         // 00:00 te staan, niet erna.

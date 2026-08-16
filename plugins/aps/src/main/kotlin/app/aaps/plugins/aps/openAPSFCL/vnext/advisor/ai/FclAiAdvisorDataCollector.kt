@@ -29,7 +29,7 @@ object FclAiAdvisorDataCollector {
     private const val RELATIVE_PATH = "Documents/AAPS/ANALYSE"
     private const val ACTIVE_PARAMS_FILE = "FCLvNext_active_params.json"
     private const val LEARNER_LOG_FILE = "FCLvNext_LearnerLog_v1.csv"
-    // 12/07/2026 (Ecko): teruggezet naar v8 — zie de kdoc bij het schrijven
+    // 12/07/2026: teruggezet naar v8 — zie de kdoc bij het schrijven
     // in FCLCycleLogRepository.kt (bestandsnaam-verwarring, terug op verzoek).
     // LET OP (herhaling van de les van 06/07/2026): deze constante moet ALTIJD
     // in de pas lopen met de daadwerkelijke schrijf-bestandsnaam, anders leest
@@ -64,7 +64,7 @@ object FclAiAdvisorDataCollector {
 
         val activeParams = readActiveParams(File(dir, ACTIVE_PARAMS_FILE)).toMutableMap()
 
-        // ✅ Prioriteitsketen voor activeParams (02/07/2026, Ecko):
+        // ✅ Prioriteitsketen voor activeParams (02/07/2026):
         // 1. FclAiParamStore (AI-goedgekeurde waarden) — meest actueel
         // 2. DFLearner-prefs (voor learner-beheerde params)
         // 3. active_params.json (AAPS Preferences — kan achter lopen)
@@ -192,7 +192,7 @@ object FclAiAdvisorDataCollector {
         val avgTimeToPeakMin: Double?,
         val avgOvershootAfterPeakMmol: Double?,
         val notableEpisodes: List<String>,
-        // 08/07/2026 (Ecko) — zie de kdoc bij FclDailyReportPayload voor de reden.
+        // 08/07/2026 — zie de kdoc bij FclDailyReportPayload voor de reden.
         val multiCommitEpisodeCount: Int,
         val flatTaperEpisodeCount: Int
     )
@@ -202,7 +202,7 @@ object FclAiAdvisorDataCollector {
 
         data class Row(
             val ts: Instant, val bg: Double, val target: Double, val iobRatio: Double, val bolus: Double,
-            // 08/07/2026 (Ecko) — voor de taper-diagnostiek hieronder.
+            // 08/07/2026 — voor de taper-diagnostiek hieronder.
             val episodeCommitNr: Int, val commitDoseFinal: Double
         )
 
@@ -256,7 +256,7 @@ object FclAiAdvisorDataCollector {
         // Tijd-tot-piek / overshoot / voorspelfout worden NIET hier berekend — die komen
         // uit summariseEpisodeMetrics() (EpisodeMetrics, dezelfde bron als AdvisorScreen),
         // niet gedupliceerd vanuit de ruwe CSV.
-        // ── Taper-diagnostiek (08/07/2026, Ecko) ────────────────────────────
+        // ── Taper-diagnostiek (08/07/2026) ────────────────────────────
         // AANLEIDING: de AI-adviseur stelde eerder voor om earlyBoostFactor te
         // verlagen en earlyBoostMinConfidence te verhogen na een aantal hypo's
         // — een redelijke maar verkeerde conclusie, want de eigenlijke oorzaak

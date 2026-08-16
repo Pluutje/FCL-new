@@ -7,7 +7,7 @@ import java.time.Instant
  * Zet FCLCycleLogEntity (Room database) om naar LogRow (analyzer domeinmodel).
  * prebolus velden bestaan niet meer in FCLvNext en zijn verwijderd.
  *
- * 05/07/2026 (Ecko): FCLCycleLogEntity is herstructureerd in @Embedded-groepen
+ * 05/07/2026: FCLCycleLogEntity is herstructureerd in @Embedded-groepen
  * (zie doc-comment bij FCLCycleLogEntity.kt) om een VerifyError-crash op de
  * platte ~150-parameter constructor op te lossen. Deze mapper voedt de
  * Analyzer/statistics-schermen — was hierdoor niet meer compileerbaar met de

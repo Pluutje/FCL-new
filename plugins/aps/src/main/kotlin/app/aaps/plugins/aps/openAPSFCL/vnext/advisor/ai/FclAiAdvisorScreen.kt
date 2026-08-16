@@ -55,14 +55,14 @@ private fun utcToLocal(utc: String): String = try {
  * Eén kaart per parametersuggestie, los goed te keuren of af te wijzen.
  * Provider-keuze (Claude / Gemini) + API-sleutel-invoer in een inklapbaar
  * blok — ingeklapt zodra er al een sleutel is opgeslagen, zodat het maar
- * eenmalig in het oog springt (30/06/2026, Ecko).
+ * eenmalig in het oog springt (30/06/2026).
  */
 @Composable
 fun FclAiAdvisorScreen(
     runResult: AiAdvisorRunResult?,
     onBack: () -> Unit,
     onRefreshNow: () -> Unit,
-    // Klikbare kruisverwijzing (24/07/2026, Ecko): laat de "Zie ook: Automaat
+    // Klikbare kruisverwijzing (24/07/2026): laat de "Zie ook: Automaat
     // → Nacht"-tekst op het Nacht-tabblad hierheen springen met het Nacht-
     // tabblad al open, i.p.v. altijd op Dag te starten.
     startOnNacht: Boolean = false,
@@ -78,7 +78,7 @@ fun FclAiAdvisorScreen(
     val initialTab = remember { if (startOnNacht) 1 else 0 }
     var showSettings by remember { mutableStateOf(!FclAiAdvisorSettingsStore.isConfigured(context)) }
 
-    // 05/07/2026 (Ecko): NIET meer automatisch dismissen bij het openen van dit
+    // 05/07/2026: NIET meer automatisch dismissen bij het openen van dit
     // scherm — alleen bekijken is niet hetzelfde als beoordelen. De melding
     // blijft nu terugkomen (elke cyclus, via FclAiAdvisorScheduler.runIfDue())
     // zolang er nog voorstellen openstaan, en verdwijnt vanzelf zodra alles
@@ -120,9 +120,9 @@ fun FclAiAdvisorScreen(
             SettingsSection(context, onSaved = { showSettings = false })
         }
 
-        // ── Dag: bestaande inhoud, nu als tabblad (24/07/2026, Ecko) ──────
+        // ── Dag: bestaande inhoud, nu als tabblad (24/07/2026) ──────
         val dagPage = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.InfoTabPage("Dag") {
-        // 13/07/2026 (Ecko) — directe klik-bevestiging voor "Nu vernieuwen". De
+        // 13/07/2026 — directe klik-bevestiging voor "Nu vernieuwen". De
         // knoptekst hieronder ("⏳ Bezig…") leunt op FclAiAdvisorScheduler.isRunning(),
         // een plain AtomicBoolean, geen Compose-observable State — die wijzigt in de
         // praktijk niet betrouwbaar mee in de UI. En bij een eerdere foutmelding
@@ -133,7 +133,7 @@ fun FclAiAdvisorScreen(
         // onafhankelijk van hoe lang de aanvraag duurt of hoe hij afloopt. Het
         // succesvolle-resultaat-scherm zelf blijft ongewijzigd.
         var lastRequestedAt by remember { mutableStateOf<String?>(null) }
-        // 21/07/2026 (Ecko): naast de weergavetekst hierboven ook het echte
+        // 21/07/2026: naast de weergavetekst hierboven ook het echte
         // Instant bijhouden — nodig om zo dadelijk te kunnen bepalen of
         // runResult (van de VORIGE aanvraag) inmiddels verouderd is t.o.v.
         // deze nieuwe klik. Zie kdoc bij isRefreshing hieronder.
@@ -168,7 +168,7 @@ fun FclAiAdvisorScreen(
             )
         }
 
-        // 21/07/2026 (Ecko) — BUGFIX: het rapport hieronder toonde na een klik op
+        // 21/07/2026 — BUGFIX: het rapport hieronder toonde na een klik op
         // "Nu vernieuwen" gewoon het VORIGE resultaat door totdat het nieuwe
         // binnen was — geen enkel verschil te zien tussen "nog bezig" en "dit IS
         // het nieuwe advies". runResult komt van buiten (de host bewaart alleen
@@ -214,7 +214,7 @@ fun FclAiAdvisorScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
 
-                    // ── Informatieve constatering (21/07/2026, Ecko) ──────────────
+                    // ── Informatieve constatering (21/07/2026) ──────────────
                     // Zie kdoc bij AiAdvisorRunResult.advisoryNoteNl: GEEN voorstel — niet
                     // goed/af te keuren, dus bewust niet als SuggestionCard maar als losse,
                     // visueel duidelijk andere info-kaart. Bedoeld voor de "timing al op
@@ -264,7 +264,7 @@ fun FclAiAdvisorScreen(
         }
 
         // ── Nacht: AI-adviseur (basaal) — verhuisd hierheen vanuit Automaat
-        // → Nacht (24/07/2026, Ecko), zodat de dag- en nacht-AI-adviezen bij
+        // → Nacht (24/07/2026), zodat de dag- en nacht-AI-adviezen bij
         // elkaar op één tabblad staan, gescheiden van de regel-gebaseerde
         // Automaat-tab. Zelfde API-sleutel/model als hierboven, eigen opslag
         // en trigger (zie FclNightAiAdvisorScheduler) blijven ongewijzigd.
@@ -533,7 +533,7 @@ private fun SuggestionCard(suggestion: AiParamSuggestion, context: Context) {
                      style = MaterialTheme.typography.bodySmall)
             }
 
-            // Korte waarschuwing (18/07/2026, Ecko) — bewust beknopt, geen lang
+            // Korte waarschuwing (18/07/2026) — bewust beknopt, geen lang
             // betoog: bij elke kaart opnieuw zichtbaar, vlak boven de knoppen.
             Text(
                 "\u26A0\uFE0F Controleer advies en confidence goed voor je goedkeurt \u2014 bij twijfel afwijzen.",

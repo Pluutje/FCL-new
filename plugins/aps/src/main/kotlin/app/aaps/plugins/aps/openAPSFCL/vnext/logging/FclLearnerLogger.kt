@@ -37,7 +37,7 @@ object FclLearnerLogger {
      *
      * Gebruik: onEpisodeLogged = { metrics -> FclAiAdvisorScheduler.runIfDue(context, listOf(metrics)) }
      *
-     * (01/07/2026, Ecko): dit is de koppelplek voor de AI-parameter-adviseur.
+     * (01/07/2026): dit is de koppelplek voor de AI-parameter-adviseur.
      * Episode-afsluiting is het logische moment: alle metrics zijn beschikbaar
      * en de AI kan per episode beoordelen of er reden is voor een dagrapport.
      */

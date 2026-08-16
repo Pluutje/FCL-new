@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 import android.content.Context
 
 /**
- * FclLearnerApplier (10/07/2026, Ecko) — accepteren/afwijzen van het
+ * FclLearnerApplier (10/07/2026) — accepteren/afwijzen van het
  * openstaande MANUAL-voorstel. Zelfde rol als FclAiAdvisorApplier, maar voor
  * de Learner: geen los-per-parameter-goedkeuren (de Learner stelt altijd een
  * complete, samenhangende D/F/vExtra/ref-set voor — dat is nu eenmaal hoe
@@ -37,7 +37,7 @@ object FclLearnerApplier {
             episodeCount   = p.episodeCount
         )
         if (ok) {
-            // 27/07/2026 (Ecko) — snapshot bewaren VOORDAT de pending-rij
+            // 27/07/2026 — snapshot bewaren VOORDAT de pending-rij
             // gewist wordt, zodat FCLCycleLogRepository.kt (Stap 7) een
             // volgende, bijna-identieke berekening kan herkennen als "niets
             // nieuws" en niet opnieuw hoeft te melden. Zie

@@ -5,7 +5,7 @@ import app.aaps.core.interfaces.profile.ProfileRepository
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * FclProfileBridge (26/07/2026, Ecko) — zelfde in-memory-brug-patroon als
+ * FclProfileBridge (26/07/2026) — zelfde in-memory-brug-patroon als
  * FclActiveConfigBridge, nu voor ProfileFunction/ProfileRepository.
  *
  * AANLEIDING: de Accepteren-knop bij een openstaand MANUAL-voorstel van de

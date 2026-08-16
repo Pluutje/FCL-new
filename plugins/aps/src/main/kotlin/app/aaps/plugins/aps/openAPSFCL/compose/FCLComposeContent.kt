@@ -42,7 +42,7 @@ class FCLComposeContent(
         onNavigateBack: () -> Unit,
         onSettings: (() -> Unit)?
     ) {
-        // 05/07/2026 (Ecko): één keer, hier op het hoogste niveau, de one-shot
+        // 05/07/2026: één keer, hier op het hoogste niveau, de one-shot
         // navigatievlag lezen (get-and-reset) — bepaalt zowel welke buitenste
         // tab initieel actief is (Analyzer i.p.v. Status) als, doorgegeven aan
         // FclAnalyzerScreen, welk tabblad DAARBINNEN opent (AI Advisor i.p.v.
@@ -50,7 +50,7 @@ class FCLComposeContent(
         val navigateToAiAdvisor = remember {
             app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.FclAiNotificationHelper.consumeNavigateRequest()
         }
-        // 10/07/2026 (Ecko) — zelfde one-shot-patroon voor de Learner's
+        // 10/07/2026 — zelfde one-shot-patroon voor de Learner's
         // MANUAL-melding. Beide vlaggen worden hier één keer gelezen; ze
         // kunnen nooit allebei tegelijk true zijn (elke melding zet alleen
         // haar eigen vlag), dus geen prioriteitsconflict tussen de twee.

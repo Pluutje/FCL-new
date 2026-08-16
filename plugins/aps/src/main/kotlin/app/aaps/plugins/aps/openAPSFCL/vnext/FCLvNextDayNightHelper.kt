@@ -38,8 +38,8 @@ class FCLvNextDayNightHelper(
     fun isWeekendDay(dayOfWeek: Int): Boolean =
         isWeekendDay(dayOfWeek, preferences.get(StringKey.WeekendDagen))
 
-    // ── Geleidelijke nacht-overgang (17/07/2026, Ecko) ───────────────────────
-    // Aanleiding: drie avonden op rij (14/15, 15/16, 16/17 juli) at Ecko rond
+    // ── Geleidelijke nacht-overgang (17/07/2026) ───────────────────────
+    // Aanleiding: drie avonden op rij (14/15, 15/16, 16/17 juli) at de gebruiker rond
     // 23:00 iets tegen een aan-de-lage-kant BG voor het slapen. De BG-stijging
     // was nog volop bezig toen de klok NachtStart passeerde — isNightNow()
     // sprong in één cyclus van false naar true, en ALLE nacht-instellingen
@@ -49,7 +49,7 @@ class FCLvNextDayNightHelper(
     // gevolg, terwijl de nog actieve maaltijd-episode niet meer goed
     // gecorrigeerd kon worden.
     //
-    // Ecko koos bewust voor een zuiver tijd-gebaseerde geleidelijke overgang
+    // de gebruiker koos bewust voor een zuiver tijd-gebaseerde geleidelijke overgang
     // (i.p.v. wachten tot de episode is afgerond): het risico van "vasthouden
     // tot einde episode" is een grotere, plotselinge terugval in kracht na
     // afloop, met kans op een net-te-agressieve correctie die alsnog
@@ -89,11 +89,11 @@ class FCLvNextDayNightHelper(
     }
 
     companion object {
-        // 05/07/2026 (Ecko): losgetrokken uit de instance-methode zodat andere
+        // 05/07/2026: losgetrokken uit de instance-methode zodat andere
         // modules (FclMealTimeAnticipation.kt) exact dezelfde weekend-definitie
         // kunnen hergebruiken zonder een eigen Preferences-afhankelijkheid nodig
         // te hebben en zonder de dag-afkortingen-mapping te dupliceren.
-        // BUGFIX (15/08/2026, Ecko): vergeleek voorheen een Nederlandse
+        // BUGFIX (15/08/2026): vergeleek voorheen een Nederlandse
         // dag-afkorting ("ma".."zo") tegen weekendDagenCsv — maar
         // FCLSettingsScreen.kt slaat WeekendDagen op als CSV van CIJFERS
         // (boolArrayToWeekendDagen: "arr.indices.filter{arr[it]}.map{it+1}",

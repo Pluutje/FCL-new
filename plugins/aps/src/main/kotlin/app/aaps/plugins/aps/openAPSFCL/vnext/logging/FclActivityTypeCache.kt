@@ -5,18 +5,18 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * FclActivityTypeCache (06/07/2026, Ecko) — lichte, kale opslag (geen
+ * FclActivityTypeCache (06/07/2026) — lichte, kale opslag (geen
  * Room/PersistenceLayer) voor de door ActivityTypeListener.kt gedetecteerde
  * activiteitstypes (ON_BICYCLE/WALKING/RUNNING/STILL/IN_VEHICLE/TILTING/
  * ON_FOOT/UNKNOWN), inclusief betrouwbaarheid.
  *
  * BEWUST GEEN Room-entity/DAO/PersistenceLayer-uitbreiding — op uitdrukkelijk
- * verzoek van Ecko: "van de AAPS-database afblijven, een los bestand
+ * verzoek van de gebruiker: "van de AAPS-database afblijven, een los bestand
  * toevoegen is geen probleem, maar geen wijzigingen die bij een volgende
  * dev-update grote impact kunnen hebben." Kale SharedPreferences, zelfde
  * lichte patroon als FclMealTimeAnticipation.loadFrom/saveTo.
  *
- * HERZIEN 06/07/2026 (Ecko): eerste versie bewaarde alleen de LAATSTE waarde
+ * HERZIEN 06/07/2026: eerste versie bewaarde alleen de LAATSTE waarde
  * en was toegespitst op fietsen (isRecentlyCycling). Op verzoek uitgebreid
  * naar een rollend venster met ALLE gedetecteerde typen, zodat:
  *  (a) EstimatedCaloriesCalculator.kt élk type een passende MET-waarde kan

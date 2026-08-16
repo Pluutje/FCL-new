@@ -27,7 +27,7 @@ object DFMapping {
     const val D_START = 1.05   // startpunt na reset: ~92% sterkte (was 1.00 = 95%)
 
     const val F_MIN = 0.20
-    const val F_MAX = 0.95   // Verhoogd 0.80→0.95 (29/06/2026, Ecko): timing zat hard
+    const val F_MAX = 0.95   // Verhoogd 0.80→0.95 (29/06/2026): timing zat hard
     // op ceiling van 118%. Bij F=0.95: timing max 124%,
     // earlyBoostFactor 2.12 (was 1.75), lateCommitDecayFactor
     // 0.63 (was 0.45) — sterkere frontload met sterkere afbouw
@@ -51,7 +51,7 @@ object DFMapping {
     // Kalibratie-sectie in de Automaat-tab worden aangepast door de gebruiker.
     // Standaardwaarden zijn de gevalideerde baselines.
     const val REF_WMD_DEFAULT = 1.10   // Stijgingsdrempel frontload (mmol boven target)
-    // VLOER 26/06/2026 (Ecko, architectuurreview): FrontloadLearner corrigeert nu
+    // VLOER 26/06/2026 (architectuurreview): FrontloadLearner corrigeert nu
     // alleen naar EERDER (lager WMD), maar zonder vloer zou hij via meerdere
     // episoden te ver zakken. Onder 1.00 triggert watching bij BG=6.4 mmol
     // (target 5.4) — bij trage maaltijden levert dat alleen kleine nutteloze
@@ -177,7 +177,7 @@ object DFMapping {
             // F-afgeleide basis (zie kdoc bij REF_LCD_DEFAULT hierboven) —
             // specifiek voor "laatste commit was te laat/te groot", los van
             // de algehele frontload-balans die F stuurt.
-            // MINIMUM 26/06/2026 (Ecko, architectuurreview): earlyBoostFactor
+            // MINIMUM 26/06/2026 (architectuurreview): earlyBoostFactor
             // en lateCommitDecayFactor worden beide geleerd maar in dezelfde
             // richting beïnvloed door F. Na overdoseringen daalde refLcd terug
             // naar 0.0 terwijl F ook al daalde — het systeem corrigeerde

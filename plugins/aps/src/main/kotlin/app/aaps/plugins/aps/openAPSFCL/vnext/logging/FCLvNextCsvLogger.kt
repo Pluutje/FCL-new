@@ -29,7 +29,7 @@ data class FCLvNextCsvLogRow(
     var recentSlope: Double = 0.0,
     var recentDelta5m: Double = 0.0,
     var consistency: Double = 0.0,
-    // Curve-fit lane (04/07/2026, Ecko) — zie FCLvNextTrends.kt. curveFitR2 is
+    // Curve-fit lane (04/07/2026) — zie FCLvNextTrends.kt. curveFitR2 is
     // de fit-kwaliteit (0..1) van de parabool over de laatste ~45 min ruwe BG;
     // curveAcceleration is de acceleratie (mmol/L/uur²) uit diezelfde fit.
     var curveFitR2: Double = 0.0,
@@ -175,13 +175,13 @@ data class FCLvNextCsvLogRow(
     var commitDoseFinal: Double = 0.0,
     var lateDecayMul: Double = 1.0,
     var episodeCommitNr: Int = 0,
-    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Zie kdoc
+    // 11/07/2026 — puur diagnostisch, geen invloed op dosering. Zie kdoc
     // bij lastBgStijgtNogFors in FCLvNext.kt — legt vast of het vluchtventiel
     // voor de late-commit-afbouw deze cyclus actief was, en met welke commitNr
     // die beslissing werd genomen (los van eventuele afronding elders).
     var bgStijgtNogFors: Boolean = false,
     var commitNrUsed: Int = 0,
-    // Extra decay-steilheid door bevestigde "topping out" (04/07/2026, Ecko) —
+    // Extra decay-steilheid door bevestigde "topping out" (04/07/2026) —
     // 0.0 zolang de curve-fit dit niet bevestigt, dus geen effect op bestaand
     // gedrag tenzij expliciet aangetoond dat de piek ruim onder 10 mmol blijft.
     var toppingOutBoost: Double = 0.0,
@@ -243,7 +243,7 @@ data class FCLvNextCsvLogRow(
     var earlyResetThisCycle: Boolean = false,
     var downtrendLocked: Boolean = false,
     var sensorBlipActive: Boolean = false
-    // 03/08/2026 (Ecko): een CSV-kolom voor de nieuwe auto-disarm (post-hypo-
+    // 03/08/2026: een CSV-kolom voor de nieuwe auto-disarm (post-hypo-
     // brake) is BEWUST NIET toegevoegd — dit veld is al 155 constructor-
     // parameters groot (allemaal met default-waarde), en het 156e veld
     // veroorzaakte een VerifyError bij opstarten (invoke-direct/range over de
@@ -254,7 +254,7 @@ data class FCLvNextCsvLogRow(
     // hier als bij FCLCycleLogEntity — apart, zorgvuldig doorgerekend traject,
     // geen los-eind-toevoeging.
 ) {
-    // ── Diagnose-uitbreiding (16/07/2026, Ecko) — v8→v9 schema-bump ────────
+    // ── Diagnose-uitbreiding (16/07/2026) — v8→v9 schema-bump ────────
     // BEWUST BUITEN de primaire constructor (i.t.t. alle velden hierboven):
     // FCLvNextCsvLogRow had al ~70 constructor-parameters. Kotlin genereert
     // voor een constructor met default-waarden één grote "$default"-bridge-
@@ -286,6 +286,14 @@ data class FCLvNextCsvLogRow(
     var aigfPct: Double = 100.0
     var aigfActive: Boolean = false
     var aigfReason: String = ""
+    // 16/08/2026 — component B apart loggen, i.p.v. alleen impliciet
+    // via aigf_pct (dat is uitsluitend component A). Nodig om de HERONTWERP
+    // van component B (dosis-drempel-freeze -> live, elke cyclus) te kunnen
+    // valideren tegen toekomstige data — zie kdoc bij lastSmoothedAigfBPct
+    // in FCLvNext.kt.
+    var aigfBPct: Double = 100.0
+    var aigfBActive: Boolean = false
+    var aigfBReason: String = ""
     // episodePeakCommitU: de taper-clamp-ankerwaarde zelf (zie
     // PEAK_ANCHOR_THRESHOLD_FRAC in FCLvNext.kt) — tot nu toe alleen indirect
     // af te leiden uit commit_dose_final/late_decay_mul.

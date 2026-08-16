@@ -39,7 +39,7 @@ object FclAiAdvisorService {
 
     sealed class Result {
         data class Success(val rawText: String) : Result()
-        // httpCode (28/07/2026, Ecko): los veld i.p.v. de tekst parsen, zodat
+        // httpCode (28/07/2026): los veld i.p.v. de tekst parsen, zodat
         // callAdvisor() een 503 betrouwbaar kan onderscheiden van andere
         // fouten (verkeerde/verlopen key, timeout, ...) — zie hieronder.
         // Blijft null bij een lokale fout (timeout/verbindingsfout) waar
@@ -52,7 +52,7 @@ object FclAiAdvisorService {
      * Probeert keys in volgorde; bij een fout (HTTP 4xx/5xx, timeout) wordt
      * de volgende key geprobeerd. Lege keys worden overgeslagen.
      *
-     * UITZONDERING — HTTP 503 (28/07/2026, Ecko: "is het een optie om bij
+     * UITZONDERING — HTTP 503 (28/07/2026, de gebruiker: "is het een optie om bij
      * een 503 error de 2de key niet te gebruiken"): een 503 betekent dat
      * Google's servers tijdelijk overbelast zijn, niet dat déze key ongeldig
      * of leeg is. De 2e key aanroepen lost dat niet op (dezelfde

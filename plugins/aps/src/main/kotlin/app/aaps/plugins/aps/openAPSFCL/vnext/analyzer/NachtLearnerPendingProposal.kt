@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 
 /**
- * NachtLearnerPendingProposal (26/07/2026, Ecko) — analoog aan
+ * NachtLearnerPendingProposal (26/07/2026) — analoog aan
  * FclLearnerPendingProposal, maar voor de NACHT-as van de Learner (het
  * NF-schaal-voorstel van NachtLearner.maybeLearnNacht(), i.p.v. D/F).
  *

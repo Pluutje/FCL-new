@@ -20,7 +20,7 @@ import kotlin.math.sign
  * FCL Nacht-basaal — automatisch bijstellen naar het échte AAPS-profiel
  * ============================================================================
  *
- * 24/07/2026 (Ecko). Ontstaan uit de vraag of het AI-nachtadvies (per-uur
+ * 24/07/2026. Ontstaan uit de vraag of het AI-nachtadvies (per-uur
  * %-verschuivingen, al getaperd/geclamped in FclNightAiAdvisorResponseParser)
  * automatisch in het echte pompprofiel kan worden doorgevoerd, i.p.v. steeds
  * handmatig — met als motivatie dat AAPS's eigen IOB/autosens-berekening het
@@ -48,7 +48,7 @@ import kotlin.math.sign
  *     vastleggen"-actie in de UI gewijzigd.
  *  5. Max 1x per dag voor de AUTOMATISCHE route (via
  *     ProfileAutoAdjustLogDao.existsForDate()) — een handmatige "Nu
- *     vernieuwen"-trigger negeert deze cap bewust (26/07/2026, Ecko: anders
+ *     vernieuwen"-trigger negeert deze cap bewust (26/07/2026, de gebruiker: anders
  *     blokkeert een eerdere run van vandaag, ongeacht de uitkomst, elke
  *     latere handmatige verversing tot middernacht), wat geen
  *     veiligheidsrisico geeft omdat een handmatige trigger sowieso nooit
@@ -61,7 +61,7 @@ import kotlin.math.sign
  *     hieronder), nooit automatisch toegepast. Er is bewust geen
  *     "Afwijzen"-actie meer: niet activeren betekent al niet toegepast, en
  *     "Basisprofiel opnieuw vastleggen" is het expliciete reset-mechanisme
- *     (27/07/2026, Ecko: een aparte afwijsknop zou het gemiddelde-venster
+ *     (27/07/2026, de gebruiker: een aparte afwijsknop zou het gemiddelde-venster
  *     onduidelijk kunnen resetten).
  *  7. Best-effort: elke fout (geen profiel, validatie geweigerd,
  *     ProfileRepository/ProfileFunction faalt) wordt gelogd met reden en
@@ -90,7 +90,7 @@ object FclNightBasalAutoAdjuster {
     private const val MIN_NIGHTS_ANALYZED = 5
     private const val MIN_AVG_CONFIDENCE = 0.55
 
-    // 27/07/2026 (Ecko) — wachtperiode + gemiddelde over meerdere nachten,
+    // 27/07/2026 — wachtperiode + gemiddelde over meerdere nachten,
     // op verzoek: "ik heb gister de basaal aangepast en nu na 1 nacht komt
     // hij weer met een voorstel om te verlagen". nightsAnalyzed hierboven is
     // een ROLLEND venster over meerdere dagen data (voor de AI-zekerheid);
@@ -108,7 +108,7 @@ object FclNightBasalAutoAdjuster {
     //    MANUAL_MAX_WINDOW_NIGHTS (de oudste nacht valt er dan weer af).
     //  - AUTOMATISCH: schrijft niet meer elke nacht, maar precies 1x per
     //    AUTO_COOLDOWN_NIGHTS nachten, en dan met het gemiddelde van EXACT
-    //    die laatste AUTO_COOLDOWN_NIGHTS nachten (Ecko's eigen suggestie:
+    //    die laatste AUTO_COOLDOWN_NIGHTS nachten (de gebruikers eigen suggestie:
     //    "misschien is dan 3 nachten wachten zelfs wel beter"). Na een
     //    toepassing begint de teller vanzelf weer op 0 (zie
     //    nightsSinceLastChange()), dus dit herhaalt zich vanzelf.
@@ -157,7 +157,7 @@ object FclNightBasalAutoAdjuster {
     )
 
     /**
-     * 27/07/2026 (Ecko) — verzamelt de rijen NA [since] (exclusief) die een
+     * 27/07/2026 — verzamelt de rijen NA [since] (exclusief) die een
      * echte berekening bevatten (perHourShiftJson != "{}" — skip-rijen zoals
      * confidence-gate/geen-profiel tellen dus niet mee), reduceert tot de
      * MEEST RECENTE rij per kalenderdag (meerdere "Nu vernieuwen"-klikken op
@@ -257,7 +257,7 @@ object FclNightBasalAutoAdjuster {
         profileRepository: ProfileRepository,
         payload: FclNightReportPayload?,
         result: NightAiAdvisorRunResult,
-        // 26/07/2026 (Ecko) — zie kdoc bij de AUTO-kortsluiting hieronder.
+        // 26/07/2026 — zie kdoc bij de AUTO-kortsluiting hieronder.
         isManualTrigger: Boolean = false
     ) {
         try {
@@ -279,7 +279,7 @@ object FclNightBasalAutoAdjuster {
     ) {
         val mode = FclNightBasalAutoAdjustStore.getMode(context)
         if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
-        // 26/07/2026 (Ecko) — de oorspronkelijke veiligheidsafspraak bij "Nu
+        // 26/07/2026 — de oorspronkelijke veiligheidsafspraak bij "Nu
         // vernieuwen" was: nooit ongevraagd echt op de pomp schrijven. Nu dat
         // ook via de handmatige knop een berekening kan triggeren (zie kdoc
         // bij FclNightAiAdvisorScheduler.forceRunNow()), blijft die afspraak
@@ -293,7 +293,7 @@ object FclNightBasalAutoAdjuster {
         val db = FCLAnalyzerDatabase.getInstance(context)
         val now = System.currentTimeMillis()
         val today = LocalDate.now(AMSTERDAM).toString()
-        // 26/07/2026 (Ecko) — bugfix: deze cap was bedoeld om de
+        // 26/07/2026 — bugfix: deze cap was bedoeld om de
         // AUTOMATISCHE, nachtelijke route tegen dubbel toepassen op dezelfde
         // dag te beschermen (zie kdoc-item 5 bovenaan). Hij ving in de
         // praktijk óók elke latere "Nu vernieuwen"-klik diezelfde dag af,
@@ -365,7 +365,7 @@ object FclNightBasalAutoAdjuster {
         if (shiftByHour.isEmpty()) return
 
         // ── Nieuwe uurwaarden berekenen, met cumulatieve-drift-cap per uur ──
-        // (26/07/2026, Ecko) — uitbesteed aan computeNewHourly() zodat
+        // (26/07/2026) — uitbesteed aan computeNewHourly() zodat
         // applyPending() hieronder (het "Accepteren" pad bij MANUAL) exact
         // dezelfde cap-logica hergebruikt bij het VERS herberekenen tegen
         // het op dát moment actuele profiel.
@@ -377,7 +377,7 @@ object FclNightBasalAutoAdjuster {
         val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
 
         if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL) {
-            // 27/07/2026 (Ecko) — deze rij is puur de RUWE data van vannacht;
+            // 27/07/2026 — deze rij is puur de RUWE data van vannacht;
             // ze wordt niet meer 1-op-1 als "het voorstel" getoond. Advisor-
             // screen.kt (via computeCurrentProposal()) middelt zelf over alle
             // beschikbare nachten sinds de laatste wijziging. Geen Afwijzen
@@ -390,7 +390,7 @@ object FclNightBasalAutoAdjuster {
         }
 
         // ── mode == AUTO: eerst ALTIJD de ruwe data van vannacht loggen ──
-        // (27/07/2026, Ecko) — nodig als datapunt voor de 3-nachten-middeling
+        // (27/07/2026) — nodig als datapunt voor de 3-nachten-middeling
         // hieronder, ongeacht of dit de nacht is waarop ook echt geschreven
         // wordt. Dit was voorheen een losse skip-rij zonder de echte
         // berekening (oldJson/shiftJson="{}"); nu bevat elke nacht altijd de
@@ -400,7 +400,7 @@ object FclNightBasalAutoAdjuster {
                hoursAtCapCount = hoursAtCap.size, nightsAnalyzed = nightsAnalyzed, avgConfidence = avgConfidence)
 
         // ── mode == AUTO: 1x per AUTO_COOLDOWN_NIGHTS nachten toepassen,
-        //    met het gemiddelde van EXACT die nachten (Ecko's suggestie) ──
+        //    met het gemiddelde van EXACT die nachten (de gebruikers suggestie) ──
         val nightsSince = nightsSinceLastChange(context, db)
         if (nightsSince < AUTO_COOLDOWN_NIGHTS) return
         val window = collectRecentNightlyShifts(db, lastChangeDate(context, db, db.profileAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L), AUTO_COOLDOWN_NIGHTS)
@@ -474,7 +474,7 @@ object FclNightBasalAutoAdjuster {
     }
 
     /**
-     * Accepteren van het openstaande MANUAL-voorstel (26/07/2026, Ecko;
+     * Accepteren van het openstaande MANUAL-voorstel (26/07/2026, de gebruiker;
      * herzien 27/07/2026 voor het gemiddelde-over-meerdere-nachten-ontwerp).
      * Gebruikt dezelfde vensterverzameling/-middeling als
      * computeCurrentProposal() (UI-laag) — zodat wat je ziet exact is wat er
@@ -519,7 +519,7 @@ object FclNightBasalAutoAdjuster {
         val newJson = hourlyToJson(newHourly)
         val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
 
-        // (26/07/2026, Ecko) — zelfde validate→replace→createProfileSwitch-pad
+        // (26/07/2026) — zelfde validate→replace→createProfileSwitch-pad
         // als de AUTO-tak in applyInternal() hierboven (bewust gedupliceerd
         // i.p.v. via een gedeelde functie met een expliciet AAPS-profieltype
         // in de signatuur — de exacte klassenaam van `current`/`profiles[i]`
@@ -584,7 +584,7 @@ object FclNightBasalAutoAdjuster {
     }
 
     /**
-     * Gedeelde cap-berekening (26/07/2026, Ecko) — zie kdoc bij de aanroep in
+     * Gedeelde cap-berekening (26/07/2026) — zie kdoc bij de aanroep in
      * applyInternal(). Zuiver functioneel, geen DB/AAPS-toegang, dus veilig
      * te hergebruiken vanuit zowel de nachtelijke pipeline als applyPending().
      */
@@ -640,7 +640,7 @@ object FclNightBasalAutoAdjuster {
         return value.coerceIn(low, high)
     }
 
-    // 29/07/2026 (Ecko, n.a.v. terugkoppeling) — voorheen snapte roundToStep()
+    // 29/07/2026 (n.a.v. terugkoppeling) — voorheen snapte roundToStep()
     // elke berekende uurwaarde naar een vaste 0.05 U/u-grid vóórdat 'm naar
     // het profiel werd geschreven. Dat hoorde hier niet: de daadwerkelijke
     // afronding naar de pomp-stapgrootte gebeurt AAPS-breed altijd al correct

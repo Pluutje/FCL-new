@@ -23,7 +23,7 @@ object FclOverrideBridge {
      * Aanroepen vanuit de Analyzer (of de AI-advisor) zodra de gebruiker een
      * parameter-aanpassing bevestigt.
      *
-     * ✅ GEWIJZIGD (30/06/2026, Ecko): MERGE i.p.v. volledige vervanging.
+     * ✅ GEWIJZIGD (30/06/2026): MERGE i.p.v. volledige vervanging.
      * Reden: bij meerdere losse goedkeuringen vlak na elkaar (bijv. AI-advisor
      * kaarten één voor één goedkeuren) overschreef post() voorheen de volledige
      * pending override — een net goedgekeurde parameter kon zo stilzwijgend

@@ -119,7 +119,7 @@ object NachtLearner {
         val today = DateTime.now().toString("yyyy-MM-dd")
         val sp    = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        // 26/07/2026 (Ecko) — dag/nacht-splitsing: NachtLearner is inherent
+        // 26/07/2026 — dag/nacht-splitsing: NachtLearner is inherent
         // nacht-specifiek en gebruikt daarom voortaan zijn EIGEN NACHT-as
         // (isNight=true) i.p.v. de dag-as die hij voorheen deelde met de
         // Dag-Learner (zie de oude kdoc bij de isAutoEnabled-check hieronder,
@@ -206,7 +206,7 @@ object NachtLearner {
         // ook voor de Dag-as doet (zie BUGFIX 26/07/2026 aldaar).
         DFLearner.setNfLevel(context, nieuweNf)
 
-        // 26/07/2026 (Ecko) — AUTO past direct toe (ongewijzigd gedrag),
+        // 26/07/2026 — AUTO past direct toe (ongewijzigd gedrag),
         // MANUAL slaat een voorstel op + meldt het (zelfde Fase-2-patroon
         // als de Dag-Learner, nu ook voor de NACHT-as). OFF is hierboven al
         // afgevangen (isEvaluationEnabled), dus hier alleen nog AUTO/MANUAL.

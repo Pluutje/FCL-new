@@ -21,15 +21,15 @@ object FclActiveConfigBridge {
         val volhoudendheid: Int,
         val nfLevel:        Double,
         val manualMaxBolus: Double,  // prefs max_bolus_day — handmatige MaxSMB instelling
-        // 12/07/2026 (Ecko) — analoog aan manualMaxBolus, nodig om iobRatio
+        // 12/07/2026 — analoog aan manualMaxBolus, nodig om iobRatio
         // (die intern altijd relatief aan max_iob is, zie DetermineBasalFCL.kt)
         // terug te kunnen rekenen naar absolute eenheden voor de learner (zie
         // Dflearner.kt's "laagMetNogAanwezigeIob"-check). manualMaxBolus alleen
         // was hiervoor niet bruikbaar: dat is een heel andere, veel kleinere
         // referentiewaarde (per-cyclus maximum, geen dag-plafond).
         val manualMaxIob: Double = 10.0,
-        // 12/07/2026 (Ecko) — actuele ISF (mmol/L per U), voor de Learner's
-        // "laagMetNogAanwezigeIob"-check (zie Dflearner.kt controlevraag Ecko
+        // 12/07/2026 — actuele ISF (mmol/L per U), voor de Learner's
+        // "laagMetNogAanwezigeIob"-check (zie Dflearner.kt controlevraag de gebruiker
         // 12/07/2026): de theoretische-verdere-daling-drempel schaalt hiermee
         // mee per persoon, i.p.v. één vaste eenheid voor iedereen. "Actueel op
         // evaluatiemoment", net als manualMaxBolus/manualMaxIob — niet per se

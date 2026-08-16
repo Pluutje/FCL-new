@@ -14,25 +14,25 @@ data class FclUiSnapshot(
     val delta5m: Double?,
     val slopeHr: Double?,
     val predictedPeak: Double?,
-    // 06/07/2026 (Ecko) — verificatieblok: laat de laatste 3 BG-waarden zien
+    // 06/07/2026 — verificatieblok: laat de laatste 3 BG-waarden zien
     // exact zoals FCLvNextBgHistoryProvider ze aanlevert (dus .recalculated —
     // gecalibreerd + gesmooth, na LinearCalibration + UKF), zodat in één
     // oogopslag te zien is of FCLvNext met dezelfde waarden rekent als het
     // hoofdscherm. Zie de kdoc bovenaan FCLvNextBgHistoryProvider.kt voor
     // de achtergrond (calibratie-discussie met de hoofdontwikkelaar).
     val last3DbPoints: List<FCLvNextBgHistoryProvider.BgPoint> = emptyList(),
-    // 22/07/2026 (Ecko) — geselecteerde pomp + werkelijke max-basaal, voor
+    // 22/07/2026 — geselecteerde pomp + werkelijke max-basaal, voor
     // de nieuwe Pomp-sectie onderaan (zie buildPompSectie). pumpMaxBasalUh
     // is dezelfde, pomptype-bewuste waarde (absoluut of %-van-profiel-basaal)
     // als OapsProfileFCL.max_basal — zie computeRealMaxBasalUh in
     // OpenAPSFCLPlugin.kt voor de berekening zelf.
     val pumpNaam: String = "",
     val pumpMaxBasalUh: Double = 0.0,
-    // 22/07/2026 (Ecko) — huidige basaalstand, naast de max; nuttig genoeg om
+    // 22/07/2026 — huidige basaalstand, naast de max; nuttig genoeg om
     // structureel te tonen (i.t.t. het tijdelijke ruwe-waarden-debugblok dat
     // hier eerst stond, nu weer verwijderd).
     val pumpCurrentBasalUh: Double = 0.0,
-    // 06/07/2026 (Ecko) — korte activiteitsindicatie ("laatste uur") voor de
+    // 06/07/2026 — korte activiteitsindicatie ("laatste uur") voor de
     // Activiteit-sectie. -1.0/-1 als er geen data beschikbaar is (zelfde
     // conventie als de kolommen in FCLvNext_ActivityLog_v2.csv). Bewust een
     // apart, licht opvraagje per cyclus — dit toont alleen het laatste uur,
@@ -40,16 +40,18 @@ data class FclUiSnapshot(
     val recentSteps1h: Int = -1,
     val recentCalories1h: Double = -1.0,
     val recentHr1h: Double = -1.0,
-    // 06/07/2026 (Ecko) — gedetecteerd activiteitstype (ON_BICYCLE/WALKING/
+    // 06/07/2026 — gedetecteerd activiteitstype (ON_BICYCLE/WALKING/
     // RUNNING/STILL/IN_VEHICLE/TILTING/ON_FOOT), null als er niets recents is.
     val recentActivityType: String? = null,
     val recentActivityConfidencePct: Int = 0,
-    // 14/07/2026 (Ecko) — Activiteits Insuline Gevoeligheids Factor (AIGF),
+    // 14/07/2026 — Activiteits Insuline Gevoeligheids Factor (AIGF),
     // HERONTWORPEN 28/07/2026 in twee losse componenten (zie uitgebreide
     // kdoc bij FclActivitySensitivity.kt): A = vorige dag/naijling (continu),
-    // B = recente uren vóór de huidige maaltijd (bevroren per episode bij
-    // het eerste écht bevestigde commit). 100 = neutraal, 125 = 25%
-    // gevoeliger (minder insuline), 75 = 25% minder gevoelig (meer insuline).
+    // B = recente uren vóór dit moment (sinds 16/08/2026 ook continu/live,
+    // elke cyclus opnieuw berekend — niet meer bevroren per maaltijd-episode,
+    // zie kdoc bij lastSmoothedAigfBPct in FCLvNext.kt). 100 = neutraal,
+    // 125 = 25% gevoeliger (minder insuline), 75 = 25% minder gevoelig (meer
+    // insuline).
     val aigfEnabled: Boolean = false,
     // Component A — continu, stuurt de afterload-reductie aan.
     val aigfAPct: Double? = null,
@@ -57,9 +59,8 @@ data class FclUiSnapshot(
     val aigfACurrentCal24h: Double = 0.0,
     val aigfABaselineCal24h: Double = 0.0,
     val aigfADaysOfHistory: Double = 0.0,
-    // Component B — bevroren per maaltijd-episode, stuurt de commit-
-    // verhoging aan. Blijft 100 zolang deze episode nog geen eerste échte
-    // commit heeft gehad.
+    // Component B — sinds 16/08/2026 ook continu/live (elke cyclus), stuurt
+    // de commit-verhoging aan.
     val aigfBPct: Double? = null,
     val aigfBReasonNl: String = "",
     val aigfBCurrentCal4h: Double = 0.0,
@@ -89,7 +90,7 @@ class FCLvNextStatusFormatter(
         isNight: Boolean,
         ui: FclUiSnapshot,
         advice: app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextAdvice?,
-        // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0..1.0. Default
+        // Geleidelijke nacht-overgang (17/07/2026): 0.0..1.0. Default
         // gekoppeld aan isNight zodat oudere aanroepen ongewijzigd blijven.
         nightTransitionFraction: Double = if (isNight) 1.0 else 0.0
     ): String {
@@ -126,9 +127,9 @@ class FCLvNextStatusFormatter(
             appendLine("─────────────────────")
             appendLine("• ${str.glucose}:  ${BgUnits.formatBg(ui.bgNow, mgdl)}$deltaStr")
             appendLine("• ${str.iob}:     ${"%.2f".format(ui.iob)} U")
-            // 06/07/2026 (Ecko) — verificatieblok calibratie: liet de laatste 3
+            // 06/07/2026 — verificatieblok calibratie: liet de laatste 3
             // DB-waarden zien om de calibratiepijplijn te checken. Uitgezet
-            // (22/07/2026, Ecko) — check is voorlopig klaar; het onderliggende
+            // (22/07/2026) — check is voorlopig klaar; het onderliggende
             // ui.last3DbPoints-veld en de aanlevering ervan blijven intact,
             // dus dit is met één regel weer aan te zetten als dat nog eens nodig is.
             if (peakLine.isNotEmpty()) appendLine("• ${str.fclPiek}: $peakLine")
@@ -180,7 +181,7 @@ class FCLvNextStatusFormatter(
     }
 
     // ── Sectie 4: Pomp ────────────────────────────────────────────────────
-    // 22/07/2026 (Ecko) — geselecteerde pomp + werkelijke max-basaal. Bewust
+    // 22/07/2026 — geselecteerde pomp + werkelijke max-basaal. Bewust
     // als eigen, statische sectie (net als Analyzer-waarden hieronder) i.p.v.
     // in Situatie: dit verandert alleen bij een profiel-/pompwissel, niet
     // elke cyclus, dus het hoort niet tussen de live per-cyclus-waarden.
@@ -208,7 +209,7 @@ class FCLvNextStatusFormatter(
             appendLine("─────────────────────")
             appendLine("• ${str.maxSmbDagLabel}        : ${"%.2f".format(liveMaxSmb)} U  (S% × handmatig)")
             append(    "• ${str.iobRemdrempel}    : ${"%.3f".format(activeConfig.peakIobBrakeSuppressThreshold)}")
-            // FIJNAFSTEMMING-sectie verwijderd (01/07/2026, Ecko): Fijnafstelling-tab
+            // FIJNAFSTEMMING-sectie verwijderd (01/07/2026): Fijnafstelling-tab
             // in de Analyzer leest dezelfde waarden van FclActiveConfigBridge en toont
             // ze overzichtelijker. Dubbele weergave hier achter expert-mode heeft geen
             // toegevoegde waarde meer.
@@ -219,7 +220,7 @@ class FCLvNextStatusFormatter(
 
     fun buildStatus(
         isNight: Boolean,
-        // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
+        // Geleidelijke nacht-overgang (17/07/2026) — zie kdoc bij
         // buildSituatieSectie()/FCLvNextInput.nightTransitionFraction.
         nightTransitionFraction: Double = if (isNight) 1.0 else 0.0,
         advice: FCLvNextAdvice?,
@@ -234,7 +235,7 @@ class FCLvNextStatusFormatter(
     ): String = buildString {
         val str = FclStrings.get(context)
         appendLine("════════════════════════")
-        appendLine(" 🧠 FCL V7 v5.1.3")
+        appendLine(" 🧠 FCL V7 v5.2.0a")
         appendLine("════════════════════════")
         appendLine()
 
@@ -248,13 +249,13 @@ class FCLvNextStatusFormatter(
 
         appendLine("🏃 ${str.activiteit}")
         appendLine("─────────────────────")
-        // 06/07/2026 (Ecko) — korte indicatie laatste uur, los van de uitgebreide
+        // 06/07/2026 — korte indicatie laatste uur, los van de uitgebreide
         // 8-uurs-geschiedenis die alleen in FCLvNext_ActivityLog_v2.csv staat.
         val stepsTxt = if (ui.recentSteps1h >= 0) "${ui.recentSteps1h}" else "–"
         val calTxt = if (ui.recentCalories1h >= 0.0) "${"%.0f".format(ui.recentCalories1h)} kcal" else "–"
         val hrTxt = if (ui.recentHr1h >= 0.0) "${"%.0f".format(ui.recentHr1h)} bpm" else "–"
         appendLine("• Laatste uur: 👣 $stepsTxt  🔥 $calTxt  ❤ $hrTxt")
-        // 06/07/2026 (Ecko) — gedetecteerd activiteitstype, apart van de meetwaarden
+        // 06/07/2026 — gedetecteerd activiteitstype, apart van de meetwaarden
         // hierboven, zodat direct zichtbaar is WELK type de kcal-schatting beïnvloedt.
         val actIcon = when (ui.recentActivityType) {
             "ON_BICYCLE" -> "🚴"
@@ -267,28 +268,35 @@ class FCLvNextStatusFormatter(
         if (ui.recentActivityType != null) {
             appendLine("• Activiteitstype: $actIcon ${ui.recentActivityType} (${ui.recentActivityConfidencePct}%)")
         }
-        // 14/07/2026 (Ecko) — AIGF-regel: altijd tonen zodra de functie AAN    lyumjev
-        // staat in Settings. HERSCHREVEN 28/07/2026 (Ecko) na het herontwerp
-        // in twee componenten: leesbare, begrijpelijke taal i.p.v. kale
-        // getallen — zie kdoc bij FclActivitySensitivity.kt voor de
-        // achtergrond. Component A (vorige dag) en B (recente uren, per
-        // maaltijd) krijgen elk hun eigen regel, plus een regel met het
-        // vandaag gedetecteerde "wakker sinds"-moment.
+        // 14/07/2026 — AIGF-regel: altijd tonen zodra de functie AAN
+        // staat in Settings. HERSCHREVEN 28/07/2026 na het herontwerp in twee
+        // componenten. HERSCHREVEN 16/08/2026 — controlevraag: de tekst
+        // gaf tot nu toe alleen het percentage en een losse zin, zonder te
+        // laten zien wat dat CONCREET voor de dosering betekent, en zonder
+        // duidelijk te maken dat A alleen kan VERLAGEN en B alleen kan
+        // VERHOGEN (asymmetrisch, bewust — zie kdoc bij aigfCommitBoost/
+        // aigfAfterloadScale in FCLvNext.kt). Nu met een expliciete
+        // "→ effect op dosering"-regel per component, en zonder de dode
+        // "nog geen commit deze episode"-tak (component B is sinds het
+        // HERONTWERP altijd live, nooit meer per-episode bevroren — zie kdoc
+        // bij lastSmoothedAigfBPct in FCLvNext.kt).
         if (ui.aigfEnabled) {
             appendLine()
             appendLine("• AIGF (Activiteits Insuline Gevoeligheidsfactor): AAN")
 
-            // ── Component A: vorige dag/naijling ──
+            // ── Component A: vorige dag/naijling — kan dosering alleen VERLAGEN ──
             if (ui.aigfAReasonNl.isNotEmpty()) {
-                appendLine("   Vorige dag: nog geen berekening — ${ui.aigfAReasonNl}")
+                appendLine("   Laatste 24u (naijling vorige dag): nog geen berekening — ${ui.aigfAReasonNl}")
             } else {
                 val pctA = ui.aigfAPct ?: 100.0
                 val uitlegA = when {
-                    pctA > 100.5 -> "je was de afgelopen 24 uur duidelijk actiever dan gebruikelijk — iets minder insuline dan normaal"
-                    pctA < 99.5  -> "je was de afgelopen 24 uur rustiger dan gebruikelijk — iets meer insuline dan normaal"
-                    else         -> "ongeveer zoals gebruikelijk, geen aanpassing"
+                    pctA > 100.5 -> "duidelijk actiever dan gebruikelijk"
+                    pctA < 99.5  -> "rustiger dan gebruikelijk (verlaagt niets — component A verhoogt nooit)"
+                    else         -> "ongeveer zoals gebruikelijk"
                 }
-                appendLine("   Vorige dag: ${"%.0f".format(pctA)}% — $uitlegA")
+                val effectA = if (pctA > 100.5) "×${"%.2f".format(100.0 / pctA)} op de dosering na de piek (iets minder)" else "geen effect"
+                appendLine("   Laatste 24u (naijling vorige dag): ${"%.0f".format(pctA)}% — $uitlegA")
+                appendLine("     → effect op dosering: $effectA")
                 val opbouwA = if (ui.aigfADaysOfHistory < 5.0)
                     " (nog opbouwend: ${"%.1f".format(ui.aigfADaysOfHistory)}/5,0 dagen historie)" else ""
                 appendLine(
@@ -297,24 +305,24 @@ class FCLvNextStatusFormatter(
                 )
             }
 
-            // ── Component B: recente uren, per maaltijd ──
-            if (ui.aigfBReasonNl == "nog geen commit deze episode" || ui.aigfBPct == null) {
-                appendLine("   Deze maaltijd: nog geen eerste bevestigd commit — neutraal (100%)")
-            } else if (ui.aigfBReasonNl.isNotEmpty()) {
-                appendLine("   Deze maaltijd: nog geen berekening — ${ui.aigfBReasonNl}")
+            // ── Component B: recente uren, live — kan dosering alleen VERHOGEN ──
+            if (ui.aigfBReasonNl.isNotEmpty()) {
+                appendLine("   Laatste 4u (live, elke cyclus bijgewerkt): nog geen berekening — ${ui.aigfBReasonNl}")
             } else {
-                val pctB = ui.aigfBPct
+                val pctB = ui.aigfBPct ?: 100.0
                 val wakePct = ui.aigfBWakeOverlapFrac * 100.0
                 val uitlegB = when {
-                    wakePct < 25.0 -> "de uren ervoor waren grotendeels nachtrust, dus dit telt nauwelijks mee"
-                    pctB > 100.5   -> "duidelijk actiever dan gebruikelijk vlak vóór deze maaltijd — iets minder insuline"
-                    pctB < 99.5    -> "rustiger dan gebruikelijk vlak vóór deze maaltijd — iets meer insuline"
-                    else           -> "ongeveer zoals gebruikelijk, geen aanpassing"
+                    wakePct < 25.0 -> "grotendeels nachtrust in dit venster, telt nauwelijks mee"
+                    pctB > 100.5   -> "duidelijk actiever dan gebruikelijk (verhoogt niets — component B verlaagt nooit)"
+                    pctB < 99.5    -> "rustiger dan gebruikelijk"
+                    else           -> "ongeveer zoals gebruikelijk"
                 }
-                appendLine("   Deze maaltijd: ${"%.0f".format(pctB)}% (wakker-aandeel ${"%.0f".format(wakePct)}%) — $uitlegB")
+                val effectB = if (pctB < 99.5) "×${"%.2f".format(100.0 / pctB)} op grote commits (iets meer)" else "geen effect"
+                appendLine("   Laatste 4u (live, elke cyclus bijgewerkt): ${"%.0f".format(pctB)}% (wakker-aandeel ${"%.0f".format(wakePct)}%) — $uitlegB")
+                appendLine("     → effect op dosering: $effectB")
                 appendLine(
                     "     ${"%.0f".format(ui.aigfBCurrentCal4h)} kcal laatste 4u, " +
-                        "gebruikelijk ${"%.0f".format(ui.aigfBBaselineCal4h)} kcal (bevroren bij eerste commit)"
+                        "gebruikelijk ${"%.0f".format(ui.aigfBBaselineCal4h)} kcal"
                 )
             }
 

@@ -30,7 +30,7 @@ data class InfoTabPage(
 fun InfoTabPager(
     pages: List<InfoTabPage>,
     modifier: Modifier = Modifier,
-    // Klikbare kruisverwijzingen (24/07/2026, Ecko): laat een aanroeper een
+    // Klikbare kruisverwijzingen (24/07/2026): laat een aanroeper een
     // ander tabblad dan het eerste laten openen — bijvoorbeeld "Zie ook: ..."
     // tekst op een ander scherm die hierheen springt en direct op Nacht wil
     // uitkomen i.p.v. altijd op het eerste (Dag-)tabblad.

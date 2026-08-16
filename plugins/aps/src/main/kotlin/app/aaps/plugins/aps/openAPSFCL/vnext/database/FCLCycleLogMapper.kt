@@ -7,14 +7,14 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.logging.FCLvNextCsvLogRow
  * vanuit FCLvNext.kt via:
  *   import app.aaps.plugins.aps.openAPSFCL.vnext.database.toEntity
  *
- * 05/07/2026 (Ecko): herschreven om per @Embedded-groep een klein sub-object
+ * 05/07/2026: herschreven om per @Embedded-groep een klein sub-object
  * te bouwen i.p.v. één platte aanroep met alle ~150 velden. Zie de doc-
  * comment bij FCLCycleLogEntity voor waarom (registerlimiet invoke-direct/
  * range, veroorzaakte een VerifyError-crash met de oude platte structuur).
  */
 fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
     // META
-    schemaVersion          = "9",
+    schemaVersion          = "10",
     timestampMs            = ts.millis,
 
     context = ContextFields(
@@ -65,7 +65,10 @@ fun FCLvNextCsvLogRow.toEntity(): FCLCycleLogEntity = FCLCycleLogEntity(
         externalBolusU         = externalBolusU,
         aigfPct                = aigfPct,
         aigfActive              = aigfActive,
-        aigfReason              = aigfReason
+        aigfReason              = aigfReason,
+        aigfBPct                = aigfBPct,
+        aigfBActive             = aigfBActive,
+        aigfBReason             = aigfBReason
     ),
 
     trends = TrendsFields(

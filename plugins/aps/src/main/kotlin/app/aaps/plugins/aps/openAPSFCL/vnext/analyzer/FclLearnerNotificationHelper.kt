@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * FclLearnerNotificationHelper (10/07/2026, Ecko) — exacte spiegeling van
+ * FclLearnerNotificationHelper (10/07/2026) — exacte spiegeling van
  * FclAiNotificationHelper.kt, nu voor de Learner's MANUAL-voorstel.
  *
  * Hergebruikt bewust dezelfde NotificationId.FCL_AI_ADVISOR_READY (geen

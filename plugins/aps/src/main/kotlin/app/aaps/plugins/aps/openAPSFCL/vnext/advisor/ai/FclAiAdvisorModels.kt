@@ -28,7 +28,7 @@ data class AiAdvisorRunResult(
     val suggestions: List<AiParamSuggestion>,
     val parseError: String? = null,  // null = parsing/validatie geslaagd (suggesties kunnen alsnog individueel rejected zijn)
     /**
-     * 21/07/2026 (Ecko) — puur informatieve constatering van het model, GEEN
+     * 21/07/2026 — puur informatieve constatering van het model, GEEN
      * voorstel (niet goed/af te keuren). Bedoeld voor precies één situatie (zie
      * FclAiAdvisorPromptBuilder): timing-parameters zitten al op hun hardMax,
      * het probleem (bijv. aanhoudende overshoot) blijft bestaan, en geen enkele
@@ -65,14 +65,14 @@ data class FclDailyReportPayload(
     val notableEpisodes: List<String>,
     /** Aantal episodes deze periode met >= 3 verschillende commit-nummers
      *  (>= 3 losse doseermomenten binnen één maaltijdepisode). Noemer voor
-     *  flatTaperEpisodeCount hieronder. (08/07/2026, Ecko) */
+     *  flatTaperEpisodeCount hieronder. (08/07/2026) */
     val multiCommitEpisodeCount: Int,
     /** Van die multi-commit-episodes: hoeveel hadden een "vlakke afbouw" —
      *  de LAATSTE commit was nog >= 80% van de hoogste eerdere commit, dus
      *  geen merkbare afname ondanks meerdere commits. Hoog t.o.v.
      *  multiCommitEpisodeCount = de afbouw werkte niet, ook al lijkt de
      *  vroege trigger (earlyBoostFactor/earlyBoostMinConfidence) misschien
-     *  "te agressief" op basis van hypoCount alleen. (08/07/2026, Ecko) */
+     *  "te agressief" op basis van hypoCount alleen. (08/07/2026) */
     val flatTaperEpisodeCount: Int
 )
 

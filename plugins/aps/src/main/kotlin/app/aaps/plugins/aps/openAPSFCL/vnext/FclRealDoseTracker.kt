@@ -9,7 +9,7 @@ import app.aaps.core.interfaces.db.PersistenceLayer
  * temp-basaal- en bolus/SMB-records), niet via FCL's eigen
  * commandedU/basalRate/deliveredTotal.
  *
- * Achtergrond (19/06/2026, n.a.v. Ecko's screenshots van AAPS Treatments
+ * Achtergrond (19/06/2026, n.a.v. de gebruikers screenshots van AAPS Treatments
  * History): als FCL zelf besluit niets te doen, loopt DetermineBasalFCL door
  * naar de standaard oref0/SMB-fallback, die zélf een temp-basaal/SMB zet.
  * FCL's eigen kolommen (basal_u_h, delivered_total, commanded_dose,

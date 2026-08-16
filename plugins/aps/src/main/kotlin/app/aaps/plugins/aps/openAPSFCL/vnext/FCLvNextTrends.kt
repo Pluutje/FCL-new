@@ -18,7 +18,7 @@ import kotlin.math.sqrt
  *   FAST lane: gewogen least-squares over de laatste 4-5 punten.
  *              Levert: recentSlope (mmol/h), recentDelta5m (mmol/5min).
  *   CURVE-FIT lane: kwadratische regressie over ruwe BG, laatste ~45 min
- *              (toegevoegd 04/07/2026, Ecko — geïnspireerd op AutoISF).
+ *              (toegevoegd 04/07/2026, de gebruiker — geïnspireerd op AutoISF).
  *              Levert: curveFitR2 (0-1 fit-kwaliteit), curveAcceleration
  *              (mmol/h² uit de parabool). Gebruikt door FCLvNext.kt om
  *              peakPressureBonus en late-commit-decay EERDER te laten
@@ -63,7 +63,7 @@ object FCLvNextTrends {
         // richting/grootte-overeenstemming tussen los-berekende segment-slopes,
         // curveFitR2 kijkt naar hoe goed ÉÉN vloeiende curve de hele periode
         // beschrijft. Beide kunnen dus onafhankelijk hoog/laag zijn — vandaar
-        // een apart veld i.p.v. hergebruik van consistency. (04/07/2026, Ecko)
+        // een apart veld i.p.v. hergebruik van consistency. (04/07/2026)
         val curveFitR2: Double,             // 0..1 — fit-kwaliteit van de parabool
         val curveAcceleration: Double       // mmol/L per uur² — uit de parabool-fit
     )
@@ -78,10 +78,10 @@ object FCLvNextTrends {
     // recente segment ~70% gewicht heeft, het op-één-na-recentste ~21%, etc.
     // — MITS de cyclus/CGM-interval regelmatig 5 minuten is. Zie EWMA_TAU_MINUTES
     // hieronder voor waarom dat een verborgen aanname was die niet klopte bij
-    // gaps (05/07/2026, Ecko — n.a.v. openAPSBoost's tijd-bewuste EMA-alpha).
+    // gaps (05/07/2026, de gebruiker — n.a.v. openAPSBoost's tijd-bewuste EMA-alpha).
     private const val EWMA_ALPHA = 0.70
 
-    // ── Tijd-bewuste EWMA (05/07/2026, Ecko) ─────────────────────────────
+    // ── Tijd-bewuste EWMA (05/07/2026) ─────────────────────────────
     // PROBLEEM: ewmaAverage() gewicht was voorheen α^(stappen_geleden) — dus
     // gebaseerd op de POSITIE in de segmentenlijst, niet op werkelijk verstreken
     // tijd. Bij een regelmatig 5-min-interval is dat equivalent (stap 1 geleden
@@ -215,7 +215,7 @@ object FCLvNextTrends {
 
     // ── CURVE-FIT lane: kwadratische regressie over ruwe BG ──────────────
     //
-    // Toegevoegd 04/07/2026 (Ecko): geïnspireerd op de parabool-fit uit
+    // Toegevoegd 04/07/2026: geïnspireerd op de parabool-fit uit
     // AutoISF (GlucoseStatusCalculatorAutoIsf.kt), maar met eigen doel:
     // een fit-kwaliteitssignaal (R²) dat aangeeft hoe overtuigend één
     // vloeiende curve de laatste ~45 minuten ruwe BG beschrijft.

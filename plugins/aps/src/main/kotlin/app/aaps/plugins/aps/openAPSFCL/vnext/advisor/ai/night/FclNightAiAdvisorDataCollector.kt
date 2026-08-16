@@ -48,7 +48,7 @@ object FclNightAiAdvisorDataCollector {
                     avgBgSlopePerHour = windows.sumOf { it.bgSlopePerHour } / n,
                     avgIob = windows.sumOf { it.avgIob } / n,
                     avgIobDelta = windows.sumOf { it.iobDelta } / n,
-                    // BUGFIX (23/07/2026, Ecko): windows komt al DESC gesorteerd
+                    // BUGFIX (23/07/2026): windows komt al DESC gesorteerd
                     // uit de DAO (ORDER BY startTs DESC, zie NightWindowDao) — dus
                     // windows.first() is het MEEST RECENTE venster voor dit uur,
                     // windows.last() juist het OUDSTE (tot 14 nachten terug). Met

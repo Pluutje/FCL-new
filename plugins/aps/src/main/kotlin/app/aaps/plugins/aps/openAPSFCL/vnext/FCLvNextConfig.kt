@@ -277,16 +277,16 @@ data class FCLvNextConfig(
 fun loadFCLvNextConfig(
     prefs: Preferences,
     isNight: Boolean,
-    // Geleidelijke nacht-overgang (17/07/2026, Ecko): 0.0 = volledig dag-
+    // Geleidelijke nacht-overgang (17/07/2026): 0.0 = volledig dag-
     // gedrag, 1.0 = volledig nacht-gedrag, lineair ertussenin gedurende de
     // ingestelde overgangsduur na NachtStart. Bij fraction=0.0 identiek aan
     // het oude harde isNight-gedrag (zie FclNachtOvergangSettings.kt).
     nightTransitionFraction: Double = if (isNight) 1.0 else 0.0,
-    // 12/07/2026 (Ecko) — nodig voor de Learner's "laagMetNogAanwezigeIob"-check
+    // 12/07/2026 — nodig voor de Learner's "laagMetNogAanwezigeIob"-check
     // (zie Dflearner.kt): een theoretische-verdere-daling-drempel, geschaald
     // met de actuele ISF i.p.v. een vaste eenheid die voor iedereen gelijk is.
     effectiveIsfMmol: Double = 4.0,
-    // 22/07/2026 (Ecko) — werkelijke, pomptype-afhankelijke max-basaal (E/u),
+    // 22/07/2026 — werkelijke, pomptype-afhankelijke max-basaal (E/u),
     // doorgegeven vanuit DetermineBasalFCL.kt/profile.max_basal. 0.0 (default,
     // voor eventuele andere/oudere call sites) => val terug op de vaste
     // 15.0-default hieronder bij maxTempBasalRate.
@@ -356,7 +356,7 @@ fun loadFCLvNextConfig(
 
     // ── Gain = S (dag) of S × N (nacht), geleidelijk overlopend ────────────
     // Vervangt de afzonderlijke fcl_vnext_gain_day / fcl_vnext_gain_night prefs.
-    // 17/07/2026 (Ecko): dag- EN nacht-variant altijd allebei berekend, en
+    // 17/07/2026: dag- EN nacht-variant altijd allebei berekend, en
     // vervolgens lineair gemengd met nightTransitionFraction — i.p.v. een
     // harde if(isNight)-knip. Bij fraction=0.0/1.0 identiek aan het oude gedrag.
     val s = sterkte.toDouble()     / 100.0
@@ -435,7 +435,7 @@ fun loadFCLvNextConfig(
         episodeMinConsistency = 0.45,
 
         deliveryCycleMinutes = 5,
-        // 22/07/2026 (Ecko): was een vaste 15.0 — kwam nog uit de tijd dat bij
+        // 22/07/2026: was een vaste 15.0 — kwam nog uit de tijd dat bij
         // een sensorstoring/dropout de basaalafgifte ongewenst door kon lopen;
         // die situatie is inmiddels via andere weg opgelost, dus de vaste 15.0
         // als zodanig verviel. Nu de werkelijke, pomptype-afhankelijke grens
@@ -538,7 +538,7 @@ fun loadFCLvNextConfig(
         topGuardCapMin                  = 0.20,
         topGuardCapMax                  = 0.65,
         peakPressureBonusMaxIob         = 0.35,
-        // 23/07/2026 (Ecko) — omlaag van 2.1/2.3 naar 1.6/1.8: bij de maaltijd
+        // 23/07/2026 — omlaag van 2.1/2.3 naar 1.6/1.8: bij de maaltijd
         // van vanochtend (05:07-05:22 UTC) bleef finalDose's IOB-afbouw
         // (iobDampingFactor, dit vermogen bepaalt de vorm van de curve tussen
         // iobStart en iobMax) vlak bij 1,0 tot IOB al ruim boven de helft van
@@ -561,7 +561,7 @@ fun loadFCLvNextConfig(
         // Reden: prefs.put() gevolgd door prefs.get() in dezelfde aanroep kan de
         // gecachte prefs-waarde teruggeven i.p.v. de zojuist geschreven waarde.
         earlyBoostFactor         = po?.earlyBoostFactor        ?: prefs.get(DoubleKey.fcl_vnext_early_boost_factor),
-        // Cap op 0.40 (26/06/2026, Ecko): confidence was 0.43-0.44 terwijl EarlyBoost
+        // Cap op 0.40 (26/06/2026): confidence was 0.43-0.44 terwijl EarlyBoost
         // al bij 22:59 had kunnen vuren (BG 8.4, slope 0.78, stijging duidelijk zichtbaar).
         // Pas bij 23:09 (BG=9.3) haalde de confidence de drempel — te laat. 0.40 laat
         // EarlyBoost vuren zodra het signaal "vrij overtuigend" is, terwijl de IOB-gate
@@ -579,7 +579,7 @@ fun loadFCLvNextConfig(
         earlyPeakBiasMmol        = po?.earlyPeakBiasMmol       ?: prefs.get(DoubleKey.fcl_vnext_early_peak_bias_mmol),
     )
 
-    // Geleidelijke nacht-overgang, vervolg (17/07/2026, Ecko): de zes
+    // Geleidelijke nacht-overgang, vervolg (17/07/2026): de zes
     // parameters die applyNightResponseStyle bij volle nacht aanpast
     // (stagnationDeltaMin, stagnationEnergyBoost, persistentAggressionMul,
     // smallCorrectionCooldownMinutes, correctionHoldDeltaMax,
@@ -694,7 +694,7 @@ private fun applyDoseDistributionStyle(
 
     return when (cfg.doseDistributionStyle) {
 
-        // 22/07/2026 (Ecko) — nieuwe, extra trap boven VERY_SMOOTH. Aanleiding:
+        // 22/07/2026 — nieuwe, extra trap boven VERY_SMOOTH. Aanleiding:
         // de pomp-max bleek terecht 50 E/u (U200-insuline), dus er is nu ruimte
         // om nóg meer via basaal te laten lopen dan VERY_SMOOTH's 85%. Cijfers
         // zijn een eerste, voorzichtige extrapolatie van hetzelfde

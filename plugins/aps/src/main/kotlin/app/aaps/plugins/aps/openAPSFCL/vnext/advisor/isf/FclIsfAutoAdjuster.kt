@@ -1,0 +1,590 @@
+package app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf
+
+import android.content.Context
+import app.aaps.core.data.ue.Action
+import app.aaps.core.data.ue.Sources
+import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.IsfAutoAdjustLogEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLAnalyzerDatabase
+import app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogRepository
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.LocalDate
+import java.time.ZoneId
+import kotlin.math.abs
+import kotlin.math.sign
+
+/**
+ * ============================================================================
+ * FCL ISF — automatisch bijstellen naar het échte AAPS-profiel
+ * ============================================================================
+ *
+ * 16/08/2026. 1-op-1 gespiegeld aan FclNightBasalAutoAdjuster.kt (zie de
+ * uitgebreide kdoc daar voor de volledige achtergrond van dit patroon) —
+ * zelfde veiligheidslagen, zelfde OFF/AUTO/MANUAL-mechaniek, zelfde
+ * validate→replace→createProfileSwitch-schrijfpad, EN dezelfde bewuste
+ * code-duplicatie tussen de AUTO-tak (evaluateInternal) en applyPending()
+ * i.p.v. een gedeelde schrijf-helper — precies om dezelfde reden als daar
+ * gedocumenteerd: een gedeelde functie zou een expliciet AAPS-profieltype
+ * in de signatuur nodig hebben, en die exacte klassenaam (van `current`/
+ * `profiles[index]`/`effectiveProfile`) is buiten dit uploadpakket niet te
+ * verifiëren. Lokale `val`-type-inferentie (geen signatuur, geen gok-type)
+ * is hier de veilige keuze.
+ *
+ * Twee verschillen met de nacht-basaal-variant:
+ *  A. De bron van de suggesties is hier IsfLearner (deterministisch, uit
+ *     PersistentCorrectionController-fires — zie kdoc daar) i.p.v. een
+ *     AI-adviseur. Confidence komt dus van IsfLearner.HourSuggestion, niet
+ *     van een taalmodel. Een latere AI-verrijking kan zonder structuur-
+ *     wijziging naast of bovenop deze suggesties landen (zelfde
+ *     suggestion-vorm: uur/%-shift/confidence).
+ *  B. Er is geen aparte async scheduler/pipeline nodig (geen HTTP-aanroep
+ *     zoals bij de AI) — dit bestand doet zijn eigen dagelijkse dedup via
+ *     IsfAutoAdjustLogDao.existsForDate(), zie evaluateInternal() hieronder.
+ *
+ * ── Profiel-accessors: geverifieerd tegen profile.zip (16/08/2026) ──────
+ * Bij de eerste versie van dit bestand waren er twee onbevestigde aannames
+ * over de AAPS-profiel-ISF-accessors (de basaal-varianten stonden al
+ * elders in de codebase bevestigd, ISF nergens). Na een terechte
+ * controlevraag zijn beide nagetrokken tegen de echte AAPS core
+ * profile-interfaces (Profile.kt/SingleProfile.kt):
+ *  1. `effectiveProfile.getIsfMgdlTimeFromMidnight(h * 3600)` — KLOPTE
+ *     precies zoals afgeleid (Profile.kt regel 118).
+ *  2. `.sens = ...` — KLOPTE NIET. SingleProfile.kt gebruikt `.isf`
+ *     (JSONArray), niet `.sens` — die laatste naam hoort bij het
+ *     losstaande, interne OapsProfileFCL/OapsProfileAutoIsf-datamodel
+ *     (het oref0-porteringspad), niet bij AAPS's eigen profielopslag.
+ *     Gecorrigeerd naar `.isf` op beide plekken (evaluateInternal()/
+ *     applyPending()) vóórdat dit gecompileerd is — dus zonder dat dit
+ *     ooit als foutieve build naar de gebruiker is gegaan.
+ * Standaard nog altijd UIT (zie FclIsfAutoAdjustStore, default
+ * FclSystemMode.OFF) — deze verificatie maakt AAN zetten nu wel veilig.
+ */
+object FclIsfAutoAdjuster {
+
+    private val AMSTERDAM = ZoneId.of("Europe/Amsterdam")
+
+    private const val MAX_HOURLY_SHIFT_PCT = 10.0
+    private const val DAILY_TOTAL_CAP_FRAC = 0.15
+    private const val CUMULATIVE_DRIFT_CAP_FRAC = 0.20
+    private const val MIN_SAMPLES_TOTAL = 20         // som van sampleCount over alle aangeraakte uren
+    private const val MIN_AVG_CONFIDENCE = 0.55
+
+    // Zelfde gemiddelde-over-meerdere-dagen-ontwerp als FclNightBasalAutoAdjuster
+    // (zie de uitgebreide kdoc daar, 27/07/2026) — hier "dagen" i.p.v. "nachten",
+    // want ISF-metingen zijn niet aan nacht gebonden.
+    const val MANUAL_COOLDOWN_DAYS = 3
+    const val MANUAL_MAX_WINDOW_DAYS = 10
+    const val AUTO_COOLDOWN_DAYS = 5
+
+    suspend fun daysSinceLastChange(context: Context, db: FCLAnalyzerDatabase): Int {
+        val baselineSetAt = FclIsfAutoAdjustStore.getBaselineSetAt(context)
+        val lastAppliedAt = db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val lastChangeAt = maxOf(baselineSetAt, lastAppliedAt)
+        if (lastChangeAt <= 0L) return 0
+        val changeDate = java.time.Instant.ofEpochMilli(lastChangeAt).atZone(AMSTERDAM).toLocalDate()
+        val today = LocalDate.now(AMSTERDAM)
+        return java.time.temporal.ChronoUnit.DAYS.between(changeDate, today).toInt().coerceAtLeast(0)
+    }
+
+    private fun lastChangeDate(context: Context, lastAppliedAt: Long): LocalDate {
+        val baselineSetAt = FclIsfAutoAdjustStore.getBaselineSetAt(context)
+        val lastChangeAt = maxOf(baselineSetAt, lastAppliedAt)
+        return if (lastChangeAt > 0L) java.time.Instant.ofEpochMilli(lastChangeAt).atZone(AMSTERDAM).toLocalDate()
+        else LocalDate.MIN
+    }
+
+    private data class DailyShift(
+        val localDate: String,
+        val oldHourly: Map<Int, Double>,
+        val shiftByHour: Map<Int, Double>,
+        val samplesAnalyzed: Int,
+        val avgConfidence: Double
+    )
+
+    private suspend fun collectRecentDailyShifts(
+        db: FCLAnalyzerDatabase,
+        since: LocalDate,
+        maxDays: Int
+    ): List<DailyShift> {
+        val rows = db.isfAutoAdjustLogDao().getSinceDateDesc(since.toString())
+            .filter { it.perHourShiftJson != "{}" }
+        val byDate = LinkedHashMap<String, IsfAutoAdjustLogEntity>()
+        for (row in rows) {
+            if (!byDate.containsKey(row.localDate)) byDate[row.localDate] = row
+        }
+        return byDate.entries.take(maxDays).reversed().map { (date, row) ->
+            DailyShift(
+                localDate = date,
+                oldHourly = jsonToHourlyMap(row.oldIsfJson),
+                shiftByHour = jsonToHourlyMap(row.perHourShiftJson),
+                samplesAnalyzed = row.samplesAnalyzed,
+                avgConfidence = row.avgConfidence
+            )
+        }
+    }
+
+    private fun weightedAverageShift(days: List<DailyShift>): Map<Int, Double> {
+        val result = HashMap<Int, Double>()
+        for (h in 0..23) {
+            var weightedSum = 0.0
+            var weightTotal = 0.0
+            days.forEachIndexed { idx, day ->
+                val weight = (idx + 1).toDouble()
+                weightedSum += (day.shiftByHour[h] ?: 0.0) * weight
+                weightTotal += weight
+            }
+            result[h] = if (weightTotal > 0.0) weightedSum / weightTotal else 0.0
+        }
+        return result
+    }
+
+    private fun jsonToHourlyMap(json: String): Map<Int, Double> {
+        val map = HashMap<Int, Double>()
+        return try {
+            val obj = JSONObject(json)
+            obj.keys().forEach { k -> k.toIntOrNull()?.let { map[it] = obj.getDouble(k) } }
+            map
+        } catch (_: Exception) {
+            map
+        }
+    }
+
+    data class DailyProposal(
+        val daysUsed: Int,
+        val newestLocalDate: String,
+        val oldHourly: Map<Int, Double>,
+        val newHourly: Map<Int, Double>,
+        val shiftByHour: Map<Int, Double>,
+        val hoursAtCap: Set<Int>
+    )
+
+    suspend fun computeCurrentProposal(context: Context, maxDays: Int = MANUAL_MAX_WINDOW_DAYS): DailyProposal? {
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val lastAppliedAt = db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val since = lastChangeDate(context, lastAppliedAt)
+        val days = collectRecentDailyShifts(db, since, maxDays)
+        if (days.isEmpty()) return null
+        val avgShift = weightedAverageShift(days)
+        val oldHourly = days.last().oldHourly
+        val baseline = FclIsfAutoAdjustStore.getBaseline(context) ?: oldHourly
+        val (newHourly, hoursAtCap) = computeNewHourly(oldHourly, avgShift, baseline)
+        return DailyProposal(days.size, days.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap)
+    }
+
+    /**
+     * Aan te roepen elke cyclus vanuit DetermineBasalFCL, net als
+     * FclNightAiAdvisorScheduler.onCycle() — de dagelijkse dedup gebeurt
+     * hieronder zelf (existsForDate), dus dit is verder een goedkope no-op
+     * op elke cyclus behalve de eerste van een nieuwe dag.
+     */
+    fun onCycle(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository,
+        cycleLogRepository: FCLCycleLogRepository
+    ) {
+        try {
+            runBlocking {
+                evaluateInternal(context, profileFunction, profileRepository, cycleLogRepository, isManualTrigger = false)
+            }
+        } catch (_: Exception) {
+            // best-effort — zelfde filosofie als FclNightBasalAutoAdjuster: nooit een crash,
+            // nooit de rest van de dosis-cyclus beïnvloeden.
+        }
+    }
+
+    /** Voor een handmatige "Nu vernieuwen"-knop, negeert de dagelijkse dedup. */
+    fun forceRunNow(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository,
+        cycleLogRepository: FCLCycleLogRepository
+    ) {
+        if (FclIsfAutoAdjustStore.getMode(context) == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
+        try {
+            runBlocking {
+                evaluateInternal(context, profileFunction, profileRepository, cycleLogRepository, isManualTrigger = true)
+            }
+        } catch (_: Exception) {
+            // best-effort
+        }
+    }
+
+    private suspend fun evaluateInternal(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository,
+        cycleLogRepository: FCLCycleLogRepository,
+        isManualTrigger: Boolean
+    ) {
+        val mode = FclIsfAutoAdjustStore.getMode(context)
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF) return
+        // Zelfde afspraak als bij de nacht-basaal: AUTO + handmatige trigger slaat
+        // altijd over (nooit ongevraagd op de pomp schrijven via een "Nu vernieuwen"-knop).
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.AUTO && isManualTrigger) return
+
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val now = System.currentTimeMillis()
+        val today = LocalDate.now(AMSTERDAM).toString()
+        if (db.isfAutoAdjustLogDao().existsForDate(today) && !isManualTrigger) return
+
+        // ── Huidig profiel + index in ProfileRepository ophalen ──
+        val effectiveProfile = profileFunction.getProfile()
+        if (effectiveProfile == null) {
+            logRow(db, now, today, mode, applied = false, skipReason = "geen actief profiel",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, samplesAnalyzed = 0, avgConfidence = 0.0)
+            return
+        }
+        val originalName = profileFunction.getOriginalProfileName()
+        val profiles = profileRepository.profiles.value
+        val index = profiles.indexOfFirst { it.name == originalName }
+        if (index == -1) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "profiel '$originalName' niet gevonden in ProfileRepository",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, samplesAnalyzed = 0, avgConfidence = 0.0)
+            return
+        }
+        val current = profiles[index]
+
+        // getIsfMgdlTimeFromMidnight() — geverifieerd correct, zie kdoc bovenaan dit bestand.
+        val currentHourly = HashMap<Int, Double>()
+        for (h in 0..23) currentHourly[h] = effectiveProfile.getIsfMgdlTimeFromMidnight(h * 3600)
+
+        var baseline = FclIsfAutoAdjustStore.getBaseline(context)
+        if (baseline == null) {
+            FclIsfAutoAdjustStore.setBaseline(context, currentHourly, source = "initial", nowMs = now)
+            baseline = currentHourly
+        }
+
+        // ── IsfLearner-suggesties ophalen ──
+        val persistEvents = app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistDatabase.getInstance(context)
+            .persistEventDao().getSince(now - IsfLearner.LOOKBACK_DAYS.toLong() * 24 * 60 * 60 * 1000L)
+        val suggestions = IsfLearner.computeSuggestions(
+            repository = cycleLogRepository,
+            persistEvents = persistEvents,
+            currentIsfMgdlByHour = currentHourly,
+            nowMs = now
+        )
+        if (suggestions.isEmpty()) {
+            logRow(db, now, today, mode, applied = false, skipReason = "geen bruikbare suggesties (te weinig schone correcties)",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, samplesAnalyzed = 0, avgConfidence = 0.0)
+            return
+        }
+
+        val samplesAnalyzed = suggestions.sumOf { it.sampleCount }
+        val avgConfidence = suggestions.map { it.confidence }.average()
+
+        // ── Confidence-gate ──
+        if (samplesAnalyzed < MIN_SAMPLES_TOTAL || avgConfidence < MIN_AVG_CONFIDENCE) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "confidence-gate: samples=$samplesAnalyzed (min $MIN_SAMPLES_TOTAL) " +
+                       "gem.confidence=${"%.2f".format(avgConfidence)} (min $MIN_AVG_CONFIDENCE)",
+                   oldJson = "{}", newJson = "{}", shiftJson = "{}",
+                   hoursAtCapCount = 0, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        val shiftByHour = HashMap<Int, Double>()
+        suggestions.forEach { s -> shiftByHour[s.hour] = s.suggestedShiftPct.coerceIn(-MAX_HOURLY_SHIFT_PCT, MAX_HOURLY_SHIFT_PCT) }
+
+        val (newHourly, hoursAtCap) = computeNewHourly(currentHourly, shiftByHour, baseline)
+        FclIsfAutoAdjustStore.updateCapHitCounters(context, hoursAtCap, shiftByHour.keys)
+
+        val oldJson = hourlyToJson(currentHourly)
+        val newJson = hourlyToJson(newHourly)
+        val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
+
+        if (mode == app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL) {
+            logRow(db, now, today, mode, applied = false, skipReason = "",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        // ── mode == AUTO: eerst altijd de ruwe data van vandaag loggen ──
+        logRow(db, now, today, mode, applied = false, skipReason = "",
+               oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+               hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+
+        // ── mode == AUTO: 1x per AUTO_COOLDOWN_DAYS dagen toepassen, met het
+        //    gemiddelde van EXACT die dagen ──
+        val daysSince = daysSinceLastChange(context, db)
+        if (daysSince < AUTO_COOLDOWN_DAYS) return
+        val window = collectRecentDailyShifts(db, lastChangeDate(context, db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L), AUTO_COOLDOWN_DAYS)
+        if (window.size < AUTO_COOLDOWN_DAYS) return
+        val avgShift = weightedAverageShift(window)
+        val (avgNewHourly, avgHoursAtCap) = computeNewHourly(currentHourly, avgShift, baseline)
+        FclIsfAutoAdjustStore.updateCapHitCounters(context, avgHoursAtCap, avgShift.keys)
+        val avgOldJson = oldJson
+        val avgNewJson = hourlyToJson(avgNewHourly)
+        val avgShiftJson = JSONObject().apply { avgShift.forEach { (h, v) -> put(h.toString(), v) } }.toString()
+
+        // ── daadwerkelijk toepassen (met het gemiddelde, niet losse dag) ──
+        // .isf hieronder — geverifieerd tegen SingleProfile.kt (profile.zip, 16/08/2026): bevestigd correct.
+        val newSingleProfile = current.deepClone().apply { isf = buildIsfJsonArray(avgNewHourly) }
+
+        val errors = profileRepository.validateStructured(newSingleProfile)
+        if (errors.isNotEmpty()) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        val replaceResult = profileRepository.replace(index, newSingleProfile)
+        if (replaceResult.isFailure) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        val newProfileStore = profileRepository.profile.value
+        if (newProfileStore == null) {
+            logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        val ps = profileFunction.createProfileSwitch(
+            profileStore = newProfileStore,
+            profileName = current.name,
+            durationInMinutes = 0,
+            percentage = 100,
+            timeShiftInHours = 0,
+            timestamp = now,
+            action = Action.PROFILE_SWITCH,
+            source = Sources.Aaps,
+            note = "FCL ISF-auto (gemiddelde over ${window.size} dagen): " + avgShift.entries
+                .sortedBy { it.key }
+                .joinToString { (h, pct) -> "%02d:00 %+.1f%%".format(h, pct) },
+            listValues = emptyList(),
+            iCfg = effectiveProfile.iCfg
+        )
+        if (ps == null) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
+                   oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+                   hoursAtCapCount = avgHoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
+        logRow(db, now, today, mode, applied = true, skipReason = "",
+               oldJson = avgOldJson, newJson = avgNewJson, shiftJson = avgShiftJson,
+               hoursAtCapCount = avgHoursAtCap.size, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+    }
+
+    /**
+     * Accepteren van het openstaande MANUAL-voorstel — zelfde rol als
+     * FclNightBasalAutoAdjuster.applyPending(). Bewust NIET via de gedeelde
+     * schrijf-logica van evaluateInternal() (zie kdoc bovenaan dit bestand).
+     */
+    suspend fun applyPending(
+        context: Context,
+        profileFunction: ProfileFunction,
+        profileRepository: ProfileRepository
+    ): Boolean {
+        val db = FCLAnalyzerDatabase.getInstance(context)
+        val lastAppliedAt = db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L
+        val since = lastChangeDate(context, lastAppliedAt)
+        val window = collectRecentDailyShifts(db, since, MANUAL_MAX_WINDOW_DAYS)
+        if (window.size < MANUAL_COOLDOWN_DAYS) return false
+        val shiftByHour = weightedAverageShift(window)
+        val newest = window.last()
+
+        val effectiveProfile = profileFunction.getProfile() ?: return false
+        val originalName = profileFunction.getOriginalProfileName()
+        val profiles = profileRepository.profiles.value
+        val index = profiles.indexOfFirst { it.name == originalName }
+        if (index == -1) return false
+        val current = profiles[index]
+
+        // getIsfMgdlTimeFromMidnight() — geverifieerd correct, zie kdoc bovenaan dit bestand.
+        val currentHourly = HashMap<Int, Double>()
+        for (h in 0..23) currentHourly[h] = effectiveProfile.getIsfMgdlTimeFromMidnight(h * 3600)
+        val baseline = FclIsfAutoAdjustStore.getBaseline(context) ?: currentHourly
+
+        val (newHourly, hoursAtCap) = computeNewHourly(currentHourly, shiftByHour, baseline)
+        FclIsfAutoAdjustStore.updateCapHitCounters(context, hoursAtCap, shiftByHour.keys)
+
+        val now = System.currentTimeMillis()
+        val today = LocalDate.now(AMSTERDAM).toString()
+        val mode = app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.MANUAL
+        val oldJson = hourlyToJson(currentHourly)
+        val newJson = hourlyToJson(newHourly)
+        val shiftJson = JSONObject().apply { shiftByHour.forEach { (h, v) -> put(h.toString(), v) } }.toString()
+
+        // .isf hieronder — geverifieerd tegen SingleProfile.kt (profile.zip, 16/08/2026): bevestigd correct.
+        val newSingleProfile = current.deepClone().apply { isf = buildIsfJsonArray(newHourly) }
+
+        val errors = profileRepository.validateStructured(newSingleProfile)
+        if (errors.isNotEmpty()) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "validatie geweigerd: " + errors.joinToString { it.message },
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = newest.samplesAnalyzed, avgConfidence = newest.avgConfidence)
+            return false
+        }
+
+        val replaceResult = profileRepository.replace(index, newSingleProfile)
+        if (replaceResult.isFailure) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "ProfileRepository.replace() mislukt: ${replaceResult.exceptionOrNull()?.message}",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = newest.samplesAnalyzed, avgConfidence = newest.avgConfidence)
+            return false
+        }
+
+        val newProfileStore = profileRepository.profile.value
+        if (newProfileStore == null) {
+            logRow(db, now, today, mode, applied = false, skipReason = "geen ProfileStore na replace()",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = newest.samplesAnalyzed, avgConfidence = newest.avgConfidence)
+            return false
+        }
+
+        val ps = profileFunction.createProfileSwitch(
+            profileStore = newProfileStore,
+            profileName = current.name,
+            durationInMinutes = 0,
+            percentage = 100,
+            timeShiftInHours = 0,
+            timestamp = now,
+            action = Action.PROFILE_SWITCH,
+            source = Sources.Aaps,
+            note = "FCL ISF-auto (geaccepteerd, gemiddelde over ${window.size} dagen): " + shiftByHour.entries
+                .sortedBy { it.key }
+                .joinToString { (h, pct) -> "%02d:00 %+.1f%%".format(h, pct) },
+            listValues = emptyList(),
+            iCfg = effectiveProfile.iCfg
+        )
+        if (ps == null) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "createProfileSwitch() geweigerd (validatie/pompcompatibiliteit)",
+                   oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+                   hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = newest.samplesAnalyzed, avgConfidence = newest.avgConfidence)
+            return false
+        }
+
+        logRow(db, now, today, mode, applied = true, skipReason = "",
+               oldJson = oldJson, newJson = newJson, shiftJson = shiftJson,
+               hoursAtCapCount = hoursAtCap.size, samplesAnalyzed = newest.samplesAnalyzed, avgConfidence = newest.avgConfidence)
+        return true
+    }
+
+    private fun computeNewHourly(
+        currentHourly: Map<Int, Double>,
+        shiftByHour: Map<Int, Double>,
+        baseline: Map<Int, Double>
+    ): Pair<Map<Int, Double>, Set<Int>> {
+        val hoursAtCap = mutableSetOf<Int>()
+        val newHourly = HashMap<Int, Double>()
+        var totalOld = 0.0
+        var totalNew = 0.0
+        for (h in 0..23) {
+            val curVal = currentHourly[h] ?: 0.0
+            totalOld += curVal
+            val shiftPct = shiftByHour[h]
+            var newVal = if (shiftPct != null) cleanPrecision(curVal * (1.0 + shiftPct / 100.0)) else curVal
+            if (shiftPct != null) {
+                val clamped = clampToBaseline(newVal, baseline[h] ?: curVal)
+                if (clamped != newVal) hoursAtCap.add(h)
+                newVal = clamped
+            }
+            newHourly[h] = newVal
+            totalNew += newVal
+        }
+
+        if (totalOld > 0.0 && abs(totalNew - totalOld) / totalOld > DAILY_TOTAL_CAP_FRAC) {
+            val allowedTotal = totalOld * (1.0 + DAILY_TOTAL_CAP_FRAC * sign(totalNew - totalOld))
+            val deltaWanted = totalNew - totalOld
+            val deltaAllowed = allowedTotal - totalOld
+            val scale = if (deltaWanted != 0.0) deltaAllowed / deltaWanted else 0.0
+            for (h in 0..23) {
+                val curVal = currentHourly[h] ?: 0.0
+                val delta = (newHourly[h] ?: curVal) - curVal
+                var scaledVal = cleanPrecision(curVal + delta * scale)
+                if (shiftByHour.containsKey(h)) {
+                    val clamped = clampToBaseline(scaledVal, baseline[h] ?: curVal)
+                    if (clamped != scaledVal) hoursAtCap.add(h)
+                    scaledVal = clamped
+                }
+                newHourly[h] = scaledVal
+            }
+        }
+        return newHourly to hoursAtCap
+    }
+
+    private fun clampToBaseline(value: Double, baselineValue: Double): Double {
+        val low = cleanPrecision(baselineValue * (1.0 - CUMULATIVE_DRIFT_CAP_FRAC)).coerceAtLeast(1.0)
+        val high = cleanPrecision(baselineValue * (1.0 + CUMULATIVE_DRIFT_CAP_FRAC))
+        return value.coerceIn(low, high)
+    }
+
+    private fun cleanPrecision(value: Double): Double {
+        return Math.round(value * 1000.0) / 1000.0
+    }
+
+    private fun hourlyToJson(hourly: Map<Int, Double>): String {
+        val obj = JSONObject()
+        for (h in 0..23) obj.put(h.toString(), hourly[h] ?: 0.0)
+        return obj.toString()
+    }
+
+    /** JSON-arrayvorm is hetzelfde als buildBasalJsonArray() in
+     *  FclNightBasalAutoAdjuster.kt (time/timeAsSeconds/value); de
+     *  doelveld-naam (.isf) is geverifieerd, zie kdoc bovenaan dit bestand. */
+    private fun buildIsfJsonArray(hourly: Map<Int, Double>): JSONArray {
+        val arr = JSONArray()
+        for (h in 0..23) {
+            arr.put(
+                JSONObject()
+                    .put("time", "%02d:00".format(h))
+                    .put("timeAsSeconds", h * 3600)
+                    .put("value", hourly[h] ?: 0.0)
+            )
+        }
+        return arr
+    }
+
+    private suspend fun logRow(
+        db: FCLAnalyzerDatabase,
+        now: Long,
+        today: String,
+        mode: app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode,
+        applied: Boolean,
+        skipReason: String,
+        oldJson: String,
+        newJson: String,
+        shiftJson: String,
+        hoursAtCapCount: Int,
+        samplesAnalyzed: Int,
+        avgConfidence: Double
+    ) {
+        db.isfAutoAdjustLogDao().insert(
+            IsfAutoAdjustLogEntity(
+                timestampMs = now,
+                localDate = today,
+                mode = mode.name,
+                applied = applied,
+                skipReason = skipReason,
+                oldIsfJson = oldJson,
+                newIsfJson = newJson,
+                perHourShiftJson = shiftJson,
+                hoursAtCapCount = hoursAtCapCount,
+                samplesAnalyzed = samplesAnalyzed,
+                avgConfidence = avgConfidence
+            )
+        )
+    }
+}

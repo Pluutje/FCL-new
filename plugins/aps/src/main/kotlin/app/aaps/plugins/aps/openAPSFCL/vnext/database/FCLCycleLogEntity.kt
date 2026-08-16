@@ -11,7 +11,7 @@ import androidx.room.PrimaryKey
  * de geïntegreerde FCL Analyzer volledig kan werken zonder informatieverlies.
  *
  * ────────────────────────────────────────────────────────────────────────
- * WAAROM DEZE STRUCTUUR — @Embedded-groepering (05/07/2026, Ecko)
+ * WAAROM DEZE STRUCTUUR — @Embedded-groepering (05/07/2026)
  * ────────────────────────────────────────────────────────────────────────
  * Deze entity had eerder ~150 velden als ÉÉN platte constructor. Dat
  * veroorzaakte een java.lang.VerifyError ("invalid arg count" in
@@ -40,7 +40,7 @@ import androidx.room.PrimaryKey
  *
  * Kolommen zijn gegroepeerd conform de CSV header van FCLvNextCsvLogger.
  *
- * v7→v8 (05/07/2026, Ecko): +curveFitR2, +curveAcceleration, +toppingOutBoost
+ * v7→v8 (05/07/2026): +curveFitR2, +curveAcceleration, +toppingOutBoost
  * in TrendsFields (curve-fit confidence-gate, zie FCLvNextTrends.kt /
  * FCLvNext.kt). Versiebump 13→15 (NIET 14 — die versie is al eerder kortstondig
  * gedeclareerd bij de mislukte platte-constructor-poging; Room vergelijkt
@@ -49,7 +49,7 @@ import androidx.room.PrimaryKey
  * fallbackToDestructiveMigration() in FCLAnalyzerDatabase.kt dropt en
  * hermaakt alle tabellen — geen handmatige Migration nodig.
  *
- * v8→v9 (16/07/2026, Ecko): +codeVersion, +appRestartThisCycle (in
+ * v8→v9 (16/07/2026): +codeVersion, +appRestartThisCycle (in
  * ContextFields), +aigfPct/+aigfActive/+aigfReason (in DeliveryFields),
  * +episodePeakCommitU (in ForensicFields) — zie FCL_CODE_VERSION in
  * FCLvNext.kt voor de aanleiding. ANDERS DAN v7→v8/v13→16: dit is de eerste
@@ -106,7 +106,7 @@ data class ContextFields(
     val nachtFactorPct: Int,
     val doseDistributionStyle: String,
     val nightResponseStyle: String,
-    // v8→v9 (16/07/2026, Ecko) — zie FCL_CODE_VERSION/isFirstCycleSinceInit
+    // v8→v9 (16/07/2026) — zie FCL_CODE_VERSION/isFirstCycleSinceInit
     // in FCLvNext.kt. Historische rijen van vóór deze migratie krijgen "" / false.
     val codeVersion: String = "",
     val appRestartThisCycle: Boolean = false
@@ -153,12 +153,17 @@ data class DeliveryFields(
     // 0.0 als geen externe bolus gedetecteerd. Gebruikt door analyzer voor
     // correcte totalInsulinDelivered en hasManualCorrection markering.
     val externalBolusU: Double = 0.0,
-    // v8→v9 (16/07/2026, Ecko) — AIGF stond tot nu toe in geen enkele kolom,
+    // v8→v9 (16/07/2026) — AIGF stond tot nu toe in geen enkele kolom,
     // ondanks actieve invloed op dosering. aigfPct is de daadwerkelijk
     // TOEGEPASTE (gladgestreken) waarde, zie aigfSmoothedPct in FCLvNext.kt.
     val aigfPct: Double = 100.0,
     val aigfActive: Boolean = false,
-    val aigfReason: String = ""
+    val aigfReason: String = "",
+    // v9->v10 (16/08/2026) — component B apart, zie kdoc bij
+    // FCLvNextCsvLogRow.aigfBPct.
+    val aigfBPct: Double = 100.0,
+    val aigfBActive: Boolean = false,
+    val aigfBReason: String = ""
 )
 
 // ── TRENDS ────────────────────────────────────────────────────────────────
@@ -168,7 +173,7 @@ data class TrendsFields(
     val recentSlope: Double,
     val recentDelta5m: Double,
     val consistency: Double,
-    // Curve-fit lane (05/07/2026, Ecko) — zie FCLvNextTrends.kt. curveFitR2 is
+    // Curve-fit lane (05/07/2026) — zie FCLvNextTrends.kt. curveFitR2 is
     // de fit-kwaliteit (0..1) van de parabool over de laatste ~45 min ruwe BG;
     // curveAcceleration is de acceleratie (mmol/L/uur²) uit diezelfde fit.
     // toppingOutBoost is de extra decay-steilheid (0..0.25) die is toegepast
@@ -281,11 +286,11 @@ data class ForensicFields(
     val lateDecayMul: Double,
     val episodeCommitNr: Int,
     val iobOvershootFactor: Double,
-    // 11/07/2026 (Ecko) — puur diagnostisch, geen invloed op dosering. Zie
+    // 11/07/2026 — puur diagnostisch, geen invloed op dosering. Zie
     // kdoc bij lastBgStijgtNogFors in FCLvNext.kt.
     val bgStijgtNogFors: Boolean = false,
     val commitNrUsed: Int = 0,
-    // v8→v9 (16/07/2026, Ecko) — de taper-clamp-ankerwaarde zelf, zie
+    // v8→v9 (16/07/2026) — de taper-clamp-ankerwaarde zelf, zie
     // PEAK_ANCHOR_THRESHOLD_FRAC in FCLvNext.kt. Tot nu toe alleen indirect
     // af te leiden uit commitDoseFinal/lateDecayMul.
     val episodePeakCommitU: Double = 0.0

@@ -35,7 +35,7 @@ class FCLvNextBgHistoryProvider(
         val bgMmol: Double
     )
 
-    // ✅ NIEUW (07/08/2026, Ecko-diagnose "timing-gaten") — onafhankelijke,
+    // ✅ NIEUW (07/08/2026-diagnose "timing-gaten") — onafhankelijke,
     // kleine fallback-buffer bovenop AAPS's eigen bucketed-data-cache
     // (getLastHours() hierboven).
     //
@@ -118,14 +118,14 @@ class FCLvNextBgHistoryProvider(
      * meegenomen — de trendberekening gebruikt actuele tijdstempels en
      * schaalt er correct mee.
      *
-     * Achtergrond (23/06/2026, Ecko): bij FSL-2 via Juggluco→xDrip+ ontvangt
+     * Achtergrond (23/06/2026): bij FSL-2 via Juggluco→xDrip+ ontvangt
      * AAPS soms twee metingen binnen 1 minuut (BLE + NFC-scan tegelijk). AAPS
      * buckette de tweede als filledGap. De !filledGap-filter gooide die er
      * dan uit, waardoor het puntenaantal in het 2-uursvenster kunstmatig laag
      * bleef en FCLvNext ten onrechte skipte. Het echte timing-interval
      * (5m ± 6s zoals zichtbaar in xDrip) is geen probleem.
      */
-    // ✅ VERHOOGD (02/07/2026, Ecko): Samsung A36 + FSL-2 + Juggluco→xDrip+→AAPS
+    // ✅ VERHOOGD (02/07/2026): Samsung A36 + FSL-2 + Juggluco→xDrip+→AAPS
     // geeft soms aaneengesloten reeksen van filledGap-punten wanneer de BLE-verbinding
     // kort wegvalt (typisch 10-20 minuten). Met MAX_GAP_MINUTES=10 werd één zo'n
     // reeks al afgewezen terwijl de punten er wel gewoon inzaten als interpolatie.

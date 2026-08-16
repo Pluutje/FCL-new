@@ -79,7 +79,7 @@ class DetermineBasalFCL @Inject constructor(
     private val iobCobCalculator: IobCobCalculator,
     private val profileFunction: ProfileFunction,
     private val cycleLogRepository: app.aaps.plugins.aps.openAPSFCL.vnext.database.FCLCycleLogRepository,
-    // ── Automatisch nacht-basaal-profiel bijstellen (24/07/2026, Ecko) ──────
+    // ── Automatisch nacht-basaal-profiel bijstellen (24/07/2026) ──────
     // Alleen gebruikt om door te geven aan FclNightAiAdvisorScheduler.onCycle();
     // DetermineBasalFCL zelf doet er verder niets mee. Zie kdoc bij
     // FclNightBasalAutoAdjuster.kt voor de volledige toelichting.
@@ -115,7 +115,7 @@ class DetermineBasalFCL @Inject constructor(
         )
 
     init {
-        // 26/07/2026 (Ecko) — FclProfileBridge: maakt de al-geïnjecteerde
+        // 26/07/2026 — FclProfileBridge: maakt de al-geïnjecteerde
         // profileFunction/profileRepository beschikbaar voor de UI-laag
         // (ProfileAutoAdjustCard's Accepteren-knop, zie FclProfileBridge.kt
         // voor de volledige toelichting). Eenmalig bij constructie, net als
@@ -123,7 +123,7 @@ class DetermineBasalFCL @Inject constructor(
         // per cyclus.
         app.aaps.plugins.aps.openAPSFCL.vnext.FclProfileBridge.set(profileFunction, profileRepository)
 
-        // ✅ NIEUW (01/07/2026, Ecko): AI-parameteradviseur koppelen aan episode-
+        // ✅ NIEUW (01/07/2026): AI-parameteradviseur koppelen aan episode-
         // afsluiting. FclLearnerLogger.logEpisode() is het exacte moment waarop
         // alle episode-metrics beschikbaar zijn — logischer dan DetermineBasal-cyclus
         // (die heeft de EpisodeMetrics niet) of een aparte WorkManager-job.
@@ -139,7 +139,7 @@ class DetermineBasalFCL @Inject constructor(
             )
         }
 
-        // ✅ NIEUW (02/07/2026, Ecko): Activiteitslogger koppelen aan episodestart.
+        // ✅ NIEUW (02/07/2026): Activiteitslogger koppelen aan episodestart.
         // FCLvNext heeft geen directe dependency op PersistenceLayer; de callback
         // stuurt de benodigde stap-opvraag via DetermineBasalFCL die wél
         // persistenceLayer heeft.
@@ -219,7 +219,7 @@ class DetermineBasalFCL @Inject constructor(
         consoleError.add(msg)
     }
 
-    // ── AIGF: N-uurs-calorietotal (14/07/2026, Ecko; verallgemeend 28/07/2026
+    // ── AIGF: N-uurs-calorietotal (14/07/2026, de gebruiker; verallgemeend 28/07/2026
     // voor de A/B-herziening — zie kdoc bij FclActivitySensitivity.kt) ──────
     // Zelfde methode/grenzen als FclActivityLogger.logEpisodeStart() gebruikt
     // voor cal_totaal_8h (losse 1-uurs deelvensters, opgeteld) — BEWUST niet
@@ -258,7 +258,7 @@ class DetermineBasalFCL @Inject constructor(
         return if (valid.isEmpty()) -1.0 else valid.sum()
     }
 
-    // ── FclWakeDetector-koppeling (28/07/2026, Ecko) ────────────────────────
+    // ── FclWakeDetector-koppeling (28/07/2026) ────────────────────────
     // FCLvNext.kt heeft geen directe PersistenceLayer-toegang, dus deze
     // wrapper haalt het stappental van de laatste FclWakeDetector.STEP_
     // WINDOW_MIN minuten op en geeft dat door aan checkAndUpdate() — elke
@@ -266,7 +266,7 @@ class DetermineBasalFCL @Inject constructor(
     // als hierboven), zodat de allereerste overschrijding van vandaag zo
     // snel mogelijk na het moment zelf wordt vastgelegd.
     //
-    // Tijd-fallback (28/07/2026, Ecko: "dagstart + 1 uur pakken als
+    // Tijd-fallback (28/07/2026, de gebruiker: "dagstart + 1 uur pakken als
     // trigger"): op een dag met weinig stappen (geen hondenwandeling, ziek)
     // zou de stappen-trigger nooit afgaan en zou component B tot middernacht
     // "onbekend" blijven. `ochtendStartFallbackDeadlineMs()` herbruikt de
@@ -462,7 +462,7 @@ class DetermineBasalFCL @Inject constructor(
         targetMgdl += activity.targetAdjust * 18.0
 
         // ─────────────────────────────────────────────
-        // 🍽️⏰ MAALTIJD-TIJD-ANTICIPATIE — VERWIJDERD (29/07/2026, Ecko)
+        // 🍽️⏰ MAALTIJD-TIJD-ANTICIPATIE — VERWIJDERD (29/07/2026)
         // ─────────────────────────────────────────────
         // Het hele FclMealTimeAnticipation-mechanisme (05/07/2026) is
         // verwijderd. In de praktijk (week 22-29/7) vuurde het ~10-13x per
@@ -474,7 +474,7 @@ class DetermineBasalFCL @Inject constructor(
         // target-verlaging bovenop de toch al lopende eerste volle commit —
         // concreet aangetoond bij de 3,01U-bolus om 29/07 11:03 (WFF-doel
         // 0,33→3,10U) en twee vergelijkbare gevallen (24/07 15:54, 28/07
-        // 13:48). Ecko's conclusie: de kans op een te hoge dosis bij iets
+        // 13:48). de gebruikers conclusie: de kans op een te hoge dosis bij iets
         // dat geen echte maaltijd is (een koekje bij de koffie) woog
         // zwaarder dan de bedoelde marginale voorsprong bij een echte
         // maaltijd. FclMealTimeAnticipation.kt is niet langer onderdeel van
@@ -488,7 +488,7 @@ class DetermineBasalFCL @Inject constructor(
         val dayNightHelper = FCLvNextDayNightHelper(preferences)
         val isNight: Boolean = dayNightHelper.isNightNow()
 
-        // Nacht-AI-adviseur — randdetectie (23/07/2026, Ecko). Puur een
+        // Nacht-AI-adviseur — randdetectie (23/07/2026). Puur een
         // 1-regel trigger: alle logica (dedup per dag, achtergrond-thread,
         // opslag) zit volledig in FclNightAiAdvisorScheduler/-Store, los van
         // de bestaande (dag-)AI-adviseur. onCycle() keert altijd direct terug
@@ -496,7 +496,15 @@ class DetermineBasalFCL @Inject constructor(
         app.aaps.plugins.aps.openAPSFCL.vnext.advisor.ai.night.FclNightAiAdvisorScheduler
             .onCycle(context, isNight, profileFunction, profileRepository)
 
-        // Geleidelijke nacht-overgang (17/07/2026, Ecko) — zie kdoc bij
+        // ISF-auto-adjust (16/08/2026) — zelfde 1-regel-triggerpatroon als de
+        // nacht-AI-adviseur hierboven; alle dedup/mode-logica zit in
+        // FclIsfAutoAdjuster zelf. Standaard UIT (FclSystemMode.OFF), dus dit
+        // is een goedkope no-op tot bewust aangezet — zie kdoc bij
+        // FclIsfAutoAdjuster voor de geverifieerde profiel-accessors.
+        app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf.FclIsfAutoAdjuster
+            .onCycle(context, profileFunction, profileRepository, cycleLogRepository)
+
+        // Geleidelijke nacht-overgang (17/07/2026) — zie kdoc bij
         // FCLvNextDayNightHelper.minutesSinceNightStart() en
         // FclNachtOvergangSettings.kt voor de volledige aanleiding/afweging.
         // nightTransitionFraction: 0.0 = volledig dag-gedrag, 1.0 = volledig
@@ -517,7 +525,7 @@ class DetermineBasalFCL @Inject constructor(
         // Dag: hoger = agressievere AAPS micro-bolussen bij hoge BG.
         // Nacht: lager = voorzichtigere AAPS correcties (default 0.9 = 10% minder).
         // Range 0.9-1.5. Heeft geen effect op FCLvNext zelf.
-        // 17/07/2026 (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip.
+        // 17/07/2026: lineair gemengd i.p.v. harde dag/nacht-knip.
         val aaps_multiplier_day = preferences.get(DoubleKey.fcl_aaps_mulitplier_day)
         val aaps_multiplier_night = preferences.get(DoubleKey.fcl_aaps_mulitplier_night)
         val aaps_multiplier =
@@ -548,7 +556,7 @@ class DetermineBasalFCL @Inject constructor(
 
         //   val bgHistoryPoints = getHistoricalBGData(2)
 
-        // ✅ NIEUW (07/08/2026, Ecko-diagnose "timing-gaten") — registreer de
+        // ✅ NIEUW (07/08/2026-diagnose "timing-gaten") — registreer de
         // actuele meting (die hierboven al gevalideerd is: bg/minAgo/noise-
         // checks liggen allemaal VOOR dit punt, met early-return) in
         // FCLvNextBgHistoryProvider's eigen fallback-buffer, onafhankelijk
@@ -585,7 +593,7 @@ class DetermineBasalFCL @Inject constructor(
                 null
             }
 
-        // ✅ VERLAAGD (02/07/2026, Ecko): Samsung A36 + FSL-2 + Juggluco→xDrip+ geeft
+        // ✅ VERLAAGD (02/07/2026): Samsung A36 + FSL-2 + Juggluco→xDrip+ geeft
         // regelmatig reeksen waarbij 5-6 goede punten overblijven na gap-filtering.
         // Was 7 (35 min); verlaagd naar 5 (≈25 min) samen met MAX_GAP_MINUTES=15
         // in FCLvNextBgHistoryProvider. Met 5 goede punten is slope en eerste
@@ -637,7 +645,7 @@ class DetermineBasalFCL @Inject constructor(
             val pendingBolusU10min = (realDelivered10min.bolusU - realDelivered8min.bolusU)
                 .coerceAtLeast(0.0)
 
-            // ✅ NIEUW (14/07/2026, Ecko; herzien 28/07/2026 — twee vensters
+            // ✅ NIEUW (14/07/2026, de gebruiker; herzien 28/07/2026 — twee vensters
             // i.p.v. één, zie kdoc bij FclActivitySensitivity.kt): elke cyclus
             // opnieuw berekend. Dit zijn de "huidige waarden" die FCLvNext.kt
             // tegen hun eigen historische baseline afleggen (component A resp.
@@ -666,7 +674,7 @@ class DetermineBasalFCL @Inject constructor(
                 realDeliveredBolusU = realDelivery.bolusU,
                 pendingBolusU10min = pendingBolusU10min,
                 profileBasalUH = profile_current_basal,
-                // 22/07/2026 (Ecko): werkelijke, pomptype-afhankelijke max-basaal
+                // 22/07/2026: werkelijke, pomptype-afhankelijke max-basaal
                 // (zie computeRealMaxBasalUh in OpenAPSFCLPlugin.kt) — vervangt de
                 // vaste 15.0 die voorheen in FCLvNextConfig stond.
                 realMaxBasalUh = profile.max_basal,
@@ -693,7 +701,7 @@ class DetermineBasalFCL @Inject constructor(
                 else bolusAmount + (basalRate * (cycleMin / 60.0))
 
             // max bolus uit prefs (zelfde als config maxSMB gebruikt) — 17/07/2026
-            // (Ecko): lineair gemengd i.p.v. harde dag/nacht-knip, zodat het
+            // (de gebruiker): lineair gemengd i.p.v. harde dag/nacht-knip, zodat het
             // getoonde cijfer op het statusscherm klopt met wat er echt gebeurt.
             val maxBolusU_day = preferences.get(DoubleKey.max_bolus_day)
             val maxBolusU_night = preferences.get(DoubleKey.max_bolus_night)
@@ -707,7 +715,7 @@ class DetermineBasalFCL @Inject constructor(
                 )
 
 
-            // 06/07/2026 (Ecko) — laatste-uur activiteitsindicatie voor de status-
+            // 06/07/2026 — laatste-uur activiteitsindicatie voor de status-
             // formatter (Activiteit-sectie). Zelfde patroon/bron als
             // FclActivityLogger.kt, maar bewust hier apart en licht gehouden:
             // dit draait elke cyclus (i.p.v. alleen bij episodestart) en toont
@@ -739,7 +747,7 @@ class DetermineBasalFCL @Inject constructor(
                 }
             } catch (e: Exception) { -1.0 }
 
-            // 06/07/2026 (Ecko) — meest recente gedetecteerde activiteit, voor de
+            // 06/07/2026 — meest recente gedetecteerde activiteit, voor de
             // status-formatter. "Latest" (niet vensterspecifiek) omdat dit de
             // huidige/laatst-bekende toestand toont, niet een terugkijkend uur.
             val recentActivity = try {
@@ -752,11 +760,11 @@ class DetermineBasalFCL @Inject constructor(
                 delta5m = trendAnalysis?.recentDelta5m,
                 slopeHr = trendAnalysis?.firstDerivative,
                 predictedPeak = advice.predictedPeak,
-                // 06/07/2026 (Ecko) — zelfde bron/pad als FCLvNext zelf gebruikt
+                // 06/07/2026 — zelfde bron/pad als FCLvNext zelf gebruikt
                 // voor trends/slope (zie FCLvNextBgHistoryProvider.kt), dus dit
                 // toont daadwerkelijk wat FCLvNext ziet, niet een aparte/losse lookup.
                 last3DbPoints = bgHistoryProvider.getLastHoursResilient(1).takeLast(3),
-                // 22/07/2026 (Ecko) — leesbare pompnaam + werkelijke max-basaal
+                // 22/07/2026 — leesbare pompnaam + werkelijke max-basaal
                 // (dezelfde, al bestaande pomptype-bewuste waarde als
                 // profile.max_basal, zie computeRealMaxBasalUh in
                 // OpenAPSFCLPlugin.kt) voor de nieuwe Pomp-sectie.
@@ -764,7 +772,7 @@ class DetermineBasalFCL @Inject constructor(
                     activePlugin.activePump.model().description
                 } catch (e: Exception) { "" },
                 pumpMaxBasalUh = profile.max_basal,
-                // 22/07/2026 (Ecko) — 50 E/u bleek correct (U200-insuline in een
+                // 22/07/2026 — 50 E/u bleek correct (U200-insuline in een
                 // pomp die mechanisch 0,25 mL/u max haalt); geen debug meer nodig.
                 // Huidige basaalstand blijft wel zichtbaar (heeft meerwaarde).
                 pumpCurrentBasalUh = try {
@@ -816,7 +824,7 @@ class DetermineBasalFCL @Inject constructor(
         } else {
             consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/5 (min 25 min history)")
 
-            // Sensorwissel/gat-duiding (23/07/2026, Ecko) — dit skip-pad kan niet
+            // Sensorwissel/gat-duiding (23/07/2026) — dit skip-pad kan niet
             // veilig "overruled" worden: met te weinig recente, betrouwbare
             // BG-punten kan FCLvNext een sensorwissel/-warmup niet onderscheiden
             // van een echte sensorstoring/-dropout, en precies dát verschil kan
@@ -838,7 +846,7 @@ class DetermineBasalFCL @Inject constructor(
                         "een vingerprik te vergelijken en zo nodig te kalibreren."
                 )
             }
-            // BUGFIX (11/07/2026, Ecko): deze tak deed voorheen verder niets — een
+            // BUGFIX (11/07/2026): deze tak deed voorheen verder niets — een
             // op dat moment lopende, verhoogde tijdelijke basaal bleef gewoon
             // doorlopen, want er werd geen rT ingesteld. Zelfde risicoklasse als
             // de eerdere "glucoseStatus == null"-fix in OpenAPSFCLPlugin.kt, maar

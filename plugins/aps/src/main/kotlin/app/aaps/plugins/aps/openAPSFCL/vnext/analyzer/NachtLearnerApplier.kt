@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 import android.content.Context
 
 /**
- * NachtLearnerApplier (26/07/2026, Ecko) — accepteren/afwijzen van het
+ * NachtLearnerApplier (26/07/2026) — accepteren/afwijzen van het
  * openstaande NACHT-Learner (NF-schaal) MANUAL-voorstel. Analoog aan
  * FclLearnerApplier, maar schrijft via ConfigOverrideWriter.writeWithNfLevel
  * i.p.v. writeWithStvAndParams — exact hetzelfde pad dat AUTO-modus al

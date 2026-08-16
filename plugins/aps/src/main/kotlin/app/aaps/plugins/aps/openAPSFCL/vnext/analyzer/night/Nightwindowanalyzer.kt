@@ -21,7 +21,7 @@ enum class NightWindowClass {
     DISTURBED
 }
 
-// Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — de
+// Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026) — de
 // Nacht-AI-adviseur (FclNightAiAdvisorScheduler/-ResponseParser) is nu het
 // enige basaal-adviespad. Reden: twee onafhankelijke adviezen naast elkaar
 // (met licht verschillende percentages) was niet eenduidig genoeg om op te
@@ -36,14 +36,14 @@ object NightWindowAnalyzer {
     private const val LAST_WINDOW_START_HOUR = 6
     private const val LAST_WINDOW_START_MINUTE = 30
 
-    // 30/07/2026 (Ecko, op verzoek) — was: private const val BASAL_SHIFT_MINUTES
-    // = 75L, een vaste aanname. Ecko's terugkoppeling: dit is geen fysieke
+    // 30/07/2026 (op verzoek) — was: private const val BASAL_SHIFT_MINUTES
+    // = 75L, een vaste aanname. de gebruikers terugkoppeling: dit is geen fysieke
     // "tijd tot een basaalwijziging BG beïnvloedt" maar een rekenkundige
     // eigenschap van hoe AAPS basaal-IOB berekent — calculateAbsoluteIobFrom-
     // BaseBasals() in IobCobCalculatorPlugin.kt zet het profiel-basaal om in
     // een stroom synthetische 5-min-"bolusjes" die door dezelfde
     // ICfg.iobCalcForTreatment() gaan als een echte bolus (bevestigd via de
-    // door Ecko aangeleverde broncode). Daarin is `tp = peak` (ICfg.peak, in
+    // door de gebruiker aangeleverde broncode). Daarin is `tp = peak` (ICfg.peak, in
     // minuten) LETTERLIJK het piektijd-argument van de bilineaire
     // activiteitscurve — dus hoe snel een aanhoudend tekort tegenover het
     // profiel (bv. tijdens ultra smooth, waar >95% van de TDD via de
@@ -55,7 +55,7 @@ object NightWindowAnalyzer {
     // build() hieronder) voor het geval de actieve profiel/ICfg niet
     // beschikbaar is bij het bouwen van de vensters — de aanroepers
     // (FclNightAiAdvisorScheduler.kt/Fclanalyzerscreen.kt) geven voortaan
-    // de daadwerkelijke ICfg.peak van het actieve profiel door (bij Ecko nu
+    // de daadwerkelijke ICfg.peak van het actieve profiel door (bij de gebruiker nu
     // 50 min, Lyumjev U200).
     private const val DEFAULT_BASAL_SHIFT_MINUTES = 75L
 
@@ -208,7 +208,7 @@ object NightWindowAnalyzer {
             overlappingEpisodeCount = overlappingEpisodes.size
         )
 
-        // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — zie
+        // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026) — zie
         // toelichting bovenaan dit bestand. driftSignal/driftStrength/driftReason
         // blijven als kolommen bestaan (geen DB-migratie nodig) maar krijgen nu
         // vaste, neutrale waarden i.p.v. een echte berekening.
@@ -448,7 +448,7 @@ object NightWindowAnalyzer {
         return weight.coerceIn(0.0, 1.0)
     }
 
-    // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026, Ecko) — zie
+    // Basaal-adviseur (regel-gebaseerd) verwijderd (24/07/2026) — zie
     // de toelichting bij het verwijderde NightDriftSignal-enum hierboven.
     // computeDriftSignal(), computeDriftStrength(), buildDriftReason() en
     // computeAdvisedBasal() zaten hier vroeger; de Nacht-AI-adviseur is nu het

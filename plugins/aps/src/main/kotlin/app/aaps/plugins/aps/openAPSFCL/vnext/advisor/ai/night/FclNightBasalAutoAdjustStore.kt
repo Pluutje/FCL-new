@@ -8,7 +8,7 @@ import org.json.JSONObject
  * FCL Nacht-basaal — automatisch bijstellen — Store
  * ============================================================================
  *
- * 24/07/2026 (Ecko). Eigen SharedPreferences-bestand, zelfde patroon als
+ * 24/07/2026. Eigen SharedPreferences-bestand, zelfde patroon als
  * FclNightAiAdvisorStore — losstaand van alle andere opslag. Bewaart:
  *  - de modus, standaard UIT
  *  - het basisprofiel (per-uur basaalwaarden) waar de ±25%-drift-cap in
@@ -16,7 +16,7 @@ import org.json.JSONObject
  *    EERSTE toepassing (voorstel of automatisch) en daarna alleen nog
  *    gewijzigd via een expliciete, handmatige "opnieuw vastleggen"-actie
  *    (zie resetBaseline hieronder) — NOOIT automatisch verschoven, precies
- *    zoals met Ecko besproken (24/07/2026): "mocht hij ooit tegen de max
+ *    zoals met de gebruiker besproken (24/07/2026): "mocht hij ooit tegen de max
  *    van de 25% aanlopen dan zouden we het oorspronkelijke ook handmatig
  *    aan moeten kunnen passen".
  *  - per uur, hoeveel opeenvolgende dagen de drift-cap dat uur heeft geraakt
@@ -24,7 +24,7 @@ import org.json.JSONObject
  *    UI) — gaat naar 0 zodra een uur een dag niet raakt, en helemaal
  *    opnieuw bij een baseline-reset.
  *
- * DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko): de eigen
+ * DAG/NACHT-HERSTRUCTURERING (26/07/2026): de eigen
  * "enum class Mode { OFF, DRY_RUN, AUTO }" is vervangen door de gedeelde
  * FclSystemMode (OFF/AUTO/MANUAL) — zelfde patroon als DFLearner en de
  * dag-AI-adviseur, zodat de nacht-adjuster nu ook een echte MANUAL-modus
@@ -50,7 +50,7 @@ object FclNightBasalAutoAdjustStore {
     // ── Modus ────────────────────────────────────────────────────────────────
 
     /**
-     * Backward-compat (26/07/2026, Ecko): bestaande installaties hebben
+     * Backward-compat (26/07/2026): bestaande installaties hebben
      * mogelijk nog de oude waarden "OFF"/"DRY_RUN"/"AUTO" opgeslagen staan.
      * "DRY_RUN" wordt EXPLICIET naar MANUAL gemapt — bewust NIET via
      * FclSystemMode.fromStored() (die valt voor een onherkende waarde terug
@@ -96,7 +96,7 @@ object FclNightBasalAutoAdjustStore {
     /**
      * Legt een nieuw basisprofiel vast en zet de cap-hit-tellers terug op 0.
      * [source] is puur informatief ("initial" bij de allereerste keer,
-     * "manual-reset" bij een bewuste herziening door Ecko via de UI).
+     * "manual-reset" bij een bewuste herziening door de gebruiker via de UI).
      */
     fun setBaseline(context: Context, hourlyValues: Map<Int, Double>, source: String, nowMs: Long) {
         val obj = JSONObject()

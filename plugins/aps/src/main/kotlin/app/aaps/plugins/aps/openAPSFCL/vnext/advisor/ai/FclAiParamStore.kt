@@ -9,7 +9,7 @@ import android.content.Context
  *
  * Dit is DE enige bron van waarheid voor AI-goedgekeurde parameterwaarden.
  *
- * Architectuur (01/07/2026, Ecko — definitieve versie na meerdere iteraties):
+ * Architectuur (01/07/2026, de gebruiker — definitieve versie na meerdere iteraties):
  *
  *   Basiswaarden (hardcoded defaults)
  *     ↓ leert aan

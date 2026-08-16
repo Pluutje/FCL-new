@@ -19,7 +19,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.TimeFormat
 import java.time.Instant
 
 /**
- * FclSafetyCheckScreen (12/07/2026, Ecko)
+ * FclSafetyCheckScreen (12/07/2026)
  *
  * Nieuwe tab naast Episodes/Advisor/AI Advisor: laat per episode zien of de
  * SafetyInvariantChecker een schending heeft gevonden ("late, te grote
@@ -46,7 +46,7 @@ fun FclSafetyCheckScreen(
         ).sortedByDescending { it.episodeStart }
     }
     val violationCount = results.count { it.hasViolation }
-    // (13/07/2026, Ecko) Complementair aan violationCount: episodes waarbij
+    // (13/07/2026) Complementair aan violationCount: episodes waarbij
     // de dosis geconcentreerd in de tweede helft van de stijging viel, ook
     // als dat niet toevallig vlak bij de piek was (zie kdoc bij
     // MIN_RISE_MINUTES_FOR_HALVES in SafetyInvariantChecker.kt). Puur
@@ -175,7 +175,7 @@ private fun EpisodeSafetyCard(result: EpisodeSafetyResult) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            // ── Helft-verdeling start→piek (13/07/2026, Ecko) ────────────
+            // ── Helft-verdeling start→piek (13/07/2026) ────────────
             // Complementair aan de schendingen hieronder: dit vangt ook een
             // "alles-in-één-klap"-patroon dat niet toevallig vlak bij de
             // piek viel (zie kdoc SafetyInvariantChecker.kt).

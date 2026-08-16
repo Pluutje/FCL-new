@@ -23,7 +23,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerApplier
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerPendingProposal
 
 /**
- * LearnerProposalCard (10/07/2026, Ecko) — toont het openstaande MANUAL-
+ * LearnerProposalCard (10/07/2026) — toont het openstaande MANUAL-
  * voorstel van de Learner, met dezelfde Goedkeuren/Afwijzen-bediening als
  * SuggestionCard.kt bij de AI-adviseur. Anders dan bij de AI (los per
  * parameter) is dit hier altijd ÉÉN samenhangend D/F/vExtra/ref-voorstel —
@@ -48,7 +48,7 @@ fun LearnerProposalCard(context: Context) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            // 10/07/2026 (Ecko) — leesbare uitleg i.p.v. kale getallen (zie
+            // 10/07/2026 — leesbare uitleg i.p.v. kale getallen (zie
             // FclLearnerUitleg.kt). Was voorheen "D=1.023 F=0.818 wmd=1.00
             // wff=0.90 eb=1.14 peakBias=0.60 lcd=0.45" — niet te volgen voor
             // wie de code niet kent.

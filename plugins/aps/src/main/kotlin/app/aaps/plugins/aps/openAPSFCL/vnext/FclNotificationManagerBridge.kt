@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
  * zet de referentie één keer bij het aanmaken van de plugin (init-block),
  * de rest van de code leest via get().
  *
- * (05/07/2026, Ecko — voor de native AAPS-notificatie i.p.v. alleen de
+ * (05/07/2026, de gebruiker — voor de native AAPS-notificatie i.p.v. alleen de
  * Android-systeemnotificatie, zodat de AI Advisor ook als icoontje/melding
  * in AAPS' eigen notificatiesysteem verschijnt, net als pomp/BG/profiel-meldingen.)
  */

@@ -23,13 +23,13 @@ import androidx.compose.ui.unit.dp
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode
 
 /**
- * FclModeStatusLine (10/07/2026, Ecko) — klein, ingetogen statusregeltje voor
+ * FclModeStatusLine (10/07/2026) — klein, ingetogen statusregeltje voor
  * op de Learner-/AI-tabbladen zelf (niet in Settings, waar de bediening
  * staat) — puur ter info, geen interactie. Kleurnuance per stand: grijs
  * (uit), groen (automatisch), amber (handmatig — er staat mogelijk iets op
  * je te wachten).
  *
- * [label] (26/07/2026, Ecko) — optioneel voorvoegsel, bijv. "Dag" / "Nacht",
+ * [label] (26/07/2026) — optioneel voorvoegsel, bijv. "Dag" / "Nacht",
  * nu de Learner een dag- en een nacht-as apart bijhoudt. Leeg (default) geeft
  * exact het oude, ongeprefixte gedrag voor bestaande aanroepplekken.
  */
@@ -45,7 +45,7 @@ fun FclModeStatusLine(mode: FclSystemMode, label: String = "") {
 }
 
 /**
- * FclModeSelectorCard (10/07/2026, Ecko) — herbruikbare aan/uit +
+ * FclModeSelectorCard (10/07/2026) — herbruikbare aan/uit +
  * automatisch/handmatig-schakelaar. Gebruikt door zowel de Learner
  * (DFControlTab) als de AI-adviseur (FclAiAdvisorScreen) — zelfde concept,
  * zelfde bediening, zie FclSystemMode.kt voor de volledige toelichting.
@@ -124,11 +124,11 @@ fun FclModeSelectorCard(
 }
 
 /**
- * FclDayNightModeSelectorCard (26/07/2026, Ecko) — variant van
+ * FclDayNightModeSelectorCard (26/07/2026) — variant van
  * FclModeSelectorCard voor assen die zelf weer in Dag/Nacht uiteenvallen
  * (Learner, AI-adviseur). Aanleiding: met 2× FclModeSelectorCard per as
  * (Dag apart, Nacht apart) stonden er 4 losse aan/uit-schakelaars in
- * Instellingen — Ecko's terugkoppeling: "dat moet maar 1 keer voor de
+ * Instellingen — de gebruikers terugkoppeling: "dat moet maar 1 keer voor de
  * analyzer en 1 keer voor de AI zijn. Als ik hem uit wil zetten dan geldt
  * dat zowel voor dag als nacht en als ik dag wel automatisch zou willen
  * maar nacht niet dan zet ik nacht wel op handmatig."

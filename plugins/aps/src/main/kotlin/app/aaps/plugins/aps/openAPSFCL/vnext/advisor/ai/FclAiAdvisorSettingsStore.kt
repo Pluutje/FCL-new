@@ -5,7 +5,7 @@ import android.content.Context
 /**
  * FCL AI-Advisor Settings — model-selectie + dual API-keys per model.
  *
- * (01/07/2026, Ecko): uitgebreid met:
+ * (01/07/2026): uitgebreid met:
  *  - Hardcoded model-lijst per provider (uitbreidbaar zonder UI-aanpassing)
  *  - Twee API-keys per model — eerste geprobeerd, bij fout automatisch tweede
  *  - Lege key-velden worden overgeslagen
@@ -40,7 +40,7 @@ object FclAiAdvisorSettingsStore {
 
     val DEFAULT_MODEL_ID = "gemini-3.5-flash"
 
-    // ── Aan/uit-schakelaar (10/07/2026, Ecko) ────────────────────────────────
+    // ── Aan/uit-schakelaar (10/07/2026) ────────────────────────────────
     // Mirroring DFLearner.isAutoEnabled/setAutoEnabled — zelfde patroon, zodat
     // Learner en AI-adviseur onafhankelijk aan/uit kunnen, zoals besproken.
     // Default TRUE: bestaand gedrag (AI staat al aan) blijft ongewijzigd voor
@@ -68,7 +68,7 @@ object FclAiAdvisorSettingsStore {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Mode-schakeling (10/07/2026, Ecko) — zie FclSystemMode.kt.
+    // Mode-schakeling (10/07/2026) — zie FclSystemMode.kt.
     // ═══════════════════════════════════════════════════════════════════════
     private const val KEY_MODE = "fcl_ai_advisor_mode"
 

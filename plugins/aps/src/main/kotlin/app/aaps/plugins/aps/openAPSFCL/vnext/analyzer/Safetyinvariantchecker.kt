@@ -4,7 +4,7 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * SafetyInvariantChecker (12/07/2026, Ecko)
+ * SafetyInvariantChecker (12/07/2026)
  *
  * Automatische, generieke bewaking van het §3-patroon uit het overdrachts-
  * document: "late, te grote commit vlak op de piek". In plaats van dit
@@ -33,7 +33,7 @@ object SafetyInvariantChecker {
     const val DEFAULT_WINDOW_MINUTES = 10
     const val DEFAULT_MAX_FRACTION = 0.50
 
-    // ── Helft-verdeling start→piek (13/07/2026, Ecko) ─────────────────────
+    // ── Helft-verdeling start→piek (13/07/2026) ─────────────────────
     // AANVULLEND op de piek-nabijheid-check hierboven: die mist episodes
     // waarbij de insuline wél geconcentreerd (niet verspreid) werd gegeven,
     // maar niet toevallig vlak bij de piek. Concreet voorbeeld 13/07 08:52
@@ -49,7 +49,7 @@ object SafetyInvariantChecker {
     // resolutie (5 min/cyclus) van korte episodes betrouwbaarder dan vier
     // aparte kwarten.
     //
-    // Vuistregel (Ecko, 13/07/2026): bij een goede frontload zit ruwweg 2/3
+    // Vuistregel (de gebruiker, 13/07/2026): bij een goede frontload zit ruwweg 2/3
     // van de dosis in de eerste helft, 1/3 in de tweede.
     // BACKLOADED_THRESHOLD is een eerste, ruime inschatting — pas als
     // structureel signaal gebruiken (zie EpisodeSafetyResult.isBackloaded)
@@ -187,7 +187,7 @@ data class EpisodeSafetyResult(
     val peakTimestamp: Instant?,
     val episodePeakCommitU: Double,
     val violations: List<SafetyViolation>,
-    // ── Helft-verdeling (13/07/2026, Ecko) — zie kdoc bij MIN_RISE_MINUTES_FOR_HALVES.
+    // ── Helft-verdeling (13/07/2026) — zie kdoc bij MIN_RISE_MINUTES_FOR_HALVES.
     // null = episode te kort (< MIN_RISE_MINUTES_FOR_HALVES) om betrouwbaar te splitsen.
     val secondHalfFractionOfDose: Double? = null,
     // true als secondHalfFractionOfDose > BACKLOADED_THRESHOLD. Puur diagnostisch —

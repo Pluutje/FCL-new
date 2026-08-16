@@ -1,7 +1,7 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext
 
 /**
- * FclSystemMode (10/07/2026, Ecko) — gedeelde aan/uit + automatisch/handmatig-
+ * FclSystemMode (10/07/2026) — gedeelde aan/uit + automatisch/handmatig-
  * schakeling voor zowel de interne Learner als de AI-adviseur.
  *
  * OFF      — doet letterlijk niets: geen evaluatie, geen voorstellen, geen

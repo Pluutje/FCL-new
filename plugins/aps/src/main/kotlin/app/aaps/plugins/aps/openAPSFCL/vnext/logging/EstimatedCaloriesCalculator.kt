@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.logging
 import app.aaps.core.interfaces.db.PersistenceLayer
 
 /**
- * EstimatedCaloriesCalculator (06/07/2026, Ecko) — vervangt de eerdere
+ * EstimatedCaloriesCalculator (06/07/2026) — vervangt de eerdere
  * HealthConnect-route (HealthConnectCaloriesIngest.kt/
  * HealthConnectCaloriesPermissionActivity.kt, verwijderd).
  *
@@ -32,7 +32,7 @@ import app.aaps.core.interfaces.db.PersistenceLayer
  *      MET-tabel, ALS er een recente, voldoende betrouwbare classificatie is.
  *
  * WAAROM ALTIJD HET MAXIMUM, NOOIT ÉÉN BRON LATEN DOMINEREN (bugfix
- * 06/07/2026, Ecko): bij een rustige hartslag (bijv. 63 bpm, gewoon aanwezig
+ * 06/07/2026, de gebruiker): bij een rustige hartslag (bijv. 63 bpm, gewoon aanwezig
  * omdat het horloge gedragen wordt) gaf een eerdere versie al een vaste,
  * ABSOLUTE MET-waarde — die, keer gewicht keer een heel uur, alsnog een
  * fors kcal-getal opleverde ONGEACHT de daadwerkelijke inspanning. Met een

@@ -9,7 +9,7 @@ import java.time.Instant
 /**
  * Past een goedgekeurde AI-suggestie toe via FclAiParamStore (persistente opslag).
  *
- * ARCHITECTUUR (01/07/2026, Ecko — definitieve versie):
+ * ARCHITECTUUR (01/07/2026, de gebruiker — definitieve versie):
  *
  *   defaults → DFLearner leert → FclAiParamStore (AI past aan) → ConfigOverrideWriter
  *   leest FclAiParamStore als prioriteit boven DFLearner → FCLvNext gebruikt dit
@@ -53,7 +53,7 @@ object FclAiAdvisorApplier {
         // verouderd startpunt (bijv. als de AI earlyBoostFactor verhoogt naar 2.3
         // maar DFLearner nog 2.20 heeft → DFLearner zou bij volgende episode
         // vanuit 2.20 evalueren in plaats van vanuit 2.3).
-        // 10/07/2026 (Ecko) — sync voor ALLE 10 AI-aanpasbare parameters, niet
+        // 10/07/2026 — sync voor ALLE 10 AI-aanpasbare parameters, niet
         // alleen de twee met een dedicated evaluator. Zonder deze sync zou de
         // Learner (indien aan) bij de eerstvolgende episode vanaf een
         // verouderde referentie evalueren/convergeren, los van waar de AI de

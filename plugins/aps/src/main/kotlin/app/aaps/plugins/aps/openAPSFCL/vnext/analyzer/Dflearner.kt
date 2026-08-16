@@ -28,13 +28,13 @@ object DFLearner {
     private const val KEY_EP_COUNT       = "df_episode_count_since_last"
     private const val KEY_ACCUM_D         = "df_accum_d"   // geaccumuleerde rawΔD over wachtepisodes
     private const val KEY_ACCUM_F         = "df_accum_f"   // geaccumuleerde rawΔF over wachtepisodes
-    // 10/07/2026 (Ecko) — telt aaneengesloten episodes waarbij F al tegen
+    // 10/07/2026 — telt aaneengesloten episodes waarbij F al tegen
     // zijn plafond (DFMapping.F_MAX) zit terwijl er nog steeds extra
     // potentie nodig was (rawDeltaD > 0). Zie de "F eerst, D als vluchtoptie"
     // redirect-logica in evaluate(). Reset naar 0 zodra F weer ruimte heeft.
     private const val KEY_F_CEILING_STUCK_COUNT = "df_f_ceiling_stuck_count"
 
-    // ── Voorzichtige terugtrek naar het midden (19/07/2026, Ecko) ──────────
+    // ── Voorzichtige terugtrek naar het midden (19/07/2026) ──────────
     // AANLEIDING: D en F kennen geen enkel mechanisme dat ze uit zichzelf
     // richting het midden van hun bereik trekt. Elke diagnose hierboven is
     // eenrichtingsverkeer — een probleem duwt D of F een kant op, en zonder
@@ -134,12 +134,12 @@ object DFLearner {
     private const val TARGET_IOBR_PEAK  = 0.45   // ideale IOBratio op piek
     private const val HYPO_THRESHOLD    = 4.5    // onder dit → hypo-straf
 
-    // 20/07/2026 (Ecko): marge om refLcd als "praktisch gemaximaliseerd"
+    // 20/07/2026: marge om refLcd als "praktisch gemaximaliseerd"
     // te beschouwen — zie kdoc bij de RESCUE_OVERPOWERED-tak hieronder.
     // Geen exacte gelijkheid met REF_LCD_MAX eisen (floating-point/
     // step-afronding kan de exacte grens net missen).
     private const val REF_LCD_MAXED_MARGIN = 0.02
-    // 20/07/2026 (Ecko): grens om HYPO/HYPO_D_PROBLEEM/HYPO_D_DEMPED de
+    // 20/07/2026: grens om HYPO/HYPO_D_PROBLEEM/HYPO_D_DEMPED de
     // late-eerst-prioriteit te laten volgen — zie kdoc bij die branches
     // hieronder. In tegenstelling tot RESCUE_OVERPOWERED (die per definitie
     // nooit een échte hypo betreft, minBgInWindow>=HYPO_THRESHOLD) kan
@@ -163,7 +163,7 @@ object DFLearner {
     private const val DEAD_ZONE_IOBR    = 0.08   // geen actie bij kleine IOBratio-afwijking
     private const val MIN_VALID_PEAK_BG = 6.5    // mmol: minimale piek voor echte maaltijdepisode
     // MIN_VALID_INSULIN_FRAC: RELATIEF aan maxSMB (was een vaste 1,5U) — zie
-    // controlevraag Ecko 20/06/2026. Zelfde fractie (0,60) als de bestaande
+    // controlevraag de gebruiker 20/06/2026. Zelfde fractie (0,60) als de bestaande
     // MIN_INSULIN_FRAC in EpisodeMetricsBuilder.computeAdvisorWeight(), die
     // feitelijk dezelfde vraag stelt ("was dit een echte, volwaardige
     // episode") — nu bewust dezelfde maat, niet toevallig dicht bij elkaar.
@@ -173,7 +173,7 @@ object DFLearner {
     private const val MIN_VALID_INSULIN_FLOOR = 0.40
 
     // Eén gedeelde plek, gebruikt door evaluate(), evaluateEarlyBoost() en
-    // evaluateLateCommitDecay() (zie controlevraag Ecko 20/06/2026).
+    // evaluateLateCommitDecay() (zie controlevraag de gebruiker 20/06/2026).
     private fun minValidInsulinFor(manualMaxSmb: Double): Double =
         (MIN_VALID_INSULIN_FRAC * manualMaxSmb).coerceAtLeast(MIN_VALID_INSULIN_FLOOR)
 
@@ -245,10 +245,10 @@ object DFLearner {
         prefs(context).edit().putString(KEY_TEMPO, tempo.name).apply()
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Mode-schakeling (10/07/2026, Ecko) — vervangt het kale aan/uit-boolean
+    // Mode-schakeling (10/07/2026) — vervangt het kale aan/uit-boolean
     // door OFF/AUTO/MANUAL (zie FclSystemMode.kt voor de volledige toelichting).
     //
-    // DAG/NACHT-SPLITSING (26/07/2026, Ecko): voorheen gold één modus voor
+    // DAG/NACHT-SPLITSING (26/07/2026): voorheen gold één modus voor
     // zowel de dag-episodes als NachtLearner (NF-schaal) — zie de oude kdoc
     // bij NachtLearner.maybeLearnNacht(): "dezelfde schakelaar ... zet dag
     // én nacht-learner samen aan/uit". Op verzoek nu twee onafhankelijke
@@ -293,7 +293,7 @@ object DFLearner {
         getMode(context, isNight) != app.aaps.plugins.aps.openAPSFCL.vnext.FclSystemMode.OFF
 
     /**
-     * BUGFIX (10/07/2026, Ecko): leest nu af van getMode() i.p.v. rechtstreeks
+     * BUGFIX (10/07/2026): leest nu af van getMode() i.p.v. rechtstreeks
      * het oude KEY_AUTO-boolean — anders zouden bestaande aanroepplekken
      * (FCLCycleLogRepository.kt, convergeTrackedParams) een verouderde stand
      * blijven zien zodra iemand via setMode() een nieuwe modus kiest.
@@ -377,7 +377,7 @@ object DFLearner {
         setRefLcd(context, value)
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Generieke tracked-parameters (10/07/2026, Ecko)
+    // Generieke tracked-parameters (10/07/2026)
     // ═══════════════════════════════════════════════════════════════════════
     // AANLEIDING: earlyBoostFactor/watchingFrontloadFrac/lateCommitDecayFactor
     // hebben elk een EIGEN, dedicated evaluatiefunctie (evaluateEarlyBoost(),
@@ -427,7 +427,7 @@ object DFLearner {
      * afgeleide waarde per parameter-sleutel (uit DFMapping.toParamOverrides()).
      * Doet niets als de Learner-automaat (voor de meegegeven dag/nacht-as) uit
      * staat (isAutoEnabled=false) — dan blijven tracked-waarden bevroren, net
-     * als D/F zelf in dat geval. [isNight] (26/07/2026, Ecko): welke as — de
+     * als D/F zelf in dat geval. [isNight] (26/07/2026): welke as — de
      * aanroeper geeft door of dit een dag- of nacht-episode betrof.
      */
     fun convergeTrackedParams(context: Context, dfDerived: Map<String, Double>, isNight: Boolean = false) {
@@ -476,7 +476,7 @@ object DFLearner {
     // is geleerde NF + (nachtAggressiviteit - 5) stappen, geclipt op 1-9 —
     // zie ConfigOverrideWriter.effectiveNfLevel(). Zo kan de gebruiker
     // bovenop wat de learner heeft bijgesteld nog een eigen stap zetten,
-    // zonder het geleerde te overschrijven (vraag Ecko 19/06/2026).
+    // zonder het geleerde te overschrijven (vraag de gebruiker 19/06/2026).
     private const val KEY_NACHT_AGGRESSIVITEIT = "nacht_aggressiviteit"
     const val NACHT_AGGRESSIVITEIT_DEFAULT = 5
     const val NACHT_AGGRESSIVITEIT_MIN = 1
@@ -588,19 +588,19 @@ object DFLearner {
         metrics: EpisodeMetrics,
         skipHistory: Boolean = false,
         skipSideEffects: Boolean = false,   // true = sla KEY_LAST_TS en weekDelta niet op
-        // RELATIEF aan maxSMB i.p.v. een vast getal — zie controlevraag Ecko
+        // RELATIEF aan maxSMB i.p.v. een vast getal — zie controlevraag de gebruiker
         // 20/06/2026 (minValidInsulinFor() en de OK-tak hieronder gebruiken dit).
         // Default 1.25 = bestaande fallback-waarde elders in het bestand.
         manualMaxSmb: Double = 1.25,
-        // 12/07/2026 (Ecko) — nodig om metrics.maxIobRatio (intern altijd
+        // 12/07/2026 — nodig om metrics.maxIobRatio (intern altijd
         // relatief aan max_iob, zie DetermineBasalFCL.kt) terug te kunnen
-        // rekenen naar absolute eenheden — zie controlevraag Ecko 12/07/2026
+        // rekenen naar absolute eenheden — zie controlevraag de gebruiker 12/07/2026
         // over de "laagMetNogAanwezigeIob"-check hieronder: een vaste ratio
         // van max_iob (bijv. 0.30) betekent bij een hoge persoonlijke max-IOB-
         // instelling een veel te grote absolute hoeveelheid.
         manualMaxIob: Double = 10.0,
-        // 12/07/2026 (Ecko) — actuele ISF (mmol/L per U), voor de ISF-geschaalde
-        // "laagMetNogAanwezigeIob"-drempel hieronder. Zie controlevraag Ecko
+        // 12/07/2026 — actuele ISF (mmol/L per U), voor de ISF-geschaalde
+        // "laagMetNogAanwezigeIob"-drempel hieronder. Zie controlevraag de gebruiker
         // 12/07/2026: i.p.v. één vaste eenheid IOB voor iedereen, nu een
         // theoretische-verdere-daling-grens die met de persoonlijke ISF meeschaalt.
         effectiveIsfMmol: Double = 4.0
@@ -615,7 +615,7 @@ object DFLearner {
         val minValidInsulin = minValidInsulinFor(manualMaxSmb)
 
         // ── Handmatige correctie: episode overslaan ──────────────────────────
-        // Ontwerpprincipe (26/06/2026, Ecko audit): als er een handmatige bolus
+        // Ontwerpprincipe (26/06/2026, de gebruiker audit): als er een handmatige bolus
         // van ≥ 0.5U is gegeven, is de uitkomst (piek, hypo, timing) mede het
         // resultaat van die externe beslissing — niet van het algoritme zelf.
         // evaluateEarlyBoost() en evaluateLateCommitDecay() hadden deze check al;
@@ -638,7 +638,7 @@ object DFLearner {
             return null
         }
 
-        // BUGFIX (26/07/2026, Ecko): hier stond voorheen een interne
+        // BUGFIX (26/07/2026): hier stond voorheen een interne
         // "if (!isAutoEnabled(context)) { ...; return null }" gate, die
         // evaluate() volledig liet stoppen (geen D/F-accumulatie, geen
         // rawDelta-berekening) zodra de modus niet AUTO was — dus óók bij
@@ -665,7 +665,7 @@ object DFLearner {
         // een conservatieve D-verhoging, en de cooldown blokkeert anders vrijwel
         // altijd het leren van grote pieken (die vallen statistisch altijd tijdens
         // een lopende cooldown na een vorige aanpassing).
-        // Analyse 28/06/2026 (Ecko): van 43 episoden met piek >10 mmol in de
+        // Analyse 28/06/2026: van 43 episoden met piek >10 mmol in de
         // learner log belandden 43 in COOLDOWN. MEER_DOSIS triggerde slechts
         // 3× (op 16 juni) — precies de enige keer dat er geen lopende cooldown was.
         // De hyper-bypass geeft maximaal één aanpassing per ernstige episode;
@@ -806,14 +806,14 @@ object DFLearner {
         // het "geleende" budget terugpakken, EN nadir daalde te ver.
         val NEAR_HYPO_THRESH = 4.8   // waarschuwingsdrempel (boven echte hypo)
         val nadirTeeLaag = nadirBg < NEAR_HYPO_THRESH
-        // 20/07/2026 (Ecko): projectedSevereLowAverted ook hier laten
+        // 20/07/2026: projectedSevereLowAverted ook hier laten
         // meewegen — zelfde redenering als bij evaluateLateCommitDecay's
         // risicoSignaal. Een solo, dominante EERSTE commit die een ernstige
         // PROJECTIE veroorzaakte (zonder dat de gemeten BG ooit onder
         // NEAR_HYPO_THRESH kwam — bijv. dankzij tijdig ingrijpen) is
         // evengoed bewijs dat die ene commit te groot was. Dit is precies
         // het "tenzij het de enige is en er is te veel gedoseerd"-geval
-        // (Ecko, 20/07/2026) — soloCommit hierboven bewaakt dat het ook
+        // (de gebruiker, 20/07/2026) — soloCommit hierboven bewaakt dat het ook
         // écht de enige was.
         val frontloadTeGroot = fracHoog && soloCommit &&
             (nadirTeeLaag || metrics.projectedSevereLowAverted)
@@ -828,14 +828,14 @@ object DFLearner {
         val rawDeltaF: Double
         val diagnose: String
 
-        // 12/07/2026 (Ecko) — vóór het when-blok berekend, niet erin: een
+        // 12/07/2026 — vóór het when-blok berekend, niet erin: een
         // when {}-blok mag uitsluitend uit voorwaarde-> actie-branches
         // bestaan, geen losse val-statements ertussen (BUGFIX 12/07/2026,
-        // Ecko: dit stond eerder abusievelijk tussen de branches, wat een
+        // de gebruiker: dit stond eerder abusievelijk tussen de branches, wat een
         // reeks compile-fouten gaf — "Expecting '->'" bij regel 897 en alle
         // fouten die daarop volgden). Zie de kdoc bij de PIEK LAAG-branch
         // hieronder voor de volledige toelichting van deze berekening.
-        val maxTheoretischeDalingMmol = 1.0  // vuistwaarde uit Ecko's voorbeeld, instelbaar
+        val maxTheoretischeDalingMmol = 1.0  // vuistwaarde uit de gebruikers voorbeeld, instelbaar
         val iobDrempelU = maxTheoretischeDalingMmol / effectiveIsfMmol.coerceAtLeast(0.5)
         val iobAtNadirU = metrics.maxIobRatio * manualMaxIob
         val laagMetNogAanwezigeIob = metrics.minBgInWindow < 4.5 && iobAtNadirU > iobDrempelU
@@ -853,7 +853,7 @@ object DFLearner {
             // EpisodeMetrics.nearHypoAverted — automatische detectie, geen
             // handmatige bevestiging meer vereist, 20/06/2026)
             (metrics.rescueConfirmed || metrics.nearHypoAverted) && metrics.minBgInWindow >= HYPO_THRESHOLD -> {
-                // 20/07/2026 (Ecko): eerst-laat-dan-vroeg escalatie. Zie kdoc
+                // 20/07/2026: eerst-laat-dan-vroeg escalatie. Zie kdoc
                 // boven evaluateLateCommitDecay (dit bestand) en bij
                 // frontloadTeGroot hierboven. RESCUE_OVERPOWERED verlaagde hier
                 // altijd D (dus OOK de eerste commit, via het brede dose-scale-
@@ -873,7 +873,7 @@ object DFLearner {
                 // frontloadTeGroot) of al maximaal is ingezet (refLcd tegen
                 // REF_LCD_MAX).
                 //
-                // Uitgangspunt (Ecko, 20/07/2026): "de eerste is nooit te groot,
+                // Uitgangspunt (de gebruiker, 20/07/2026): "de eerste is nooit te groot,
                 // tenzij het de enige is en er is te veel gedoseerd" — D/F blijven
                 // dus het laatste redmiddel, nooit de eerste reactie op dit signaal.
                 //
@@ -913,7 +913,7 @@ object DFLearner {
 
             // ── HYPO zonder frontload als oorzaak ────────────────────────────────
 
-            // ✅ RODE DRAAD (01/07/2026, Ecko): "Timing eerst, hoeveelheid daarna."
+            // ✅ RODE DRAAD (01/07/2026): "Timing eerst, hoeveelheid daarna."
             // Vóór elke negatieve D-aanpassing vragen we: was de late timing de
             // oorzaak van de hypo, niet het totaal? Signaal: iobRatioAtPeak hoog
             // (veel insuline nog actief op de piek) EN frontload was niet te groot
@@ -933,7 +933,7 @@ object DFLearner {
             }
 
             hypoStraf > 0.0 && fracHoog && safeFollowUp -> {
-                // 20/07/2026 (Ecko): zelfde eerst-laat-dan-vroeg-prioriteit als
+                // 20/07/2026: zelfde eerst-laat-dan-vroeg-prioriteit als
                 // RESCUE_OVERPOWERED hierboven, met één verschil: hier kán
                 // hypoStraf een echte, diepe hypo weerspiegelen (dit is geen
                 // near-miss-tak) — dus alleen uitstellen naar refLcd als het ook
@@ -954,7 +954,7 @@ object DFLearner {
                 }
             }
             hypoStraf > 0.0 -> {
-                // 20/07/2026 (Ecko): zelfde redenering als bij HYPO_D_PROBLEEM
+                // 20/07/2026: zelfde redenering als bij HYPO_D_PROBLEEM
                 // hierboven — zie kdoc daar. Praktijkcheck (5 weken LearnerLog):
                 // van 32 echte D-verlagende hypo-episodes zouden 6 nu uitstellen
                 // (mild + staartTeGroot), 7 blijven ongewijzigd (te diep, hypoStraf
@@ -1021,7 +1021,7 @@ object DFLearner {
             }
 
             // ── PIEK LAAG ─────────────────────────────────────────────────────────
-            // HERZIEN (12/07/2026, Ecko): een lage piek alléén was voorheen al
+            // HERZIEN (12/07/2026): een lage piek alléén was voorheen al
             // genoeg om D te verlagen — maar een lage piek is net zo goed het
             // teken van een GOED gedoseerde maaltijd als van "te sterk gedoseerd".
             // Alleen bij een van deze twee is een lage piek daadwerkelijk bewijs
@@ -1035,7 +1035,7 @@ object DFLearner {
             // De "duidelijk aanwezige IOB"-drempel (iobDrempelU, hierboven vóór
             // het when-blok berekend) schaalt met de actuele ISF: hoeveel IOB
             // zou nog een daling van maxTheoretischeDalingMmol kunnen
-            // veroorzaken? Ecko's rekenvoorbeeld: BG 4.5, max 1 mmol verdere
+            // veroorzaken? de gebruikers rekenvoorbeeld: BG 4.5, max 1 mmol verdere
             // daling gewenst → drempel = 1 / ISF (bij ISF=4 → 0.25U).
             peekLaag && teLaagGeldigBewijs -> {
                 rawDeltaD = -tp.alphaPiek * 1.5 * abs(peakFout)
@@ -1167,7 +1167,7 @@ object DFLearner {
             }
         }
 
-        // ── RODE DRAAD: "F eerst, D als vluchtoptie" (10/07/2026, Ecko) ──────
+        // ── RODE DRAAD: "F eerst, D als vluchtoptie" (10/07/2026) ──────
         // Geldt uitsluitend voor OPWAARTSE D-aanpassingen (meer potentie
         // nodig). Een hypo (D omlaag) hoeft nooit te wachten tot F is
         // "uitgeprobeerd" — dat zou een hypo onnodig laten voortduren. F
@@ -1212,7 +1212,7 @@ object DFLearner {
             }
         }
 
-        // ── Voorzichtige terugtrek naar het midden (19/07/2026, Ecko) ─────────
+        // ── Voorzichtige terugtrek naar het midden (19/07/2026) ─────────
         // Zie kdoc bij KEY_QUIET_STREAK hierboven. Telt alleen mee als diagnose
         // hierboven een “echte” evaluatie was (dus niet SKIP/COOLDOWN, die
         // stoppen al eerder met return null) — op dit punt is dat altijd zo.
@@ -1534,7 +1534,7 @@ object DFLearner {
      * Synchroniseer de earlyBoostFactor in de learner-prefs met een extern
      * vastgestelde waarde (bijv. door de AI-advisor goedgekeurd).
      *
-     * Waarom nodig (01/07/2026, Ecko): ConfigOverrideWriter bouwt zijn overrides
+     * Waarom nodig (01/07/2026): ConfigOverrideWriter bouwt zijn overrides
      * met `earlyBoostFactor = p.earlyBoostFactor ?: DFLearner.getEarlyBoostFactor(it)`.
      * Als de AI-advisor `prefs.put(DoubleKey.fcl_vnext_early_boost_factor, 2.0)` zet
      * maar de learner-prefs nog 1.84 bevatten, overschrijft de volgende
@@ -1840,7 +1840,7 @@ object DFLearner {
         val geenRecenteLateCommit = lastFrac <= LCD_LAAT_FRAC_MIN ||
             lastMins == null || lastMins > LCD_FORWARD_VROEG_MIN
 
-        // 19/07/2026 (Ecko): projectedSevereLowAverted toegevoegd — vangt
+        // 19/07/2026: projectedSevereLowAverted toegevoegd — vangt
         // "te vroeg te veel insuline" ook als de gemeten BG nooit écht laag
         // kwam (bijv. door tijdig ingrijpen), maar de IOB/ISF/BG-projectie op
         // enig moment wél ruim onder de 4 wees en de BG later, rond target en

@@ -210,7 +210,7 @@ private fun FrontloadTimingKaart(s: FclStrings) {
     val laatsteStap = history.lastOrNull()
     val statusTekst = s.frontloadStatusTekst(frontloadStatusKey(huidigWmd))
 
-    // Onderscheid (25/06/2026, Ecko): de diagnosetext toonde voorheen
+    // Onderscheid (25/06/2026): de diagnosetext toonde voorheen
     // de gemiddeldeMarge over ALLE episodes — dat beschreef de cumulatieve
     // trend, niet het meest recente enkelvoudige signaal. Door ook de
     // konkrete delta (oudeWmd → nieuweWmd) te tonen, is duidelijk dat het

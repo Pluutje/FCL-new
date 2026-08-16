@@ -75,7 +75,7 @@ fun AdvisorScreen(
     onApplyDFToAaps: ((ConfigOverrideWriter.ParamOverrides, Map<String, Int>) -> Boolean)? = null,
     nfLevel: Double = 5.0,
     onApplyParams: ((ConfigOverrideWriter.ParamOverrides) -> Boolean)? = null,
-    // Klikbare kruisverwijzing (24/07/2026, Ecko): laat de "Zie ook: AI Advisor
+    // Klikbare kruisverwijzing (24/07/2026): laat de "Zie ook: AI Advisor
     // → Nacht"-tekst op het Nacht-tabblad hierheen springen met het Nacht-
     // tabblad al open, i.p.v. altijd op Dag te starten.
     startOnNacht: Boolean = false,
@@ -84,7 +84,7 @@ fun AdvisorScreen(
     val s = FclStrings.get(androidx.compose.ui.platform.LocalContext.current)
 
     // Plain remember (geen key) i.p.v. rechtstreeks "if (startOnNacht) 1 else 0"
-    // in de InfoTabPager-aanroep verderop (24/07/2026, Ecko): legt de gevraagde
+    // in de InfoTabPager-aanroep verderop (24/07/2026): legt de gevraagde
     // starttab ÉÉNMALIG vast bij de eerste compositie. Zonder dit zou een reset
     // van startOnNacht door de aanroeper (Fclanalyzerscreen.kt, vlak na het
     // openen — nodig zodat een volgend, normaal bezoek weer op Dag start) de tab
@@ -874,7 +874,7 @@ fun NachtControlTab(
         // Dag, die ook de geleerde D/F tonen, niet de Agressiviteit-schuif).
         NfKaart(s = FclStrings.get(context), currentNf = currentNfLevel)
 
-        // ── Learner — Nacht: openstaand MANUAL-voorstel (26/07/2026, Ecko) ──
+        // ── Learner — Nacht: openstaand MANUAL-voorstel (26/07/2026) ──
         // Zelfde Accepteren/Afwijzen-patroon als de dag-Learner en de
         // AI-adviseur — "zodat alles consistent blijft". Alleen zichtbaar als
         // er daadwerkelijk een niet-beoordeeld NF-voorstel klaarstaat (dus
@@ -921,7 +921,7 @@ fun NachtControlTab(
             }
         }
 
-        // ── Nacht-AI-adviseur verhuisd (24/07/2026, Ecko) ────────────────
+        // ── Nacht-AI-adviseur verhuisd (24/07/2026) ────────────────
         // Staat sindsdien op het AI-adviseur-tabblad → Nacht, naast de dag-
         // AI-adviezen — niet meer hier, om Automaat (regel-gebaseerd/geleerd)
         // en AI-advies duidelijk gescheiden te houden.
@@ -940,7 +940,7 @@ fun NachtControlTab(
 
 
 // gaussWeightForOffset() en computeSpreadAdvice() (regel-gebaseerde spread-
-// advies-helpers) verwijderd (24/07/2026, Ecko) samen met de Basaal-adviseur-
+// advies-helpers) verwijderd (24/07/2026) samen met de Basaal-adviseur-
 // kaart hieronder — zie NachtControlTab hierboven voor de toelichting.
 
 // ── NightAiAdvisorCard ────────────────────────────────────────────────────
@@ -949,7 +949,7 @@ fun NachtControlTab(
 // Basaal-adviseur is verwijderd (zie NachtControlTab hierboven).
 
 @Composable
-// Niet meer `private` (24/07/2026, Ecko) — wordt sinds de verhuizing van de
+// Niet meer `private` (24/07/2026) — wordt sinds de verhuizing van de
 // aanroep ook vanuit FclAiAdvisorScreen.kt (ander package) aangeroepen.
 fun NightAiAdvisorCard(context: android.content.Context) {
     var result by remember {
@@ -1041,7 +1041,7 @@ fun NightAiAdvisorCard(context: android.content.Context) {
                             Column(modifier = Modifier.padding(top = 4.dp)) {
                                 val pijl = if (s.direction == "LOWER") "\uD83D\uDD3D" else "\uD83D\uDD3C"
                                 val teken = if (s.suggestedShiftPct > 0) "+" else ""
-                                // Concrete doelwaarde tonen naast het % (23/07/2026, Ecko) —
+                                // Concrete doelwaarde tonen naast het % (23/07/2026) —
                                 // "+10% huidig 1 -> 1,1 U/h" i.p.v. alleen het percentage,
                                 // zodat je niet zelf hoeft om te rekenen wat het advies
                                 // concreet betekent voor de basaalstand.
@@ -1064,13 +1064,13 @@ fun NightAiAdvisorCard(context: android.content.Context) {
     }
 }
 
-// ── ProfileAutoAdjustCard (24/07/2026, Ecko; herzien 26/07/2026) ─────────
+// ── ProfileAutoAdjustCard (24/07/2026, de gebruiker; herzien 26/07/2026) ─────────
 // Automatisch-profiel-bijstellen: vergelijkingstabel van de laatste run,
 // Accepteren/Afwijzen bij een openstaand MANUAL-voorstel, en een handmatige,
 // expliciete "basisprofiel opnieuw vastleggen"-actie. Zie kdoc bij
 // FclNightBasalAutoAdjuster.kt voor de volledige achtergrond/veiligheidslagen.
 //
-// 26/07/2026 (Ecko) — dag/nacht-herstructurering: de Uit/Alleen-loggen/
+// 26/07/2026 — dag/nacht-herstructurering: de Uit/Alleen-loggen/
 // Automatisch-knoppenrij is verhuisd naar Instellingen → Analyser Automaat /
 // AI Advisor → AI-adviseur Nacht (FCLSettingsScreen.kt). Dit kaartje toont
 // alleen nog de UITKOMST (info + tabel) en, bij MANUAL met een openstaand
@@ -1092,17 +1092,17 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
     var showResetDialog by remember { mutableStateOf(false) }
     var isResetting by remember { mutableStateOf(false) }
     var refreshTrigger by remember { mutableStateOf(0) }
-    // 27/07/2026 (Ecko) — Accepteren-status voor het gewogen gemiddelde-
+    // 27/07/2026 — Accepteren-status voor het gewogen gemiddelde-
     // voorstel (zie FclNightBasalAutoAdjuster.applyPending/computeCurrentProposal).
     // Geen Afwijzen meer — zie kdoc bovenaan FclNightBasalAutoAdjuster.kt.
     var isActing by remember { mutableStateOf(false) }
     var actionResult by remember { mutableStateOf<String?>(null) }
-    // 26/07/2026 (Ecko) — extra bevestigingsstap op verzoek: Accepteren opent
+    // 26/07/2026 — extra bevestigingsstap op verzoek: Accepteren opent
     // eerst een popup met de huidig/nieuw-vergelijking en een expliciete
     // "wordt naar de pomp geschreven"-melding, met daarin nog een keer
     // Accepteren. Pas het klikken in de popup voert de actie uit.
     var showAcceptConfirmDialog by remember { mutableStateOf(false) }
-    // 27/07/2026 (Ecko) — het (gewogen) gemiddelde-voorstel over de nachten
+    // 27/07/2026 — het (gewogen) gemiddelde-voorstel over de nachten
     // sinds de laatste wijziging; zelfde berekening als applyPending()/de
     // AUTO-toepassing, zie computeCurrentProposal() se kdoc.
     var proposal by remember {
@@ -1148,7 +1148,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 27/07/2026 (Ecko), op verzoek: de titel zelf zegt nu meteen in
+            // 27/07/2026, op verzoek: de titel zelf zegt nu meteen in
             // welke modus dit kaartje draait — "Automatisch profiel
             // bijstellen" als vaste titel botste met de beschrijving eronder
             // bij Handmatig (dat past niets automatisch toe).
@@ -1169,7 +1169,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // ── 27/07/2026 (Ecko): duidelijke subkop, om de eerdere klacht
+            // ── 27/07/2026: duidelijke subkop, om de eerdere klacht
             //    ("de tekst loopt een beetje doorelkaar") te verhelpen — dit
             //    blok gaat puur over het VOORSTEL, de reset-actie hieronder
             //    staat straks onder een eigen, apart gelabelde subkop. ──
@@ -1219,7 +1219,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                     capHits = capHits
                 )
 
-                // 27/07/2026 (Ecko), op verzoek: grafische vergelijking onder
+                // 27/07/2026, op verzoek: grafische vergelijking onder
                 // de tabel — in één oogopslag zien wat het effect van
                 // eventueel accepteren op het profiel zou zijn.
                 Spacer(Modifier.height(4.dp))
@@ -1237,7 +1237,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 }
             }
 
-            // ── 27/07/2026 (Ecko): tweede, eigen subkop voor de reset-actie —
+            // ── 27/07/2026: tweede, eigen subkop voor de reset-actie —
             //    dit is het ENIGE reset-mechanisme (geen Afwijzen meer); zie
             //    kdoc bovenaan FclNightBasalAutoAdjuster.kt. ──
             Divider()
@@ -1246,7 +1246,7 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
-            // 26/07/2026 (Ecko) — uitleg vooraf toegevoegd op verzoek ("geen
+            // 26/07/2026 — uitleg vooraf toegevoegd op verzoek ("geen
             // idee wat die doet"). De bevestigingsdialoog legde het al uit,
             // maar pas NA klikken — dit zet het ervoor, zodat je het al weet
             // voordat je de knop indrukt.
@@ -1321,14 +1321,14 @@ fun ProfileAutoAdjustCard(context: android.content.Context) {
         )
     }
 
-    // 26/07/2026 (Ecko) — bevestigingspopup na Accepteren, op verzoek: "als
+    // 26/07/2026 — bevestigingspopup na Accepteren, op verzoek: "als
     // een extra bevestiging uit veiligheidsoogpunt echt nodig is dan zou ik
     // na accepteren eerder een popup verwachten met daarop nog een keer de
     // actuele en nieuwe waarden vermeld en nog een keer de melding dat de
     // wijzigingen naar de pomp zullen worden geschreven." Toont dezelfde
     // ProfileAutoAdjustTable (Huidig/Voorstel/Na caps) als het kaartje zelf,
     // zodat de vergelijking niet twee keer apart onderhouden hoeft te worden.
-    // 27/07/2026 (Ecko) — geen Afwijzen-knop meer hier: gewoon annuleren/
+    // 27/07/2026 — geen Afwijzen-knop meer hier: gewoon annuleren/
     // wegklikken laat het voorstel ongewijzigd staan (het venster blijft
     // gewoon doorgroeien tot de volgende keer dat je hier terugkomt).
     if (showAcceptConfirmDialog) {
@@ -1404,7 +1404,7 @@ private fun ProfileAutoAdjustTable(
     hoursAtCap: Set<Int>,
     capHits: Map<Int, Int>
 ) {
-    // 30/07/2026 (Ecko, op verzoek) — "Na caps"-kolom verwijderd: sinds de
+    // 30/07/2026 (op verzoek) — "Na caps"-kolom verwijderd: sinds de
     // 29/07-fix (roundToStep() vervangen door cleanPrecision(), zie
     // FclNightBasalAutoAdjuster.kt) is newVal vrijwel altijd gelijk aan
     // voorstelVal — het enige overgebleven verschil (een ECHTE cap, zoals
@@ -1439,7 +1439,7 @@ private fun ProfileAutoAdjustTable(
 }
 
 /**
- * BasalProfileChart (27/07/2026, Ecko, op verzoek) — trapvormige grafiek
+ * BasalProfileChart (27/07/2026, op verzoek) — trapvormige grafiek
  * (elk uur is een constante waarde, net als een echt basaalprofiel) met
  * Huidig en Voorstel over elkaar heen, zodat het effect van eventueel
  * accepteren in één oogopslag te zien is naast de cijfertabel erboven.
@@ -1451,7 +1451,7 @@ private fun BasalProfileChart(
     newHourly: Map<Int, Double>,
     heightDp: Int = 140
 ) {
-    // 28/07/2026 (Ecko), op verzoek: het contrast tussen Huidig/Voorstel was
+    // 28/07/2026, op verzoek: het contrast tussen Huidig/Voorstel was
     // in beide thema's nauwelijks te zien — logisch, want de twee lijnen
     // liggen bij de meeste uren exact op elkaar (alleen een paar uur wijken
     // af), en een halfdoorzichtige grijze lijn onder een gelijke ondoor-
@@ -1551,7 +1551,7 @@ private fun BasalProfileChart(
     }
 }
 
-// 28/07/2026 (Ecko) — vaste, thema-onafhankelijke kleur voor de Huidig-lijn
+// 28/07/2026 — vaste, thema-onafhankelijke kleur voor de Huidig-lijn
 // in BasalProfileChart (zie kdoc daar). Amber leest goed op zowel een
 // donkere als een lichte achtergrond, en contrasteert met het paarse
 // Voorstel (MaterialTheme.colorScheme.primary) ongeacht thema.

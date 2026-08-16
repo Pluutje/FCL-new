@@ -5,7 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Logboek van elke run van FclNightBasalAutoAdjuster (24/07/2026, Ecko) —
+ * Logboek van elke run van FclNightBasalAutoAdjuster (24/07/2026) —
  * zowel niet-toegepaste voorstellen (MANUAL) als daadwerkelijk toegepaste
  * automatische profielwijzigingen (AUTO). Eén rij per nacht-run die de
  * auto-adjuster daadwerkelijk heeft doorlopen (dus niet als modus UIT staat,
@@ -16,7 +16,7 @@ import androidx.room.PrimaryKey
  * ProfileRepository.replace()/ProfileFunction.createProfileSwitch(), en wat het
  * vergelijkingstabblad toont.
  *
- * DAG/NACHT-HERSTRUCTURERING (26/07/2026, Ecko): [mode] bevat sinds dan de
+ * DAG/NACHT-HERSTRUCTURERING (26/07/2026): [mode] bevat sinds dan de
  * naam van de gedeelde FclSystemMode ("OFF"/"AUTO"/"MANUAL", zie
  * FclNightBasalAutoAdjustStore.getMode()) i.p.v. de oude eigen
  * "DRY_RUN"/"AUTO"-enum. De MEEST RECENTE rij met mode=="MANUAL" &&

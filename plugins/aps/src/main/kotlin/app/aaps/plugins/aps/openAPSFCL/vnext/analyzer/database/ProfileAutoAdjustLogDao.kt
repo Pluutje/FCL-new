@@ -23,7 +23,7 @@ interface ProfileAutoAdjustLogDao {
     @Query("SELECT * FROM profile_auto_adjust_log ORDER BY timestampMs DESC LIMIT 1")
     suspend fun getLatest(): ProfileAutoAdjustLogEntity?
 
-    /** 27/07/2026 (Ecko) — meest recente rij die daadwerkelijk is toegepast
+    /** 27/07/2026 — meest recente rij die daadwerkelijk is toegepast
      *  (applied=1), voor de wachtperiode-berekening: "hoeveel nachten zijn
      *  verstreken sinds de laatste échte wijziging" (zie
      *  FclNightBasalAutoAdjuster.nightsSinceLastChange()). Anders dan
@@ -36,7 +36,7 @@ interface ProfileAutoAdjustLogDao {
     @Query("SELECT COUNT(DISTINCT localDate) FROM profile_auto_adjust_log WHERE mode = :mode AND timestampMs >= :sinceMs")
     suspend fun countDistinctDates(mode: String, sinceMs: Long): Int
 
-    /** 27/07/2026 (Ecko) — voor het (gewogen) gemiddelde-voorstel over de
+    /** 27/07/2026 — voor het (gewogen) gemiddelde-voorstel over de
      *  laatste N nachten sinds een wijziging: alle rijen NA [sinceDate]
      *  (exclusief), nieuwste eerst. FclNightBasalAutoAdjuster verzamelt
      *  hieruit zelf de meest recente rij per kalenderdag en filtert rijen

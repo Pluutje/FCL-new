@@ -128,10 +128,16 @@ fun DFControlTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // ── 0. Openstaand voorstel (10/07/2026, Ecko) ────────────────────
+        // ── 0. Openstaand voorstel (10/07/2026) ────────────────────
         // Aan/uit + automatisch/handmatig staat sinds 10/07/2026 bij
         // Settings → Analyser Automaat / AI Advisor, niet meer hier.
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.LearnerProposalCard(context)
+
+        // ── 0b. ISF bijstellen (16/08/2026) ─────────────────────────
+        // Zelfde plek/patroon als de Learner-kaart hierboven: deterministisch,
+        // niet AI/niet nacht-specifiek. Aan/uit + automatisch/handmatig staat
+        // ook hier bij Settings → Analyser Automaat / AI Advisor.
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.IsfAutoAdjustCard(context)
 
         // ── 1. Agressiviteitsschaal + Toepassen in AAPS ────────────────────
         AggressiviteitsKaart(
@@ -170,7 +176,7 @@ fun DFControlTab(
             applyResult = applyResult,
             applyTs = applyTs
         )
-        // 26/07/2026 (Ecko) — dag/nacht-splitsing: twee onafhankelijke assen,
+        // 26/07/2026 — dag/nacht-splitsing: twee onafhankelijke assen,
         // dus twee statusregels i.p.v. één.
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = false), label = "Dag")
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = true), label = "Nacht")

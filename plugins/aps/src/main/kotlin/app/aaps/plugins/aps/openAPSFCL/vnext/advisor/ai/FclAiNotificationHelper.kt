@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicReference
  * ── FCL AI Advisor Notificatie ────────────────────────────────────────────
  * Toont TWEE parallelle meldingen als de AI-adviseur openstaande voorstellen heeft:
  *
- * 1. Native AAPS-notificatie (05/07/2026, Ecko) — via de DI-geïnjecteerde
+ * 1. Native AAPS-notificatie (05/07/2026) — via de DI-geïnjecteerde
  *    NotificationManager (bereikbaar via FclNotificationManagerBridge, want
  *    dit object zelf heeft geen constructor-injectie). Verschijnt in AAPS'
  *    eigen notificatie-icoon/lijst op het hoofdscherm, net als de bestaande
@@ -98,7 +98,7 @@ object FclAiNotificationHelper {
         else
             "AI Advisor: $pendingCount voorstellen klaar om te bekijken"
 
-        // 05/07/2026 (Ecko): eigen NotificationId.FCL_AI_ADVISOR_READY i.p.v.
+        // 05/07/2026: eigen NotificationId.FCL_AI_ADVISOR_READY i.p.v.
         // het gedeelde AUTOMATION_MESSAGE — dat gaf zowel het verkeerde icoon
         // (Automation-plugin i.p.v. FCL) als een risico op het "kapen" van de
         // klik-navigatie van echte Automation-meldingen. Met een eigen ID:
@@ -113,7 +113,7 @@ object FclAiNotificationHelper {
             text = text,
             actions = listOf(
                 NotificationAction(
-                    // TODO (Ecko): zie eerdere notitie — vervang door een eigen
+                    // TODO (de gebruiker): zie eerdere notitie — vervang door een eigen
                     // stringresource ("Bekijken") zodra strings.xml is aangevuld.
                     buttonTextRes = android.R.string.ok,
                     action = { navigateRequested.set(true) }

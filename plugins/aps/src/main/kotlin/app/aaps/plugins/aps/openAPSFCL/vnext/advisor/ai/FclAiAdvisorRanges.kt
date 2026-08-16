@@ -4,7 +4,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride
 
 /**
  * FCL AI-Advisor — Parameter-ranges (eenmalige bron van waarheid)
- * (01/07/2026, Ecko — herschreven)
+ * (01/07/2026, de gebruiker — herschreven)
  *
  * WIJZIGINGEN t.o.v. vorige versie:
  *  - 6 parameters verwijderd die de AI NIET mag aanpassen:
@@ -29,7 +29,7 @@ object FclAiAdvisorRanges {
     const val CEILING_BUST_CONFIDENCE = 0.55   // ⚠️ TESTFASE: was 0.75 — terugzetten voor productie
 
     // Minimale confidence om een voorstel uberhaupt als actionable kaart te tonen
-    // (18/07/2026, Ecko). Voorstellen eronder komen niet meer in de goed te keuren
+    // (18/07/2026). Voorstellen eronder komen niet meer in de goed te keuren
     // lijst terecht, maar in de "automatisch verworpen"-lijst (net als een
     // parameter buiten bereik) — dezelfde bestaande weergave, geen nieuwe UI nodig.
     const val MIN_SUGGESTION_CONFIDENCE = 0.60
@@ -73,7 +73,7 @@ object FclAiAdvisorRanges {
 
         // ── Early Boost (hoeveel en hoe vroeg) ───────────────────────────────
 
-        // 21/07/2026 (Ecko): hardMax 2.50 -> 2.80 (softMax blijft 2.20 —
+        // 21/07/2026: hardMax 2.50 -> 2.80 (softMax blijft 2.20 —
         // ongewijzigd, de learner drift dus NIET vanzelf hoger; alleen de AI
         // mag, met bewijs, tot hier ceiling-busten). Aanleiding: in de week
         // 14-21/07 zat de effectieve boost-factor 40× tegen de oude hardMax

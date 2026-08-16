@@ -233,7 +233,7 @@ object ConfigOverrideWriter {
                 if (p.isEmpty()) null else run {
                     // Prioriteit per param: (AI aan? → FclAiParamStore) → p.X (D/F-vers) → …
                     //
-                    // HERZIEN (10/07/2026, Ecko — Learner/AI-onafhankelijkheid):
+                    // HERZIEN (10/07/2026, de gebruiker — Learner/AI-onafhankelijkheid):
                     //  1. FclAiParamStore telt alleen mee als de AI-adviseur AAN staat.
                     //     Staat AI uit, dan wordt FclAiParamStore genegeerd (niet geleegd —
                     //     zie FclAiAdvisorSettingsStore.isEnabled-kdoc) zodat de Learner,
@@ -253,7 +253,7 @@ object ConfigOverrideWriter {
 
                     app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextConfigOverride.ParamOverrides(
                         peakPredictionThreshold       = p.peakPredictionThreshold,
-                        // ── AI-PARAM-STORE PRIORITEIT (01/07/2026, Ecko) ─────────────────
+                        // ── AI-PARAM-STORE PRIORITEIT (01/07/2026) ─────────────────
                         // Als de AI-advisor een waarde heeft goedgekeurd voor deze parameters,
                         // wint die altijd boven de DFLearner-fallback. Zo is er één waarheid:
                         //   defaults → DFLearner leert → AI past aan → dit is de aktieve waarde

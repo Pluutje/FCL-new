@@ -83,7 +83,7 @@ object FclAiAdvisorHistoryRepository {
     fun readApproved(): List<HistoryEntry> = readAll().filter { it.status == AiSuggestionStatus.APPROVED }
 
     /**
-     * Is dit voorstel nog onbeoordeeld? (05/07/2026, Ecko — bugfix)
+     * Is dit voorstel nog onbeoordeeld? (05/07/2026, de gebruiker — bugfix)
      *
      * PROBLEEM: [readPendingFromLastRun] filtert op status==PENDING, maar
      * [record] wordt in de praktijk NOOIT met PENDING aangeroepen — alleen
@@ -99,7 +99,7 @@ object FclAiAdvisorHistoryRepository {
      * hier alleen ook bruikbaar buiten dat scherm (voor de badge/notificatie).
      */
     fun isStillPending(suggestion: AiParamSuggestion): Boolean {
-        // 21/07/2026 (Ecko): BUGFIX — een suggestie die de validator zelf al
+        // 21/07/2026: BUGFIX — een suggestie die de validator zelf al
         // rejected heeft (buiten bereik, te lage confidence, ontbrekende
         // evidenceFields, ...) is nooit "nog te beoordelen" geweest; die kwam
         // niet eens als goed te keuren kaart in beeld. Zonder deze check telde
@@ -119,9 +119,9 @@ object FclAiAdvisorHistoryRepository {
      * Gebruikt door het Analyzer-dashboard om een badge/notificatie te tonen.
      * "Laatste rapport" = alle PENDING entries met de meest recente ts_utc.
      * Zo zie je alleen de batch van de laatste run, niet oeroude PENDING's.
-     * (02/07/2026, Ecko)
+     * (02/07/2026)
      *
-     * LET OP (05/07/2026, Ecko): deze functie levert door de hierboven
+     * LET OP (05/07/2026): deze functie levert door de hierboven
      * beschreven reden altijd een lege lijst. Bewust NIET verwijderd (kan nog
      * ergens gebruikt worden voor toekomstige history-weergave), maar voor
      * "is er nog iets te beoordelen" moet [isStillPending] gebruikt worden,

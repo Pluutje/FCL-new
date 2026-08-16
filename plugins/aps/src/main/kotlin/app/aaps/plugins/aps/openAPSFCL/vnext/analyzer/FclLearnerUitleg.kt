@@ -3,7 +3,7 @@ package app.aaps.plugins.aps.openAPSFCL.vnext.analyzer
 import kotlin.math.abs
 
 /**
- * FclLearnerUitleg (10/07/2026, Ecko) — vertaalt de technische diagnose-code
+ * FclLearnerUitleg (10/07/2026) — vertaalt de technische diagnose-code
  * en D/F-getallen van een LearningStep naar een leesbare Nederlandse
  * uitleg voor het Learner-voorstel (LearnerProposalCard). De ruwe getallen
  * (D=1.023 F=0.818 wmd=... etc.) waren voor een niet-ingewijde niet te

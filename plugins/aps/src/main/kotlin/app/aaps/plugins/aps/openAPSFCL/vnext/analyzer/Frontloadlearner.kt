@@ -144,7 +144,7 @@ object FrontloadLearner {
         val huidigPeakBias = DFLearner.getRefPeakBias(context)
 
         // ── REF_WMD: wanneer de frontload triggert ───────────────────────────
-        // ONTWERPKEUZE (25/06/2026, Ecko): insuline zo vroeg mogelijk, piek zo
+        // ONTWERPKEUZE (25/06/2026): insuline zo vroeg mogelijk, piek zo
         // laag mogelijk. De enige reden om de frontload-trigger te VERHOGEN
         // (later triggeren, WMD omhoog) zou zijn dat de trigger te vroeg vuurt
         // en daardoor de piek overschat. Maar een hogere WMD betekent dat de BG
@@ -179,7 +179,7 @@ object FrontloadLearner {
         }
 
         // ── REF_WFF: hoe groot de frontload-commit ──────────────────────────
-        // ONTWERPKEUZE (25/06/2026, Ecko): de frontload wordt ALLEEN verkleind
+        // ONTWERPKEUZE (25/06/2026): de frontload wordt ALLEEN verkleind
         // als er een hypo volgt EN er weinig of geen vervolgdoses zijn geweest.
         // Als er wél vervolgdoses waren én een hypo volgde: dan waren die
         // vervolgdoses te veel, niet de frontload zelf. Die worden afgevangen
@@ -197,7 +197,7 @@ object FrontloadLearner {
             veiligeEpisodes.map { it.firstBigCommitFrac }.average()
         else null
 
-        // ── Extra signaal: Veiligheidscontrole-schendingen (13/07/2026, Ecko) ──
+        // ── Extra signaal: Veiligheidscontrole-schendingen (13/07/2026) ──
         // Complementair aan fbc: fbc zegt iets over de EERSTE commit, een
         // schending (SafetyInvariantChecker, via EpisodeMetrics.hasLateCommit-
         // Violation) zegt iets over de LAATSTE — een episode kan een prima fbc
@@ -222,7 +222,7 @@ object FrontloadLearner {
         val FBC_TARGET_MIN = 0.45
         val FBC_TARGET_MAX = 0.65
 
-        // (13/07/2026, Ecko) OR blijft de basis: fbc-te-laag EN structurele
+        // (13/07/2026) OR blijft de basis: fbc-te-laag EN structurele
         // schendingen zijn allebei onafhankelijk voldoende voor een WFF-stap
         // (zie kdoc bij violatieStructureel hierboven). Maar als BEIDE signalen
         // onafhankelijk hetzelfde wijzen, is dat sterker bewijs dan één signaal

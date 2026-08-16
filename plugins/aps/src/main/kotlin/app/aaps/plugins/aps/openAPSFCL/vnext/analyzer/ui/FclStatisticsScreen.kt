@@ -28,7 +28,7 @@ fun FclStatisticsScreen() {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            // 12/08/2026 (Ecko): was 14 dagen — TimeInRangeCard's "7/14/30 dagen"-
+            // 12/08/2026: was 14 dagen — TimeInRangeCard's "7/14/30 dagen"-
             // knop (zie Timeinrangecard.kt, dayWindow) kan tot 30 dagen opvragen,
             // maar deze query haalt maar één keer data op (LaunchedEffect(Unit),
             // draait niet opnieuw als dayWindow wijzigt) en met een vaste grens van
