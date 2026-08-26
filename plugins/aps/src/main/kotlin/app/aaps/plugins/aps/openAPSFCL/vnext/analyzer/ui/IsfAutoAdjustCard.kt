@@ -180,6 +180,27 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    // 16/08/2026, op verzoek — dev-fase: de weergave-gate
+                    // (MIN_SAMPLES_TOTAL_DISPLAY/MIN_AVG_CONFIDENCE_DISPLAY)
+                    // staat lager dan de productie-schrijfdrempel (MIN_
+                    // SAMPLES_TOTAL/MIN_AVG_CONFIDENCE), zodat er sneller iets
+                    // te zien is tijdens het testen. AUTO respecteert altijd
+                    // de hogere productiedrempel (zie FclIsfAutoAdjuster), dus
+                    // dit label is puur relevant voor MANUAL/Accepteren.
+                    val belowProductionThreshold = p.latestSamplesAnalyzed < Adjuster.MIN_SAMPLES_TOTAL ||
+                        p.latestAvgConfidence < Adjuster.MIN_AVG_CONFIDENCE
+                    if (belowProductionThreshold) {
+                        Text(
+                            "🧪 Ontwikkelmodus: dit voorstel haalt de productie-drempel nog niet " +
+                                "(${p.latestSamplesAnalyzed} metingen, min. ${Adjuster.MIN_SAMPLES_TOTAL}; " +
+                                "confidence ${"%.2f".format(p.latestAvgConfidence)}, min. ${"%.2f".format(Adjuster.MIN_AVG_CONFIDENCE)}) " +
+                                "— alleen zichtbaar dankzij de verlaagde weergavedrempel om het testen te " +
+                                "versnellen. AUTO past dit nooit toe onder de productiedrempel.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
                     IsfAutoAdjustTable(
                         oldHourly = p.oldHourly,
                         shiftByHour = p.shiftByHour,
@@ -306,6 +327,30 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                             "actieve pompprofiel. Controleer de vergelijking en bevestig " +
                             "pas als je het ermee eens bent."
                     )
+                    // 16/08/2026, op verzoek — extra, expliciete waarschuwing
+                    // wanneer dit voorstel onder de productie-schrijfdrempel
+                    // zit (alleen zichtbaar dankzij de verlaagde weergave-
+                    // gate tijdens de dev-fase, zie kdoc bij
+                    // MIN_SAMPLES_TOTAL_DISPLAY in FclIsfAutoAdjuster.kt).
+                    // Bewust GEEN blokkade — de gebruiker gaf zelf aan dit
+                    // te willen kunnen testen en voorstellen desnoods zelf
+                    // weer handmatig terug te zetten.
+                    if (pendingProposal != null &&
+                        (pendingProposal.latestSamplesAnalyzed < Adjuster.MIN_SAMPLES_TOTAL ||
+                            pendingProposal.latestAvgConfidence < Adjuster.MIN_AVG_CONFIDENCE)
+                    ) {
+                        Text(
+                            "⚠️ Let op: dit voorstel zit onder de productie-drempel " +
+                                "(${pendingProposal.latestSamplesAnalyzed} metingen, min. ${Adjuster.MIN_SAMPLES_TOTAL}; " +
+                                "confidence ${"%.2f".format(pendingProposal.latestAvgConfidence)}, " +
+                                "min. ${"%.2f".format(Adjuster.MIN_AVG_CONFIDENCE)}). Dit is dev-fase-data, bedoeld " +
+                                "om te testen of de code/UI werkt — controleer zelf of de voorgestelde " +
+                                "ISF-waarden hieronder logisch ogen voordat je bevestigt. Je kunt dit na " +
+                                "toepassen altijd handmatig terugzetten.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     if (pendingProposal != null) {
                         IsfAutoAdjustTable(
                             oldHourly = pendingProposal.oldHourly,
@@ -400,9 +445,20 @@ private fun IsfAutoAdjustTable(
             // uur dat NOCH gemeten NOCH interpoleerbaar is (buiten bereik,
             // zie INTERPOLATION_MAX_GAP_HOURS) krijgt "geen data" i.p.v.
             // stilzwijgend "voorstel" te tonen bij een ongewijzigde 0%.
+            // "Al optimaal" (18/08/2026): een uur met eigen, directe data
+            // waarvan de gemeten afwijking verwaarloosbaar is (zie kdoc bij
+            // IsfLearner.ALREADY_OPTIMAL_THRESHOLD_PCT) — vroeger stilzwijgend
+            // weggelaten uit de resultatenlijst, nu expliciet zichtbaar als
+            // bevestiging i.p.v. onderscheidbaar van "nog geen data". Gaat
+            // vóór "tegen grens": bij een verwaarloosbare shift wordt de
+            // drift-cap sowieso nooit geraakt, maar de volgorde maakt de
+            // bedoeling expliciet.
+            val isAlreadyOptimal = hasDirectData && !isInterpolated &&
+                kotlin.math.abs(shiftPct) < app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.ALREADY_OPTIMAL_THRESHOLD_PCT
             val status = when {
                 isInterpolated -> "afgeleid" + (if (atCap) " (tegen grens)" else "")
                 !hasDirectData -> "geen data"
+                isAlreadyOptimal -> "al optimaal"
                 atCap -> "tegen grens" + (if (hitCount > 0) " (${hitCount}d)" else "")
                 else -> "voorstel"
             }

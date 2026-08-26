@@ -473,6 +473,50 @@ private fun computeDoseAccessLevel(
                 ctx.acceleration >= 0.06 ->
                 DoseAccessLevel.SMALL
 
+            // ── Curve-fit-bevestigde stijging in-range (18/08/2026) ─────────
+            // AANLEIDING: maaltijd 18/8 19:04 — toegang bleef tot en met
+            // 19:09 op MICRO_ONLY hangen (BG 5,6-5,8, nog IN_RANGE t.o.v.
+            // target 5,4) terwijl de vroege-boost-target al 4,80U berekende
+            // en curveFitR2 om 19:09 al 0,920 was — ruim boven
+            // CURVE_FIT_MIN_R2 (0,90), dezelfde drempel die elders
+            // (curveConfirmtOmslag) al als "bevestigd" geldt. De sprong-
+            // conditie hierboven kijkt alleen naar slope/recentSlope/
+            // acceleration, niet naar de betrouwbaardere curve-fit —
+            // met als gevolg dat een al bevestigde, versnellende stijging
+            // toch tot ~10 minuten op microCap bleef hangen: precies het
+            // venster waarin vroege insuline de meeste hefboom op de
+            // latere piek heeft (insulinewerking piekt pas na 60-90 min).
+            // Bewust behoudend: escaleert naar SMALL, niet direct NORMAL —
+            // BG staat nog wel degelijk in range, dus de extra
+            // voorzichtigheid van een kleinere cap blijft gehandhaafd;
+            // alleen de MICRO-ondergrens wordt losgelaten zodra de
+            // curve-fit zelf al genoeg vertrouwen geeft. Zelfde idioom
+            // (curveFitR2/curveAcceleration) als curveConfirmtOmslag elders
+            // in dit bestand — geen nieuw signaal, alleen hergebruikt op
+            // de vroege kant van de curve i.p.v. de omslag-kant.
+            //
+            // ── Uitsluiting: recente hypo/rebound (18/08/2026, backtest) ────
+            // Backtest over 11 dagen (13 logbestanden) liet zien dat deze
+            // escalatie in 11 van de 53 gevallen waar hij daadwerkelijk iets
+            // zou hebben uitgemaakt, NIET tot een echte, aanhoudende stijging
+            // leidde. Drie van die mislukte gevallen (4/8 17:29, 9/8 15:41,
+            // 7/8 21:17) waren geen maaltijd maar een terugveer-reactie na een
+            // hypo/lage BG: curveFitR2 en curveAcceleration zien er tijdens
+            // zo'n terugveer identiek "bevestigd" uit als bij een echte
+            // maaltijd — de curve-fit kan dat onderscheid niet maken, alleen
+            // de recente BG-geschiedenis kan dat. In alle drie gevallen was
+            // BG binnen de voorgaande 30 minuten nog in de LOW-zone geweest,
+            // gevolgd door een terugval (in twee van de drie tot een nieuwe,
+            // diepere hypo). Daarom: geen escalatie als BG in de laatste
+            // ~45 minuten (9 cycli) nog LOW is geweest — een verse maaltijd
+            // start per definitie niet vanuit een net doorgemaakte hypo.
+            // Raakt de oorspronkelijke aanleiding (18/8 19:04, meal na een
+            // rustige avond zonder recente hypo) niet.
+            ctx.curveFitR2 >= CURVE_FIT_MIN_R2 && ctx.curveAcceleration > 0.0 &&
+                ctx.input.bgHistory.sortedBy { it.first.millis }.takeLast(9)
+                    .none { it.second <= 4.4 } ->
+                DoseAccessLevel.SMALL
+
             // Bestaand: enkele meting met stijging → MICRO_ONLY
             maxOf(ctx.slope, ctx.recentSlope * 0.5) >= 0.6 && ctx.acceleration >= 0.06 ->
                 DoseAccessLevel.MICRO_ONLY
@@ -1627,6 +1671,18 @@ private fun canCommitNow(
     // ✅ NIEUW: vroege episode override — kortere cooldown bij bewezen maaltijdstijging
     // Alleen actief in eerste 15 minuten van een CONFIRMED episode, en alleen als IOB
     // nog niet zo hoog is dat de peakIobBrake (Patch 1) al zou moeten ingrijpen.
+    //
+    // Cap verlaagd 5 -> 3 (26/08/2026, gebruiker): "minutes" hierboven komt uit
+    // Joda's Minutes.minutesBetween(), dat AFRONDT NAAR BENEDEN (whole minutes,
+    // geen seconden). Een cyclus die in werkelijkheid 4 min 55 sec na de vorige
+    // commit binnenkomt (heel normaal bij BG-metingen die niet exact om de 5:00
+    // binnenkomen) telt dus als "4", niet "5" — en werd bij een cap van 5 dan
+    // alsnog geblokkeerd, precies in de eerste, belangrijkste minuten van een
+    // maaltijd. Bevestigd in de historische data (v9/v10-csv's): meerdere
+    // momenten met minutes_since_commit==4, vroege episode, lage IOB en toch
+    // geen commit. Cap van 3 geeft ruim voldoende marge tegen die normale
+    // meet-jitter, zonder de facto twee commits binnen één BG-reading toe te
+    // staan (die readings komen nooit dichter dan ~3-4 min na elkaar binnen).
     val earlyEpisodeCooldown =
         if (minutesSinceEpisodeStart in 0..config.earlyEpisodeWindowMinutes &&
             ctx.iobRatio < config.earlyEpisodeCooldownIobMax) {
@@ -4124,7 +4180,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v70-2026-08-16-1630"
+    private val FCL_CODE_VERSION = "v81-2026-08-26-1400"
 
     // ── Restart-detectie (16/07/2026) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -7656,6 +7712,37 @@ class FCLvNext(
                     status.append(
                         "OMSLAG DIRECTE REM: ${"%.2f".format(voorDirectCut)}->${"%.2f".format(lateDecayMul)} " +
                             "(diepte=${"%.2f".format(omslagDiepte)})\n"
+                    )
+                }
+
+                // ── Vangnet: lateDecayMul mag niet ongehinderd STIJGEN als de
+                // curve-fit al een omslag heeft bevestigd (18/08/2026) ──────────
+                // AANLEIDING: 18/8 20:39 — late_decay_mul sprong in één cyclus van
+                // 0,16 naar 0,69 (ondanks curveConfirmtOmslag=true op dat moment:
+                // curveAcceleration=-7,39, r²=0,991), waardoor episodePeakCommitU
+                // (2,40U) × 0,69 de op-1-na-grootste commit van de hele episode
+                // afleverde (1,67U) — exact 1 cyclus ná de feitelijke piek (11,5→
+                // 11,4 mmol), terwijl BG net was gaan dalen. Kon bij nader onderzoek
+                // niet met zekerheid tot ÉÉN specifieke tak hierboven worden herleid
+                // (reentry/vroegeStijgingNuVoorHetEerst/eerste-levering/nieuwe-
+                // maaltijd-trog bleken elk, op basis van de gelogde waarden, niet
+                // van toepassing) — vandaar bewust een vangnet NA alle takken
+                // hierboven, i.p.v. één specifieke tak nog strenger te maken: welk
+                // pad de stijging ook veroorzaakte, een al curve-fit-bevestigde
+                // omslag mag lateDecayMul nooit hoger maken dan het al bereikte
+                // afbouwniveau. Hergebruikt bewust hetzelfde, elders al bewezen
+                // signaal (curveConfirmtOmslag) als GAT 1 hierboven — geen nieuw
+                // mechanisme, alleen hetzelfde vangnet nu ook hier, ongeacht welke
+                // van de takken hierboven de stijging veroorzaakte. Raakt uitsluitend
+                // een STIJGING t.o.v. vorige cyclus — een legitieme, doorgaande
+                // afbouw (lateDecayMul gelijk of lager) wordt hier nooit door geraakt.
+                if (lateDecayMul > lastKnownLateDecayMul && curveConfirmtOmslag) {
+                    val voorGrendel = lateDecayMul
+                    lateDecayMul = lastKnownLateDecayMul
+                    status.append(
+                        "LATEDECAYMUL-GRENDEL (bevestigde omslag): ${"%.2f".format(voorGrendel)}->" +
+                            "${"%.2f".format(lateDecayMul)} (curveAccel=${"%.2f".format(ctx.curveAcceleration)} " +
+                            "r²=${"%.2f".format(ctx.curveFitR2)})\n"
                     )
                 }
 

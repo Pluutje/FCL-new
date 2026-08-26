@@ -1,12 +1,12 @@
 package app.aaps.plugins.aps.openAPSFCL.vnext.database
 
 import android.content.Context
-import android.os.Environment
 import app.aaps.plugins.aps.openAPSFCL.vnext.FclActiveConfigBridge
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.DFLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeDetector
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetricsBuilder
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerBackup
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.toLogRow
 import app.aaps.plugins.aps.openAPSFCL.vnext.persist.VLearner
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -36,6 +36,7 @@ class FCLCycleLogRepository @Inject constructor(
     private val persistDao by lazy { persistDb.persistEventDao() }
 
     private var lastCsvExportHour: Int = -1
+    private var lastBackupCheckHour: Int = -1
     private var lastLearnerRunHour: Int = -1
     private var lastCgpCalcHour: Int = -1   // berekening elke 2 uur
 
@@ -44,6 +45,7 @@ class FCLCycleLogRepository @Inject constructor(
             dao.insert(entity)
             pruneOldData()
             maybeExportCsv()
+            maybeWriteBackup()
             maybeRunLearners()
             maybeCgpCalc()
         }
@@ -72,6 +74,22 @@ class FCLCycleLogRepository @Inject constructor(
         if (currentHour == lastCsvExportHour) return
         lastCsvExportHour = currentHour
         exportCsvLast7Days()
+    }
+
+    /**
+     * Dagelijkse backup van de geleerde D/F/V-staat en verwante
+     * plugin-interne instellingen (zie FclLearnerBackup.kt, 26/08/2026 —
+     * n.a.v. het verlies van deze staat bij de overstap naar de nieuwe
+     * telefoon op 20/08/2026). Zelfde uur-gate als maybeExportCsv(); de
+     * daadwerkelijke "vandaag al gedaan?"-check zit in
+     * FclLearnerBackup.maybeWriteDailyBackup() zelf, dus dit hier is
+     * puur om niet elke cyclus een bestand-exists-check te doen.
+     */
+    private suspend fun maybeWriteBackup() {
+        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (currentHour == lastBackupCheckHour) return
+        lastBackupCheckHour = currentHour
+        FclLearnerBackup.maybeWriteDailyBackup(context)
     }
 
     /**
@@ -481,13 +499,51 @@ class FCLCycleLogRepository @Inject constructor(
         scope.launch { runLearners() }
     }
 
+    // ── Schrijflocatie + crash-hardening (20/08/2026) ────────────
+    // AANLEIDING: overzet naar nieuwe telefoon — de app crashte op ELKE
+    // BG-update (FATAL EXCEPTION, hele proces gekilld) met
+    // FileNotFoundException: EACCES (Permission denied) op
+    // Environment.getExternalStorageDirectory()/Documents/AAPS/ANALYSE.
+    // Uit de AndroidManifest.xml bleek de app READ/WRITE_EXTERNAL_STORAGE
+    // bewust te verwijderen ("App uses scoped storage / SAF (minSdk 31)") en
+    // MANAGE_EXTERNAL_STORAGE nergens aan te vragen.
+    // HERZIEN (20/08/2026, uitdrukkelijk verzoek): de gedeelde Documents-map
+    // blijft bewust de schrijflocatie — dat is precies waarom dit bestand
+    // met een gewone bestandsverkenner te vinden is, voor deze en elke
+    // toekomstige gebruiker van de app. De juiste, structurele oplossing zit
+    // dus niet hier, maar in de AndroidManifest.xml (buiten deze plugin-map,
+    // dus niet in deze levering): MANAGE_EXTERNAL_STORAGE moet daar alsnog
+    // worden aangevraagd. Zie de leveringsnotitie voor de exacte
+    // manifest-snippet en de resterende stap (permissie via Instellingen of
+    // adb toekennen na de rebuild) — zonder die manifest-wijziging zal dit
+    // pad op een verse installatie (zoals nu) nog steeds EACCES geven.
+    //
+    // Daarnaast: de HELE functie blijft in try/catch. Dit bestand is
+    // puur diagnostisch (voor de losse CSV-analyse) — nooit dosis-bepalend —
+    // dus een schrijffout (schijf vol, onverwachte permissiewijziging, etc.)
+    // mag nooit meer de hele closed loop meesleuren in een crash zoals nu
+    // gebeurde. Bij een fout wordt alleen deze ene export overgeslagen, met
+    // een regel in logcat; de rest van de cyclus (inclusief dosering) gaat
+    // gewoon door.
     private suspend fun exportCsvLast7Days() {
+        try {
+            exportCsvLast7DaysInternal()
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "FCLCycleLogRepository",
+                "exportCsvLast7Days mislukt — export overgeslagen, rest van de cyclus gaat door",
+                e
+            )
+        }
+    }
+
+    private suspend fun exportCsvLast7DaysInternal() {
         val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L
         val rows = dao.getSince(sevenDaysAgo)
         if (rows.isEmpty()) return
 
         val dir = File(
-            Environment.getExternalStorageDirectory(),
+            android.os.Environment.getExternalStorageDirectory(),
             "Documents/AAPS/ANALYSE"
         )
         dir.mkdirs()

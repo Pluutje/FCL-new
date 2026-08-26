@@ -330,7 +330,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
                 IntKey.ApsDynIsfAdjustmentFactor.max.toDouble()
             )
         val smbEnabled = preferences.get(BooleanKey.ApsUseSmb)
-      //  val advancedFiltering = constraintsChecker.isAdvancedFilteringEnabled().also { inputConstraints.copyReasons(it) }.value()
+  //     val advancedFiltering = constraintsChecker.isAdvancedFilteringEnabled().also { inputConstraints.copyReasons(it) }.value()
         val advancedFiltering = true
 
         val now = dateUtil.now()

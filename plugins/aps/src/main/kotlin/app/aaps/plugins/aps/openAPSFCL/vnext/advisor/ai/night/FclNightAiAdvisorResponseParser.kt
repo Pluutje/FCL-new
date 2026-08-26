@@ -136,30 +136,32 @@ object FclNightAiAdvisorResponseParser {
     // "afgezwakt door een buurvenster" hieronder klopt dus niet meer letterlijk
     // en is bijgewerkt.
     //
-    // TWEEDE HERZIENING (30/07/2026, op verzoek — "de eerste verlaging
-    // mag best wat eerder beginnen, gekoppeld aan mijn DIA van 10 uur"): het
-    // gewicht is bewust ASYMMETRISCH gemaakt. Vooruit in de tijd (een kern-uur
-    // heeft nog een NASLEEP in het uur erna) blijft het bestaande, kortere
-    // bereik (±1..3u, ongewijzigd). Terug in de tijd (ANTICIPATIE — een
-    // probleem dat pas om bv. 02:00 zichtbaar wordt, mag al eerder een
-    // voorzichtige daling krijgen, in lijn met hoe lang een basaalwijziging via
-    // de insulinewerkingsduur nog doorwerkt) is het bereik nu 4 uur i.p.v. 3,
-    // met een iets minder steile afname — zie ANTICIPATION_WEIGHTS hieronder.
-    // Dit is een BOVENOP de bestaande BASAL_SHIFT_MINUTES=75min-correctie in
-    // Nightwindowanalyzer.kt (die blijft ongewijzigd — dat is een vaste
-    // natuurkundige onset-vertraging, geen instelbare marge): effectHour ligt
-    // dus al zo'n 30-75 min vóór het waargenomen probleem, en dit
-    // anticipatie-bereik trekt daar bovenop nog eens tot 4 uur voor het
-    // (eventueel al verschoven) kern-uur een geleidelijk aflopend signaal door.
-    private fun gaussWeight(offset: Int): Double = when {
-        offset == 0 -> 1.0
-        offset == 1 -> 0.55    // nasleep: 1u ná een beoordeeld uur
-        offset == 2 -> 0.20
-        offset == 3 -> 0.08
-        offset == -1 -> 0.65   // anticipatie: 1u vóór een beoordeeld/problematisch uur
-        offset == -2 -> 0.50
-        offset == -3 -> 0.35
-        offset == -4 -> 0.20
+    // DERDE HERZIENING (24/08/2026, op verzoek — "22:00 moet ook worden
+    // meegenomen, met een vloeiend verloop, ongeacht waar/hoe lang het blok
+    // duurt"): de asymmetrische, DIA-gekoppelde versie hierboven (30/07)
+    // bleek niet meer de bedoeling — expliciet nagevraagd, en het antwoord
+    // was dat niet de DIA maar de veel kortere piektijd/halfwaardetijd van de
+    // insuline (bv. ~40 min bij Lyumjev) bepalend is, én dat de kernwens
+    // eigenlijk is: NOOIT een sprong van 0% direct naar het volle kern-
+    // percentage in één stap tussen buururen — zoals in de screenshot van
+    // 24/8 gebeurde toen alleen 23:00 (-5%) een aanpassing kreeg en het uur
+    // ervoor onaangeroerd bleef.
+    // Vervangen door een vaste, SYMMETRISCHE, korte trap: 1u afstand → 50%,
+    // 2u afstand → 20%, 3u+ afstand → 0%. Getoetst tegen beide door de
+    // gebruiker gegeven voorbeelden: kern om 23:00 (-5%) geeft 22:00 exact
+    // -2,5% (50%); kern om 01:00 (-5%) geeft 00:00 -2,5% (50%, 1u), 23:00 -1%
+    // (20%, 2u) en 22:00 blijft ongewijzigd (0%, 3u) — beide kloppen exact.
+    // Symmetrisch toegepast (zelfde tabel voor zowel anticipatie als nasleep)
+    // zodat óók het einde van een aanpassingsblok nu op dezelfde manier
+    // vloeiend afbouwt i.p.v. de vorige, kortere en asymmetrische
+    // nasleep-tabel (was ±1..3u met 0,55/0,20/0,08). De BASAL_SHIFT_MINUTES=
+    // 75min-correctie in Nightwindowanalyzer.kt blijft ongewijzigd (dat is een
+    // vaste onset-vertraging, geen instelbare marge) — deze trap werkt daar
+    // bovenop.
+    private fun gaussWeight(offset: Int): Double = when (kotlin.math.abs(offset)) {
+        0 -> 1.0
+        1 -> 0.5
+        2 -> 0.2
         else -> 0.0
     }
 

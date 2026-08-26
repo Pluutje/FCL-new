@@ -152,7 +152,7 @@ val LightGeneralColors = GeneralColors(
     flavorClient3Tint = Color(0x304CAF50),   // green tint (AAPSClient3)
     versionCommitted = Color(0xFFB2B2B2),    // gray for official/committed builds (matches omniGrayColor)
     versionWarning = Color(0xFFFF8C00),      // orange for newer version available (matches metadataTextWarningColor)
-    versionUncommitted = Color(0xFFFF4444),  // red for uncommitted dev builds (matches urgentColor/alarm)
+    versionUncommitted = Color(0xFF947F7F),  // red for uncommitted dev builds (matches urgentColor/alarm)
     cycleAverage = Color(0xFF2E7D32),         // dark green for cycle pattern average line
     // Notification colors (same in both modes — high contrast on any background)
     notificationUrgent = Color(0xFFFF0400),       // red for urgent notifications
@@ -209,7 +209,7 @@ val DarkGeneralColors = GeneralColors(
     flavorClient3Tint = Color(0x304CAF50),   // green tint (AAPSClient3)
     versionCommitted = Color(0xFFB2B2B2),    // gray for official/committed builds
     versionWarning = Color(0xFFFF8C00),      // orange for newer version available
-    versionUncommitted = Color(0xFFFF4444),  // red for uncommitted dev builds
+    versionUncommitted = Color(0xFFA87E7E),  // red for uncommitted dev builds
     cycleAverage = Color(0xFF66BB6A),         // lighter green for cycle pattern average line (dark mode)
     // Notification colors (same values — high contrast on dark background)
     notificationUrgent = Color(0xFFFF0400),

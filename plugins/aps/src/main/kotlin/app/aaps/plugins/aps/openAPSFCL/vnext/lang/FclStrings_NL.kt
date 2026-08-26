@@ -160,6 +160,7 @@ object FclStrings_NL : FclStrings {
     override val maxSmb             = "MaxSMB"
     override val parameters         = "Fijnafstelling"
     override val nachtNLabel        = "Nacht"
+    override val isfLabel           = "ISF"
     override val analyse            = "Patroonanalyse"
     override val confidence         = "Confidence"
     override val gebruikt           = "Gebruikt"

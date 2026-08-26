@@ -70,8 +70,31 @@ object FclIsfAutoAdjuster {
     private const val MAX_HOURLY_SHIFT_PCT = 10.0
     private const val DAILY_TOTAL_CAP_FRAC = 0.15
     private const val CUMULATIVE_DRIFT_CAP_FRAC = 0.20
-    private const val MIN_SAMPLES_TOTAL = 20         // som van sampleCount over alle aangeraakte uren
-    private const val MIN_AVG_CONFIDENCE = 0.55
+
+    // ── Twee aparte drempels (16/08/2026, op verzoek — dev-fase) ───────────
+    // Aanleiding: tijdens het ontwikkelen/testen duurt het met de "echte"
+    // (productie-)drempel te lang voordat er überhaupt iets te zien is —
+    // "deste eerder zien we of en hoe de code werkt". MIN_SAMPLES_TOTAL_
+    // DISPLAY/MIN_AVG_CONFIDENCE_DISPLAY bepalen alleen of een dag wordt
+    // GELOGD/GETOOND (tabel + grafiek in IsfAutoAdjustCard) — bewust laag,
+    // zodat het eerste bruikbare uur al zichtbaar wordt.
+    //
+    // MIN_SAMPLES_TOTAL/MIN_AVG_CONFIDENCE blijven de ORIGINELE, strengere
+    // waarden en zijn nu de "productie"-schrijfdrempel: een EXTRA, aparte
+    // check vlak vóór de daadwerkelijke pomp-schrijfactie (zowel de AUTO-tak
+    // in evaluateInternal() als, ter info in de UI, bij MANUAL's Accepteren).
+    // Bewuste asymmetrie tussen AUTO en MANUAL: AUTO schrijft zonder mens
+    // ertussen, dus AUTO mag NOOIT onder de productie-drempel schrijven, punt
+    // uit — geen "extra waarschuwing" mogelijk zoals bij MANUAL, want er is
+    // niemand om te waarschuwen. MANUAL heeft altijd al een mens die op
+    // Accepteren klikt; daar volstaat een extra, expliciete waarschuwing in
+    // de bevestigingsdialoog (zie IsfAutoAdjustCard.kt) i.p.v. een harde
+    // blokkade — de gebruiker gaf zelf aan bewust te willen testen met lagere
+    // drempels en eventuele voorstellen zelf handmatig terug te zetten.
+    const val MIN_SAMPLES_TOTAL_DISPLAY = 4          // = IsfLearner.MIN_SAMPLES_PER_HOUR (één uur is al genoeg om te tonen)
+    const val MIN_AVG_CONFIDENCE_DISPLAY = 0.30      // = ondergrens van IsfLearner's eigen confidence-clip
+    const val MIN_SAMPLES_TOTAL = 20                 // productie-drempel — som van sampleCount over alle aangeraakte uren
+    const val MIN_AVG_CONFIDENCE = 0.55              // productie-drempel
 
     // Zelfde gemiddelde-over-meerdere-dagen-ontwerp als FclNightBasalAutoAdjuster
     // (zie de uitgebreide kdoc daar, 27/07/2026) — hier "dagen" i.p.v. "nachten",
@@ -236,7 +259,14 @@ object FclIsfAutoAdjuster {
         // venster (ongeacht of die meting toevallig 0% shift opleverde) —
         // puur voor UI: onderscheidt "gemeten, geen wijziging nodig" van
         // "nooit gemeten en ook niet interpoleerbaar" (gat > MAX_GAP_HOURS).
-        val touchedHours: Set<Int> = emptySet()
+        val touchedHours: Set<Int> = emptySet(),
+        // 16/08/2026 — cijfers van de MEEST RECENTE dag in het venster, puur
+        // voor UI: laat zien of het huidige voorstel de productie-schrijf-
+        // drempel (MIN_SAMPLES_TOTAL/MIN_AVG_CONFIDENCE) al haalt, of dat
+        // het alleen zichtbaar is dankzij de verlaagde weergave-gate
+        // (dev-fase) — zie kdoc bij MIN_SAMPLES_TOTAL_DISPLAY.
+        val latestSamplesAnalyzed: Int = 0,
+        val latestAvgConfidence: Double = 0.0
     )
 
     suspend fun computeCurrentProposal(context: Context, maxDays: Int = MANUAL_MAX_WINDOW_DAYS): DailyProposal? {
@@ -251,7 +281,12 @@ object FclIsfAutoAdjuster {
         val oldHourly = days.last().oldHourly
         val baseline = FclIsfAutoAdjustStore.getBaseline(context) ?: oldHourly
         val (newHourly, hoursAtCap) = computeNewHourly(oldHourly, avgShift, baseline)
-        return DailyProposal(days.size, days.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap, interpolatedHours, touchedHours)
+        return DailyProposal(
+            days.size, days.last().localDate, oldHourly, newHourly, avgShift, hoursAtCap,
+            interpolatedHours, touchedHours,
+            latestSamplesAnalyzed = days.last().samplesAnalyzed,
+            latestAvgConfidence = days.last().avgConfidence
+        )
     }
 
     /**
@@ -360,11 +395,12 @@ object FclIsfAutoAdjuster {
         val samplesAnalyzed = suggestions.sumOf { it.sampleCount }
         val avgConfidence = suggestions.map { it.confidence }.average()
 
-        // ── Confidence-gate ──
-        if (samplesAnalyzed < MIN_SAMPLES_TOTAL || avgConfidence < MIN_AVG_CONFIDENCE) {
+        // ── Weergave-gate (dev-fase, verlaagd t.o.v. de productie-drempel —
+        //    zie kdoc bij MIN_SAMPLES_TOTAL_DISPLAY hierboven) ──
+        if (samplesAnalyzed < MIN_SAMPLES_TOTAL_DISPLAY || avgConfidence < MIN_AVG_CONFIDENCE_DISPLAY) {
             logRow(db, now, today, mode, applied = false,
-                   skipReason = "confidence-gate: samples=$samplesAnalyzed (min $MIN_SAMPLES_TOTAL) " +
-                       "gem.confidence=${"%.2f".format(avgConfidence)} (min $MIN_AVG_CONFIDENCE)",
+                   skipReason = "weergave-gate: samples=$samplesAnalyzed (min $MIN_SAMPLES_TOTAL_DISPLAY) " +
+                       "gem.confidence=${"%.2f".format(avgConfidence)} (min $MIN_AVG_CONFIDENCE_DISPLAY)",
                    oldJson = "{}", newJson = "{}", shiftJson = "{}",
                    hoursAtCapCount = 0, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
             return
@@ -398,6 +434,24 @@ object FclIsfAutoAdjuster {
         if (daysSince < AUTO_COOLDOWN_DAYS) return
         val window = collectRecentDailyShifts(db, lastChangeDate(context, db.isfAutoAdjustLogDao().getLatestApplied()?.timestampMs ?: 0L), AUTO_COOLDOWN_DAYS)
         if (window.size < AUTO_COOLDOWN_DAYS) return
+
+        // ── AUTO-schrijf-drempel (productie, NIET de verlaagde weergave-
+        //    gate hierboven) — AUTO schrijft zonder mens ertussen, dus deze
+        //    check is hard en zonder uitzondering, ongeacht hoe laag de
+        //    weergave-gate tijdens de dev-fase staat. ──
+        val windowAvgSamples = window.map { it.samplesAnalyzed }.average()
+        val windowAvgConfidence = window.map { it.avgConfidence }.average()
+        if (windowAvgSamples < MIN_SAMPLES_TOTAL || windowAvgConfidence < MIN_AVG_CONFIDENCE) {
+            logRow(db, now, today, mode, applied = false,
+                   skipReason = "AUTO-schrijf-drempel (productie) niet gehaald: gem.samples=" +
+                       "${"%.1f".format(windowAvgSamples)} (min $MIN_SAMPLES_TOTAL) gem.confidence=" +
+                       "${"%.2f".format(windowAvgConfidence)} (min $MIN_AVG_CONFIDENCE) — de weergave-gate " +
+                       "staat lager (dev-fase), maar AUTO schrijft alleen op de originele, strengere drempel.",
+                   oldJson = oldJson, newJson = oldJson, shiftJson = "{}",
+                   hoursAtCapCount = 0, samplesAnalyzed = samplesAnalyzed, avgConfidence = avgConfidence)
+            return
+        }
+
         val directAvgShift = weightedAverageShift(window)
         val (avgShift, _) = interpolateGaps(directAvgShift, touchedHoursOf(window))
         val (avgNewHourly, avgHoursAtCap) = computeNewHourly(currentHourly, avgShift, baseline)

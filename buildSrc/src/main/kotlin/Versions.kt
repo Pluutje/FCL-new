@@ -9,7 +9,7 @@ object Versions {
     const val versionCode = 1500
 
     const val compileSdk = 37
-    const val minSdk = 29
+    const val minSdk = 30
     const val targetSdk = 35
     const val wearMinSdk = 30
     const val wearTargetSdk = 30

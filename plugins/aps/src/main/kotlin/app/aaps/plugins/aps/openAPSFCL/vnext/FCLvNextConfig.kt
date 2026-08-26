@@ -211,7 +211,7 @@ data class FCLvNextConfig(
 
     // ── canCommitNow (vroege episode) ─────────────────────────────────────
     val earlyEpisodeCooldownIobMax: Double,     // 0.65 — max IOB-ratio waarbij vroege cooldown-korting nog geldt (finetuning: hoger = langer korte cooldown toestaan)
-    val earlyEpisodeMinCooldownMinutes: Int,    // 5    — kortste toegestane cooldown in vroege episode (finetuning: sneller/trager ophopen in eerste 15 min)
+    val earlyEpisodeMinCooldownMinutes: Int,    // 3 (was 5, 26/08/2026) — kortste toegestane cooldown in vroege episode (finetuning: sneller/trager ophopen in eerste 15 min)
     val earlyEpisodeWindowMinutes: Int,         // 15   — hoe lang de vroege episode override actief is (finetuning: aanpassen aan eigen maaltijdtijdprofiel)
 
     // ── computeLateBolusBlock ─────────────────────────────────────────────
@@ -531,7 +531,7 @@ fun loadFCLvNextConfig(
         trajectoryAbsorptionIobMin      = 0.35,
         trajectoryHighIobThreshold      = 0.70,
         earlyEpisodeCooldownIobMax      = 0.65,
-        earlyEpisodeMinCooldownMinutes  = 5,
+        earlyEpisodeMinCooldownMinutes  = 3,   // was 5 (26/08/2026, zie kdoc canCommitNow() in FCLvNext.kt)
         earlyEpisodeWindowMinutes       = 15,
         lateBolusBlockIobMin            = 0.35,
         topGuardMinIobRatio             = 0.30,

@@ -160,6 +160,11 @@ interface FclStrings {
     val maxSmb: String
     val parameters: String
     val nachtNLabel: String
+    // Eigen ISF-tabblad (19/08/2026) — voorheen stond de ISF-kaart op het
+    // Dag-tabblad; ISF-data bouwt zo langzaam op dat dit de rest van Dag
+    // (Agressiviteit e.d.) onnodig naar onderen duwde. Zelfde plek in de
+    // volgorde als Dag/Nacht, geen submenu van iets anders.
+    val isfLabel: String
     val analyse: String
     val confidence: String
     val gebruikt: String

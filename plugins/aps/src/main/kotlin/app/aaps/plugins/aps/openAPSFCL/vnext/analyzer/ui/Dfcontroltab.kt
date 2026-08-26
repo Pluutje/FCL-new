@@ -133,13 +133,13 @@ fun DFControlTab(
         // Settings → Analyser Automaat / AI Advisor, niet meer hier.
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.LearnerProposalCard(context)
 
-        // ── 0b. ISF bijstellen (16/08/2026) ─────────────────────────
-        // Zelfde plek/patroon als de Learner-kaart hierboven: deterministisch,
-        // niet AI/niet nacht-specifiek. Aan/uit + automatisch/handmatig staat
-        // ook hier bij Settings → Analyser Automaat / AI Advisor.
-        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.IsfAutoAdjustCard(context)
-
         // ── 1. Agressiviteitsschaal + Toepassen in AAPS ────────────────────
+        // ISF bijstellen (16/08/2026) heeft sinds 19/08/2026 een eigen
+        // tabblad (naast Dag/Nacht) — zie IsfControlTab in Advisorscreen.kt.
+        // ISF-data bouwt bewust langzaam op (zuivere correcties zijn
+        // schaars), dus stond die kaart hier steeds bovenaan te wachten op
+        // gegevens terwijl Agressiviteit — waar je vrijwel elk bezoek voor
+        // komt — naar onderen werd geduwd. Verplaatst, niet verwijderd.
         AggressiviteitsKaart(
             niveau = aggressiveness,
             niveauToegepast = lastAppliedAggressiveness,
@@ -176,10 +176,11 @@ fun DFControlTab(
             applyResult = applyResult,
             applyTs = applyTs
         )
-        // 26/07/2026 — dag/nacht-splitsing: twee onafhankelijke assen,
-        // dus twee statusregels i.p.v. één.
+        // 26/07/2026 — dag/nacht-splitsing: twee onafhankelijke assen.
+        // De Nacht-statusregel stond hier ook, dubbel met wat er al op het
+        // Nacht-tabblad hoort — verplaatst naar NachtControlTab (19/08/2026),
+        // zodat elk tabblad alleen zijn eigen status toont.
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = false), label = "Dag")
-        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = true), label = "Nacht")
         app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerAdvies.getLatest(context)?.let { advies ->
             Text(
                 "💡 F staat al ${advies.episodes} episodes tegen zijn plafond " +

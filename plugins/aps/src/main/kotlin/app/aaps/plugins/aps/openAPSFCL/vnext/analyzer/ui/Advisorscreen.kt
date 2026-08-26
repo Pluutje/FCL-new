@@ -133,13 +133,34 @@ fun AdvisorScreen(
                 )
             })
 
-            // ── Expert: Parameters en Analyse tabs ───────────────────────
+            // ── 3. ISF: automatische ISF-bijstelling (19/08/2026) ────────
+            // Eigen tabblad, was voorheen bovenaan het Dag-tabblad — zie
+            // kdoc bij Dfcontroltab.kt voor de aanleiding (ISF-data bouwt
+            // bewust langzaam op, duwde Agressiviteit onnodig naar onderen).
+            add(InfoTabPage(s.isfLabel) {
+                val isfContext = androidx.compose.ui.platform.LocalContext.current
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(
+                    app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf.FclIsfAutoAdjustStore.getMode(isfContext),
+                    label = "ISF"
+                )
+                app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.IsfAutoAdjustCard(isfContext)
+            })
+
+            // ── Expert: Parameters, Backup en Analyse tabs ───────────────
             if (expertMode) {
                 add(InfoTabPage(s.parameters) {
                     HandmatigParametersTab(
                         activeParams  = activeParams,
                         onApplyParams = onApplyParams
                     )
+                })
+                // Backup & herstel van de geleerde staat (26/08/2026) — zie
+                // FclLearnerBackup.kt / FclBackupRestoreCard.kt: aanleiding
+                // was het verlies van sterkte/timing/volhoudendheid bij de
+                // overstap naar de nieuwe telefoon op 20/08/2026. Alleen in
+                // Expert-modus, net als de andere technische tabbladen.
+                add(InfoTabPage("Backup") {
+                    FclBackupRestoreCard()
                 })
                 add(InfoTabPage(s.analyse) {
                     AdvisorOverviewCard(recommendation)
@@ -866,6 +887,11 @@ fun NachtControlTab(
                 }
             }
         }
+
+        // Statusregel (19/08/2026) — stond voorheen (samen met de Dag-
+        // variant) op het Dag-tabblad; hoort hier thuis, bij de rest van de
+        // Nacht-instellingen.
+        app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.ui.FclModeStatusLine(DFLearner.getMode(context, isNight = true), label = "Nacht")
 
         // ── NF-kaart: GELEERDE NF (door NachtLearner) — hoofdwaarde +
         // 14-dagen verloop + laatste aanpassing. Onaangeraakt door de
