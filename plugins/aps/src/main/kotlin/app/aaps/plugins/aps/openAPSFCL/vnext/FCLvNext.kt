@@ -1260,6 +1260,35 @@ private var peakBrakeWasActiveLastCycle: Boolean = false
 // dosis doorlaat terwijl de curve al aan het knikken is.
 private var prevCurveAccelerationForOmslag: Double? = null
 
+// ── Stale-omslag-vrijwaring (27/08/2026) ────────────────────────────
+// Backtest (27/08, 23 historische episodes uit augustus): curveConfirmtOmslag
+// declareert een "omslag" zodra curveAcceleration <= 0.0 (met betrouwbare
+// r²) -- maar een afnemende STIJGINGSSNELHEID is normaal ruim voordat de BG
+// zelf gaat afvlakken. Op 27/08 bleef de BG na zo'n vroege "omslag"
+// (19:48-20:03) nog 45+ minuten fors doorstijgen (8,9->10,7 mmol/L) terwijl
+// late_decay_mul naar 0,04 kelderde en elke cyclus op de vloer (0,15U) bleef
+// hangen. De bestaande reentry-vrijwaring (isReentrySignal, voor "tweede
+// gang/dessert") herstelde dit pas na ~20-25 minuten.
+//
+// Twee alternatieven doorgerekend op dezelfde 23 episodes: (1) curveConfirmtOmslag
+// pas laten gelden bij recentSlope<3,0, en (2) de late_decay_mul-vloer optrekken --
+// beide gaven ongeveer evenveel extra insuline bij een terechte doorgaande stijging
+// als bij een echte omslag (~coin flip, geen nettoverbetering). Een 2-cycli-
+// bevestiging (dezelfde voorwaarde 2x achter elkaar, <=6 min) bleek wel een rele
+// verbetering: filtert de helft van de eenmalige ruis-momenten (23->14
+// triggerpunten), houdt ongeveer dezelfde trefkans (8 terecht/5 fout/1 vlak), en
+// bij een misser is de reactietijd nog maar ~5-10 min i.p.v. de huidige 20-25 min.
+//
+// Bewust een aparte, smalle vrijwaring i.p.v. curveConfirmtOmslag zelf aanpassen:
+// die blijft ongewijzigd correct voor de meerderheid van de gevallen (188 van de
+// 242 kandidaat-cycli in de backtest), dit raakt alleen het specifieke patroon
+// "curve zegt omslag, recentSlope zegt duidelijk van niet", en alleen na 2
+// bevestigende cycli, niet op een enkele meting.
+private const val STALE_OMSLAG_RECENT_SLOPE_MIN = 3.0
+private const val STALE_OMSLAG_CONFIRM_MAX_GAP_MIN = 6
+private var prevStaleOmslagCandidate: Boolean = false
+private var prevStaleOmslagCandidateAt: DateTime? = null
+
 
 private val persistCtrl = PersistentCorrectionController(
     cooldownCycles = 3,        // of 2, jij kiest
@@ -1967,10 +1996,35 @@ private fun hypoProtection(
         // Worst-case downtrend - MAAR bij snelle maaltijdstijging (recentSlope>=8.0)
         // is de worst-case NIET de macro-daling: die is een artefact van de vorige
         // episode. Gebruik dan de stijging (vFast) voor een realistische projectie.
-        val vEff = if (ctx.recentSlope >= 8.0 && vFast > vMacro)
+        val vEffRaw = if (ctx.recentSlope >= 8.0 && vFast > vMacro)
             maxOf(vMacro, vFast * 0.7)   // stijging, max 70% gewicht
         else
             minOf(vMacro, vFast * 0.9)   // origineel: worst-case daling
+
+        // NIEUW (26/08/2026, v82) — vloer op 0 bij vrijwel lege IOB EN een
+        // BG die op dit moment niet daalt. Aanleiding: maaltijd 26/8, 12:43 —
+        // BG=6,4 en stijgend (recentSlope=1,05), IOB nagenoeg leeg
+        // (iobRatio=0,03), en toch projecteerde het model 4,0 mmol/L puur op
+        // basis van de worst-case-daling-aanname hierboven. Die aanname
+        // (vEffRaw) is bedoeld om een ECHTE, waargenomen daling niet te
+        // negeren — maar bij vrijwel lege IOB kán een toekomstige hypo
+        // vrijwel alleen nog door de NU geplande dosis zelf ontstaan (die
+        // wordt hieronder al apart verrekend via insulinImpact), niet door
+        // reeds actieve insuline. Zelfde onderbouwing als de
+        // mealCompensationFactor-uitzondering hierboven (23/07/2026): een
+        // backtest over 18 vergelijkbare momenten in de historische data
+        // (9-26/8) laat zien dat iobRatio<0,10 + recentDelta5m>=0 (BG op dit
+        // moment niet dalend) nooit gevolgd werd door een echte hypo — in
+        // alle gevallen waar dat wél gebeurde was recentDelta5m negatief
+        // (een daadwerkelijk waargenomen daling), en die blijven met deze
+        // vloer gewoon volledig beschermd (vEff blijft dan ongewijzigd
+        // negatief). Raakt uitsluitend de vroege-episode/laag-IOB-situatie;
+        // bij hogere IOB of een reeds dalende BG verandert er niets.
+        val vEff = if (ctx.iobRatio < 0.10 && ctx.recentDelta5m >= 0.0)
+            maxOf(vEffRaw, 0.0)
+        else
+            vEffRaw
+
 
         val a = ctx.acceleration.coerceIn(-1.2, 1.2)
 
@@ -4180,7 +4234,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v81-2026-08-26-1400"
+    private val FCL_CODE_VERSION = "v84-2026-08-27-2100"
 
     // ── Restart-detectie (16/07/2026) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -7440,10 +7494,25 @@ class FCLvNext(
                 } ?: false
                 prevCurveAccelerationForOmslag = ctx.curveAcceleration
                 val omslagBijnaBevestigd = curveAccelDecelerating && !curveConfirmtOmslag
-                val bgStijgtNogFors = ctx.slope >= 1.5 &&
+                // Zie kdoc bij STALE_OMSLAG_RECENT_SLOPE_MIN hierboven. Alleen
+                // curveConfirmtOmslag (niet omslagBijnaBevestigd) is hier relevant:
+                // dit vangt specifiek het geval waarin de curve-fit een omslag meldt
+                // terwijl recentSlope zelf nog stevig positief is -- en dat 2 cycli
+                // achter elkaar aanhoudt (geen enkele meting).
+                val staleOmslagCandidateNow = curveConfirmtOmslag &&
+                    !omslagBijnaBevestigd &&
+                    ctx.slope >= 1.5 &&
+                    ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
+                    ctx.recentSlope >= STALE_OMSLAG_RECENT_SLOPE_MIN
+                val staleOmslagConfirmed = staleOmslagCandidateNow &&
+                    prevStaleOmslagCandidate &&
+                    (prevStaleOmslagCandidateAt?.let { minutesSince(it, now) <= STALE_OMSLAG_CONFIRM_MAX_GAP_MIN } ?: false)
+                prevStaleOmslagCandidate = staleOmslagCandidateNow
+                prevStaleOmslagCandidateAt = now
+                val bgStijgtNogFors = (ctx.slope >= 1.5 &&
                     ctx.input.bgNow > ctx.input.targetBG + 3.0 &&
                     !curveConfirmtOmslag &&
-                    !omslagBijnaBevestigd
+                    !omslagBijnaBevestigd) || staleOmslagConfirmed
                 // Zie kdoc bij BGSTIJGT_NOG_FORS_RAMP_WIDTH hierboven. Zelfde
                 // signaalkwaliteits-gates als bgStijgtNogFors (slope, geen
                 // (bijna-)omslag) — alleen de afstand-tot-de-drempel wordt continu
@@ -8509,6 +8578,17 @@ class FCLvNext(
                 }
             }
         }
+
+        // Diagnostiek (26/08/2026, v83): eindstand van de post-hypo-rem deze
+        // cyclus, na arm/disarm/ratchet hierboven, weggeschreven naar de eigen
+        // post_hypo_brake_log-tabel i.p.v. als kolom op fcl_cycle_log (v82
+        // deed dat wel en veroorzaakte een reproduceerbare VerifyError-crash
+        // bij opstarten -- zie kdoc bij PostHypoBrakeLogEntity).
+        cycleLogRepository.logPostHypoBrake(
+            active = postHypoBrakeActive,
+            armedMinutes = if (postHypoBrakeActive) minutesSince(postHypoBrakeArmedAt, now) else -1,
+            timestampMs = now.millis
+        )
 
         // ─────────────────────────────────────────────
         // 🧨 LATE-BOLUS HARD BLOCK (avoid hypo after/at peak)

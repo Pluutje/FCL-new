@@ -11,6 +11,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.EpisodeEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.NightWindowEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.IsfAutoAdjustLogEntity
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.PostHypoBrakeLogEntity
 
 // ── MIGRATION_16_17 (16/07/2026) ─────────────────────────────────────
 // Zuiver additief: 6 nieuwe kolommen op de bestaande fcl_cycle_log-tabel.
@@ -118,6 +119,30 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
     }
 }
 
+// ── MIGRATION_21_22 (26/08/2026) ─────────────────────────────────────
+// Nieuwe, lege tabel voor de post-hypo-brake-diagnostiek (postHypoBrakeActive/
+// postHypoBrakeArmedMinutes) — zie kdoc bij PostHypoBrakeLogEntity voor de
+// volledige aanleiding: dezelfde 2 velden rechtstreeks aan fcl_cycle_log
+// toevoegen (via ALTER TABLE, het patroon van bijv. MIGRATION_19_20) gaf op
+// het toestel een reproduceerbare VerifyError-crash bij het opstarten van de
+// app, bevestigd via een gecontroleerde A/B-test op het toestel zelf. Zuiver
+// additief (nieuwe tabel, geen wijziging aan bestaande tabellen) — zelfde,
+// twee keer eerder bewezen patroon als MIGRATION_18_19/MIGRATION_20_21.
+// fcl_cycle_log blijft in deze migratie volledig onaangeroerd.
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `post_hypo_brake_log` (" +
+                "`id` INTEGER NOT NULL, " +
+                "`timestampMs` INTEGER NOT NULL, " +
+                "`active` INTEGER NOT NULL, " +
+                "`armedMinutes` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_post_hypo_brake_log_timestampMs` ON `post_hypo_brake_log` (`timestampMs`)")
+    }
+}
+
 @Database(
     entities = [
         FCLCycleLogEntity::class,
@@ -125,7 +150,8 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
         NightWindowEntity::class,
         BasalProfileHistoryEntity::class,
         ProfileAutoAdjustLogEntity::class,
-        IsfAutoAdjustLogEntity::class
+        IsfAutoAdjustLogEntity::class,
+        PostHypoBrakeLogEntity::class
     ],
     // v13→v15 (05/07/2026): +curveFitR2/+curveAcceleration/+toppingOutBoost
     // (in TrendsFields), en FCLCycleLogEntity herstructureerd in @Embedded-
@@ -192,7 +218,14 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
     // de bestaande geschiedenis. Ditmaal WEL meteen de Migration + versiebump
     // in dezelfde stap toegevoegd (zie MIGRATION_19_20 hierboven voor de
     // eerdere keer dat dit werd vergeten — dat mag niet nog een keer gebeuren).
-    version = 21,
+    // v21→v22 (26/08/2026): +post_hypo_brake_log (nieuwe, lege tabel voor de
+    // post-hypo-brake-diagnostiek). Zuiver additief (nieuwe tabel, geen
+    // wijziging aan bestaande tabellen, dus ook fcl_cycle_log blijft exact
+    // zoals in v21) — MIGRATION_21_22 hierboven. Zie kdoc bij
+    // PostHypoBrakeLogEntity voor de aanleiding (VerifyError-crash toen deze
+    // velden via een ALTER TABLE op fcl_cycle_log zelf gingen, in de nooit
+    // uitgeleverde v82-poging).
+    version = 22,
     exportSchema = false
 )
 abstract class FCLAnalyzerDatabase : RoomDatabase() {
@@ -203,6 +236,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
     abstract fun basalProfileHistoryDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.BasalProfileHistoryDao
     abstract fun profileAutoAdjustLogDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.ProfileAutoAdjustLogDao
     abstract fun isfAutoAdjustLogDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.IsfAutoAdjustLogDao
+    abstract fun postHypoBrakeLogDao(): app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.PostHypoBrakeLogDao
 
     companion object {
         private const val DB_NAME = "fcl_analyzer.db"
@@ -217,7 +251,7 @@ abstract class FCLAnalyzerDatabase : RoomDatabase() {
                     FCLAnalyzerDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21)
+                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }

@@ -8,6 +8,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.EpisodeMetricsBuilder
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FrontloadLearner
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.FclLearnerBackup
 import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.toLogRow
+import app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.database.PostHypoBrakeLogEntity
 import app.aaps.plugins.aps.openAPSFCL.vnext.persist.VLearner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,7 @@ class FCLCycleLogRepository @Inject constructor(
     private val db by lazy { FCLAnalyzerDatabase.getInstance(context) }
     private val dao by lazy { db.cycleLogDao() }
     private val episodeDao by lazy { db.episodeDao() }
+    private val postHypoBrakeDao by lazy { db.postHypoBrakeLogDao() }
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private val persistDb by lazy {
@@ -62,6 +64,25 @@ class FCLCycleLogRepository @Inject constructor(
             persistDao.deleteOlderThan(
                 app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistDatabase.cutoffMs()
             )
+        }
+    }
+
+    /**
+     * Log de eindstand van de post-hypo-brake per cyclus (26/08/2026) in een
+     * eigen, kleine tabel -- zie kdoc bij PostHypoBrakeLogEntity voor de
+     * aanleiding. Los van de hoofd-CSV-insert, zelfde fire-and-forget
+     * patroon als logPersistEvent() hierboven.
+     */
+    fun logPostHypoBrake(active: Boolean, armedMinutes: Int, timestampMs: Long) {
+        scope.launch {
+            postHypoBrakeDao.insert(
+                PostHypoBrakeLogEntity(
+                    timestampMs = timestampMs,
+                    active = active,
+                    armedMinutes = armedMinutes
+                )
+            )
+            postHypoBrakeDao.deleteOlderThan(FCLAnalyzerDatabase.cutoffMs())
         }
     }
 
@@ -542,6 +563,16 @@ class FCLCycleLogRepository @Inject constructor(
         val rows = dao.getSince(sevenDaysAgo)
         if (rows.isEmpty()) return
 
+        // 26/08/2026 -- post-hypo-brake-diagnostiek staat in een eigen tabel
+        // (zie kdoc bij PostHypoBrakeLogEntity); hier op timestampMs samen-
+        // voegen tot dezelfde CSV-regel als voorheen, zodat er voor de
+        // gebruiker maar een bestand blijft. Elke cyclus die niet vroegtijdig
+        // terugkeert (zie FCLvNext.kt) schrijft exact dezelfde now.millis naar
+        // beide tabellen, dus een directe match op timestampMs volstaat.
+        // Ontbreekt een match (vroegtijdige return, of de rij is ouder dan
+        // deze feature) dan is de rem per definitie niet geevalueerd -> false/-1.
+        val brakeByTs = postHypoBrakeDao.getSince(sevenDaysAgo).associateBy { it.timestampMs }
+
         val dir = File(
             android.os.Environment.getExternalStorageDirectory(),
             "Documents/AAPS/ANALYSE"
@@ -566,7 +597,13 @@ class FCLCycleLogRepository @Inject constructor(
         // eerdere v8->v9-hernoeming bleek de daadwerkelijk geinstalleerde
         // app soms toch op de oude bestandsnaam te blijven schrijven — hou
         // hier rekening mee bij het verifieren dat deze build ook echt actief is.
-        val file = File(dir, "FCLvNext_Log_v10.csv")
+        // v10->v11 (26/08/2026) -- +2 kolommen (post_hypo_brake_active/
+        // post_hypo_brake_armed_min, zie csvHeader() hieronder), afkomstig
+        // uit de nieuwe, aparte post_hypo_brake_log-tabel (samengevoegd op
+        // timestampMs, zie exportCsvLast7DaysInternal() hierboven). LET OP
+        // (zelfde punt als bij v9->v10 hierboven): verifieer dat de nieuwe
+        // build ook echt actief is, anders blijft het toestel op v10 schrijven.
+        val file = File(dir, "FCLvNext_Log_v11.csv")
 
         val sep = ";"
         // 23/07/2026 — ts_utc blijft de bron van waarheid (ondubbelzinnig,
@@ -580,7 +617,8 @@ class FCLCycleLogRepository @Inject constructor(
             writer.write(csvHeader(sep))
             writer.newLine()
             rows.forEach { row ->
-                writer.write(row.toCsvLine(sep, fmt, fmtLocal))
+                val brake = brakeByTs[row.timestampMs]
+                writer.write(row.toCsvLine(sep, fmt, fmtLocal, brake?.active ?: false, brake?.armedMinutes ?: -1))
                 writer.newLine()
             }
         }
@@ -658,7 +696,8 @@ private fun csvHeader(sep: String): String = listOf(
     "peak_floor_active", "peak_floor_value", "h_eff",
     "iob_scale_used", "v_used",
     "iob_headroom", "dose_suppressed_u",
-    "peak_approach_active", "early_reset_this_cycle", "downtrend_locked", "sensor_blip_active"
+    "peak_approach_active", "early_reset_this_cycle", "downtrend_locked", "sensor_blip_active",
+    "post_hypo_brake_active", "post_hypo_brake_armed_min"
 ).joinToString(sep)
 
 // ── CSV regel — delta_target afgeleid als bg - target ────────────────────
@@ -666,7 +705,9 @@ private fun csvHeader(sep: String): String = listOf(
 private fun FCLCycleLogEntity.toCsvLine(
     sep: String,
     fmt: DateTimeFormatter,
-    fmtLocal: DateTimeFormatter
+    fmtLocal: DateTimeFormatter,
+    postHypoBrakeActive: Boolean,
+    postHypoBrakeArmedMinutes: Int
 ): String {
     val ts = fmt.format(Instant.ofEpochMilli(timestampMs))
     val tsLocal = fmtLocal.format(Instant.ofEpochMilli(timestampMs))
@@ -738,6 +779,7 @@ private fun FCLCycleLogEntity.toCsvLine(
         d2(peakInternals.iobScaleUsed), d2(peakInternals.vUsed),
         d2(doseerruimte.iobHeadroom), d2(doseerruimte.doseSuppressedU),
         bool(doseerruimte.peakApproachActive), bool(doseerruimte.earlyResetThisCycle),
-        bool(doseerruimte.downtrendLocked), bool(doseerruimte.sensorBlipActive)
+        bool(doseerruimte.downtrendLocked), bool(doseerruimte.sensorBlipActive),
+        bool(postHypoBrakeActive), postHypoBrakeArmedMinutes
     ).joinToString(sep)
 }
