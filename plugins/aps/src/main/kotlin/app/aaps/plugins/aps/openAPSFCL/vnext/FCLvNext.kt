@@ -806,6 +806,33 @@ private const val AGE_FRAC_FLOOR = 0.40       // nooit verder inkrimpen dan dit
 private const val OMSLAG_DIEPTE_REF_MMOL = 3.0        // |curveAcceleration| voor volle verlaging
 private const val POST_OMSLAG_MAX_FLOOR_CUT = 0.28    // max. verlaging van decayFloor
 private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 0
+// ── v88: smalle, IOB-gated tweede bodem voor lateDecayMul ──────────────────
+// AANLEIDING: de BACKLOG-notitie bij commitDose verderop (v85, 30/08/2026)
+// stelde een brede ondergrens over de HELE multiplier-stack voor (7 factoren
+// samen, analoog aan Boost's AggressionBudget). Terugrekenen op de volledige
+// historische CSV-set (9121 cycli, 27/07-30/08) liet zien dat dat idee bij
+// nader inzien te grof was: van de 136 momenten waarop die stack onder 8%
+// zakte terwijl BG fors boven target stond, had de mediane IOB-ratio daar al
+// 0,55 — bij de meeste van die momenten was commitIobFactor dus TERECHT
+// laag (er stond al veel insuline actief). Een blanco vloer had daar in
+// 22,8% van de gevallen alsnog tot een lage waarde (<4,5 mmol) binnen 3 uur
+// geleid, 11,4% zelfs tot een echte hypo (<4,0) — het zou dus regelmatig
+// extra insuline hebben gegeven precies wanneer dat niet had gemoeten.
+//
+// Bij de kleine subgroep waar IOB WEL laag was (commitIobFactor ≥
+// JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR hieronder, n=10 in de dataset) bleek de
+// onderdrukking in ALLE 10 gevallen te komen van lateDecayMul alléén, dat op
+// zijn absolute bodem (POST_OMSLAG_ABSOLUTE_MIN_FLOOR hierboven, 0,04) bleef
+// hangen terwijl BG nog altijd fors boven target stond — geen samenspel van
+// meerdere factoren, dus geen aanleiding voor een generieke stack-vloer.
+// Trefkans (BG bleef daarna stijgen): 70%. Geen van de 10 kreeg binnen 3 uur
+// alsnog een lage waarde. Vandaar bewust een smalle, specifieke tweede
+// bodem — alleen voor lateDecayMul, alleen wanneer IOB geen reden tot
+// voorzichtigheid geeft. Zie de toepassing verderop, vlak vóór
+// lastKnownLateDecayMul = lateDecayMul.
+private const val JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR = 0.80       // IOB-rem nauwelijks actief (r ≲ iobStart)
+private const val LATE_DECAY_SECONDARY_FLOOR = 0.15              // was POST_OMSLAG_ABSOLUTE_MIN_FLOOR (0,04) in dit gat
+private const val LATE_DECAY_SECONDARY_FLOOR_MARGIN_MMOL = 3.0   // zelfde "fors boven target"-maat als bgStijgtNogFors elders
 // 20/07/2026: gedeeltelijke, vroegere versie van de post-omslag
 // verlaging — al actief zodra omslagBijnaBevestigd waar is (curve-
 // versnelling minstens 45% afgenomen, nog wel positief), niet pas bij
@@ -4234,7 +4261,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v84-2026-08-27-2100"
+    private val FCL_CODE_VERSION = "v89-2026-09-01-0737"
 
     // ── Restart-detectie (16/07/2026) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -4267,6 +4294,44 @@ class FCLvNext(
     private fun isSustainT1BoostActive(): Boolean =
         context.getSharedPreferences(EXPERT_PREFS, android.content.Context.MODE_PRIVATE)
             .getBoolean(SUSTAIN_T1_BOOST_KEY, false)
+
+    // ── Vroege-signalering-drempel voor WATCHING (01/09/2026) ─────────
+    // Backtest (510 historische maaltijd-episodes, /tmp/bt3/peak_threshold.py):
+    // de overstap IDLE->WATCHING in de peak-estimator (hieronder, bij
+    // "PEAK STATE TRANSITIONS") was hardcoded vast op predictedPeak>=9,0 mmol.
+    // Dit bleek de grootste enkele bottleneck (~43% van alle WFF-trigger-
+    // episodes) voor hoe laat WatchingFrontload uberhaupt in aanmerking kan
+    // komen — los van REF_WMD/REF_WFF, die pas ERNA meespelen.
+    //
+    // Verlagen heeft twee, qua risico verschillende effecten:
+    //  - bij episodes die toch al >=9,0 zouden bereiken: puur eerder
+    //    WATCHING-eligible (mediaan ~10-15 min eerder bij 8,0/7,5) — zelfde
+    //    maaltijden, alleen eerdere timing.
+    //  - bij episodes die de 9,0 nooit bereiken: een NIEUWE groep matige
+    //    maaltijden (gem. piek ~8,3-8,5 mmol) komt voor het eerst in
+    //    aanmerking. Die groep had in de bestaande data al een hogere
+    //    hypo-rate (~12%) dan de groep die ook bij een lagere drempel nooit
+    //    eligible wordt (~11%) — vergelijkbaar met de groep die nu al bij
+    //    9,0 eligible is (~13%). Geen counterfactual-dosisdata beschikbaar
+    //    (open-loop virtuele sensor toont alleen mechanisme, niet BG-effect
+    //    van eerdere dosering) — vandaar bewust een smalle, door de
+    //    gebruiker zelf te bedienen schuif i.p.v. een vaste nieuwe default.
+    //
+    // MIN/MAX zijn de grenzen van wat daadwerkelijk is teruggerekend; de
+    // schuif in Expert-modus (FCLSettingsScreen.kt) kan niet buiten dit
+    // bereik komen. Default = huidige (ongewijzigde) 9,0 — een schone start
+    // verandert dus niets totdat de gebruiker bewust verlaagt.
+    private val WATCHING_PEAK_START_PREFS = "fcl_watching_peak_start_settings"
+    private val WATCHING_PEAK_START_KEY = "watching_peak_start_threshold"
+    private val WATCHING_PEAK_START_DEFAULT = 9.0f
+    private val WATCHING_PEAK_START_MIN = 7.5
+    private val WATCHING_PEAK_START_MAX = 9.0
+
+    private fun getWatchingPeakStartThreshold(): Double =
+        context.getSharedPreferences(WATCHING_PEAK_START_PREFS, android.content.Context.MODE_PRIVATE)
+            .getFloat(WATCHING_PEAK_START_KEY, WATCHING_PEAK_START_DEFAULT)
+            .toDouble()
+            .coerceIn(WATCHING_PEAK_START_MIN, WATCHING_PEAK_START_MAX)
 
     // ── AIGF-instellingen (14/07/2026) ────────────────────────────────
     // Bewust EIGEN, niet-expert SharedPreferences-bestand (i.t.t. de
@@ -5346,10 +5411,15 @@ class FCLvNext(
 
             PeakPredictionState.IDLE -> {
                 // Start watching only when episode is active AND predicted peak is meaningfully high
+                // 01/09/2026: was hardcoded 9.0 — nu instelbaar via Expert-modus schuif
+                // (getWatchingPeakStartThreshold(), 7,5-9,0, default 9,0 = ongewijzigd
+                // gedrag). Zie kdoc bij WATCHING_PEAK_START_PREFS hierboven voor de
+                // backtest-onderbouwing en de bewuste keuze voor een handmatige schuif
+                // i.p.v. een nieuwe vaste default.
                 if (
                     peakEstimator.active &&
                     ctx.consistency >= config.minConsistency &&
-                    predictedPeak >= 9.0 &&
+                    predictedPeak >= getWatchingPeakStartThreshold() &&
                     strongRise
                 ) {
                     peakEstimator.state = PeakPredictionState.WATCHING
@@ -7773,14 +7843,39 @@ class FCLvNext(
                 // zelf al !curveConfirmtOmslag vereist, maar deze rem is bewust
                 // onvoorwaardelijk als extra vangnet, niet afhankelijk van welke tak
                 // hierboven lateDecayMul heeft bepaald).
+                //
+                // AANVULLING (v85, 30/08/2026) — GAT 3: staleOmslagConfirmed vrijwaart nu ook
+                // omslagDirectCut en de grendel hieronder, niet langer alleen decayFloorBaseRaw.
+                // Achtergrond-analyse van de v84-vrijwaring (STALE_OMSLAG_RECENT_SLOPE_MIN,
+                // zie kdoc hierboven) liet zien dat staleOmslagConfirmed weliswaar
+                // decayFloorBaseRaw verhoogt (via bgStijgtNogFors), maar dat de twee
+                // remmen hieronder — omslagDirectCut (tot 60% extra) en de
+                // LATEDECAYMUL-GRENDEL verderop — allebei uitsluitend op
+                // curveConfirmtOmslag zelf reageren, dus ook nog vol doorwerken
+                // wanneer staleOmslagConfirmed diezelfde omslag al als vermoedelijk vals
+                // heeft aangemerkt. Terugrekenen op de historische CSV-data (9121
+                // cycli, 27/07-30/08) liet zien dat precies dít de meest kansrijke van
+                // drie onderzochte varianten was: op de momenten waar staleOmslagConfirmed
+                // al TRUE was, bleek de BG in 8 van de 11 gevallen (73%) nog daadwerkelijk
+                // door te stijgen — vergeleken met 62% voor v84 zelf, en 33-58% voor de
+                // twee andere onderzochte varianten (wachttijd weglaten, resp. een aparte
+                // gezamenlijke vloer over de hele multiplier-stack). Vandaar bewust géén
+                // nieuw signaal — alleen hetzelfde, al bewezen staleOmslagConfirmed nu ook
+                // hier en bij de grendel toegepast, zodat v84's eigen vrijwaring niet meer
+                // via deze twee sluiproutes alsnog wordt overruled.
                 val omslagDirectCut = omslagDiepte * POST_OMSLAG_DIRECT_CUT_FRACTIE
-                if (omslagDirectCut > 0.001) {
+                if (omslagDirectCut > 0.001 && !staleOmslagConfirmed) {
                     val voorDirectCut = lateDecayMul
                     lateDecayMul = (lateDecayMul * (1.0 - omslagDirectCut))
                         .coerceAtLeast(POST_OMSLAG_ABSOLUTE_MIN_FLOOR)
                     status.append(
                         "OMSLAG DIRECTE REM: ${"%.2f".format(voorDirectCut)}->${"%.2f".format(lateDecayMul)} " +
                             "(diepte=${"%.2f".format(omslagDiepte)})\n"
+                    )
+                } else if (omslagDirectCut > 0.001) {
+                    status.append(
+                        "OMSLAG DIRECTE REM OVERGESLAGEN (stale-omslag-vrijwaring, GAT 3): " +
+                            "diepte=${"%.2f".format(omslagDiepte)}\n"
                     )
                 }
 
@@ -7805,13 +7900,42 @@ class FCLvNext(
                 // van de takken hierboven de stijging veroorzaakte. Raakt uitsluitend
                 // een STIJGING t.o.v. vorige cyclus — een legitieme, doorgaande
                 // afbouw (lateDecayMul gelijk of lager) wordt hier nooit door geraakt.
-                if (lateDecayMul > lastKnownLateDecayMul && curveConfirmtOmslag) {
+                // AANVULLING (v85, 30/08/2026): zie kdoc bij GAT 3 hierboven — ook
+                // deze grendel wordt overgeslagen zolang staleOmslagConfirmed TRUE is.
+                if (lateDecayMul > lastKnownLateDecayMul && curveConfirmtOmslag && !staleOmslagConfirmed) {
                     val voorGrendel = lateDecayMul
                     lateDecayMul = lastKnownLateDecayMul
                     status.append(
                         "LATEDECAYMUL-GRENDEL (bevestigde omslag): ${"%.2f".format(voorGrendel)}->" +
                             "${"%.2f".format(lateDecayMul)} (curveAccel=${"%.2f".format(ctx.curveAcceleration)} " +
                             "r²=${"%.2f".format(ctx.curveFitR2)})\n"
+                    )
+                } else if (lateDecayMul > lastKnownLateDecayMul && curveConfirmtOmslag) {
+                    status.append(
+                        "LATEDECAYMUL-GRENDEL OVERGESLAGEN (stale-omslag-vrijwaring, GAT 3)\n"
+                    )
+                }
+
+                // v88: smalle, IOB-gated tweede bodem — zie kdoc bij
+                // JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR hierboven. Alleen als IOB geen
+                // reden tot voorzichtigheid geeft (commitIobFactor dicht bij 1,0) EN
+                // BG nog altijd fors boven target staat, mag lateDecayMul niet verder
+                // wegzakken dan LATE_DECAY_SECONDARY_FLOOR — i.p.v. de veel lagere
+                // POST_OMSLAG_ABSOLUTE_MIN_FLOOR hierboven. Bewust NA de GRENDEL
+                // hierboven (kan dus een net door de grendel teruggezette waarde nog
+                // optillen tot de tweede bodem, nooit andersom).
+                if (allowCommitBoost && commitAccessOk &&
+                    commitIobFactor >= JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR &&
+                    ctx.input.bgNow > ctx.input.targetBG + LATE_DECAY_SECONDARY_FLOOR_MARGIN_MMOL &&
+                    lateDecayMul < LATE_DECAY_SECONDARY_FLOOR
+                ) {
+                    val voorSecondaryFloor = lateDecayMul
+                    lateDecayMul = LATE_DECAY_SECONDARY_FLOOR
+                    status.append(
+                        "LATEDECAYMUL TWEEDE BODEM (v88, lage IOB + BG fors boven target): " +
+                            "${"%.2f".format(voorSecondaryFloor)}->${"%.2f".format(lateDecayMul)} " +
+                            "(commitIobFactor=${"%.2f".format(commitIobFactor)} BG=${"%.2f".format(ctx.input.bgNow)} " +
+                            "target=${"%.2f".format(ctx.input.targetBG)})\n"
                     )
                 }
 
@@ -7836,6 +7960,16 @@ class FCLvNext(
                     )
                 }
                 logRow.commitPostPeakFactor = postPeak.commitFactor
+                // BACKLOG (v85, 30/08/2026) — AFGEHANDELD in v88, maar NIET zoals hier
+                // oorspronkelijk voorgesteld. Een herberekening op de volledige CSV-set
+                // (zie kdoc bij JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR bovenaan dit bestand)
+                // liet zien dat een generieke ondergrens over alle 6 factoren hieronder
+                // samen te grof was — de meeste momenten waarop de stack diep wegzakte,
+                // deden dat TERECHT vanwege hoge IOB, en een blanco vloer had daar
+                // regelmatig alsnog tot een lage BG-waarde geleid. De enige schone,
+                // veilige deelverzameling bleek steeds lateDecayMul alléén te zijn, bij
+                // lage IOB — vandaar een smalle, specifieke tweede bodem op lateDecayMul
+                // zelf (LATE_DECAY_SECONDARY_FLOOR), niet op deze hele vermenigvuldiging.
                 val commitDose =
                     if (allowCommitBoost && commitAccessOk)
                         (config.maxSMB * fraction * commitIobFactor * prePeakMul * postPeak.commitFactor * rawPlateauPenalty * commitAggressionMul * lateDecayMul)

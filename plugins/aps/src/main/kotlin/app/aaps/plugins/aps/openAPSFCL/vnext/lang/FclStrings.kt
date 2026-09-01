@@ -219,6 +219,9 @@ interface FclStrings {
     val expertModusMeerOpties: String
     val expertT1BoostTitel: String
     val expertT1BoostUitleg: String
+    val expertPeakStartTitel: String
+    val expertPeakStartUitleg: String
+    val expertPeakStartWaarde: String
     val expertPin: String
     val expertPinFout: String
     val pincode: String

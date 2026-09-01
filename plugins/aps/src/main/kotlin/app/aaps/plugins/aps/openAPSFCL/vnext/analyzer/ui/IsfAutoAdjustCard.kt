@@ -81,11 +81,19 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
     var proposal by remember {
         mutableStateOf<app.aaps.plugins.aps.openAPSFCL.vnext.advisor.isf.FclIsfAutoAdjuster.DailyProposal?>(null)
     }
+    // 31/08/2026 — laatste-cyclus voortgangs-snapshot per uur (zie kdoc bij
+    // FclIsfAutoAdjustStore.KEY_PROGRESS_JSON), los van [proposal]: blijft
+    // gevuld ook als nog geen enkel uur de suggestie-drempel haalt, dus ook
+    // vóórdat [proposal] voor het eerst niet-null wordt.
+    var hourProgress by remember {
+        mutableStateOf<Map<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress>>(emptyMap())
+    }
 
     LaunchedEffect(refreshTrigger, mode) {
         capHits = Store.getCapHitCounters(context)
         val windowCap = if (mode == FclSystemMode.AUTO) Adjuster.AUTO_COOLDOWN_DAYS else Adjuster.MANUAL_MAX_WINDOW_DAYS
         proposal = if (mode == FclSystemMode.OFF) null else Adjuster.computeCurrentProposal(context, windowCap)
+        hourProgress = if (mode == FclSystemMode.OFF) emptyMap() else Store.getProgress(context)
     }
 
     if (mode == FclSystemMode.OFF) {
@@ -156,6 +164,16 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                             "${Adjuster.MANUAL_COOLDOWN_DAYS} dag/dagen).",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    // 31/08/2026, op verzoek — ook zolang GEEN ENKEL uur de
+                    // suggestie-drempel haalt (dus [proposal] nog steeds null
+                    // is) is er per uur al een gewogen telling bekend (zie
+                    // kdoc bij IsfLearner.HourProgress). Zonder dit bleef de
+                    // tekst hierboven wekenlang de enige informatie, zonder
+                    // enig zicht op hoever elk uur al staat.
+                    if (hourProgress.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        IsfProgressTable(hourProgress)
+                    }
                 } else {
                     val statusText = when {
                         mode == FclSystemMode.MANUAL && p.daysUsed < Adjuster.MANUAL_COOLDOWN_DAYS ->
@@ -208,6 +226,7 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                         capHits = capHits,
                         interpolatedHours = p.interpolatedHours,
                         touchedHours = p.touchedHours,
+                        hourProgress = hourProgress,
                         mgdl = mgdl
                     )
 
@@ -359,6 +378,7 @@ fun IsfAutoAdjustCard(context: android.content.Context) {
                             capHits = capHits,
                             interpolatedHours = pendingProposal.interpolatedHours,
                             touchedHours = pendingProposal.touchedHours,
+                            hourProgress = hourProgress,
                             mgdl = mgdl
                         )
                         Spacer(Modifier.height(4.dp))
@@ -418,6 +438,7 @@ private fun IsfAutoAdjustTable(
     capHits: Map<Int, Int>,
     interpolatedHours: Set<Int>,
     touchedHours: Set<Int>,
+    hourProgress: Map<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress> = emptyMap(),
     mgdl: Boolean
 ) {
     val unit = BgUnits.unitShort(mgdl)
@@ -455,9 +476,18 @@ private fun IsfAutoAdjustTable(
             // bedoeling expliciet.
             val isAlreadyOptimal = hasDirectData && !isInterpolated &&
                 kotlin.math.abs(shiftPct) < app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.ALREADY_OPTIMAL_THRESHOLD_PCT
+            // 31/08/2026, op verzoek — "geen data" toont er nu een voortgangs-
+            // indicatie bij (gewogen telling / drempel), zie kdoc bij
+            // IsfLearner.HourProgress: zonder dit was "geen data" een
+            // doodlopend statisch label, ongeacht of dit uur al bijna
+            // genoeg metingen had of nog helemaal niets.
+            val progressSuffix = hourProgress[hour]?.let { prog ->
+                " (${"%.1f".format(prog.weightedCount)}/" +
+                    "${app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.MIN_SAMPLES_PER_HOUR})"
+            } ?: ""
             val status = when {
                 isInterpolated -> "afgeleid" + (if (atCap) " (tegen grens)" else "")
-                !hasDirectData -> "geen data"
+                !hasDirectData -> "geen data" + progressSuffix
                 isAlreadyOptimal -> "al optimaal"
                 atCap -> "tegen grens" + (if (hitCount > 0) " (${hitCount}d)" else "")
                 else -> "voorstel"
@@ -477,6 +507,44 @@ private fun IsfAutoAdjustTable(
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isInterpolated) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * IsfProgressTable (31/08/2026) — compacte tabel met de rauwe dataverzamelings-
+ * voortgang per uur (zie kdoc bij IsfLearner.HourProgress), gesorteerd van
+ * dichtst-bij-de-drempel naar verst weg. Alleen gebruikt zolang [proposal]
+ * nog null is (nog geen enkel uur haalt de suggestie-drempel) — zodra er wél
+ * een voorstel is, toont IsfAutoAdjustTable dezelfde voortgang al per "geen
+ * data"-rij, dus dan is deze aparte tabel niet meer nodig.
+ */
+@Composable
+private fun IsfProgressTable(
+    hourProgress: Map<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress>
+) {
+    val minSamples = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.MIN_SAMPLES_PER_HOUR
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text("Uur", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f))
+            Text("Voortgang", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f))
+        }
+        Divider()
+        hourProgress.values.sortedByDescending { it.weightedCount }.forEach { prog ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Text(
+                    "%02d:00".format(prog.hour),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(0.8f)
+                )
+                Text(
+                    "${"%.1f".format(prog.weightedCount)} / $minSamples" +
+                        (if (prog.rawCount > 0) " (${prog.rawCount} metingen)" else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1.2f)
                 )
             }
         }

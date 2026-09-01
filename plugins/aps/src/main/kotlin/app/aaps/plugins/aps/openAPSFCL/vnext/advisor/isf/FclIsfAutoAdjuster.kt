@@ -379,12 +379,17 @@ object FclIsfAutoAdjuster {
         // ── IsfLearner-suggesties ophalen ──
         val persistEvents = app.aaps.plugins.aps.openAPSFCL.vnext.persist.FCLPersistDatabase.getInstance(context)
             .persistEventDao().getSince(now - IsfLearner.LOOKBACK_DAYS.toLong() * 24 * 60 * 60 * 1000L)
-        val suggestions = IsfLearner.computeSuggestions(
+        val (suggestions, hourProgress) = IsfLearner.computeSuggestionsWithProgress(
             repository = cycleLogRepository,
             persistEvents = persistEvents,
             currentIsfMgdlByHour = currentHourly,
             nowMs = now
         )
+        // 31/08/2026 — ONVOORWAARDELIJK, ook als suggestions leeg blijft: dit is de
+        // enige plek waar de UI kan aflezen hoever de dataverzameling per uur staat
+        // (zie kdoc bij FclIsfAutoAdjustStore.KEY_PROGRESS_JSON). Bewust vóór de
+        // "geen suggesties"-early-return hieronder.
+        FclIsfAutoAdjustStore.setProgress(context, hourProgress)
         if (suggestions.isEmpty()) {
             logRow(db, now, today, mode, applied = false, skipReason = "geen bruikbare suggesties (te weinig schone correcties)",
                    oldJson = "{}", newJson = "{}", shiftJson = "{}",

@@ -35,6 +35,17 @@ object FclIsfAutoAdjustStore {
     private const val KEY_BASELINE_SET_AT = "baseline_set_at"
     private const val KEY_BASELINE_SOURCE = "baseline_source" // "initial" | "manual-reset"
     private const val KEY_CAP_HIT_JSON = "cap_hit_json"       // {"0": 3, "1": 0, ...}
+    // 31/08/2026 — snapshot van de LAATSTE cyclus' rauwe dataverzamelings-
+    // voortgang per uur (IsfLearner.HourProgress, ongeacht of het uur de
+    // suggestie-drempel al haalt). Los van de dag-gebaseerde logregels
+    // (isf_auto_adjust_log): die worden alleen geschreven/meegeteld als er
+    // ELDERS die dag al minstens 1 suggestie was (zie kdoc bij
+    // collectRecentDailyShifts in FclIsfAutoAdjuster), dus zolang GEEN
+    // enkel uur de drempel haalt is er geen bruikbare logregel om voortgang
+    // uit af te lezen. Dit is bewust een simpele "laatste stand"-snapshot,
+    // geen historie — precies genoeg om de UI te laten zien hoe ver elk uur
+    // nu staat.
+    private const val KEY_PROGRESS_JSON = "progress_json"      // {"0": {"w": 2.33, "r": 3}, ...}
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -106,5 +117,44 @@ object FclIsfAutoAdjustStore {
         val obj = JSONObject()
         current.forEach { (hour, count) -> obj.put(hour.toString(), count) }
         prefs(context).edit().putString(KEY_CAP_HIT_JSON, obj.toString()).apply()
+    }
+
+    // ── Voortgangs-snapshot per uur (dataverzameling, zie KEY_PROGRESS_JSON) ──
+
+    /** Leeg zolang er nog nooit een evaluatie is geweest (bijv. net na installatie
+     *  of zolang de modus UIT staat). "w" = gewogen totaal (IsfLearner.HourProgress.
+     *  weightedCount), "r" = rauw aantal (rawCount). */
+    fun getProgress(context: Context): Map<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress> {
+        val json = prefs(context).getString(KEY_PROGRESS_JSON, null) ?: return emptyMap()
+        return try {
+            val obj = JSONObject(json)
+            val map = LinkedHashMap<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress>()
+            obj.keys().forEach { key ->
+                val hour = key.toInt()
+                val entry = obj.getJSONObject(key)
+                map[hour] = app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress(
+                    hour = hour,
+                    weightedCount = entry.getDouble("w"),
+                    rawCount = entry.getInt("r")
+                )
+            }
+            map
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** Overschrijft de volledige snapshot — bedoeld om elke evaluatie-cyclus
+     *  onvoorwaardelijk aangeroepen te worden (ook als er geen enkele suggestie
+     *  uitkomt), zodat de UI altijd de meest recente voortgang kan tonen. */
+    fun setProgress(context: Context, progress: Map<Int, app.aaps.plugins.aps.openAPSFCL.vnext.analyzer.IsfLearner.HourProgress>) {
+        val obj = JSONObject()
+        progress.forEach { (hour, p) ->
+            val entry = JSONObject()
+            entry.put("w", p.weightedCount)
+            entry.put("r", p.rawCount)
+            obj.put(hour.toString(), entry)
+        }
+        prefs(context).edit().putString(KEY_PROGRESS_JSON, obj.toString()).apply()
     }
 }

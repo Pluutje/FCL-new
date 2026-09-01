@@ -696,6 +696,69 @@ fun FCLSettingsScreen(preferences: Preferences, sp: SP) {
                         }
                     }
 
+                    // ── Vroege-signalering-drempel (predictedPeak start voor WATCHING) ──
+                    // 01/09/2026: handmatige testschuif, zie kdoc bij
+                    // WATCHING_PEAK_START_PREFS in FCLvNext.kt voor de backtest-
+                    // onderbouwing. Bewust EIGEN SharedPreferences-bestand (zelfde
+                    // patroon als AIGF/T1-boost hierboven) — geen nieuwe AAPS-
+                    // Preferences-key nodig. Default (9,0) = huidig, ongewijzigd
+                    // gedrag; schuif kan alleen binnen het backtest-geverifieerde
+                    // bereik 7,5-9,0 bewegen (MIN/MAX-constantes hieronder moeten
+                    // gelijk blijven aan WATCHING_PEAK_START_MIN/MAX in FCLvNext.kt).
+                    val watchingPeakStartMin = 7.5f
+                    val watchingPeakStartMax = 9.0f
+                    var watchingPeakStartThreshold by remember {
+                        mutableStateOf(
+                            ctx.getSharedPreferences("fcl_watching_peak_start_settings", android.content.Context.MODE_PRIVATE)
+                                .getFloat("watching_peak_start_threshold", 9.0f)
+                                .coerceIn(watchingPeakStartMin, watchingPeakStartMax)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                s.expertPeakStartTitel,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                            )
+                            Text(
+                                s.expertPeakStartUitleg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                s.expertPeakStartWaarde.format(watchingPeakStartThreshold),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                color = if (watchingPeakStartThreshold >= watchingPeakStartMax)
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                else
+                                    MaterialTheme.colorScheme.primary
+                            )
+                            Slider(
+                                value = watchingPeakStartThreshold,
+                                onValueChange = { v ->
+                                    val clamped = v.coerceIn(watchingPeakStartMin, watchingPeakStartMax)
+                                    watchingPeakStartThreshold = clamped
+                                    ctx.getSharedPreferences("fcl_watching_peak_start_settings", android.content.Context.MODE_PRIVATE)
+                                        .edit().putFloat("watching_peak_start_threshold", clamped).apply()
+                                },
+                                valueRange = watchingPeakStartMin..watchingPeakStartMax,
+                                steps = 14  // stapjes van 0,1 mmol tussen 7,5 en 9,0
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
                         modifier = Modifier.fillMaxWidth(),
