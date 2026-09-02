@@ -830,6 +830,47 @@ private const val POST_OMSLAG_ABSOLUTE_MIN_FLOOR = 0.04  // nooit volledig naar 
 // bodem — alleen voor lateDecayMul, alleen wanneer IOB geen reden tot
 // voorzichtigheid geeft. Zie de toepassing verderop, vlak vóór
 // lastKnownLateDecayMul = lateDecayMul.
+// ── Trickle-gate (v91, 02/09/2026 — herontwerp na v90-incident) ────
+// AANLEIDING: v90 (02/09/2026, eerste poging) gebruikte een simpele,
+// PERMANENTE per-episode vlag: zodra lateDecayMul ooit <=0,10 was geweest,
+// mocht alleen nog reentry een nieuwe commit toestaan. Dat werkte voor het
+// oorspronkelijke probleem (2/9 06:59-08:00, 0,66U aan late, ruis-getriggerde
+// na-commits tijdens een echt rustig plateau), maar bleek FOUT in een tweede
+// scenario diezelfde dag: episode 13:04-13:39, waar lateDecayMul al na 5
+// commits op 0,04 stond terwijl BG nog volop en versnellend doorsteeg
+// (8,3->10,1 mmol, 13:14-13:29). De vlag blokkeerde toen alle gewone commits
+// tijdens die echte, actieve stijging; toen reentry uiteindelijk vuurde,
+// reset de bestaande reentry-logica lateDecayMul terug naar bijna 1,0 (by
+// design, voor een échte tweede golf) en leverde de opgekropte behoefte in
+// één klap: 2,99U om 13:34 — een dosis die de gebruiker nog nooit in die
+// mate had gezien. Root cause: een LAGE lateDecayMul betekent niet
+// automatisch "we zitten na de piek in een rustig plateau" — het kan ook
+// puur komen doordat er al veel commits zijn geweest tijdens een nog
+// actieve, doorgaande stijging (de teller-gebaseerde afbouw kent geen
+// "zijn we voorbij de piek?"-besef).
+//
+// OPLOSSING (v91): geen permanente vlag meer, maar een LEVENDE, elke cyclus
+// opnieuw bepaalde check — en een tweede voorwaarde die specifiek onderscheidt
+// "voorbij een lokale piek" van "nog aan het stijgen": ctx.deltaToTarget mag
+// niet hoger zijn dan de tot nu toe in deze episode bereikte episodeMaxDeltaTargetSoFar
+// (bestaand, elders al bijgehouden veld — zie de DOSE_RATIO-sectie verderop).
+// Zolang delta_target een NIEUWE episode-high zet, is er per definitie geen
+// sprake van een afgezakt plateau, ongeacht hoe laag lateDecayMul toevallig
+// staat — de gate blijft dan uit. Zodra delta_target niet meer boven het tot
+// dusver bereikte maximum uitkomt (het echte omslagpunt), EN lateDecayMul
+// diep is, mag de gate weer aanslaan.
+//
+// Backtest (13+ dagen samengevoegde data, 20/8-2/9): met deze voorwaarde is
+// het fout-geblokkeerde volume (cycli geblokkeerd terwijl delta_target zelf
+// een nieuwe episode-high was) op de VOLLEDIGE dataset 0,00U — inclusief
+// beide incident-episodes van 2/9 expliciet nagerekend: het oorspronkelijke
+// trickle-patroon (06:59-08:00) wordt nog steeds volledig geblokkeerd, de
+// 13:04-13:39-episode wordt nu GEEN ENKELE cyclus geblokkeerd. Legitiem
+// trickle-volume dat nog wél wordt tegengehouden: ca. 12U over 13+ dagen
+// (minder dan de eerdere, te brede v90-poging blokkeerde — bewust
+// conservatiever na dit incident).
+private const val LATE_DECAY_DEEP_THRESHOLD = 0.10
+
 private const val JOINT_FLOOR_MIN_COMMIT_IOB_FACTOR = 0.80       // IOB-rem nauwelijks actief (r ≲ iobStart)
 private const val LATE_DECAY_SECONDARY_FLOOR = 0.15              // was POST_OMSLAG_ABSOLUTE_MIN_FLOOR (0,04) in dit gat
 private const val LATE_DECAY_SECONDARY_FLOOR_MARGIN_MMOL = 3.0   // zelfde "fors boven target"-maat als bgStijgtNogFors elders
@@ -4261,7 +4302,7 @@ class FCLvNext(
     // "vNN-jjjj-mm-dd-uumm" (aanmaaktijdstip, geen omschrijving; die van
     // eerdere versies raakten toch achter). Alleen als het écht relevant
     // is een korte omschrijving toevoegen.
-    private val FCL_CODE_VERSION = "v89-2026-09-01-0737"
+    private val FCL_CODE_VERSION = "v92-2026-09-02-2004"
 
     // ── Restart-detectie (16/07/2026) ─────────────────────────────────
     // true op precies de EERSTE cyclus na het (her)starten van dit class-
@@ -7277,9 +7318,26 @@ class FCLvNext(
             val allowCommitBoost = accelFirst.ok
 
 
+            // v91 — trickle-gate, zie kdoc bij LATE_DECAY_DEEP_THRESHOLD hierboven.
+            // Levend (elke cyclus opnieuw bepaald, GEEN permanente vlag): alleen
+            // actief als lateDecayMul (stand bij binnenkomst deze cyclus, vóór de
+            // eventuele herberekening verderop) al diep is EN delta_target nu geen
+            // nieuwe episode-high zet — dus aantoonbaar voorbij een lokaal omslagpunt,
+            // niet zomaar "veel commits gehad terwijl de stijging nog doorzet".
+            val trickleGateActive =
+                lastKnownLateDecayMul <= LATE_DECAY_DEEP_THRESHOLD &&
+                    ctx.deltaToTarget <= episodeMaxDeltaTargetSoFar
             val effectiveCommitAllowed =
-                if (reentry) true else commitAllowed
+                if (reentry) true
+                else if (trickleGateActive) false
+                else commitAllowed
             logRow.effectiveCommitAllowed = effectiveCommitAllowed
+            if (trickleGateActive && !reentry && commitAllowed) {
+                status.append(
+                    "TRICKLE-GATE (v91): commit geblokkeerd - lateDecayMul=${"%.2f".format(lastKnownLateDecayMul)} " +
+                        "deltaToTarget=${"%.2f".format(ctx.deltaToTarget)} <= episodeMax=${"%.2f".format(episodeMaxDeltaTargetSoFar)}\n"
+                )
+            }
 
             status.append(
                 "EffectiveCommitAllowed=${if (effectiveCommitAllowed) "YES" else "NO"}\n"
@@ -9103,7 +9161,42 @@ class FCLvNext(
             // forse dosis wordt teruggeschaald. Tussen 90-180 min loopt de
             // reductie lineair op tot max 60%; binnen 90 min (normale
             // episodes) is deze laag volledig inactief.
-            val lateSecondWaveScale: Double = if (minutesSinceEpisode > 90) {
+            //
+            // GAT (2/9-incident, v92): de piek-episode (peakEstimator/
+            // activeMealEpisodeId) sluit pas als er ÉÉN cyclus is met zowel
+            // mealSignal.state==NONE als een écht vlak plateau (exit-
+            // voorwaarde B bij peakEstimator vereist |slope|<0.20). Een
+            // normale na-maaltijd-daling is per definitie hellend, niet
+            // vlak — bij een maaltijdritme van 1,5-2u loopt de daling van de
+            // ene maaltijd in de praktijk vaak door tot de volgende alweer
+            // een nieuwe stijging inzet, zonder dat de episode ooit sluit.
+            // Gevolg: twee (of meer) volledig losse, gewone maaltijden delen
+            // dan ongewild dezelfde, steeds ouder wordende episode, en de
+            // tweede/derde maaltijd wordt door laag 2b afgeremd alsof het
+            // een late golf van de EERSTE maaltijd is, terwijl het gewoon
+            // een verse, aparte maaltijd is. Concreet voorval: maaltijd
+            // 18:44 (2/9) zat al 194 min in een episode die in werkelijk-
+            // heid van een eerdere, allang afgeronde maaltijd om 15:54
+            // stamde; een 1,09U-commit werd hierdoor tot 0,44U afgeknepen.
+            //
+            // FIX: vereis, naast de duur, ook `episodePeakCommitU > 0.0` —
+            // dat veld wordt uitsluitend verankerd door een commit die zelf
+            // al ≥PEAK_ANCHOR_THRESHOLD_FRAC (75%) van maxSMB was (zie kdoc
+            // daar), dus al bevestigd bewijs dat dít een substantiële
+            // maaltijd betreft, niet alleen "het duurt al lang". Bij het
+            // 2/9-incident stond episodePeakCommitU nog op 0,00 — er was
+            // nog nooit een grote commit in die episode geweest. Steekproef
+            // over de volledige week 26/8-2/9 (alle clusters met episode
+            // >100 min): bij gevallen met een reeds verankerde grote commit
+            // (bijv. 26/8 22:34, 3,91U; 29/8 17:04, 3,52U) blijft laag 2b nu
+            // gewoon actief — precies het 12/06-scenario waar hij voor
+            // gebouwd is. Bij gevallen zonder verankerde commit (bijv. 1/9
+            // 03:19 nachtepisode, en de 2/9-episode van dit incident) stond
+            // episodePeakCommitU op 0,00 en wordt laag 2b nu terecht over-
+            // geslagen. Overige episode-state (episodeCommitCount, hypo-
+            // schuld, taper-anker, trickle-gate uit v91) blijft ongewijzigd
+            // — alleen deze ene afterload-laag krijgt de extra voorwaarde.
+            val lateSecondWaveScale: Double = if (minutesSinceEpisode > 90 && episodePeakCommitU > 0.0) {
                 val frac = ((minutesSinceEpisode - 90).toDouble() / 90.0).coerceAtMost(1.0)
                 1.0 - frac * 0.60
             } else 1.0
