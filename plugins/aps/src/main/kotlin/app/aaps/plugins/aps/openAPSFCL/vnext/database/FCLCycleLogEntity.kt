@@ -38,7 +38,13 @@ import androidx.room.PrimaryKey
  * elke groep klein blijft (< 30 velden), kan dit registerprobleem niet
  * meer terugkomen, ook niet over jaren van uitbreiding.
  *
- * Kolommen zijn gegroepeerd conform de CSV header van FCLvNextCsvLogger.
+ * Kolommen waren gegroepeerd conform de CSV header van FCLvNextCsvLogger — sinds
+ * 2/9/2026 is de CSV-kolomvolgorde in FCLCycleLogRepository.kt (csvHeader()/
+ * toCsvLine()) losgekoppeld en herschikt naar leesbare thema-groepen (o.a.
+ * doseringsbeslissing en guards/afterload-remmen aaneengesloten), puur voor
+ * menselijke/analyse-leesbaarheid. Deze @Embedded-volgorde (en dus de
+ * Room-tabelkolomvolgorde) is BEWUST ongewijzigd gelaten — CSV-volgorde en
+ * DB-kolomvolgorde hoeven niet meer 1-op-1 gelijk te lopen.
  *
  * v7→v8 (05/07/2026): +curveFitR2, +curveAcceleration, +toppingOutBoost
  * in TrendsFields (curve-fit confidence-gate, zie FCLvNextTrends.kt /
